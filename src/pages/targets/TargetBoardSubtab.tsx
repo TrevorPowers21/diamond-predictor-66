@@ -339,6 +339,47 @@ export default function TargetBoardSubtab() {
     },
   });
 
+  // Active build's player_snapshots (rostered targets read these, not the board
+  // line). TWP: merge hitter-slot hitter fields + pitcher-slot pitcher fields.
+  const { data: rosterSnapByPid = new Map<string, any>() } = useQuery({
+    queryKey: ["target-board-roster-snaps", effectiveTeamId ?? null],
+    enabled: !!effectiveTeamId,
+    queryFn: async () => {
+      const m = new Map<string, any>();
+      const { data: b } = await (supabase as any).from("team_builds").select("id").eq("customer_team_id", effectiveTeamId).eq("is_active", true).maybeSingle();
+      if (!b?.id) return m;
+      const { data: bps } = await (supabase as any).from("team_build_players").select("player_id, position_slot, included_in_roster, player_snapshot").eq("build_id", b.id).eq("included_in_roster", true);
+      const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+      const byPid = new Map<string, any[]>();
+      for (const bp of (bps || [])) { if (!(bp as any).player_snapshot) continue; (byPid.get((bp as any).player_id) ?? byPid.set((bp as any).player_id, []).get((bp as any).player_id)!).push(bp); }
+      for (const [pid, list] of byPid) {
+        if (list.length === 1) { m.set(pid, list[0].player_snapshot); continue; }
+        const h = (list.find((r) => !isPit(r.position_slot)) ?? list[0]).player_snapshot;
+        const p = (list.find((r) => isPit(r.position_slot)) ?? list[0]).player_snapshot;
+        m.set(pid, { ...p, o_war: h.o_war, hitter_depth_role: h.hitter_depth_role, twp_hitter_market_value: h.twp_hitter_market_value, p_avg: h.p_avg, p_obp: h.p_obp, p_slg: h.p_slg, p_wrc_plus: h.p_wrc_plus, p_war: p.p_war, p_rv_plus: p.p_rv_plus, twp_pitcher_market_value: p.twp_pitcher_market_value, is_twp: true });
+      }
+      return m;
+    },
+  });
+
+  // The line each target DISPLAYS: rostered → build player_snapshot; else → the
+  // saved transfer_snapshot (normalized owar→o_war, nil_valuation→market_value);
+  // scouting scores come from the live prediction (not stored in snapshots).
+  const displayByPlayerId = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const r of board) {
+      const pid = r.player_id;
+      const live = displayByPlayerId.get(pid);
+      const roster = rosterSnapByPid.get(pid);
+      const ts: any = (r as any).transfer_snapshot;
+      const snap = roster
+        ? roster
+        : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
+      m.set(pid, snap ? { ...(live || {}), ...snap } : (live || null));
+    }
+    return m;
+  }, [board, predictionByPlayerId, rosterSnapByPid]);
+
   const hitterCount = useMemo(() => board.filter((r) => !isPitcherTarget(r)).length, [board]);
   const pitcherCount = useMemo(() => board.filter(isPitcherTarget).length, [board]);
 
@@ -387,8 +428,8 @@ export default function TargetBoardSubtab() {
     const mul = dir === "asc" ? 1 : -1;
     const arr = [...rows];
     arr.sort((a, b) => {
-      const pa = predictionByPlayerId.get(a.player_id);
-      const pb = predictionByPlayerId.get(b.player_id);
+      const pa = displayByPlayerId.get(a.player_id);
+      const pb = displayByPlayerId.get(b.player_id);
       if (sk === "name") {
         return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`) * mul;
       }
@@ -532,7 +573,7 @@ export default function TargetBoardSubtab() {
             </TableHeader>
             <TableBody>
               {sorted.map((r, i) => {
-                const pred = predictionByPlayerId.get(r.player_id);
+                const pred = displayByPlayerId.get(r.player_id);
                 return (
                   <SortableRow key={r.player_id} id={r.player_id}>
                     {({ listeners, attributes, isDragging }) => (
@@ -654,7 +695,7 @@ export default function TargetBoardSubtab() {
             </TableHeader>
             <TableBody>
               {sorted.map((r, i) => {
-                const pred = predictionByPlayerId.get(r.player_id);
+                const pred = displayByPlayerId.get(r.player_id);
                 return (
                   <SortableRow key={r.player_id} id={r.player_id}>
                     {({ listeners, attributes, isDragging }) => (

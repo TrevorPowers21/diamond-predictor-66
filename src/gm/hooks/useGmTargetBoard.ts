@@ -85,6 +85,28 @@ export function useGmTargetBoard() {
     },
   });
 
+  // Active build player_snapshots — rostered targets read these, not the board line.
+  const { data: rosterSnapByPid = new Map<string, any>() } = useQuery({
+    queryKey: ["gm-target-roster-snaps", effectiveTeamId ?? null],
+    enabled: !!user?.id && !!effectiveTeamId,
+    queryFn: async () => {
+      const m = new Map<string, any>();
+      const { data: b } = await (supabase as any).from("team_builds").select("id").eq("customer_team_id", effectiveTeamId).eq("is_active", true).maybeSingle();
+      if (!b?.id) return m;
+      const { data: bps } = await (supabase as any).from("team_build_players").select("player_id, position_slot, included_in_roster, player_snapshot").eq("build_id", b.id).eq("included_in_roster", true);
+      const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+      const byPid = new Map<string, any[]>();
+      for (const bp of (bps || [])) { if (!(bp as any).player_snapshot) continue; (byPid.get((bp as any).player_id) ?? byPid.set((bp as any).player_id, []).get((bp as any).player_id)!).push(bp); }
+      for (const [pid, list] of byPid) {
+        if (list.length === 1) { m.set(pid, list[0].player_snapshot); continue; }
+        const h = (list.find((r) => !isPit(r.position_slot)) ?? list[0]).player_snapshot;
+        const p = (list.find((r) => isPit(r.position_slot)) ?? list[0]).player_snapshot;
+        m.set(pid, { ...p, o_war: h.o_war, twp_hitter_market_value: h.twp_hitter_market_value, p_war: p.p_war, twp_pitcher_market_value: p.twp_pitcher_market_value, is_twp: true });
+      }
+      return m;
+    },
+  });
+
   const offerKey = ["gm-target-offers", effectiveTeamId ?? null];
   const { data: offerByPlayer = new Map<string, { offer: number | null; asking: number | null }>() } = useQuery({
     queryKey: offerKey,
@@ -121,12 +143,21 @@ export function useGmTargetBoard() {
       board.map((r) => {
         const pred = predByPlayer.get(r.player_id);
         const pitcher = isPitcherPos(r.position);
-        const war = pitcher ? (pred?.p_war ?? null) : (pred?.o_war ?? null);
+        // The DISPLAY line: rostered → build player_snapshot; else → the saved
+        // transfer_snapshot (normalized owar→o_war, nil_valuation→market_value);
+        // fall back to the live prediction. So GM matches every other surface.
+        const roster = rosterSnapByPid.get(r.player_id);
+        const ts: any = (r as any).transfer_snapshot;
+        const snap = roster
+          ? roster
+          : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
+        const line: any = snap ?? pred;
+        const war = pitcher ? (line?.p_war ?? null) : (line?.o_war ?? null);
         // Side-aware TWP market: a pitcher target reads twp_pitcher, a hitter
         // reads twp_hitter (raw market_value is NULL for TWPs). Matches the roster.
         const market = pitcher
-          ? (pred?.market_value ?? pred?.twp_pitcher_market_value ?? null)
-          : (pred?.market_value ?? pred?.twp_hitter_market_value ?? null);
+          ? (line?.market_value ?? line?.twp_pitcher_market_value ?? null)
+          : (line?.market_value ?? line?.twp_hitter_market_value ?? null);
         const deal = offerByPlayer.get(r.player_id);
         return {
           player_id: r.player_id,
@@ -147,7 +178,7 @@ export function useGmTargetBoard() {
           snapshot: pred ?? null,
         };
       }),
-    [board, predByPlayer, offerByPlayer, notesByPlayer],
+    [board, predByPlayer, rosterSnapByPid, offerByPlayer, notesByPlayer],
   );
 
   // One upsert for either deal field — pass the column being edited.
