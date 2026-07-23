@@ -504,7 +504,7 @@ export default function TargetBoardSubtab() {
     return (
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd(sorted, scope, "hitter")}>
         <SortableContext items={sorted.map((r) => r.player_id)} strategy={verticalListSortingStrategy}>
-          <Table>
+          <Table className="table-fixed min-w-[1160px]">
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
                 <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
@@ -514,7 +514,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <HitterSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead className="min-w-[96px]">
+                <TableHead className="w-[104px]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="AVG" sk="p_avg" /></TableHead>
@@ -524,11 +524,10 @@ export default function TargetBoardSubtab() {
                 <TableHead className="text-right"><HitterSortBtn label="wRC+" sk="p_wrc_plus" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="oWAR" sk="o_war" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="Market Value" sk="market_value" /></TableHead>
-                <TableHead className="text-center min-w-[180px]">
+                <TableHead className="text-center w-[180px]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span>
                 </TableHead>
                 <TableHead className="w-[36px] p-0"></TableHead>
-                <TableHead className="w-full p-0"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -571,7 +570,7 @@ export default function TargetBoardSubtab() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="min-w-[96px]">{portalBadge(r)}</TableCell>
+                        <TableCell className="w-[104px]">{portalBadge(r)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_avg)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_obp)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_slg)}</TableCell>
@@ -609,7 +608,6 @@ export default function TargetBoardSubtab() {
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-full p-0"></TableCell>
                       </>
                     )}
                   </SortableRow>
@@ -627,7 +625,7 @@ export default function TargetBoardSubtab() {
     return (
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd(sorted, "pitcher", "pitcher")}>
         <SortableContext items={sorted.map((r) => r.player_id)} strategy={verticalListSortingStrategy}>
-          <Table>
+          <Table className="table-fixed min-w-[1280px]">
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
                 <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
@@ -637,7 +635,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <PitcherSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead className="min-w-[96px]">
+                <TableHead className="w-[104px]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="ERA" sk="p_era" /></TableHead>
@@ -648,11 +646,10 @@ export default function TargetBoardSubtab() {
                 <TableHead className="text-right"><PitcherSortBtn label="pRV+" sk="p_rv_plus" /></TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="pWAR" sk="p_war" /></TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="Market Value" sk="market_value" /></TableHead>
-                <TableHead className="text-center min-w-[180px]">
+                <TableHead className="text-center w-[180px]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span>
                 </TableHead>
                 <TableHead className="w-[36px] p-0"></TableHead>
-                <TableHead className="w-full p-0"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -695,7 +692,7 @@ export default function TargetBoardSubtab() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="min-w-[96px]">{portalBadge(r)}</TableCell>
+                        <TableCell className="w-[104px]">{portalBadge(r)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_era)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_fip)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_whip)}</TableCell>
@@ -734,7 +731,6 @@ export default function TargetBoardSubtab() {
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-full p-0"></TableCell>
                       </>
                     )}
                   </SortableRow>
