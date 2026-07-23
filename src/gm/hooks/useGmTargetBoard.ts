@@ -108,7 +108,11 @@ export function useGmTargetBoard() {
         const pred = predByPlayer.get(r.player_id);
         const pitcher = isPitcherPos(r.position);
         const war = pitcher ? (pred?.p_war ?? null) : (pred?.o_war ?? null);
-        const market = pred?.market_value ?? pred?.twp_hitter_market_value ?? pred?.twp_pitcher_market_value ?? null;
+        // Side-aware TWP market: a pitcher target reads twp_pitcher, a hitter
+        // reads twp_hitter (raw market_value is NULL for TWPs). Matches the roster.
+        const market = pitcher
+          ? (pred?.market_value ?? pred?.twp_pitcher_market_value ?? null)
+          : (pred?.market_value ?? pred?.twp_hitter_market_value ?? null);
         const deal = offerByPlayer.get(r.player_id);
         return {
           player_id: r.player_id,
