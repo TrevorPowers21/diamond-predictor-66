@@ -109,15 +109,20 @@ consistency pass:
 - **Surfaces to read transfer_snapshot (roster→player_snapshot, else→transfer_snapshot):**
   TB target board, Targets-tab board, target player profile, GM target board, situation board.
 - **Build stages:**
-  - [ ] Stage 1 — capture `neutralPrediction` on every target-row path
-    (`addPlayerFromTargetSearch` pitcher/hitter/TWP paths + the sync pull); source = the
-    picked `player_predictions` row (e.g. TeamBuilder.tsx ~2647 `stored`).
-  - [ ] Stage 2 — load path reads DB `transfer_snapshot` + `production_notes` and applies the
-    saved toggle state (today the sync rebuilds neutral and ignores saved toggles).
-  - [ ] Stage 3 — debounced `saveTargetToggle` writes transfer_snapshot + production_notes to
-    target_board on any toggle; clears `_dirty`; updates local snapshot → snapshot-only read.
-  - [ ] Stage 4 — TWP dual-row + side-aware (twp_hitter/twp_pitcher) throughout.
-  - [ ] Kills the wave-load (§ was: board waited on async `liveTargetPredictions` ~line 512).
+  - [x] Stage 1 (neutral) — ALREADY handled by the sim: a dirty target recomputes from
+    `liveTargetPredictionByPlayerId` (the full program-scoped neutral), no add-path threading needed.
+  - [x] Stage 2 (instant read) — ALREADY handled: sim clean-read (useTeamBuilderSimulation ~1308)
+    reads `transfer_snapshot` synchronously for clean targets → no wave-load.
+  - [x] Stage 3 — **DONE (`8c46b7d`)**: debounced `saveTargetToggle` (TeamBuilder.tsx) writes
+    transfer_snapshot + production_notes to target_board on any toggle; clears `_dirty`; adopts
+    the saved snapshot locally → snapshot-only read. **Roster lockstep**: if the target is
+    `included_in_roster`, also mirrors into `team_build_players.player_snapshot`+`production_notes`.
+  - [x] Stage 4 — TWP side-aware in the save (twp_hitter/twp_pitcher via `projectedNilForPlayer`,
+    merges onto existing snapshot so the untoggled side survives, nulls shared).
+  - [ ] **BROWSER-VERIFY** the toggle→save→reload cycle (see below) — not yet loaded.
+  - [ ] Follow-up: load path could also hydrate the row's toggle CONTROLS from saved
+    `production_notes` (today the displayed stats are correct via transfer_snapshot, but the
+    depth/dev-agg dropdowns show defaults until re-derived). Low priority — display is right.
 - **⭐ Finalization "communication" (Trevor — broader, deferred):** when precomputes finalize,
   `player_predictions` must propagate into (a) target `neutralPrediction`s and (b) default-build
   `player_snapshot`s, so neutrals + default snapshots refresh instead of going stale. Design a
