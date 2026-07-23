@@ -47,12 +47,15 @@ import { CSS } from "@dnd-kit/utilities";
 // tables. Color-coded 20-80 score with a small label.
 const ScoutMiniBox = ({ label, value }: { label: string; value: number | null }) => {
   if (value == null) return null;
+  // Mirror PlayerProfile's 6-tier percentile color scale exactly so a score
+  // shows the same color on the board as on the profile (81 = cyan, not green).
   const tier =
-    value >= 80
-      ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
-      : value >= 50
-      ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
-      : "bg-destructive/15 text-destructive";
+    value >= 90 ? "bg-[hsl(142,71%,45%,0.15)] text-[hsl(142,71%,45%)]" :
+    value >= 75 ? "bg-[hsl(188,90%,42%,0.15)] text-[hsl(188,90%,48%)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,42%)]" :
+    value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]" :
+    value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)]" :
+    "bg-destructive/15 text-destructive";
   return (
     <div
       className={`inline-flex min-w-[34px] flex-col items-center rounded px-1 py-0.5 leading-tight ${tier}`}
@@ -504,8 +507,8 @@ export default function TargetBoardSubtab() {
           <Table>
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
-                <TableHead className="w-[28px] p-0"></TableHead>
-                <TableHead className="w-[56px] text-center p-0">
+                <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
+                <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
                 <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
@@ -534,7 +537,7 @@ export default function TargetBoardSubtab() {
                   <SortableRow key={r.player_id} id={r.player_id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
-                        <TableCell className="w-[28px] p-0 text-center align-middle">
+                        <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
                           <button
                             type="button"
                             {...listeners}
@@ -548,7 +551,7 @@ export default function TargetBoardSubtab() {
                             <GripVertical className="h-4 w-4" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-[56px] p-0 text-center align-middle">
+                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-[28px] z-10 bg-[#0a1428]">
                           <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-md text-[12px] font-bold tabular-nums text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/20">
                             {i + 1}
                           </span>
@@ -623,8 +626,8 @@ export default function TargetBoardSubtab() {
           <Table>
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
-                <TableHead className="w-[28px] p-0"></TableHead>
-                <TableHead className="w-[56px] text-center p-0">
+                <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
+                <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
                 <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
@@ -654,7 +657,7 @@ export default function TargetBoardSubtab() {
                   <SortableRow key={r.player_id} id={r.player_id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
-                        <TableCell className="w-[28px] p-0 text-center align-middle">
+                        <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
                           <button
                             type="button"
                             {...listeners}
@@ -668,7 +671,7 @@ export default function TargetBoardSubtab() {
                             <GripVertical className="h-4 w-4" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-[56px] p-0 text-center align-middle">
+                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-[28px] z-10 bg-[#0a1428]">
                           <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-md text-[12px] font-bold tabular-nums text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/20">
                             {i + 1}
                           </span>
