@@ -171,15 +171,17 @@ export function useLoadBuild({
           }
         }
 
-        // Only fetch player_predictions for rows that don't have a valid snapshot.
+        // Fetch player_predictions for EVERY build player — including ones that
+        // already have a snapshot. The snapshot is the DISPLAYED (possibly
+        // dev-agg-adjusted) line; `activePred` below still prefers it for display.
+        // But the toggle recompute needs the immutable NEUTRAL prediction as its
+        // base (`neutralPrediction`, always predictionMap). If we skip the fetch for
+        // snapshot rows, a player saved with a NON-ZERO dev-agg has a null neutral,
+        // so the recompute falls back to its own already-adjusted snapshot and
+        // COMPOUNDS on every toggle (dev-agg stacks — e.g. Flukey 3.87→3.67→3.47…).
+        // Loading the projection row 1-for-1 for everyone keeps the guard honest.
         const idsNeedingPred = [...new Set(
           players
-            .filter((bp) => {
-              const pid = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
-              if (!isUuid(pid)) return false;
-              const side = isPitcherSlot(bp.position_slot) ? "P" : "H";
-              return !snapshotMap[`${pid}|${side}`];
-            })
             .map((bp) => typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id)
             .filter((id): id is string => isUuid(id))
         )];
