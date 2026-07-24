@@ -15,7 +15,7 @@ import { applyRoleTransitionAdjustment, calcPitchingPlus } from "./transferPitch
 
 export type NeutralLine = {
   p_wrc_plus?: number | null; o_war?: number | null; hitter_depth_role?: string | null;
-  p_rv_plus?: number | null; p_war?: number | null; pitcher_role?: string | null; pitcher_depth_role?: string | null;
+  p_rv_plus?: number | null; p_war?: number | null; pitcher_role?: string | null; pitcher_depth_role?: string | null; projected_ip?: number | null;
   p_era?: number | null; p_fip?: number | null; p_whip?: number | null; p_k9?: number | null; p_bb9?: number | null; p_hr9?: number | null;
   class_transition?: string | null; dev_aggressiveness?: number | null;
 };
@@ -38,6 +38,8 @@ function devScale(devAgg: number, ct: string, side: "H" | "P") {
 
 const storedRoleOf = (r: unknown): "SP" | "RP" | "SM" | null =>
   r === "SP" ? "SP" : r === "RP" ? "RP" : r === "SM" ? "SM" : null;
+
+const KNOWN_PIT_DEPTHS = new Set(["weekend_starter", "weekday_starter", "swing_starter", "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"]);
 
 // The SP↔RP role-transition rate regression + pRV+ rebuild — exact mirror of the
 // sim (useTeamBuilderSimulation 1402-1428). Operates on the (already dev-scaled)
@@ -96,7 +98,12 @@ export function projectEffectiveWar(
     const roleChanged = from != null && to != null && from !== to;
     const rates = roleChanged ? applyRoleTransition(devSource, from, to, eq) : devSource;
     const adjRv = rates.p_rv_plus != null ? Math.round(Number(rates.p_rv_plus)) : null;
-    const ip = pitcherExpectedIp(depth as any, eq);
+    // Innings from the depth toggle; when the depth is missing/unknown fall back to
+    // the neutral's own stored projected_ip (not the RP default) so a null-depth
+    // starter isn't mis-valued as a reliever.
+    const ip = depth != null && KNOWN_PIT_DEPTHS.has(String(depth))
+      ? pitcherExpectedIp(depth as any, eq)
+      : (num(neutral.projected_ip) ?? pitcherExpectedIp(depth as any, eq));
     const pwar = adjRv != null ? computePitcherWar(adjRv, ip, eq) : null;
     return { owar: null, pwar, roleChanged, rates };
   }

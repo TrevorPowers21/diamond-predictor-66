@@ -372,9 +372,21 @@ batched-fetch bugs — use the per-player fetch). Two fixes shipped:
         `player_predictions` correct row (strict team-precomputed → global regular, no cross-team
         fallback), 0 mismatch — so healing toward the neutral is toward the current truth.
       - Verify: re-run heal dry-run → 0 healable; `verify-all` → 0 across 15 programs.
+      - **v2 (SP↔RP role model): +4 more healed on staging.** `projectEffective` now models
+        the sim's role-transition regression (commit `b274d33`) — session role resolved
+        SLOT-first (`effectivePitcherRoleForBuild`), and a TARGET row looks THROUGH to the
+        player's active-build roster slot so a null-slot target keeps the roster's transition.
+        Also `projected_ip` fallback: a null-depth pitcher uses the neutral's stored IP, not the
+        RP default (fixed a false Collin-Smith "drift"). v2 heal: Farley/Palmer (⇄ transitions)
+        + Nottingham/Peavy (stale rv+). Re-run dry-run 0; verify-all 0. Faithful: 1262/1280
+        match (13/16 transition rows reproduce their snapshot exactly). The old depth-based
+        quarantine is GONE (the model handles transitions); only `devAgg≠0` is now set aside.
+      - [ ] **Still open — the `devAgg≠0` class (~6 rows).** Toggled pitcher rows whose snapshot
+            drifts from `f`. Needs its own targeted pass (confirm whether stale or a devScale
+            edge on toggled rows) before healing. Not urgent — they self-heal on next toggle.
       - [ ] **PROD: `scripts/heal-stale-snapshots.ts --prod --apply`** — run AFTER the
             neutral_snapshot backfill (needs the stored neutrals) + all market/depth resyncs.
-            Dry-run first; confirm the quarantine count + spot-check Flukey/Kenny before --apply.
+            Dry-run first; confirm counts + spot-check Flukey/Kenny/Farley before --apply.
 - Stale class = snapshots baked before a later neutral change (rounding / market fix); spread
   EVENLY across active (6.9%) + inactive (6.8%) builds — NOT a non-active-build gap. The re-bake
   DID hit every build; the neutrals just moved afterward. Heal closes that gap for good.
