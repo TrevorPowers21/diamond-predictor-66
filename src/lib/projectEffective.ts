@@ -3,19 +3,25 @@
 // future self-heal guard can never diverge from the sim. Given the immutable
 // dev_agg=0 neutral and the saved toggle state, produces the displayed WAR.
 //
-// Mirrors useTeamBuilderSimulation: hitter 676-693, pitcher 1363-1381 (no-role-change
-// path). Role-transition (SP↔RP) rates are NOT modeled here yet — callers should flag
-// role-changed rows separately rather than trust this for them.
+// Mirrors useTeamBuilderSimulation: hitter 676-693, pitcher 1354-1464.
+// The pitcher path now models the SP↔RP role transition (rate regression +
+// pRV+ rebuild) the sim applies when the session role (from the slot, NOT the
+// depth) differs from the neutral's pitcher_role — pass `sessionRole` for it to
+// fire. Without a sessionRole the transition is skipped (backward compatible).
 import { computeOWarFromWrcPlus } from "./playerCalcs";
-import { computePitcherWar, paForHitterDepthRole, pitcherExpectedIp, type PitchingEquationWeights } from "./depthRoles";
-import { DEFAULT_PITCHING_WEIGHTS } from "./pitchingEquations";
+import { computePitcherWar, paForHitterDepthRole, pitcherExpectedIp } from "./depthRoles";
+import { DEFAULT_PITCHING_WEIGHTS, type PitchingEquationWeights } from "./pitchingEquations";
+import { applyRoleTransitionAdjustment, calcPitchingPlus } from "./transferPitcherProjection";
 
 export type NeutralLine = {
   p_wrc_plus?: number | null; o_war?: number | null; hitter_depth_role?: string | null;
   p_rv_plus?: number | null; p_war?: number | null; pitcher_role?: string | null; pitcher_depth_role?: string | null;
+  p_era?: number | null; p_fip?: number | null; p_whip?: number | null; p_k9?: number | null; p_bb9?: number | null; p_hr9?: number | null;
   class_transition?: string | null; dev_aggressiveness?: number | null;
 };
 export type ToggleNotes = { depthRole?: string | null; devAggressiveness?: number | null; classTransition?: string | null } | null | undefined;
+export type SessionRole = "SP" | "RP" | null | undefined;
+export type PitcherRates = { p_era: number | null; p_fip: number | null; p_whip: number | null; p_k9: number | null; p_bb9: number | null; p_hr9: number | null; p_rv_plus: number | null };
 
 const num = (v: unknown) => (v == null ? null : Number(v));
 
@@ -30,11 +36,42 @@ function devScale(devAgg: number, ct: string, side: "H" | "P") {
   return storedMult > 0 ? sessionMult / storedMult : 1;
 }
 
+const storedRoleOf = (r: unknown): "SP" | "RP" | "SM" | null =>
+  r === "SP" ? "SP" : r === "RP" ? "RP" : r === "SM" ? "SM" : null;
+
+// The SP↔RP role-transition rate regression + pRV+ rebuild — exact mirror of the
+// sim (useTeamBuilderSimulation 1402-1428). Operates on the (already dev-scaled)
+// rates; returns the role-adjusted rates and the rebuilt whole pRV+.
+function applyRoleTransition(devSource: PitcherRates, from: "SP" | "RP" | "SM", to: "SP" | "RP", eq: PitchingEquationWeights): PitcherRates {
+  const curve = {
+    tier1Max: eq.rp_to_sp_low_better_tier1_max, tier2Max: eq.rp_to_sp_low_better_tier2_max, tier3Max: eq.rp_to_sp_low_better_tier3_max,
+    tier1Mult: eq.rp_to_sp_low_better_tier1_mult, tier2Mult: eq.rp_to_sp_low_better_tier2_mult, tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
+  };
+  const rtEra = applyRoleTransitionAdjustment(devSource.p_era, eq.sp_to_rp_reg_era_pct, from, to, true, curve);
+  const rtFip = applyRoleTransitionAdjustment(devSource.p_fip, eq.sp_to_rp_reg_fip_pct, from, to, true, curve);
+  const rtWhip = applyRoleTransitionAdjustment(devSource.p_whip, eq.sp_to_rp_reg_whip_pct, from, to, true, curve);
+  const rtK9 = applyRoleTransitionAdjustment(devSource.p_k9, eq.sp_to_rp_reg_k9_pct, from, to, false, curve);
+  const rtBb9 = applyRoleTransitionAdjustment(devSource.p_bb9, eq.sp_to_rp_reg_bb9_pct, from, to, true, curve);
+  const rtHr9 = applyRoleTransitionAdjustment(devSource.p_hr9, eq.sp_to_rp_reg_hr9_pct, from, to, true, curve);
+  const eraP = calcPitchingPlus(rtEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+  const fipP = calcPitchingPlus(rtFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+  const whipP = calcPitchingPlus(rtWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+  const k9P = calcPitchingPlus(rtK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+  const bb9P = calcPitchingPlus(rtBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+  const hr9P = calcPitchingPlus(rtHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+  const rtRv = [eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)
+    ? Math.round((Number(eraP) * eq.era_plus_weight) + (Number(fipP) * eq.fip_plus_weight) + (Number(whipP) * eq.whip_plus_weight)
+      + (Number(k9P) * eq.k9_plus_weight) + (Number(bb9P) * eq.bb9_plus_weight) + (Number(hr9P) * eq.hr9_plus_weight))
+    : devSource.p_rv_plus;
+  return { p_era: rtEra, p_fip: rtFip, p_whip: rtWhip, p_k9: rtK9, p_bb9: rtBb9, p_hr9: rtHr9, p_rv_plus: rtRv };
+}
+
 export function projectEffectiveWar(
   neutral: NeutralLine | null | undefined,
   notes: ToggleNotes,
   eq: PitchingEquationWeights = DEFAULT_PITCHING_WEIGHTS,
-): { owar: number | null; pwar: number | null; roleChanged: boolean } {
+  sessionRole?: SessionRole,
+): { owar: number | null; pwar: number | null; roleChanged: boolean; rates?: PitcherRates } {
   if (!neutral) return { owar: null, pwar: null, roleChanged: false };
   const devAgg = Number.isFinite(Number(notes?.devAggressiveness)) ? Number(notes?.devAggressiveness) : 0;
   const ct = String(notes?.classTransition ?? neutral.class_transition ?? "SJ").toUpperCase();
@@ -43,13 +80,25 @@ export function projectEffectiveWar(
   if (isPitcher) {
     const depth = notes?.depthRole ?? neutral.pitcher_depth_role ?? null;
     const scale = devScale(devAgg, ct, "P");
-    const adjRv = num(neutral.p_rv_plus) != null ? Math.round(Number(neutral.p_rv_plus) * scale) : null;
+    const inv = scale > 0 ? 1 / scale : 1;
+    // dev-scale the rates + rv+ first (mirrors sim devSource 1371-1381)
+    const devSource: PitcherRates = {
+      p_era: num(neutral.p_era) != null ? Number(neutral.p_era) * inv : null,
+      p_fip: num(neutral.p_fip) != null ? Number(neutral.p_fip) * inv : null,
+      p_whip: num(neutral.p_whip) != null ? Number(neutral.p_whip) * inv : null,
+      p_k9: num(neutral.p_k9) != null ? Number(neutral.p_k9) * scale : null,
+      p_bb9: num(neutral.p_bb9) != null ? Number(neutral.p_bb9) * inv : null,
+      p_hr9: num(neutral.p_hr9) != null ? Number(neutral.p_hr9) * inv : null,
+      p_rv_plus: num(neutral.p_rv_plus) != null ? Math.round(Number(neutral.p_rv_plus) * scale) : null,
+    };
+    const from = storedRoleOf(neutral.pitcher_role);
+    const to = sessionRole === "SP" || sessionRole === "RP" ? sessionRole : null;
+    const roleChanged = from != null && to != null && from !== to;
+    const rates = roleChanged ? applyRoleTransition(devSource, from, to, eq) : devSource;
+    const adjRv = rates.p_rv_plus != null ? Math.round(Number(rates.p_rv_plus)) : null;
     const ip = pitcherExpectedIp(depth as any, eq);
     const pwar = adjRv != null ? computePitcherWar(adjRv, ip, eq) : null;
-    // role change vs the neutral's pitcher_role would alter rates → flag for the caller
-    const notesRole = (notes as any)?.role ?? (notes as any)?.pitcherRole ?? null;
-    const roleChanged = notesRole != null && String(notesRole) !== String(neutral.pitcher_role ?? "");
-    return { owar: null, pwar, roleChanged };
+    return { owar: null, pwar, roleChanged, rates };
   }
 
   const depth = notes?.depthRole ?? neutral.hitter_depth_role ?? null;
