@@ -335,3 +335,25 @@ verify-all = 0 across 15 programs incl. the TWP two-row section.
       each TWP on a board, delete its rows for the team and reinsert exactly two own-side
       rows (roster if rostered, else gatekept prediction). Run AFTER the migration.
 - [ ] **Verify:** `scripts/verify-all.ts` → 0 (incl. TWP two-row section).
+
+## 11. Persisted neutral_snapshot (kills the dev-agg compounding class, 2026-07-24)
+**Why:** the build load only fetched player_predictions for rows WITHOUT a snapshot,
+so a SAVED player (Flukey) had a null `neutralPrediction` at runtime and the toggle
+recompute stacked dev-agg off his own already-adjusted snapshot (3.87→3.67→3.47…).
+Audit proved 0 players actually lack a neutral ROW (the "130"/"27" were my own
+batched-fetch bugs — use the per-player fetch). Two fixes shipped:
+1. **`useLoadBuild` immediate fix** — fetch predictions for EVERY build player (not
+   just snapshot-less ones), so the live neutral loads for saved players.
+2. **Persist it** so it can never go null again (Trevor's call): store the dev_agg=0
+   line ON the row.
+- [ ] **Prod migration `20260724130000_neutral_snapshot.sql`** — add `neutral_snapshot jsonb`
+      to `team_build_players` + `target_board`.
+- [ ] **Prod: `scripts/backfill-neutral-snapshot.ts --prod --apply`** — populate every
+      build/target row from the gatekept neutral (own-side for TWP; side = position_slot
+      ?? player.position). Staging: 1116 build + 165 target (all dev_agg=0). no-AB/local skipped.
+- **Code:** load prefers `neutral_snapshot ?? live predictionMap`; `saveMutation`
+  re-stamps it on the roster insert (else a re-save wipes it); `addPlayer` stamps
+  own-side on new target rows.
+- [ ] **Follow-up (damage cleanup):** snapshots that were compounded BEFORE the fix are
+      corrupted (Flukey's stored pWAR 4.17 vs neutral 1.12). They self-heal on the next
+      toggle+save, OR re-bake all snapshots from `neutral_snapshot` + saved dev-agg.
