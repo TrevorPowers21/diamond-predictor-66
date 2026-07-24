@@ -2001,6 +2001,37 @@ export default function TeamBuilder() {
         }));
         const { error } = await supabase.from("team_build_players").insert(rows);
         if (error) throw error;
+
+        // Keep the universal target board's RECIPE in lockstep with the roster: a
+        // rostered target's target_board.production_notes must match the roster's,
+        // so the board shows the same toggle state the coach set on the roster.
+        // (The snapshot is kept 1:1 by saveTargetToggle + the rostered-consistency
+        // backfill; this closes the bulk-save gap that left board notes NULL.)
+        // One-way only — a TWP is two roster rows → one merged board row today, so
+        // its notes ride the per-side toggle lockstep, not this bulk mirror (which
+        // would clobber the other side). TWP two-row board is a separate step.
+        if (effectiveTeamId) {
+          const rosteredTargets = persistableRoster.filter(
+            (rp) => (rp.roster_status ?? "returner") === "target"
+              && (rp as any).included_in_roster !== false
+              && !((rp.player as any)?.is_twp)
+              && rp.player_id,
+          );
+          for (const rp of rosteredTargets) {
+            const notes = serializeBuildPlayerMeta(
+              rp.production_notes, rp.team_metrics ?? null, rp.team_power_plus ?? null,
+              rp.roster_status ?? null, rp.depth_role ?? null, rp.class_transition ?? null,
+              rp.dev_aggressiveness ?? null, rp.class_transition_overridden ?? false,
+              rp.dev_aggressiveness_overridden ?? false, rp.transfer_snapshot ?? null,
+              rp.player ? { first_name: rp.player.first_name || "", last_name: rp.player.last_name || "", position: rp.player.position ?? null, team: rp.player.team ?? null, from_team: rp.player.from_team ?? null, conference: rp.player.conference ?? null } : null,
+              (rp as any).projection_tier ?? null, (rp as any).nil_value_overridden ?? false,
+            );
+            // production_notes column exists on target_board (staging migration); the
+            // generated types lag, so cast the payload like the other board writes.
+            await supabase.from("target_board").update({ production_notes: notes } as any)
+              .eq("customer_team_id", effectiveTeamId).eq("player_id", rp.player_id!);
+          }
+        }
       }
 
       setSelectedBuildId(buildId);
