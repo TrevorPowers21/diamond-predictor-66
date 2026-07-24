@@ -43,7 +43,7 @@ let issues = 0; const flag = (s: string) => { issues++; console.log(`  ❌ ${s}`
   console.log(`  programs: ${buildsByCt.size}`);
 
   // ---- 2. players meta ----
-  const tb = await page("target_board", "player_id, customer_team_id, transfer_snapshot, production_notes", (q) => q);
+  const tb = await page("target_board", "player_id, customer_team_id, position_slot, transfer_snapshot, production_notes", (q) => q);
   const pids = [...new Set(tb.map((r: any) => r.player_id))];
   const pmeta = new Map<string, any>();
   for (let i = 0; i < pids.length; i += 200) { const { data } = await sb.from("players").select("id, first_name, last_name, position, is_twp").in("id", pids.slice(i, i + 200)); for (const p of (data || [])) pmeta.set(p.id, p); }
@@ -86,6 +86,25 @@ let issues = 0; const flag = (s: string) => { issues++; console.log(`  ❌ ${s}`
     }
   }
   console.log(`  rostered one-way targets checked: ${rChk}`);
+
+  // ---- 4. TWP two-row: each TWP on a board = exactly 2 own-side rows ----
+  console.log("\n=== 4. TWP two-row: exactly 2 own-side rows (hitter slot + pitcher slot) ===");
+  const twpBoard = new Map<string, any[]>();
+  for (const r of tb) { if (!pmeta.get(r.player_id)?.is_twp) continue; const k = `${r.player_id}|${r.customer_team_id}`; (twpBoard.get(k) ?? twpBoard.set(k, []).get(k)!).push(r); }
+  let twpChk = 0;
+  for (const [k, rows] of twpBoard) {
+    const [pid, ctid] = k.split("|"); const meta = pmeta.get(pid) || {}; const who = `${ctName.get(ctid)}/${meta.first_name} ${meta.last_name}`;
+    twpChk++;
+    if (rows.length !== 2) { flag(`${who}: TWP has ${rows.length} board rows (want 2)`); continue; }
+    const h = rows.find((r: any) => !isPit(r.position_slot)), p = rows.find((r: any) => isPit(r.position_slot));
+    if (!h || !p) { flag(`${who}: TWP rows not one-hitter-one-pitcher (slots ${rows.map((r: any) => r.position_slot)})`); continue; }
+    const hs = h.transfer_snapshot || {}, ps = p.transfer_snapshot || {};
+    if (num(hs.p_war) != null || num(hs.twp_pitcher_market_value) != null) flag(`${who}: hitter row carries pitcher data`);
+    if (num(ps.owar) != null || num(ps.twp_hitter_market_value) != null) flag(`${who}: pitcher row carries hitter data`);
+    if (num(hs.owar) == null) flag(`${who}: hitter row missing owar`);
+    if (num(ps.p_war) == null) flag(`${who}: pitcher row missing p_war`);
+  }
+  console.log(`  TWP (player,team) groups checked: ${twpChk}`);
 
   console.log(`\n===== ${issues === 0 ? "✅ ALL CONSISTENT — 0 issues across all programs" : `❌ ${issues} issue(s)`} =====`);
 })();

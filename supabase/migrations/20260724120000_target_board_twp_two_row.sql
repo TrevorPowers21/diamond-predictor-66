@@ -13,7 +13,20 @@
 
 ALTER TABLE public.target_board ADD COLUMN IF NOT EXISTS position_slot text;
 
-ALTER TABLE public.target_board DROP CONSTRAINT IF EXISTS target_board_user_team_player_unique;
+-- Drop EVERY existing unique constraint on target_board (there are two from prior
+-- scoping migrations: user_team_player and team_player) so none of them forces one
+-- row per player. Then a single slot-aware unique index takes over.
+DO $$
+DECLARE cname text;
+BEGIN
+  FOR cname IN
+    SELECT conname FROM pg_constraint
+     WHERE conrelid = 'public.target_board'::regclass AND contype = 'u'
+  LOOP
+    EXECUTE format('ALTER TABLE public.target_board DROP CONSTRAINT IF EXISTS %I', cname);
+  END LOOP;
+END $$;
+
 DROP INDEX IF EXISTS public.target_board_user_team_player_slot_uidx;
 CREATE UNIQUE INDEX target_board_user_team_player_slot_uidx
   ON public.target_board (user_id, customer_team_id, player_id, coalesce(position_slot, ''));
