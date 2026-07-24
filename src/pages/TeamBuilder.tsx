@@ -2010,7 +2010,14 @@ export default function TeamBuilder() {
         // One-way only — a TWP is two roster rows → one merged board row today, so
         // its notes ride the per-side toggle lockstep, not this bulk mirror (which
         // would clobber the other side). TWP two-row board is a separate step.
-        if (effectiveTeamId) {
+        //
+        // GATE: only the ACTIVE build's roster drives the universal target board
+        // (GM rule — a non-active scenario build must never write board notes). If
+        // this save isn't the active build, skip. Fail-safe: no flag → no mirror.
+        const { data: activeRow } = await (supabase as any).from("team_builds")
+          .select("id").eq("customer_team_id", effectiveTeamId ?? "").eq("is_active", true).maybeSingle();
+        const isActiveBuild = !!activeRow && (activeRow as any).id === buildId;
+        if (effectiveTeamId && isActiveBuild) {
           const rosteredTargets = persistableRoster.filter(
             (rp) => (rp.roster_status ?? "returner") === "target"
               && (rp as any).included_in_roster !== false

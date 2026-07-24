@@ -37,6 +37,12 @@ const depthOf = (pn: any) => { try { const o = typeof pn === "string" ? JSON.par
     }
   }
   console.log(`one-way rostered targets to mirror notes: ${updates.length}   (TWP skipped=${twpSkipped}, roster had no notes=${noNotes})`);
+  // per-program breakdown (prove all-programs coverage, not just Georgia)
+  const ctIds = [...new Set(updates.map((u) => u.ctid))];
+  const ctName = new Map<string, string>();
+  for (let i = 0; i < ctIds.length; i += 100) { const { data } = await sb.from("customer_teams").select("id, name").in("id", ctIds.slice(i, i + 100)); for (const c of (data || [])) ctName.set(c.id, c.name); }
+  const byCt = new Map<string, number>(); for (const u of updates) byCt.set(u.ctid, (byCt.get(u.ctid) ?? 0) + 1);
+  console.log("by program:"); for (const [id, n] of byCt) console.log(`  ${ctName.get(id) ?? id.slice(0, 8)}: ${n}`);
   // name the changes
   const pids = updates.map((u) => u.pid);
   const nm = new Map<string, string>();

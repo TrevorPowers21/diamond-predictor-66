@@ -7,6 +7,7 @@ import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { applyTeamScopeFilter, dedupePreferredPerPlayer } from "@/lib/teamScopedPredictions";
 import { isPitcherPos } from "@/gm/lib/loadGmBuildRoster";
 import { logGmActivity } from "@/gm/lib/logGmActivity";
+import { resolveActiveBuildId } from "@/lib/activeBuild";
 
 /** One authored, dated note on a target. */
 export interface GmTargetNote {
@@ -91,9 +92,10 @@ export function useGmTargetBoard() {
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
       const m = new Map<string, any>();
-      const { data: b } = await (supabase as any).from("team_builds").select("id").eq("customer_team_id", effectiveTeamId).eq("is_active", true).maybeSingle();
-      if (!b?.id) return m;
-      const { data: bps } = await (supabase as any).from("team_build_players").select("player_id, position_slot, included_in_roster, player_snapshot").eq("build_id", b.id).eq("included_in_roster", true);
+      const { data: blds } = await (supabase as any).from("team_builds").select("id, is_active, is_default, team, academic_year, updated_at, created_at").eq("customer_team_id", effectiveTeamId);
+      const activeId = resolveActiveBuildId(blds);
+      if (!activeId) return m;
+      const { data: bps } = await (supabase as any).from("team_build_players").select("player_id, position_slot, included_in_roster, player_snapshot").eq("build_id", activeId).eq("included_in_roster", true);
       const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
       const byPid = new Map<string, any[]>();
       for (const bp of (bps || [])) { if (!(bp as any).player_snapshot) continue; (byPid.get((bp as any).player_id) ?? byPid.set((bp as any).player_id, []).get((bp as any).player_id)!).push(bp); }
