@@ -198,6 +198,37 @@ everywhere. Current status:
       `rebake-twp-markets.ts`. Staging done (Kenny: hitter 1.499/cornerstone/61,817, pitcher
       0.832/swing_starter/31,193, cleanly separated).
 
+## 9. Pitcher-market PVF resync + depth-on-target-snapshot (Georgia audit, 2026-07-24)
+**Why:** the pitcher-market MODEL dropped the weekend-starter PVF (×1.2) long ago
+(`pitcherProjection.ts:503` = pWar × $/WAR × tier, no PVF), but the rows baked
+before that change still carried it. The target board copies `player_predictions`,
+so 13 Georgia pitcher targets read ~20% high; Overbeek read his old-conference
+value; Sifford had a negative (pre-floor) market. Roster WAR was already clean.
+**Fix = data only (no projection rerun); market is a pure function of stored WAR.**
+Run IN THIS ORDER, dry-run each first, --apply after:
+- [ ] **`scripts/fix-pitcher-market-pvf.ts --apply`** — canonical resync of stored
+      pitcher `market_value` + `twp_pitcher_market_value` in `player_predictions` =
+      `pWar × 25000 × tier` (no PVF, floor $0), ALL teams. Gated + self-validating
+      (rows within 4% of recompute confirm tier resolution matches the precompute;
+      unexplained rows are logged, never written). Staging: 59,334 rows changed
+      (43,231 precision, 15,146 PVF, 957 stale-vs-WAR/anomaly), $0 residual on re-run.
+      Row-by-row → slow (~10-15 min); idempotent, so safe to re-run if interrupted.
+- [ ] **`scripts/resync-target-snapshots.ts --all --apply`** — recompute
+      `target_board.transfer_snapshot` MARKET in place from its own stored WAR at the
+      program tier (preserves toggled WAR, unlike a re-copy), and stamp
+      `hitter_depth_role`/`pitcher_depth_role` (production_notes override → precompute's
+      stored role IF it reproduces the stored WAR → WAR-derived fallback). Staging: 91 rows.
+- [ ] **`scripts/resync-build-snapshot-markets.ts --all --apply`** — floor non-positive-WAR
+      build `player_snapshot` markets to $0 (position-independent). Positive-WAR hitter
+      markets are left to the app's live bake (position may be null → don't guess).
+      Staging: 1 row (Sifford). 0 elsewhere.
+- [ ] **Verify:** `scripts/audit-georgia.ts` → 0 inconsistencies (roster + target board,
+      full WAR + market + depth checks). Adapt the build/customer_team ids for other programs.
+- Add-path already stamps depth + corrected market from predictions (`useTargetBoard`
+  lines 148-150) → new adds are correct. Latent follow-up: some `player_predictions`
+  pitcher rows have a depth label stale vs their own (later-recomputed) WAR — the resync
+  validates+falls-back, but the precompute finalization should re-derive depth from WAR.
+
 ### ✅ Removed the last stray live-compute for targets (`37ec75d`)
 `PlayerTableRow` ran `simulateTransferProjection` (a live transfer-to-team compute) for EVERY
 target and displayed its oWAR/market, overriding the snapshot read. It coincidentally matched
