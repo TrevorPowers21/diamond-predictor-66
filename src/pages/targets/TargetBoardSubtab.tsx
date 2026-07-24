@@ -98,8 +98,12 @@ const groupForHitter = (pos: string | null | undefined): GroupKey | null => {
   return "IF";
 };
 
+// A TWP has two rows: the pitcher row carries a pitcher position_slot, the hitter
+// row a hitter slot — so classify by the ROW's slot when present, else the player's
+// position (one-way players have position_slot NULL). Routes Kenny's two rows into
+// the pitcher and hitter tables respectively.
 const isPitcherTarget = (row: TargetBoardRow) =>
-  /^(SP|RP|CL|LHP|RHP|P)$/i.test(String(row.position || "").trim());
+  /^(SP|RP|CL|LHP|RHP|P)$/i.test(String((row.position_slot ?? row.position) || "").trim());
 
 type ViewType = "hitter" | "pitcher";
 type HitterMode = "overall" | "by-position";
@@ -184,8 +188,8 @@ const applyManualOrder = (rows: TargetBoardRow[], order: string[]): TargetBoardR
   const indexOf = new Map<string, number>();
   order.forEach((id, i) => indexOf.set(id, i));
   return [...rows].sort((a, b) => {
-    const ia = indexOf.has(a.player_id) ? indexOf.get(a.player_id)! : Infinity;
-    const ib = indexOf.has(b.player_id) ? indexOf.get(b.player_id)! : Infinity;
+    const ia = indexOf.has(a.id) ? indexOf.get(a.id)! : Infinity;
+    const ib = indexOf.has(b.id) ? indexOf.get(b.id)! : Infinity;
     if (ia !== ib) return ia - ib;
     // both unranked → preserve incoming order
     return 0;
@@ -354,11 +358,19 @@ export default function TargetBoardSubtab() {
       const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
       const byPid = new Map<string, any[]>();
       for (const bp of (bps || [])) { if (!(bp as any).player_snapshot) continue; (byPid.get((bp as any).player_id) ?? byPid.set((bp as any).player_id, []).get((bp as any).player_id)!).push(bp); }
+      // Key each side's snapshot by `${pid}|hitter` / `${pid}|pitcher` so the board
+      // row for each side reads its OWN slot's roster snapshot (no merge). A one-way
+      // player has a single row → one side key.
       for (const [pid, list] of byPid) {
-        if (list.length === 1) { m.set(pid, list[0].player_snapshot); continue; }
-        const h = (list.find((r) => !isPit(r.position_slot)) ?? list[0]).player_snapshot;
-        const p = (list.find((r) => isPit(r.position_slot)) ?? list[0]).player_snapshot;
-        m.set(pid, { ...p, o_war: h.o_war, hitter_depth_role: h.hitter_depth_role, twp_hitter_market_value: h.twp_hitter_market_value, p_avg: h.p_avg, p_obp: h.p_obp, p_slg: h.p_slg, p_wrc_plus: h.p_wrc_plus, p_war: p.p_war, p_rv_plus: p.p_rv_plus, twp_pitcher_market_value: p.twp_pitcher_market_value, is_twp: true });
+        if (list.length === 1) {
+          const only = list[0];
+          m.set(`${pid}|${isPit(only.position_slot) ? "pitcher" : "hitter"}`, only.player_snapshot);
+          continue;
+        }
+        const h = list.find((r) => !isPit(r.position_slot));
+        const p = list.find((r) => isPit(r.position_slot));
+        if (h) m.set(`${pid}|hitter`, h.player_snapshot);
+        if (p) m.set(`${pid}|pitcher`, p.player_snapshot);
       }
       return m;
     },
@@ -367,17 +379,21 @@ export default function TargetBoardSubtab() {
   // The line each target DISPLAYS: rostered → build player_snapshot; else → the
   // saved transfer_snapshot (normalized owar→o_war, nil_valuation→market_value);
   // scouting scores come from the live prediction (not stored in snapshots).
-  const displayByPlayerId = useMemo(() => {
+  // Keyed by target_board ROW id (not player_id) so a TWP's two rows each resolve
+  // their own side's line. Rostered → the matching-side roster snapshot; else → the
+  // row's own transfer_snapshot. Scouting comes from the live prediction (by player).
+  const displayByRow = useMemo(() => {
     const m = new Map<string, any>();
     for (const r of board) {
       const pid = r.player_id;
+      const side = isPitcherTarget(r) ? "pitcher" : "hitter";
       const live = predictionByPlayerId.get(pid);
-      const roster = rosterSnapByPid.get(pid);
+      const roster = rosterSnapByPid.get(`${pid}|${side}`);
       const ts: any = (r as any).transfer_snapshot;
       const snap = roster
         ? roster
         : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
-      m.set(pid, snap ? { ...(live || {}), ...snap } : (live || null));
+      m.set(r.id, snap ? { ...(live || {}), ...snap } : (live || null));
     }
     return m;
   }, [board, predictionByPlayerId, rosterSnapByPid]);
@@ -430,8 +446,8 @@ export default function TargetBoardSubtab() {
     const mul = dir === "asc" ? 1 : -1;
     const arr = [...rows];
     arr.sort((a, b) => {
-      const pa = displayByPlayerId.get(a.player_id);
-      const pb = displayByPlayerId.get(b.player_id);
+      const pa = displayByRow.get(a.id);
+      const pb = displayByRow.get(b.id);
       if (sk === "name") {
         return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`) * mul;
       }
@@ -506,11 +522,11 @@ export default function TargetBoardSubtab() {
     (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const oldIndex = sortedRows.findIndex((r) => r.player_id === active.id);
-      const newIndex = sortedRows.findIndex((r) => r.player_id === over.id);
+      const oldIndex = sortedRows.findIndex((r) => r.id === active.id);
+      const newIndex = sortedRows.findIndex((r) => r.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
       const next = arrayMove(sortedRows, oldIndex, newIndex);
-      const newOrder = next.map((r) => r.player_id);
+      const newOrder = next.map((r) => r.id);
       setManualOrders((prev) => ({ ...prev, [scope]: newOrder }));
       saveManualOrder(effectiveTeamId, scope, newOrder);
       // Drag implies "I want manual order" — flip the sort selector to
@@ -575,9 +591,9 @@ export default function TargetBoardSubtab() {
             </TableHeader>
             <TableBody>
               {sorted.map((r, i) => {
-                const pred = displayByPlayerId.get(r.player_id);
+                const pred = displayByRow.get(r.id);
                 return (
-                  <SortableRow key={r.player_id} id={r.player_id}>
+                  <SortableRow key={r.id} id={r.id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
                         <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
@@ -697,9 +713,9 @@ export default function TargetBoardSubtab() {
             </TableHeader>
             <TableBody>
               {sorted.map((r, i) => {
-                const pred = displayByPlayerId.get(r.player_id);
+                const pred = displayByRow.get(r.id);
                 return (
-                  <SortableRow key={r.player_id} id={r.player_id}>
+                  <SortableRow key={r.id} id={r.id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
                         <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">

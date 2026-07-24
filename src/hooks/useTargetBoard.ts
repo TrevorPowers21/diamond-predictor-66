@@ -31,6 +31,10 @@ export interface TargetBoardRow {
   // toggle survives refresh instead of being rebuilt to neutral.
   transfer_snapshot: Record<string, any> | null;
   production_notes: string | null;
+  // TWP two-row: distinguishes the hitter row from the pitcher row. NULL for a
+  // one-way player (single row). Mirrors the roster's per-side rows.
+  position_slot: string | null;
+  is_twp: boolean;
 }
 
 /**
@@ -72,7 +76,7 @@ export function useTargetBoard() {
       // is what guarantees a superadmin sees one team at a time, never a blend.
       if (!effectiveTeamId) return [];
       const { data, error } = await tb()
-        .select("id, player_id, notes, added_at, transfer_snapshot, production_notes, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division, source_player_id)")
+        .select("id, player_id, position_slot, notes, added_at, transfer_snapshot, production_notes, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division, source_player_id, is_twp)")
         // Team-scoped only — every coach on the team sees the same board.
         .eq("customer_team_id", effectiveTeamId!)
         .order("added_at", { ascending: false });
@@ -96,6 +100,8 @@ export function useTargetBoard() {
         division: row.players.division ?? null,
         transfer_snapshot: row.transfer_snapshot ?? null,
         production_notes: row.production_notes ?? null,
+        position_slot: row.position_slot ?? null,
+        is_twp: !!row.players.is_twp,
       })) as TargetBoardRow[];
     },
     // Refetch when the user re-focuses TB / Targets / any surface using the
@@ -133,9 +139,10 @@ export function useTargetBoard() {
         supabase.from("player_predictions")
           .select("customer_team_id, variant, model_type, p_avg, p_obp, p_slg, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role")
           .eq("player_id", playerId).eq("season", PROJECTION_SEASON).in("status", ["active", "departed"]),
-        supabase.from("players").select("is_twp").eq("id", playerId).maybeSingle(),
+        supabase.from("players").select("is_twp, position").eq("id", playerId).maybeSingle(),
       ]);
       const isTwp = !!(pl as any)?.is_twp;
+      const plPosition = (pl as any)?.position ?? null;
       const rows = (preds || []) as any[];
       const pred =
         rows.find((r) => r.customer_team_id === effectiveTeamId && r.variant === "precomputed")
@@ -150,13 +157,25 @@ export function useTargetBoard() {
         hitter_depth_role: pred.hitter_depth_role, pitcher_depth_role: pred.pitcher_depth_role,
         is_twp: isTwp,
       } : null;
-      const { error } = await tb()
-        .insert({
-          user_id: user.id,
-          player_id: playerId,
-          customer_team_id: effectiveTeamId,
-          transfer_snapshot,
-        });
+      // TWP → TWO rows (hitter slot + pitcher slot), each own-side only, mirroring
+      // the roster. One-way → a single row (position_slot NULL). Own-side split
+      // keeps a side's snapshot from carrying the other side's stats.
+      let insertRows: any[];
+      if (isTwp && transfer_snapshot) {
+        const t = transfer_snapshot as any;
+        const isPitPos = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(plPosition || "").trim());
+        const hitterSlot = isPitPos ? "UTL" : (plPosition || "UTL");
+        const pitcherSlot = /starter/i.test(String(pred?.pitcher_depth_role || "")) ? "SP" : "RP";
+        const hitterSnap = { is_twp: true, nil_valuation: null, p_avg: t.p_avg, p_obp: t.p_obp, p_slg: t.p_slg, p_wrc_plus: t.p_wrc_plus, owar: t.owar, o_war: t.o_war, hitter_depth_role: t.hitter_depth_role, twp_hitter_market_value: t.twp_hitter_market_value };
+        const pitcherSnap = { is_twp: true, nil_valuation: null, p_era: t.p_era, p_fip: t.p_fip, p_whip: t.p_whip, p_k9: t.p_k9, p_bb9: t.p_bb9, p_hr9: t.p_hr9, p_rv_plus: t.p_rv_plus, p_war: t.p_war, pitcher_depth_role: t.pitcher_depth_role, twp_pitcher_market_value: t.twp_pitcher_market_value };
+        insertRows = [
+          { user_id: user.id, player_id: playerId, customer_team_id: effectiveTeamId, position_slot: hitterSlot, transfer_snapshot: hitterSnap },
+          { user_id: user.id, player_id: playerId, customer_team_id: effectiveTeamId, position_slot: pitcherSlot, transfer_snapshot: pitcherSnap },
+        ];
+      } else {
+        insertRows = [{ user_id: user.id, player_id: playerId, customer_team_id: effectiveTeamId, position_slot: null, transfer_snapshot }];
+      }
+      const { error } = await tb().insert(insertRows);
       if (error) throw error;
       // Log to the front-office feed (skip silent syncs so remounts don't spam).
       if (!_silent) {
