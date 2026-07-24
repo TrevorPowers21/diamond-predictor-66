@@ -1998,6 +1998,10 @@ export default function TeamBuilder() {
             rp.projection_tier ?? null,
             rp.nil_value_overridden ?? false,
           ),
+          // Persist the NEUTRAL base so a re-save never wipes it (this insert
+          // replaces the build's rows). It's the immutable dev_agg=0 line the toggle
+          // recompute reads; keeping it on the row means it can't go null and compound.
+          neutral_snapshot: ((rp as any).neutralPrediction ?? (rp as any).neutral_snapshot ?? null) as any,
         }));
         const { error } = await supabase.from("team_build_players").insert(rows);
         if (error) throw error;

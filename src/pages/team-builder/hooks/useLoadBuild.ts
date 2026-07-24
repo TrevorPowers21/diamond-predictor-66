@@ -542,14 +542,14 @@ export function useLoadBuild({
                       }
                     : resolvedLocalPlayer || null,
                   prediction: activePred ?? null,
-                  // Phase B: the NEUTRAL base (dev_agg=0 precompute line), kept
-                  // separate from `prediction` (which becomes the adjusted snapshot).
-                  // The toggle handler recomputes from THIS, never from the adjusted
-                  // snapshot, so changes can't compound. Always the live prediction
-                  // row (predictionMap), even when a snapshot is present.
-                  neutralPrediction: (normalizedPlayerId
-                    ? predictionMap[`${normalizedPlayerId}|${bpSide}`] ?? null
-                    : null),
+                  // Phase B: the NEUTRAL base (dev_agg=0 line), kept separate from
+                  // `prediction` (the adjusted snapshot). The toggle handler recomputes
+                  // from THIS, never from the adjusted snapshot, so changes can't
+                  // compound. Prefer the PERSISTED neutral_snapshot on the build row
+                  // (stamped at add/save) so it never depends on the live fetch; fall
+                  // back to the live prediction row if an old row lacks it.
+                  neutralPrediction: (bp as any).neutral_snapshot
+                    ?? (normalizedPlayerId ? predictionMap[`${normalizedPlayerId}|${bpSide}`] ?? null : null),
                   nilVal: pd?.nil_valuations?.[0]?.estimated_value ?? null,
                   nil_owar: pd?.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
                   team_metrics: meta.metrics,
