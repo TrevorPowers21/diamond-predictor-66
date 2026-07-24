@@ -354,6 +354,27 @@ batched-fetch bugs — use the per-player fetch). Two fixes shipped:
 - **Code:** load prefers `neutral_snapshot ?? live predictionMap`; `saveMutation`
   re-stamps it on the roster insert (else a re-save wipes it); `addPlayer` stamps
   own-side on new target rows.
-- [ ] **Follow-up (damage cleanup):** snapshots that were compounded BEFORE the fix are
-      corrupted (Flukey's stored pWAR 4.17 vs neutral 1.12). They self-heal on the next
-      toggle+save, OR re-bake all snapshots from `neutral_snapshot` + saved dev-agg.
+- [x] **Follow-up (damage cleanup) — DONE on staging (self-heal Step 2).**
+      `scripts/heal-stale-snapshots.ts --all --apply` re-derived `snapshot = f(neutral, notes)`
+      for the provably-safe set: **73 rows healed** (devAgg=0, no SP/RP role transition → f is
+      EXACT). Full-line rebuild: copies the neutral's rates+index, re-WARs at the saved
+      (sanitized) depth, re-markets at program tier. Flukey 4.17→3.16 (de-compounded),
+      Kenny SP 2.36→0.83, Grube wRC+121→126 (up to the verified-live projection).
+      - **Pitcher-depth sanitize:** a pitcher slot whose notes.depthRole is a HITTER role
+        (pollution, e.g. Kenny build 837125ae `everyday_starter`) falls back to the neutral's
+        `pitcher_depth_role` — only ever corrects, never overrides a real choice.
+      - **28 QUARANTINED, NOT healed:** 14 devAgg≠0 toggled pitchers + 14 devAgg=0 pitchers that
+        cross the SP/RP boundary (Cespedes, Paz, Flores, Ritter…). `projectEffective` doesn't
+        model the role-transition rate regression, so its WAR is NOT valid for them — their
+        snapshots are correct via the sim's regression. **DO NOT heal until projectEffective
+        models SP↔RP.** They self-heal on the next toggle anyway.
+      - **Neutral verified live first (Trevor's ask):** all 73 stored neutrals == the live
+        `player_predictions` correct row (strict team-precomputed → global regular, no cross-team
+        fallback), 0 mismatch — so healing toward the neutral is toward the current truth.
+      - Verify: re-run heal dry-run → 0 healable; `verify-all` → 0 across 15 programs.
+      - [ ] **PROD: `scripts/heal-stale-snapshots.ts --prod --apply`** — run AFTER the
+            neutral_snapshot backfill (needs the stored neutrals) + all market/depth resyncs.
+            Dry-run first; confirm the quarantine count + spot-check Flukey/Kenny before --apply.
+- Stale class = snapshots baked before a later neutral change (rounding / market fix); spread
+  EVENLY across active (6.9%) + inactive (6.8%) builds — NOT a non-active-build gap. The re-bake
+  DID hit every build; the neutrals just moved afterward. Heal closes that gap for good.
