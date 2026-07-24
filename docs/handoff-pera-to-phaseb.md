@@ -316,19 +316,22 @@ carry them BOTH ways; only the ACTIVE build touches the board.
   **gated on the active build** (non-active scenario builds never write board notes).
 - GM `createBuild` already marks the first non-default build active (no change needed).
 
-### ⏳ TWP two-row target board (Kenny) — SPEC, NOT DONE (needs "a ton of testing")
-Today a TWP is ONE merged `target_board` row (both sides); the roster is TWO rows
-(hitter slot + pitcher slot). Trevor wants the board to MATCH the roster = two rows,
-so each side carries its own snapshot + notes and add-to-roster maps 1:1 (this is how
-prod's roster works). Kenny is NOT broken today (verify-all passes on his merged row);
-this is the convention fix. Scope:
-1. **Migration:** add `position_slot text` to `target_board`; replace the one-row-per-player
-   uniqueness with `UNIQUE (customer_team_id, player_id, coalesce(position_slot,''))`
-   (one-way = null slot single row; TWP = two rows, slots mirror the roster e.g. RF/SP).
-2. **Writes:** `useTargetBoard.addPlayer` inserts TWO rows for a TWP; `saveTargetToggle`
-   writes the matching side by `position_slot`; notes mirror + rostered-consistency go per-side.
-3. **Reads (the risky part — make robust to 1-or-2 rows/player):** `useTargetBoard` list,
-   `useGmTargetBoard`, `TargetBoardSubtab`, TeamBuilder sim, `PlayerHub`, `runDataCascade`.
-4. **Data:** split existing merged TWP rows into two (hitter row + pitcher row).
-5. **Verify:** extend `verify-all.ts` to cover TWP two-row (each side self-consistent,
-   both notes present, add-to-roster 1:1 per side).
+### ✅ TWP two-row target board — DONE on staging (2026-07-24). Prod steps below.
+A TWP is now TWO `target_board` rows (hitter slot + pitcher slot), each own-side with
+its own snapshot + notes, mirroring the roster. All TWP-gated → non-TWP (single row,
+null slot) unchanged. Kenny: RF 1.499/$61,817/cornerstone + SP 0.832/$31,193/swing_starter.
+verify-all = 0 across 15 programs incl. the TWP two-row section.
+- **Migration `20260724120000_target_board_twp_two_row.sql`:** adds `position_slot`,
+  DROPS **every** unique constraint on the table (there were TWO — user_team_player AND
+  team_player; a 2nd-row insert hit the second), then a slot-aware unique index
+  `(user_id, customer_team_id, player_id, coalesce(position_slot,''))`. **PROD: apply this.**
+- **Code (staging branch):** `useTargetBoard` (row carries position_slot + is_twp;
+  addPlayer inserts 2 own-side rows for a TWP); `TargetBoardSubtab` + `useGmTargetBoard`
+  + `GMTargets` (classify by row slot, per-side roster snap, render/drag keyed by row id);
+  `saveTargetToggle` (writes the matching side by slot, t own-side, settles the toggled
+  side only); `PlayerHub` (fetch both, pick the profile's side). `runDataCascade` nulls
+  all snapshots — no change needed.
+- [ ] **PROD one-time: `scripts/rebuild-twp-target-rows.ts --apply`** — idempotent; for
+      each TWP on a board, delete its rows for the team and reinsert exactly two own-side
+      rows (roster if rostered, else gatekept prediction). Run AFTER the migration.
+- [ ] **Verify:** `scripts/verify-all.ts` → 0 (incl. TWP two-row section).
