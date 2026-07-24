@@ -284,3 +284,51 @@ Fix: paginate within batches of 100 AND `.order("id")`. Then 162/162, noPredicti
 - Lower-risk sibling left as-is: TB `liveTargetPredictions` (`useTeamBuilderSimulation`
   ~line 512) — team-scope filter reduces it to ~2 rows/player, under the cap; and it's
   already slated to be replaced by the `transfer_snapshot` read (§5).
+
+## 10. Notes-recipe + active-build resolver + full DB verify (2026-07-24, cont.)
+**Discovery (from the Georgia audit):** rostered targets had a `transfer_snapshot`
+(values) but NULL `production_notes` — the rostered-consistency backfill copied the
+snapshot without the RECIPE that creates it. Trevor: notes create the snapshot;
+carry them BOTH ways; only the ACTIVE build touches the board.
+
+### Staging done — run on prod in this order (dry-run each, then --apply)
+- [ ] **`scripts/set-active-builds.ts --apply`** — set `team_builds.is_active` for
+      programs with no flag, via the shared resolver (same-team → current
+      academic_year → largest roster → most-recent). Staging: 14 programs
+      (Arkansas→"Arkansas Baseball 2027 Roster", Kansas→"2027 Proj Jayhawks" via the
+      season guard). **PROD: coordinate with Trevor — real users/activity differ from
+      staging; confirm each program's live build before flipping.** Exactly one active per team.
+- [ ] **`scripts/backfill-target-notes-from-roster.ts --apply`** — mirror each one-way
+      rostered target's active-build roster `production_notes` → `target_board.production_notes`.
+      Staging: 37 rows (Georgia 17, Arkansas 17, +3). TWP skipped (phase 2).
+- [ ] **`scripts/backfill-rostered-target-consistency.ts --apply`** — RE-RUN (now that
+      all programs have an active build) to reconcile board `transfer_snapshot` ← active
+      roster `player_snapshot` (1:1). Fixed to select `position_slot` so the TWP merge
+      is side-correct. Staging: 38 rows.
+- [ ] **Verify:** `scripts/verify-all.ts` → 0 issues across all programs (active-build
+      uniqueness + resolver agreement, target snapshot WAR-from-depth + market=f(WAR) at
+      program tier, rostered board notes==roster notes + snapshot 1:1). Staging: **0**.
+
+### Code shipped (staging branch)
+- `src/lib/activeBuild.ts` — `resolveActiveBuildId` (one source of truth).
+- `useGmTargetBoard` + `TargetBoardSubtab` — repointed off bare `.eq(is_active,true)` to the resolver.
+- `TeamBuilder.saveMutation` — mirrors one-way rostered-target notes → target_board,
+  **gated on the active build** (non-active scenario builds never write board notes).
+- GM `createBuild` already marks the first non-default build active (no change needed).
+
+### ⏳ TWP two-row target board (Kenny) — SPEC, NOT DONE (needs "a ton of testing")
+Today a TWP is ONE merged `target_board` row (both sides); the roster is TWO rows
+(hitter slot + pitcher slot). Trevor wants the board to MATCH the roster = two rows,
+so each side carries its own snapshot + notes and add-to-roster maps 1:1 (this is how
+prod's roster works). Kenny is NOT broken today (verify-all passes on his merged row);
+this is the convention fix. Scope:
+1. **Migration:** add `position_slot text` to `target_board`; replace the one-row-per-player
+   uniqueness with `UNIQUE (customer_team_id, player_id, coalesce(position_slot,''))`
+   (one-way = null slot single row; TWP = two rows, slots mirror the roster e.g. RF/SP).
+2. **Writes:** `useTargetBoard.addPlayer` inserts TWO rows for a TWP; `saveTargetToggle`
+   writes the matching side by `position_slot`; notes mirror + rostered-consistency go per-side.
+3. **Reads (the risky part — make robust to 1-or-2 rows/player):** `useTargetBoard` list,
+   `useGmTargetBoard`, `TargetBoardSubtab`, TeamBuilder sim, `PlayerHub`, `runDataCascade`.
+4. **Data:** split existing merged TWP rows into two (hitter row + pitcher row).
+5. **Verify:** extend `verify-all.ts` to cover TWP two-row (each side self-consistent,
+   both notes present, add-to-roster 1:1 per side).
