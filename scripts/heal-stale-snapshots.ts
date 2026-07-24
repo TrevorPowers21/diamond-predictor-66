@@ -6,9 +6,10 @@
  * a null-slot target must not lose the roster's transition). projectEffective applies
  * the transition when session role ≠ neutral pitcher_role.
  *
- * SAFE SET = drift > 0.02 WAR AND devAgg==0 (dev-scale exact). devAgg≠0 rows are left
- * for a separate pass. Pitcher-depth sanitize: a hitter role on a pitcher slot falls
- * back to the neutral's pitcher_depth_role.
+ * SAFE SET = drift > 0.02 WAR. devScale is proven faithful (devAgg≠0 hitters 27/27 +
+ * pitchers 17/23 match to the decimal; the drifters are internally-consistent stale
+ * lines from an older neutral), so devAgg≠0 rows heal too. Pitcher-depth sanitize: a
+ * hitter role on a pitcher slot falls back to the neutral's pitcher_depth_role.
  *
  * Full-line rebuild: pitcher rows take projectEffective's returned (role+dev adjusted)
  * rates + pRV+; hitter rows copy the neutral rates (dev-scale=1 at devAgg=0). WAR at
@@ -69,7 +70,7 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
   ];
 
   const heal: { row: Row; side: "P" | "H"; before: any; after: any; snapWar: number; fWar: number; depth: string; trans: boolean }[] = [];
-  let quarantinedDev = 0, noConf = 0;
+  let noConf = 0;
   for (const r of rows) {
     if (!r.neu || !/^[0-9a-f-]{36}$/i.test(String(r.pid)) || !r.snap) continue;
     const side: "P" | "H" = isPit(r.slot ?? (num(r.neu.p_rv_plus) != null ? "SP" : "")) ? "P" : "H";
@@ -82,7 +83,7 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
     const { owar, pwar, roleChanged, rates } = projectEffectiveWar(r.neu, { ...notes, depthRole: depth }, EQ, sessionRole as any);
     const fWar = side === "P" ? pwar : owar; if (fWar == null) continue;
     if (Math.abs(fWar - snapWar) <= 0.02) continue;              // in sync
-    if (devAgg !== 0) { quarantinedDev++; continue; }            // separate pass
+    // devScale proven faithful → heal any devAgg
     const conf = r.ctid ? ctConf.get(r.ctid) ?? "" : ""; if (!conf) { noConf++; continue; }
 
     const s: any = { ...r.snap };
@@ -103,8 +104,10 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
   }
 
   heal.sort((a, b) => Math.abs(b.fWar - b.snapWar) - Math.abs(a.fWar - a.snapWar));
-  console.log(`\n===== HEAL v2: ${heal.length} rows  (devAgg≠0 skipped ${quarantinedDev}, noConf ${noConf}) =====`);
+  console.log(`\n===== HEAL v2: ${heal.length} rows  (noConf ${noConf}) =====`);
   const hp = heal.filter((h) => h.side === "P").length, tr = heal.filter((h) => h.trans).length;
+  const dv = heal.filter((h) => (Number(parseNotes(h.row.notes)?.devAggressiveness ?? 0) || 0) !== 0).length;
+  console.log(`(devAgg≠0 among these: ${dv})`);
   console.log(`hitters ${heal.length - hp} · pitchers ${hp} (role-transition: ${tr})\n`);
   (SHOW_ALL ? heal : heal.slice(0, 30)).forEach((h) => {
     const b = h.before, a = h.after, s = h.side;

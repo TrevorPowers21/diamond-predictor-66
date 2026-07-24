@@ -381,9 +381,15 @@ batched-fetch bugs — use the per-player fetch). Two fixes shipped:
         + Nottingham/Peavy (stale rv+). Re-run dry-run 0; verify-all 0. Faithful: 1262/1280
         match (13/16 transition rows reproduce their snapshot exactly). The old depth-based
         quarantine is GONE (the model handles transitions); only `devAgg≠0` is now set aside.
-      - [ ] **Still open — the `devAgg≠0` class (~6 rows).** Toggled pitcher rows whose snapshot
-            drifts from `f`. Needs its own targeted pass (confirm whether stale or a devScale
-            edge on toggled rows) before healing. Not urgent — they self-heal on next toggle.
+      - [x] **`devAgg≠0` class — DONE (6 healed).** Proven stale, not a formula bug: devAgg≠0
+            hitters 27/27 + pitchers 17/23 match `f` to the decimal, and the 6 drifters are
+            internally consistent (`p_war == computePitcherWar(own rv+, IP)`) lines from an
+            older neutral (Neiswonger baked at rv+~133, neutral now 134; etc.). devScale is
+            faithful → the quarantine is removed; the heal now covers any devAgg.
+      - **✅ SNAPSHOT CONSISTENCY COMPLETE (staging):** final full-row check = **1280/1280
+        match** `snapshot == f(neutral, notes)` across all 15 programs (role transitions +
+        roster-slot look-through + projected_ip fallback). 33 no-neutral rows = no-AB/local
+        (no projection; inert). verify-all 0, 242 tests pass, projectEffective tsc-clean.
       - [ ] **PROD: `scripts/heal-stale-snapshots.ts --prod --apply`** — run AFTER the
             neutral_snapshot backfill (needs the stored neutrals) + all market/depth resyncs.
             Dry-run first; confirm counts + spot-check Flukey/Kenny/Farley before --apply.
