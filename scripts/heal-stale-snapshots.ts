@@ -30,6 +30,14 @@ const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegEx
 const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
 console.log(`### DB: ${ENV}  APPLY=${APPLY} ###`);
 
+// Prod --apply is gated (mirrors import:prod): a scheduled/unattended run must set
+// RSTR_AUTOMATION_TOKEN; an interactive one can pass --yes. Guards against a stray
+// `--prod --apply` writing prod without intent.
+if (APPLY && ENV.includes("production") && !process.env.RSTR_AUTOMATION_TOKEN && !process.argv.includes("--yes")) {
+  console.log("REFUSED: prod --apply needs RSTR_AUTOMATION_TOKEN (unattended) or --yes (interactive).");
+  process.exit(3);
+}
+
 const num = (v: any) => (v == null ? null : Number(v));
 const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 const asRole = (s: any): "SP" | "RP" | null => { const v = String(s || "").toUpperCase(); if (/^SP|^LHP|^RHP/.test(v)) return "SP"; if (/^RP|^CL/.test(v)) return "RP"; return null; };
@@ -116,8 +124,10 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
   });
   if (!SHOW_ALL && heal.length > 30) console.log(`  … +${heal.length - 30} more (--all)`);
 
-  if (!APPLY) { console.log("\n(dry-run — no writes. Add --apply.)"); return; }
-  let done = 0;
-  for (const h of heal) { const { error } = await sb.from(h.row.table).update({ [h.row.snapCol]: h.after }).eq("id", h.row.id); if (error) console.log("err", h.row.id, error.message); else done++; if (done % 10 === 0) process.stdout.write(`\r  ${done}/${heal.length}`); }
+  if (!APPLY) { console.log(`\n(dry-run — no writes. Add --apply.)`); console.log(`HEAL_SUMMARY env=${ENV.includes("production") ? "prod" : "staging"} dryrun=true drift=${heal.length}`); return; }
+  let done = 0, errs = 0;
+  for (const h of heal) { const { error } = await sb.from(h.row.table).update({ [h.row.snapCol]: h.after }).eq("id", h.row.id); if (error) { console.log("err", h.row.id, error.message); errs++; } else done++; if (done % 10 === 0) process.stdout.write(`\r  ${done}/${heal.length}`); }
   console.log(`\n✅ healed ${done}/${heal.length}`);
+  console.log(`HEAL_SUMMARY env=${ENV.includes("production") ? "prod" : "staging"} dryrun=false healed=${done} errors=${errs}`);
+  if (errs > 0) process.exit(1);
 })();

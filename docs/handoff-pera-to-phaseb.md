@@ -170,7 +170,13 @@ everywhere. Current status:
   contained. Make the "from team build" note conditional (build context only).
 
 ## 7. 🔧 OPEN — deferred refinements
-- [ ] Load-time self-healing guard (verify snapshot == f(neutral, notes), heal drift)
+- [x] **Self-healing guard — BUILT (scheduled sweep, not load-time).** Chose a server-side
+      sweep over client code so it's fully DB-verifiable (no unverifiable browser path).
+      `scripts/self_heal_sweep.sh` (launchd wrapper) runs `heal-stale-snapshots.ts --prod
+      --all --apply` daily 04:15, logs to `~/Library/Logs/rstr-iq-self-heal.log`, pings only
+      on heal>0/error. Prod --apply gated behind `RSTR_AUTOMATION_TOKEN` (like import:prod).
+      Idempotent + safe (only writes `f(neutral,notes)`). **Setup + prereqs: `docs/SELF_HEAL_SWEEP.md`
+      — do NOT enable on prod until the neutral_snapshot migration + backfill have run there.**
 - [ ] TWP re-bake by `position_slot` (fully toggle-adjusted TWP pitcher market)
 
 ## 8. Prod promotion (after staging verified, before main)
