@@ -20,6 +20,9 @@ export interface GmTargetNote {
 
 /** A target board player with their team-scoped projection resolved. */
 export interface GmTarget {
+  id: string;            // target_board ROW id — unique per side (a TWP has two)
+  position_slot: string | null;
+  is_twp: boolean;
   player_id: string;
   name: string;
   first_name: string;
@@ -99,11 +102,18 @@ export function useGmTargetBoard() {
       const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
       const byPid = new Map<string, any[]>();
       for (const bp of (bps || [])) { if (!(bp as any).player_snapshot) continue; (byPid.get((bp as any).player_id) ?? byPid.set((bp as any).player_id, []).get((bp as any).player_id)!).push(bp); }
+      // per-side keys (pid|hitter / pid|pitcher) so a TWP's two board rows each read
+      // their own slot's roster snapshot; one-way = single side key.
       for (const [pid, list] of byPid) {
-        if (list.length === 1) { m.set(pid, list[0].player_snapshot); continue; }
-        const h = (list.find((r) => !isPit(r.position_slot)) ?? list[0]).player_snapshot;
-        const p = (list.find((r) => isPit(r.position_slot)) ?? list[0]).player_snapshot;
-        m.set(pid, { ...p, o_war: h.o_war, twp_hitter_market_value: h.twp_hitter_market_value, p_war: p.p_war, twp_pitcher_market_value: p.twp_pitcher_market_value, is_twp: true });
+        if (list.length === 1) {
+          const only = list[0];
+          m.set(`${pid}|${isPit(only.position_slot) ? "pitcher" : "hitter"}`, only.player_snapshot);
+          continue;
+        }
+        const h = list.find((r) => !isPit(r.position_slot));
+        const p = list.find((r) => isPit(r.position_slot));
+        if (h) m.set(`${pid}|hitter`, h.player_snapshot);
+        if (p) m.set(`${pid}|pitcher`, p.player_snapshot);
       }
       return m;
     },
@@ -144,11 +154,15 @@ export function useGmTargetBoard() {
     () =>
       board.map((r) => {
         const pred = predByPlayer.get(r.player_id);
-        const pitcher = isPitcherPos(r.position);
+        // A TWP has two rows — classify by the ROW's slot; one-way falls back to the
+        // player's position.
+        const pitcher = r.position_slot
+          ? /^(SP|RP|CL|P|LHP|RHP)/i.test(String(r.position_slot).trim())
+          : isPitcherPos(r.position);
         // The DISPLAY line: rostered → build player_snapshot; else → the saved
         // transfer_snapshot (normalized owar→o_war, nil_valuation→market_value);
         // fall back to the live prediction. So GM matches every other surface.
-        const roster = rosterSnapByPid.get(r.player_id);
+        const roster = rosterSnapByPid.get(`${r.player_id}|${pitcher ? "pitcher" : "hitter"}`);
         const ts: any = (r as any).transfer_snapshot;
         const snap = roster
           ? roster
@@ -162,6 +176,9 @@ export function useGmTargetBoard() {
           : (line?.market_value ?? line?.twp_hitter_market_value ?? null);
         const deal = offerByPlayer.get(r.player_id);
         return {
+          id: r.id,
+          position_slot: r.position_slot ?? null,
+          is_twp: !!r.is_twp,
           player_id: r.player_id,
           name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "—",
           first_name: r.first_name ?? "",
