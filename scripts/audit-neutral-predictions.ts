@@ -13,7 +13,9 @@ import { createClient } from "@supabase/supabase-js";
 import * as fs from "fs";
 import { resolveActiveBuildId } from "../src/lib/activeBuild";
 const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
-const sb = createClient(rd(".env.local", "VITE_SUPABASE_URL"), rd(".env.local", "SUPABASE_SERVICE_ROLE_KEY"));
+const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.local";
+const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
+console.log(`### DB: ${ENV} ###`);
 const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 const page = async (t: string, sel: string, flt: (q: any) => any) => { let f = 0, o: any[] = []; for (;;) { let q = sb.from(t).select(sel); q = flt(q); const { data } = await q.range(f, f + 999); o = o.concat(data || []); if (!data || data.length < 1000) break; f += 1000; } return o; };
 
@@ -34,13 +36,16 @@ const page = async (t: string, sel: string, flt: (q: any) => any) => { let f = 0
 
   // fetch predictions for all involved players
   const allPids = [...new Set([...need.values()].map((n) => n.pid))];
-  // Small batches (20 players) so a batch's total rows stay well under the 1000
-  // cap — avoids the pagination artifact that was falsely dropping rows.
+  // PER-PLAYER direct fetch — one player has ~15 rows, well under the cap, so no
+  // batching/pagination artifact can drop rows (two batched attempts both silently
+  // dropped rows, e.g. Souza's global returner row). Slower but definitively correct.
   const preds = new Map<string, any[]>();
-  for (let i = 0; i < allPids.length; i += 20) { const batch = allPids.slice(i, i + 20); let f = 0; for (;;) { const { data } = await sb.from("player_predictions").select("player_id, customer_team_id, variant, status, pitcher_role, p_era, p_rv_plus, p_wrc_plus, o_war, p_war").eq("season", 2027).in("player_id", batch).in("variant", ["regular", "precomputed"]).in("status", ["active", "departed"]).order("id").range(f, f + 999); if (!data?.length) break; for (const r of data) { (preds.get(r.player_id) ?? preds.set(r.player_id, []).get(r.player_id)!).push(r); } if (data.length < 1000) break; f += 1000; } }
-  // sanity probe: Flukey must show his global row
-  const fl = preds.get("642d3b47-d8df-4513-8f4a-57e3e1cbbd93");
-  console.log(`[probe] Flukey pred rows fetched: ${fl?.length ?? 0} (expect >=1)`);
+  for (let i = 0; i < allPids.length; i++) {
+    const { data } = await sb.from("player_predictions").select("player_id, customer_team_id, variant, model_type, status, pitcher_role, p_era, p_rv_plus, p_wrc_plus, o_war, p_war").eq("season", 2027).eq("player_id", allPids[i]).in("variant", ["regular", "precomputed"]).in("status", ["active", "departed"]);
+    if (data?.length) preds.set(allPids[i], data);
+    if ((i + 1) % 100 === 0) process.stdout.write(`\r  fetched ${i + 1}/${allPids.length}`);
+  }
+  process.stdout.write("\r");
 
   const nm = new Map<string, string>();
   for (let i = 0; i < allPids.length; i += 200) { const { data } = await sb.from("players").select("id, first_name, last_name").in("id", allPids.slice(i, i + 200)); for (const p of (data || [])) nm.set(p.id, `${p.first_name} ${p.last_name}`); }
