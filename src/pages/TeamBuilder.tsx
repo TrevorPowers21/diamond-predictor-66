@@ -2288,9 +2288,15 @@ export default function TeamBuilder() {
     const shown: any = proj.shown ?? {};
     // Merge onto the existing snapshot so a TWP's OTHER side (its own rosterPlayers
     // row, same player_id) is preserved when only this side's toggle moved.
-    const { data: existing } = await supabase
-      .from("target_board").select("transfer_snapshot")
-      .eq("customer_team_id", effectiveTeamId).eq("player_id", pid).maybeSingle();
+    // TWP now has TWO board rows (one per slot) — fetch/write only the matching
+    // side, else maybeSingle() sees two rows. One-way = a single row (no filter).
+    const twpPitSlots = ["SP", "RP", "CL", "P", "LHP", "RHP"];
+    const twpPitCsv = "(SP,RP,CL,P,LHP,RHP)";
+    const withTwpSide = (q: any) => isTwp ? (treatAsPitcher ? q.in("position_slot", twpPitSlots) : q.not("position_slot", "in", twpPitCsv)) : q;
+    const { data: existing } = await withTwpSide(
+      supabase.from("target_board").select("transfer_snapshot")
+        .eq("customer_team_id", effectiveTeamId).eq("player_id", pid),
+    ).maybeSingle();
     const t: any = { ...(((existing as any)?.transfer_snapshot) ?? player.transfer_snapshot ?? {}) };
     const bp: any = { ...t }; // roster player_snapshot mirror (o_war / market_value field names)
     t.is_twp = isTwp; bp.is_twp = isTwp;
@@ -2307,11 +2313,17 @@ export default function TeamBuilder() {
       if (isTwp) { t.twp_hitter_market_value = mkt; bp.twp_hitter_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
       else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
     }
-    // bp (roster mirror) is OWN-SIDE ONLY for a TWP — the lockstep writes it to the
-    // matching slot only, so a slot snapshot never carries the other side's data.
+    // Both the board line (t) and the roster mirror (bp) are OWN-SIDE ONLY for a
+    // TWP — each is written to the matching slot's row only, so a slot's snapshot
+    // never carries the other side's data.
     if (isTwp) {
-      if (treatAsPitcher) { bp.o_war = null; bp.p_avg = null; bp.p_obp = null; bp.p_slg = null; bp.p_wrc_plus = null; bp.hitter_depth_role = null; bp.twp_hitter_market_value = null; }
-      else { bp.p_era = null; bp.p_fip = null; bp.p_whip = null; bp.p_k9 = null; bp.p_bb9 = null; bp.p_hr9 = null; bp.p_rv_plus = null; bp.p_war = null; bp.pitcher_depth_role = null; bp.twp_pitcher_market_value = null; }
+      if (treatAsPitcher) {
+        bp.o_war = null; bp.p_avg = null; bp.p_obp = null; bp.p_slg = null; bp.p_wrc_plus = null; bp.hitter_depth_role = null; bp.twp_hitter_market_value = null;
+        t.owar = null; t.o_war = null; t.p_avg = null; t.p_obp = null; t.p_slg = null; t.p_wrc_plus = null; t.hitter_depth_role = null; t.twp_hitter_market_value = null;
+      } else {
+        bp.p_era = null; bp.p_fip = null; bp.p_whip = null; bp.p_k9 = null; bp.p_bb9 = null; bp.p_hr9 = null; bp.p_rv_plus = null; bp.p_war = null; bp.pitcher_depth_role = null; bp.twp_pitcher_market_value = null;
+        t.p_era = null; t.p_fip = null; t.p_whip = null; t.p_k9 = null; t.p_bb9 = null; t.p_hr9 = null; t.p_rv_plus = null; t.p_war = null; t.pitcher_depth_role = null; t.twp_pitcher_market_value = null;
+      }
     }
     const playerMeta = player.player
       ? { first_name: player.player.first_name || "", last_name: player.player.last_name || "", position: player.player.position ?? null, team: player.player.team ?? null, from_team: player.player.from_team ?? null, conference: player.player.conference ?? null }
@@ -2323,10 +2335,12 @@ export default function TeamBuilder() {
       player.dev_aggressiveness_overridden ?? false, t, playerMeta,
       (player as any).projection_tier ?? null, (player as any).nil_value_overridden ?? false,
     );
-    // 1) Universal target board — always.
-    const { error: tbErr } = await supabase.from("target_board")
-      .update({ transfer_snapshot: t, production_notes: notes })
-      .eq("customer_team_id", effectiveTeamId).eq("player_id", pid);
+    // 1) Universal target board — always. TWP: only the matching side's row.
+    const { error: tbErr } = await withTwpSide(
+      supabase.from("target_board")
+        .update({ transfer_snapshot: t, production_notes: notes })
+        .eq("customer_team_id", effectiveTeamId).eq("player_id", pid),
+    );
     if (tbErr) { toast({ title: "Target save failed", description: tbErr.message, variant: "destructive" }); return; }
     // 2) Roster lockstep — if this target is on the loaded build's roster, mirror
     //    the exact same line into team_build_players.
@@ -2342,12 +2356,13 @@ export default function TeamBuilder() {
       }
       await q;
     }
-    // Local: adopt the saved snapshot + clear dirty on every row for this player
-    // (a TWP's two rows both settle) → back to a synchronous snapshot read. Force
+    // Local: adopt the saved snapshot + clear dirty for the TOGGLED side. Force
     // prediction=null so the clean-read (p.prediction ?? p.transfer_snapshot) uses
     // the just-saved adjusted transfer_snapshot, not a shadowing neutral prediction.
+    // A TWP has two rows — settle only the toggled side, since `t` is now own-side;
+    // the other side keeps its own snapshot untouched.
     setRosterPlayers((prev) => prev.map((p) =>
-      p.player_id === pid && (p.roster_status || "returner") === "target"
+      p.player_id === pid && (p.roster_status || "returner") === "target" && (!isTwp || isPitcher(p) === treatAsPitcher)
         ? { ...p, prediction: null, transfer_snapshot: t, _dirty: false } : p));
   }, [effectiveTeamId, playerProjection, projectedNilForPlayer, selectedBuildId]);
   const saveTargetToggleRef = useRef(saveTargetToggle);
