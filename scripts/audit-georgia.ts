@@ -92,7 +92,7 @@ const notesDepth = (pn: any) => (pn ? String(typeof pn === "string" ? pn : JSON.
   console.log("\n=== TARGET BOARD — Georgia target_board (transfer_snapshot) ===");
   const { data: tb } = await sb.from("target_board").select("player_id, transfer_snapshot").eq("customer_team_id", GA);
   await getMeta([...new Set((tb || []).map((r: any) => r.player_id))]);
-  console.log(`target rows: ${tb?.length}  (no depth stored → market-follows-WAR check only)`);
+  console.log(`target rows: ${tb?.length}  (depth stored → full WAR + market + 1:1 checks)`);
   const rosterByPid = new Map<string, any[]>(); for (const r of (bps || [])) { if (!r.player_snapshot) continue; const a = rosterByPid.get(r.player_id) || []; a.push(r); rosterByPid.set(r.player_id, a); }
   for (const r of (tb || [])) {
     const nm = nameMap.get(r.player_id) || r.player_id.slice(0, 8), who = `${nm} (target)`, s = r.transfer_snapshot;
@@ -101,6 +101,10 @@ const notesDepth = (pn: any) => (pn ? String(typeof pn === "string" ? pn : JSON.
     const ow = num(s.owar), pw = num(s.p_war);
     if (ow != null) checkHitterMarket(who, ow, isTwp ? num(s.twp_hitter_market_value) : num(s.nil_valuation), pos);
     if (pw != null) checkPitcherMarket(who, pw, isTwp ? num(s.twp_pitcher_market_value) : num(s.nil_valuation));
+    // depth roles are now stored → WAR must be recomputable from them (self-consistent)
+    const wrc = num(s.p_wrc_plus), rv = num(s.p_rv_plus);
+    if (ow != null && wrc != null && s.hitter_depth_role) { const exp = computeOWarFromWrcPlus(wrc, paForHitterDepthRole(s.hitter_depth_role)); if (!near(ow, exp, 0.02)) flag(who, `target oWAR ${ow.toFixed(3)} ≠ recompute(wRC+${wrc}, ${s.hitter_depth_role}/${paForHitterDepthRole(s.hitter_depth_role)}PA)=${exp?.toFixed(3)}`); }
+    if (pw != null && rv != null && s.pitcher_depth_role) { const exp = computePitcherWar(Math.round(rv), pitcherExpectedIp(s.pitcher_depth_role, EQ), EQ); if (!near(pw, exp, 0.03)) flag(who, `target pWAR ${pw.toFixed(3)} ≠ recompute(pRV+${Math.round(rv)}, ${s.pitcher_depth_role}/${pitcherExpectedIp(s.pitcher_depth_role, EQ)}IP)=${exp?.toFixed(3)}`); }
     if (isTwp) {
       if (num(s.nil_valuation) != null) flag(who, `TWP shared nil_valuation should be null, got ${Math.round(num(s.nil_valuation)!)}`);
       if (ow != null && num(s.twp_hitter_market_value) == null) flag(who, `TWP has owar ${ow.toFixed(3)} but twp_hitter_market_value null`);
