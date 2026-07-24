@@ -57,7 +57,7 @@ function mergeTwp(h: any, p: any): any {
     if (!ctid) continue;
     // rostered players on this active build
     const { data: bps } = await sb.from("team_build_players")
-      .select("player_id, included_in_roster, player_snapshot")
+      .select("player_id, position_slot, included_in_roster, player_snapshot")
       .eq("build_id", (b as any).id).eq("included_in_roster", true);
     // that program's target board
     const { data: tb } = await sb.from("target_board")

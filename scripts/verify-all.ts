@@ -1,0 +1,91 @@
+/**
+ * Full DB verification across ALL programs (read-only). Recomputes every invariant
+ * from stored values and reports mismatches. Trevor can't open the browser, so this
+ * is the proof of correctness.  npx tsx scripts/verify-all.ts
+ */
+import { createClient } from "@supabase/supabase-js";
+import * as fs from "fs";
+import { computePitcherWar, paForHitterDepthRole, pitcherExpectedIp, computeHitterMarketValue, computePitcherMarketValue, pitcherRoleFromDepthRole } from "../src/lib/depthRoles";
+import { computeOWarFromWrcPlus } from "../src/lib/playerCalcs";
+import { DEFAULT_PITCHING_WEIGHTS as EQ } from "../src/lib/pitchingEquations";
+import { resolveActiveBuildId } from "../src/lib/activeBuild";
+const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
+const sb = createClient(rd(".env.local", "VITE_SUPABASE_URL"), rd(".env.local", "SUPABASE_SERVICE_ROLE_KEY"));
+const num = (v: any) => v == null ? null : Number(v);
+const near = (a: any, b: any, tol: number) => a != null && b != null && Math.abs(Number(a) - Number(b)) <= tol;
+const mnear = (a: any, b: any) => a != null && b != null && Math.abs(Number(a) - Number(b)) <= Math.max(500, Math.abs(Number(b)) * 0.02);
+const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+const depthOf = (pn: any) => { try { const o = typeof pn === "string" ? JSON.parse(pn) : pn; return o?.depthRole ?? null; } catch { return null; } };
+const page = async (t: string, sel: string, flt: (q: any) => any) => { let f = 0, o: any[] = []; for (;;) { let q = sb.from(t).select(sel); q = flt(q); const { data } = await q.range(f, f + 999); o = o.concat(data || []); if (!data || data.length < 1000) break; f += 1000; } return o; };
+
+let issues = 0; const flag = (s: string) => { issues++; console.log(`  ❌ ${s}`); };
+
+(async () => {
+  // program → conference (school_team_id → Teams Table.id)
+  const { data: cts } = await sb.from("customer_teams").select("id, name, school_team_id");
+  const teamIds = [...new Set((cts || []).map((c: any) => String(c.school_team_id)).filter(Boolean))];
+  const teamConf = new Map<string, string>();
+  for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) teamConf.set(String(t.id), t.conference); }
+  const ctConf = new Map<string, string>(), ctName = new Map<string, string>();
+  for (const c of (cts || [])) { ctName.set(c.id, c.name); const cf = teamConf.get(String(c.school_team_id)); if (cf) ctConf.set(c.id, cf); }
+
+  const builds = await page("team_builds", "id, customer_team_id, is_active, is_default, team, academic_year, updated_at, created_at", (q) => q);
+  const buildsByCt = new Map<string, any[]>(); for (const b of builds) { (buildsByCt.get(b.customer_team_id) ?? buildsByCt.set(b.customer_team_id, []).get(b.customer_team_id)!).push(b); }
+
+  // ---- 1. exactly one active build per program + resolver agreement ----
+  console.log("=== 1. active build per program ===");
+  for (const [ctid, bs] of buildsByCt) {
+    const actives = bs.filter((b) => b.is_active);
+    if (actives.length !== 1) flag(`${ctName.get(ctid)}: ${actives.length} builds flagged is_active (want 1)`);
+    const resolved = resolveActiveBuildId(bs);
+    if (actives.length === 1 && resolved !== actives[0].id) flag(`${ctName.get(ctid)}: resolver picks ${resolved?.slice(0, 8)} ≠ is_active ${actives[0].id.slice(0, 8)}`);
+  }
+  console.log(`  programs: ${buildsByCt.size}`);
+
+  // ---- 2. players meta ----
+  const tb = await page("target_board", "player_id, customer_team_id, transfer_snapshot, production_notes", (q) => q);
+  const pids = [...new Set(tb.map((r: any) => r.player_id))];
+  const pmeta = new Map<string, any>();
+  for (let i = 0; i < pids.length; i += 200) { const { data } = await sb.from("players").select("id, first_name, last_name, position, is_twp").in("id", pids.slice(i, i + 200)); for (const p of (data || [])) pmeta.set(p.id, p); }
+
+  // ---- 3. target snapshot self-consistency + market (all programs) ----
+  console.log("\n=== 2. target snapshot WAR-from-depth + market = f(WAR) at program tier (all programs) ===");
+  let tChk = 0;
+  for (const r of tb) {
+    const conf = ctConf.get(r.customer_team_id); const s = r.transfer_snapshot; if (!s) continue;
+    const meta = pmeta.get(r.player_id) || {}; const who = `${ctName.get(r.customer_team_id)}/${meta.first_name} ${meta.last_name}`;
+    const isTwp = !!s.is_twp, ow = num(s.owar), pw = num(s.p_war), wrc = num(s.p_wrc_plus), rv = num(s.p_rv_plus);
+    // WAR from stored depth
+    if (ow != null && wrc != null && s.hitter_depth_role) { tChk++; const e = computeOWarFromWrcPlus(wrc, paForHitterDepthRole(s.hitter_depth_role)); if (!near(ow, e, 0.02)) flag(`${who}: oWAR ${ow.toFixed(3)} ≠ recompute(${s.hitter_depth_role})=${e?.toFixed(3)}`); }
+    if (pw != null && rv != null && s.pitcher_depth_role) { tChk++; const e = computePitcherWar(Math.round(rv), pitcherExpectedIp(s.pitcher_depth_role, EQ), EQ); if (!near(pw, e, 0.03)) flag(`${who}: pWAR ${pw.toFixed(3)} ≠ recompute(${s.pitcher_depth_role})=${e?.toFixed(3)}`); }
+    // market = f(WAR) at program tier
+    if (conf) {
+      if (ow != null) { const e = computeHitterMarketValue(ow, { conference: conf, position: meta.position }); const stored = isTwp ? num(s.twp_hitter_market_value) : num(s.nil_valuation); if (e != null && !mnear(stored, e)) flag(`${who}: hitter mkt ${stored == null ? "null" : Math.round(stored)} ≠ f(oWAR)=${Math.round(e)}`); }
+      if (pw != null) { const e = computePitcherMarketValue(pw, { conference: conf, role: pitcherRoleFromDepthRole(s.pitcher_depth_role || "workhorse_reliever"), team: meta.last_name }, EQ); const stored = isTwp ? num(s.twp_pitcher_market_value) : num(s.nil_valuation); if (e != null && !mnear(stored, e)) flag(`${who}: pitcher mkt ${stored == null ? "null" : Math.round(stored)} ≠ f(pWAR)=${Math.round(e)}`); }
+    }
+    if (isTwp && num(s.nil_valuation) != null) flag(`${who}: TWP shared nil_valuation not null`);
+  }
+  console.log(`  target snapshots checked: ${tb.length} (WAR recomputes: ${tChk})`);
+
+  // ---- 4. rostered target: board notes == active roster notes + 1:1 snapshot ----
+  console.log("\n=== 3. rostered target: board notes == active-build roster notes + snapshot 1:1 (one-way) ===");
+  let rChk = 0;
+  for (const [ctid, bs] of buildsByCt) {
+    const activeId = resolveActiveBuildId(bs); if (!activeId) continue;
+    const bps = await page("team_build_players", "player_id, position_slot, included_in_roster, player_snapshot, production_notes", (q) => q.eq("build_id", activeId).eq("included_in_roster", true));
+    const boardByPid = new Map((tb.filter((r: any) => r.customer_team_id === ctid)).map((r: any) => [r.player_id, r]));
+    const byPid = new Map<string, any[]>(); for (const bp of bps) { if (!boardByPid.has(bp.player_id)) continue; (byPid.get(bp.player_id) ?? byPid.set(bp.player_id, []).get(bp.player_id)!).push(bp); }
+    for (const [pid, list] of byPid) {
+      if (list.length > 1) continue; // TWP phase 2
+      rChk++; const board: any = boardByPid.get(pid); const rp = list[0]; const meta = pmeta.get(pid) || {};
+      const who = `${ctName.get(ctid)}/${meta.first_name} ${meta.last_name}`;
+      if (depthOf(rp.production_notes) !== depthOf(board.production_notes)) flag(`${who}: board notes depth "${depthOf(board.production_notes)}" ≠ roster "${depthOf(rp.production_notes)}"`);
+      const ps = rp.player_snapshot || {}, ts = board.transfer_snapshot || {};
+      if (isPit(rp.position_slot)) { if (!near(num(ps.p_war), num(ts.p_war), 0.02)) flag(`${who}: roster pWAR ${num(ps.p_war)?.toFixed(3)} ≠ board ${num(ts.p_war)?.toFixed(3)}`); }
+      else { if (!near(num(ps.o_war), num(ts.owar ?? ts.o_war), 0.01)) flag(`${who}: roster oWAR ${num(ps.o_war)?.toFixed(3)} ≠ board ${num(ts.owar ?? ts.o_war)?.toFixed(3)}`); }
+    }
+  }
+  console.log(`  rostered one-way targets checked: ${rChk}`);
+
+  console.log(`\n===== ${issues === 0 ? "✅ ALL CONSISTENT — 0 issues across all programs" : `❌ ${issues} issue(s)`} =====`);
+})();
