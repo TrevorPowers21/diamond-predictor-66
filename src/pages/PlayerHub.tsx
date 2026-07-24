@@ -212,13 +212,15 @@ export default function PlayerHub() {
   // shown DISPLAY-ONLY, reading its stored transfer_snapshot — the SAME line the
   // TB board + targets page read — never the live preview. RLS scopes the board to
   // the program, so player_id alone is enough. Null → pure scouting (interactive).
-  const { data: targetSnap = null } = useQuery({
+  // A TWP has TWO board rows (hitter slot + pitcher slot) → fetch both and pick the
+  // side matching this profile's classification below. One-way = a single row.
+  const { data: targetSnapRows = [] } = useQuery({
     queryKey: ["player-hub-target-snapshot", playerId],
     enabled: !!playerId && !isProgramPlayer,
     queryFn: async () => {
       const { data } = await (supabase as any).from("target_board")
-        .select("transfer_snapshot").eq("player_id", playerId).limit(1).maybeSingle();
-      return (data?.transfer_snapshot ?? null) as any;
+        .select("transfer_snapshot, position_slot").eq("player_id", playerId);
+      return (data ?? []) as any[];
     },
   });
 
@@ -227,6 +229,13 @@ export default function PlayerHub() {
   const position = row?.position ?? dbPlayer?.position ?? null;
   const classYr = row?.eligibility_class ?? row?.class_year ?? dbPlayer?.class_year ?? null;
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
+  // Pick the board row for the side this profile shows (TWP has two; else one).
+  const targetSnap = useMemo(() => {
+    const rows = targetSnapRows || [];
+    if (rows.length <= 1) return rows[0]?.transfer_snapshot ?? null;
+    const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+    return (rows.find((r) => isPit(r.position_slot) === isPitcher) ?? rows[0]).transfer_snapshot ?? null;
+  }, [targetSnapRows, isPitcher]);
   // For a board target: WAR/market from transfer_snapshot (owar / nil_valuation /
   // twp_* field names), passed as overrides so the profile renders DISPLAY-ONLY.
   const isTwp = !!dbPlayer?.is_twp;
