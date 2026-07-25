@@ -1309,8 +1309,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // (its toggles go through the roster save). Without this, a rostered TWP hitter
     // fell through to the live path and computed off a wrong-team transfer wRC+
     // (e.g. 113 → 1.42) instead of reading its snapshot (cornerstone → 1.499).
-    const rosteredTarget = p.roster_status === "target" && (p as any).included_in_roster === true;
-    if (!(p as any)._dirty || rosteredTarget) {
+    // CLEAN rows (no toggle moved this session) read their stored snapshot — including a
+    // rostered target, whose saved line then matches the roster. But a DIRTY rostered
+    // target must recompute LIVE like a returner (from its build neutralPrediction, below)
+    // so the coach actually sees the toggle move. A `|| rosteredTarget` clause used to force
+    // the snapshot read even when dirty, which made every toggle inert on transfer rows.
+    if (!(p as any)._dirty) {
       // Build snapshot for rostered rows; transfer_snapshot (captured at add-time)
       // for board targets — so targets read their stored line INSTANTLY instead of
       // waiting on the async liveTargetPredictions query (kills the piecemeal load).
@@ -1348,7 +1352,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // Returner compute base = neutralPrediction (the immutable dev_agg=0 line), so
     // a DIRTY row's overlay recomputes from neutral and never stacks on an already-
     // adjusted snapshot. Targets keep their live-target base.
-    const shown = (p.roster_status === "target")
+    // Only a BOARD-ONLY target (not yet on the roster) recomputes off its stored precomputed
+    // transfer line. A ROSTERED target recomputes from its build neutralPrediction — the same
+    // immutable dev_agg=0 base a returner uses — so a dirty toggle scales the correct neutral
+    // (not a wrong-team transfer number, the bug the old snapshot-always guard was papering over).
+    const boardOnlyTarget = p.roster_status === "target" && !(p as any).included_in_roster;
+    const shown = boardOnlyTarget
       ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
       : (treatAsPitcher ? ((p.neutralPrediction ?? p.prediction) ?? computeReturnerPitchingProjection(p)) : (p.neutralPrediction ?? p.prediction));
     if (treatAsPitcher) {
