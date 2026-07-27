@@ -23,7 +23,7 @@ function neutralFor(pred: any, side: "P" | "H"): any {
   if (side === "H") {
     Object.assign(base, { p_avg: pred.p_avg ?? null, p_obp: pred.p_obp ?? null, p_slg: pred.p_slg ?? null, p_wrc_plus: pred.p_wrc_plus ?? null, o_war: pred.o_war ?? null, hitter_depth_role: pred.hitter_depth_role ?? null, twp_hitter_market_value: pred.twp_hitter_market_value ?? null, market_value: pred.market_value ?? null });
   } else {
-    Object.assign(base, { p_era: pred.p_era ?? null, p_fip: pred.p_fip ?? null, p_whip: pred.p_whip ?? null, p_k9: pred.p_k9 ?? null, p_bb9: pred.p_bb9 ?? null, p_hr9: pred.p_hr9 ?? null, p_rv_plus: pred.p_rv_plus ?? null, p_war: pred.p_war ?? null, pitcher_role: pred.pitcher_role ?? null, pitcher_depth_role: pred.pitcher_depth_role ?? null, twp_pitcher_market_value: pred.twp_pitcher_market_value ?? null, projected_ip: pred.projected_ip ?? null });
+    Object.assign(base, { p_era: pred.p_era ?? null, p_fip: pred.p_fip ?? null, p_whip: pred.p_whip ?? null, p_k9: pred.p_k9 ?? null, p_bb9: pred.p_bb9 ?? null, p_hr9: pred.p_hr9 ?? null, p_rv_plus: pred.p_rv_plus ?? null, p_war: pred.p_war ?? null, pitcher_role: pred.pitcher_role ?? null, pitcher_depth_role: pred.pitcher_depth_role ?? null, market_value: pred.market_value ?? null, twp_pitcher_market_value: pred.twp_pitcher_market_value ?? null, projected_ip: pred.projected_ip ?? null });
   }
   return base;
 }

@@ -77,7 +77,7 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
     ...tbs.map((r: any) => ({ table: "target_board", id: r.id, pid: r.player_id, ctid: r.customer_team_id, slot: r.position_slot, snap: r.transfer_snapshot, neu: r.neutral_snapshot, notes: r.production_notes, snapCol: "transfer_snapshot", warHitKey: "owar", mktNonTwp: "nil_valuation", where: "target" as const })),
   ];
 
-  const heal: { row: Row; side: "P" | "H"; before: any; after: any; snapWar: number; fWar: number; depth: string; trans: boolean }[] = [];
+  const heal: { row: Row; side: "P" | "H"; before: any; after: any; snapWar: number; fWar: number; depth: string; trans: boolean; mktOnly: boolean }[] = [];
   let noConf = 0;
   for (const r of rows) {
     if (!r.neu || !/^[0-9a-f-]{36}$/i.test(String(r.pid)) || !r.snap) continue;
@@ -90,25 +90,37 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
     const sessionRole = side === "P" ? sessionRoleFor(r.pid, r.ctid, r.slot, r.where) : undefined;
     const { owar, pwar, roleChanged, rates } = projectEffectiveWar(r.neu, { ...notes, depthRole: depth }, EQ, sessionRole as any);
     const fWar = side === "P" ? pwar : owar; if (fWar == null) continue;
-    if (Math.abs(fWar - snapWar) <= 0.02) continue;              // in sync
     // devScale proven faithful → heal any devAgg
     const conf = r.ctid ? ctConf.get(r.ctid) ?? "" : ""; if (!conf) { noConf++; continue; }
 
     const s: any = { ...r.snap };
     const isTwp = !!s.is_twp;
+    // stored market for the drift compare (side + TWP aware)
+    const storedMkt = side === "P"
+      ? (isTwp ? num(s.twp_pitcher_market_value) : num(s[r.mktNonTwp]))
+      : (isTwp ? num(s.twp_hitter_market_value) : num(s[r.mktNonTwp]));
+    let newMkt: number | null;
     if (side === "P") {
       // role+dev adjusted rates from the model (non-transition devAgg=0 → == neutral)
       if (rates) { s.p_era = rates.p_era; s.p_fip = rates.p_fip; s.p_whip = rates.p_whip; s.p_k9 = rates.p_k9; s.p_bb9 = rates.p_bb9; s.p_hr9 = rates.p_hr9; s.p_rv_plus = rates.p_rv_plus; }
       s.p_war = fWar; s.projected_ip = pitcherExpectedIp(depth as any, EQ); s.pitcher_depth_role = depth;
-      const mkt = computePitcherMarketValue(fWar, { conference: conf, role: pitcherRoleFromDepthRole(depth as any), team: nm.get(r.pid) ?? null }, EQ);
-      if (isTwp) { s.twp_pitcher_market_value = mkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = mkt; }
+      newMkt = computePitcherMarketValue(fWar, { conference: conf, role: pitcherRoleFromDepthRole(depth as any), team: nm.get(r.pid) ?? null }, EQ);
+      if (isTwp) { s.twp_pitcher_market_value = newMkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = newMkt; }
     } else {
       for (const k of HIT_FIELDS) if (r.neu[k] !== undefined) s[k] = r.neu[k];
       s[r.warHitKey] = fWar; if (r.warHitKey !== "o_war" && "o_war" in s) s.o_war = fWar; s.hitter_depth_role = depth;
-      const mkt = computeHitterMarketValue(fWar, { conference: conf, position: pos.get(r.pid) });
-      if (isTwp) { s.twp_hitter_market_value = mkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = mkt; }
+      newMkt = computeHitterMarketValue(fWar, { conference: conf, position: pos.get(r.pid) });
+      if (isTwp) { s.twp_hitter_market_value = newMkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = newMkt; }
     }
-    heal.push({ row: r, side, before: r.snap, after: s, snapWar, fWar, depth, trans: !!roleChanged });
+    // Heal if WAR drifted OR the market is broken-to-zero. The market-zero case
+    // catches a correct-WAR, eligible player whose stored market is ~$0/null (e.g. a
+    // role-transition pitcher the eligibility gate zeroed). Deliberately NARROW — we do
+    // NOT churn markets that merely differ by a position/tier nuance, only ones that are
+    // effectively missing. (Small market wobble is a separate, non-urgent consistency pass.)
+    const warDrift = Math.abs(fWar - snapWar) > 0.02;
+    const mktZeroed = newMkt != null && newMkt > 1000 && (storedMkt == null || storedMkt < 1);
+    if (!warDrift && !mktZeroed) continue;                       // fully in sync
+    heal.push({ row: r, side, before: r.snap, after: s, snapWar, fWar, depth, trans: !!roleChanged, mktOnly: !warDrift && mktZeroed });
   }
 
   heal.sort((a, b) => Math.abs(b.fWar - b.snapWar) - Math.abs(a.fWar - a.snapWar));
@@ -117,10 +129,15 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
   const dv = heal.filter((h) => (Number(parseNotes(h.row.notes)?.devAggressiveness ?? 0) || 0) !== 0).length;
   console.log(`(devAgg≠0 among these: ${dv})`);
   console.log(`hitters ${heal.length - hp} · pitchers ${hp} (role-transition: ${tr})\n`);
+  const mo = heal.filter((h) => h.mktOnly).length;
+  console.log(`(market-only heals — WAR was already correct: ${mo})`);
   (SHOW_ALL ? heal : heal.slice(0, 30)).forEach((h) => {
-    const b = h.before, a = h.after, s = h.side;
+    const b = h.before, a = h.after, s = h.side, mk = h.row.mktNonTwp;
     const idx = s === "P" ? `rv+${b.p_rv_plus}→${a.p_rv_plus}` : `wRC+${b.p_wrc_plus}→${a.p_wrc_plus}`;
-    console.log(`  ${nm.get(h.row.pid)} [${s}]${h.trans ? " ⇄" : ""} (${h.row.where}) ${h.depth}: ${idx} · WAR ${h.snapWar.toFixed(3)}→${h.fWar.toFixed(3)}`);
+    const bMk = b.is_twp ? (s === "P" ? b.twp_pitcher_market_value : b.twp_hitter_market_value) : b[mk];
+    const aMk = a.is_twp ? (s === "P" ? a.twp_pitcher_market_value : a.twp_hitter_market_value) : a[mk];
+    const mkStr = h.mktOnly ? ` · $${bMk == null ? "—" : Math.round(Number(bMk))}→${aMk == null ? "—" : Math.round(Number(aMk))} [MKT]` : "";
+    console.log(`  ${nm.get(h.row.pid)} [${s}]${h.trans ? " ⇄" : ""} (${h.row.where}) ${h.depth}: ${idx} · WAR ${h.snapWar.toFixed(3)}→${h.fWar.toFixed(3)}${mkStr}`);
   });
   if (!SHOW_ALL && heal.length > 30) console.log(`  … +${heal.length - 30} more (--all)`);
 
