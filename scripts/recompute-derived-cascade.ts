@@ -67,6 +67,11 @@ const nearM = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.005 * M
       scanned++;
       const conf = rowConf(r);
       const isTwp = ptwp.has(r.player_id);
+      // The shared market_value belongs to the player's PRIMARY side (by position),
+      // matching the app's hitter/pitcher split (position.in.(SP,RP,CL,P,LHP,RHP)).
+      // Prevents a position player's sub-threshold pitching from clobbering their
+      // hitter market (and vice-versa). TWP rows route to twp_* fields (no clobber).
+      const posIsPitcher = /^(SP|RP|CL|P|LHP|RHP)$/i.test(ppos.get(r.player_id) ?? "");
       const patch: any = {};
       // ---- PITCHER ----
       if (r.pitcher_depth_role && n(r.p_rv_plus) != null) {
@@ -81,7 +86,11 @@ const nearM = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.005 * M
         if (conf != null && finalPWar != null) {
           const m = computePitcherMarketValue(finalPWar, { conference: conf, role: pitcherRoleFromDepthRole(r.pitcher_depth_role as any), team: pteam.get(r.player_id) ?? "x" }, EQ);
           const stored = isTwp ? n(r.twp_pitcher_market_value) : n(r.market_value);
-          if (m != null && stored != null && !nearM(stored, m)) { if (isTwp) patch.twp_pitcher_market_value = m; else patch.market_value = m; pmF++; }
+          if (m != null && stored != null && !nearM(stored, m)) {
+            if (isTwp) { patch.twp_pitcher_market_value = m; pmF++; }
+            else if (posIsPitcher || !r.hitter_depth_role) { patch.market_value = m; pmF++; } // pitcher owns shared market
+            // else: non-TWP position player — market_value belongs to the hitter side; skip.
+          }
         }
       }
       // ---- HITTER ----
@@ -94,7 +103,11 @@ const nearM = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.005 * M
         if (conf != null && finalOWar != null) {
           const m = computeHitterMarketValue(finalOWar, { conference: conf, position: ppos.get(r.player_id) });
           const stored = isTwp ? n(r.twp_hitter_market_value) : n(r.market_value);
-          if (m != null && stored != null && !nearM(stored, m)) { if (isTwp) patch.twp_hitter_market_value = m; else patch.market_value = m; hmF++; }
+          if (m != null && stored != null && !nearM(stored, m)) {
+            if (isTwp) { patch.twp_hitter_market_value = m; hmF++; }
+            else if (!posIsPitcher || !r.pitcher_depth_role) { patch.market_value = m; hmF++; } // hitter owns shared market
+            // else: non-TWP pitcher — market_value belongs to the pitcher side; skip.
+          }
         }
       }
       if (conf == null && (r.pitcher_depth_role || r.hitter_depth_role)) noConf++;
