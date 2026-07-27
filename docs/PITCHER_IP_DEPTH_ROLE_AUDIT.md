@@ -55,6 +55,28 @@ Change each to derive depth from IP and use `pitcherExpectedIp(depth)` (+ write 
       and p_war == computePitcherWar(rv+, that IP). Today verify-all only checks build/board SNAPSHOTS,
       so it never caught the 4,697 stale prediction rows.
 
+## ⭐ THE reusable prediction-layer prod op (fills the handoff's how-gap)
+The handoff logged the WHAT (row counts) but not the HOW — the prediction-layer fix was a
+one-off SQL batch. **`scripts/recompute-derived-cascade.ts` is now that missing artifact.**
+It recomputes the full derived cascade from EXISTING rates, in order, canonical:
+  round pRV+/wRC+ → projected_ip(depth) → pWAR/oWAR → market (last).
+- Conference resolution (matches staging): transfer → customer destination conf; global →
+  `players.team_id → Teams Table.conference` (NOT `players.conference`).
+- p_war/o_war written to EXACT recompute (1e-6) so market stays consistent with stored WAR.
+- **VALIDATE method (no more guessing): dry-run on staging must report ~0 (12 hitter-market
+  edge / 184k). Then prod dry-run → apply → re-dry-run converges.** Idempotent, 25-wide concurrent.
+- Prod applied 2026-07-27: stat/WAR cascade now EXACT parity with staging (0 across
+  pRV+/wRC+/IP/pWAR/oWAR); root cause was prod p_war baked off UNROUNDED rv+ (breaking the
+  whole-pRV+ convention → 35,870 p_war↔market inconsistencies, all fixed).
+
+## Two-way (is_twp=false) "market anomalies" — NOT anomalies (prod correct, staging buggy)
+~79 position players (PA≥30) with sub-threshold pitching (IP<5) carry both hitter+pitcher stats
+on one returner/global row. Per `recomputeTwpStatus` (PA≥30 AND IP≥5 → two-way; else bleed),
+they are HITTERS → `market_value` = hitter market. Prod's cascade landed on this correctly;
+STAGING has the pitcher-market bleed bug (e.g. Michael Anderson IF, 232 PA / 1.67 IP: staging
+$3,567 pitcher vs prod $53,473 hitter — prod right). Later cleanup: fix staging + run
+`recomputeTwpStatus` on prod for flag consistency (Tague Davis pos=TWP but is_twp=false).
+
 ## Already done (this session)
 - Kenny Ishikawa hand-fixed consistently (pitcher row @ swing_starter 30 IP, pWAR 0.026, $975).
 - Snapshot-level consistency (wRC+/oWAR, market migration, side-detection) — see PROD_PROMOTION_HANDOFF.md.
