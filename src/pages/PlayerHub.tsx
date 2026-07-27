@@ -219,7 +219,7 @@ export default function PlayerHub() {
     enabled: !!playerId && !isProgramPlayer,
     queryFn: async () => {
       const { data } = await (supabase as any).from("target_board")
-        .select("transfer_snapshot, position_slot").eq("player_id", playerId);
+        .select("transfer_snapshot, production_notes, position_slot").eq("player_id", playerId);
       return (data ?? []) as any[];
     },
   });
@@ -235,6 +235,18 @@ export default function PlayerHub() {
     if (rows.length <= 1) return rows[0]?.transfer_snapshot ?? null;
     const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
     return (rows.find((r) => isPit(r.position_slot) === isPitcher) ?? rows[0]).transfer_snapshot ?? null;
+  }, [targetSnapRows, isPitcher]);
+  // The target's saved dev-agg + depth (production_notes) for the matching side, passed
+  // as overrides so the profile's "2027 Projected Stats" slash + the dev-agg/depth toggle
+  // controls reflect the TOGGLED target line, not the neutral (dev-0) prediction. Without
+  // these the profile seeded sessionDevAgg from the neutral, so the slash showed stale.
+  const targetOverrides = useMemo(() => {
+    const rows = targetSnapRows || [];
+    if (!rows.length) return { dev: undefined as number | undefined, depth: undefined as string | undefined };
+    const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+    const m = rows.length <= 1 ? rows[0] : (rows.find((r) => isPit(r.position_slot) === isPitcher) ?? rows[0]);
+    let pn: any = m?.production_notes; try { pn = typeof pn === "string" ? JSON.parse(pn) : pn; } catch { pn = null; }
+    return { dev: Number.isFinite(Number(pn?.devAggressiveness)) ? Number(pn.devAggressiveness) : undefined, depth: pn?.depthRole ?? undefined };
   }, [targetSnapRows, isPitcher]);
   // For a board target: WAR/market from transfer_snapshot (owar / nil_valuation /
   // twp_* field names), passed as overrides so the profile renders DISPLAY-ONLY.
@@ -387,8 +399,8 @@ export default function PlayerHub() {
     return (
       <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>}>
         {isPitcher
-          ? <PitcherProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} />
-          : <PlayerProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} />}
+          ? <PitcherProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} devAggOverride={targetOverrides.dev} roleOverride={targetOverrides.depth} />
+          : <PlayerProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} devAggOverride={targetOverrides.dev} roleOverride={targetOverrides.depth} />}
       </Suspense>
     );
   }
