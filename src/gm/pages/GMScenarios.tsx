@@ -36,7 +36,10 @@ interface ScenarioReport { name: string; war: number; pay: number; headroom: num
 function targetToRow(t: GmTarget): GmRow {
   return {
     player_id: t.player_id,
-    build_player_id: `target:${t.player_id}`,
+    // Per-SIDE unique key (t.id = target_board row id): a TWP has two, so its two
+    // scenario rows must not collide (they did when keyed on player_id — remove/
+    // exclude/pay all hit both sides). Now each side adds/removes independently.
+    build_player_id: `target:${t.id}`,
     name: t.name,
     position: t.position,
     class_year: null,
@@ -193,8 +196,10 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
   const [resetNonce, setResetNonce] = useState(0);
   const toggle = (id: string) => setExcluded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setPay = (id: string, v: number | null) => setPayOverride((prev) => { const n = { ...prev }; if (v == null) delete n[id]; else n[id] = v; return n; });
-  const addTarget = (t: GmTarget) => setAddedTargets((prev) => (prev.some((r) => r.player_id === t.player_id) ? prev : [...prev, targetToRow(t)]));
-  const removeTarget = (playerId: string) => setAddedTargets((prev) => prev.filter((r) => r.player_id !== playerId));
+  // Add ONE side (deduped on the per-side build_player_id). The picker adds both
+  // sides of a TWP in one click; remove takes one side at a time.
+  const addTarget = (t: GmTarget) => setAddedTargets((prev) => (prev.some((r) => r.build_player_id === `target:${t.id}`) ? prev : [...prev, targetToRow(t)]));
+  const removeTarget = (buildPlayerId: string) => setAddedTargets((prev) => prev.filter((r) => r.build_player_id !== buildPlayerId));
   const reset = () => { setExcluded(new Set()); setPayOverride({}); setBudgetOverride(null); setAddedTargets([]); setResetNonce((n) => n + 1); };
   const pickBuild = (id: string) => { setPickedBuild(id); reset(); };
 
@@ -284,7 +289,7 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
         )}
       </CardContent>
 
-      <TargetPicker open={pickerOpen} onOpenChange={setPickerOpen} addedIds={new Set(addedTargets.map((r) => r.player_id!))} rosterIds={onBuild as Set<string>} onAdd={addTarget} />
+      <TargetPicker open={pickerOpen} onOpenChange={setPickerOpen} addedIds={new Set(addedTargets.map((r) => r.build_player_id))} rosterIds={onBuild as Set<string>} onAdd={addTarget} />
     </Card>
   );
 }
@@ -304,7 +309,7 @@ function TargetPicker({ open, onOpenChange, addedIds, rosterIds, onAdd }: { open
             : filtered.length === 0 ? <p className="py-6 text-center text-xs text-muted-foreground">{targets.length === 0 ? "No targets on the board yet." : "No matches."}</p>
             : filtered.map((t) => {
               const onRoster = rosterIds.has(t.player_id);
-              const added = addedIds.has(t.player_id);
+              const added = addedIds.has(`target:${t.id}`);
               return (
                 <div key={t.player_id} className={cn("flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5", onRoster && "opacity-55")}>
                   <div className="min-w-0 flex-1">
@@ -316,7 +321,7 @@ function TargetPicker({ open, onOpenChange, addedIds, rosterIds, onAdd }: { open
                   </div>
                   <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-foreground">{num(t.war)}</span>
                   <span className="w-20 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{money(t.market_value)}</span>
-                  <Button variant={added || onRoster ? "ghost" : "outline"} size="sm" className="h-7 shrink-0 gap-1 text-xs" disabled={added || onRoster} onClick={() => onAdd(t)}>
+                  <Button variant={added || onRoster ? "ghost" : "outline"} size="sm" className="h-7 shrink-0 gap-1 text-xs" disabled={added || onRoster} onClick={() => targets.filter((x) => x.player_id === t.player_id).forEach(onAdd)}>
                     {onRoster ? "On Roster" : added ? "Added" : <><Plus className="h-3 w-3" /> Add</>}
                   </Button>
                 </div>
@@ -406,7 +411,7 @@ function ScenarioList({ title, rows, excluded, onToggle, payOf, projValue, onPay
                 return (
                   <div key={r.build_player_id} className={cn("flex items-center gap-2 py-1.5 px-1.5", dropped && "opacity-40", r.is_added_target && "bg-[#D4AF37]/[0.05]")}>
                     {r.is_added_target ? (
-                      <button onClick={() => onRemoveTarget(r.player_id!)} title="Remove target" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive cursor-pointer">
+                      <button onClick={() => onRemoveTarget(r.build_player_id)} title="Remove target" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive cursor-pointer">
                         <X className="h-3.5 w-3.5" />
                       </button>
                     ) : (
