@@ -103,6 +103,39 @@ Migration `20260724120000_target_board_twp_two_row.sql`; code `useTargetBoard.ts
 
 ---
 
+## §7.5 — Page-load matrix (load EVERY page; nothing breaks)
+The two migrations add columns to `target_board` + `team_build_players` and change
+`target_board`'s unique constraints, so any page reading those tables could break on a
+bad query — every page below is at minimum a "does it still load, no console error"
+smoke test. **★ = branch changed this page's logic** (load + verify behavior). **○ =
+smoke only** (load, confirm no crash). (Savant intentionally excluded.)
+
+### Coach app (`/dashboard`)
+- [ ] ★ `/dashboard/team-builder` — Team Builder. No-flicker load; toggle→persist→no drift;
+      read-only after save; pWAR/market/pRV+ correct; Souza 118/1.594, Traeger 117/1.562, Cespedes 124/3.028.
+- [ ] ★ `/dashboard/targets` — Targets board. One instant batch, no wave; toggle persists;
+      **Kenny = 2 rows**; a non-TWP target = 1 row (the regression to watch).
+- [ ] ★ `/dashboard/high-follow` — High Follow list loads; target WAR/market correct.
+- [ ] ★ `/player/:playerId` — PlayerHub. Both TWP sides fetched, correct side shown; read-only toggles for returner/target.
+- [ ] ★ `/dashboard/player/:id` — PlayerProfile (hitter). Matches TB; read-only depth/dev-agg for returners/targets.
+- [ ] ★ `/dashboard/pitcher/:id` — PitcherProfile. **No classTransition crash**; pWAR matches depth role; matches TB.
+- [ ] ○ `/dashboard/player/:id/stats` · ○ `/dashboard/pitcher/:id/stats` — load, no error.
+- [ ] ★ `/dashboard/returning` — ReturningPlayers. pERA/pWAR match TB; pitcher rows no crash.
+- [ ] ○ `/dashboard/portal` — TransferPortal. Search returns players + market.
+- [ ] ○ `/dashboard/compare` · ○ `/dashboard/war-room` · ○ `/dashboard` (overview) · ○ `/dashboard/dev-weights` — load, render.
+- [ ] ○ `/dashboard/settings` — scouting-CSV upload UI intact.
+- [ ] ○ `/dashboard/admin` (+ `/admin/teams`, `/admin/users`) — load (if admin).
+
+### GM app (`/gm`)
+- [ ] ★ `/gm/roster` — GM row == TB row == profile exactly; resolves correct active build.
+- [ ] ★ `/gm/targets` — same target line as coach board; Kenny splits to 2 sides.
+- [ ] ★ `/gm/scenarios` — builds list loads; a non-active build does NOT overwrite board notes.
+- [ ] ★ `/gm/player/:playerId` — PlayerHub Financials; correct side/values.
+- [ ] ○ `/gm` · ○ `/gm/analytics` (WAR benchmarks) · ○ `/gm/allocations` · ○ `/gm/contracts` · ○ `/gm/recruiting` — load, render.
+
+### Auth / entry
+- [ ] ○ `/` (Index) · ○ `/auth` — load + login works.
+
 ## §8 — Staging data ops (all applied) + prod promotion
 Every script below has already run on **staging** (verify-all = 0). Prod is the
 coordinate-with-Trevor batch — full order + counts in **handoff §9 + §10**. Run each

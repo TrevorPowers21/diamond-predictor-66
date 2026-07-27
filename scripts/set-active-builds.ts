@@ -22,17 +22,20 @@ const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_
   const byCt = new Map<string, any[]>();
   for (const b of (builds || [])) { (byCt.get(b.customer_team_id) ?? byCt.set(b.customer_team_id, []).get(b.customer_team_id)!).push({ ...b, roster_count: counts.get(b.id) ?? 0 }); }
 
-  const plan: { ctid: string; name: string; chosen: string; chosenName: string; clears: string[] }[] = [];
+  const plan: { ctid: string; name: string; chosen: string; chosenName: string; clears: string[]; conflict: boolean }[] = [];
   for (const [ctid, bs] of byCt) {
-    if (bs.some((b) => b.is_active)) continue; // already flagged — leave it
+    if (!ctid) continue; // orphaned builds (customer_team_id null) — no program, skip
+    const activeCount = bs.filter((b) => b.is_active).length;
+    if (activeCount === 1) continue; // exactly one active — leave it as-is
+    // 0 active (needs one) OR >1 active (conflict → resolve to exactly one)
     const programTeam = bs[0]?.team ?? null;
     const chosen = resolveActiveBuildId(bs, { programTeam });
     if (!chosen) continue;
     const chosenB = bs.find((b) => b.id === chosen);
-    plan.push({ ctid, name: (cts || []).find((c: any) => c.id === ctid)?.name ?? ctid.slice(0, 8), chosen, chosenName: `${chosenB?.name} (roster ${chosenB?.roster_count}, ${chosenB?.academic_year})`, clears: bs.filter((b) => b.id !== chosen && b.is_active).map((b) => b.id) });
+    plan.push({ ctid, name: (cts || []).find((c: any) => c.id === ctid)?.name ?? String(ctid).slice(0, 8), chosen, chosenName: `${chosenB?.name} (roster ${chosenB?.roster_count}, ${chosenB?.academic_year})`, clears: bs.filter((b) => b.id !== chosen && b.is_active).map((b) => b.id), conflict: activeCount > 1 });
   }
   console.log(`programs needing an active build: ${plan.length}`);
-  for (const p of plan) console.log(`  ${p.name}: → ${p.chosenName}`);
+  for (const p of plan) console.log(`  ${p.name}${p.conflict ? " ⚠ HAD " + (p.clears.length + 1) + " ACTIVE" : ""}: → ${p.chosenName}`);
   if (!APPLY) { console.log("\nDRY RUN — add --apply."); return; }
   for (const p of plan) {
     await sb.from("team_builds").update({ is_active: false }).eq("customer_team_id", p.ctid); // exactly one active

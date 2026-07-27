@@ -35,7 +35,7 @@ const near = (a: number, b: number) => Math.abs(a - b) <= Math.max(400, Math.abs
   let cts: any[] | null = null;
   for (let a = 0; a < 5 && !cts?.length; a++) { const { data, error } = await sb.from("customer_teams").select("id, school_team_id"); if (error) console.log(`customer_teams read retry ${a}: ${error.message}`); cts = data; }
   if (!cts?.length) { console.log("FATAL: could not read customer_teams — aborting (no conference map)."); return; }
-  const teamIds = [...new Set((cts || []).map((c: any) => String(c.school_team_id)).filter(Boolean))];
+  const teamIds = [...new Set((cts || []).map((c: any) => c.school_team_id).filter(Boolean).map(String))];
   const teamConf = new Map<string, string>();
   for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) teamConf.set(String(t.id), t.conference); }
   const ctConf = new Map<string, string>(); for (const c of (cts || [])) { const cf = teamConf.get(String(c.school_team_id)); if (cf) ctConf.set(c.id, cf); }

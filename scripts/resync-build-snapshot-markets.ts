@@ -23,7 +23,7 @@ const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 (async () => {
   // build_id → conference  (team_builds.customer_team_id → customer_teams.school_team_id → Teams Table.conference)
   const { data: cts } = await sb.from("customer_teams").select("id, school_team_id");
-  const teamIds = [...new Set((cts || []).map((c: any) => String(c.school_team_id)).filter(Boolean))];
+  const teamIds = [...new Set((cts || []).map((c: any) => c.school_team_id).filter(Boolean).map(String))];
   const teamConf = new Map<string, string>();
   for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) teamConf.set(String(t.id), t.conference); }
   const ctConf = new Map<string, string>(); for (const c of (cts || [])) { const cf = teamConf.get(String(c.school_team_id)); if (cf) ctConf.set(c.id, cf); }

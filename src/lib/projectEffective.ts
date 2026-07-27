@@ -15,6 +15,7 @@ import { applyRoleTransitionAdjustment, calcPitchingPlus } from "./transferPitch
 
 export type NeutralLine = {
   p_wrc_plus?: number | null; o_war?: number | null; hitter_depth_role?: string | null;
+  p_avg?: number | null; p_obp?: number | null; p_slg?: number | null; p_iso?: number | null;
   p_rv_plus?: number | null; p_war?: number | null; pitcher_role?: string | null; pitcher_depth_role?: string | null; projected_ip?: number | null;
   p_era?: number | null; p_fip?: number | null; p_whip?: number | null; p_k9?: number | null; p_bb9?: number | null; p_hr9?: number | null;
   class_transition?: string | null; dev_aggressiveness?: number | null;
@@ -73,7 +74,7 @@ export function projectEffectiveWar(
   notes: ToggleNotes,
   eq: PitchingEquationWeights = DEFAULT_PITCHING_WEIGHTS,
   sessionRole?: SessionRole,
-): { owar: number | null; pwar: number | null; roleChanged: boolean; rates?: PitcherRates } {
+): { owar: number | null; pwar: number | null; roleChanged: boolean; rates?: PitcherRates; hitterRates?: { p_avg: number | null; p_obp: number | null; p_slg: number | null; p_iso: number | null; p_wrc_plus: number | null } } {
   if (!neutral) return { owar: null, pwar: null, roleChanged: false };
   const devAgg = Number.isFinite(Number(notes?.devAggressiveness)) ? Number(notes?.devAggressiveness) : 0;
   const ct = String(notes?.classTransition ?? neutral.class_transition ?? "SJ").toUpperCase();
@@ -112,5 +113,15 @@ export function projectEffectiveWar(
   const scale = devScale(devAgg, ct, "H");
   const adjWrc = num(neutral.p_wrc_plus) != null ? Math.round(Number(neutral.p_wrc_plus) * scale) : null;
   const owar = adjWrc != null ? computeOWarFromWrcPlus(adjWrc, paForHitterDepthRole(depth as any)) : null;
-  return { owar, pwar: null, roleChanged: false };
+  // Adjusted slash + wRC+ (dev-agg scaled) — the DISPLAYED line, so the snapshot's
+  // wRC+/slash stay consistent with its (adjusted) oWAR. Was storing the neutral wRC+
+  // against an adjusted oWAR, which read as an oWAR≠recompute(wRC+) inconsistency.
+  const hitterRates = adjWrc != null ? {
+    p_avg: num(neutral.p_avg) != null ? Number(neutral.p_avg) * scale : null,
+    p_obp: num(neutral.p_obp) != null ? Number(neutral.p_obp) * scale : null,
+    p_slg: num(neutral.p_slg) != null ? Number(neutral.p_slg) * scale : null,
+    p_iso: num(neutral.p_iso) != null ? Number(neutral.p_iso) * scale : null,
+    p_wrc_plus: adjWrc,
+  } : undefined;
+  return { owar, pwar: null, roleChanged: false, hitterRates };
 }

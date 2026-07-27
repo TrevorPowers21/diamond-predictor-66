@@ -17,8 +17,9 @@ import * as fs from "fs";
 import { computeHitterMarketValue, computePitcherMarketValue, computePitcherWar, paForHitterDepthRole, pitcherExpectedIp, pitcherRoleFromDepthRole } from "../src/lib/depthRoles";
 import { computeOWarFromWrcPlus } from "../src/lib/playerCalcs";
 import { DEFAULT_PITCHING_WEIGHTS as EQ } from "../src/lib/pitchingEquations";
+const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.local";
 const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
-const sb = createClient(rd(".env.local", "VITE_SUPABASE_URL"), rd(".env.local", "SUPABASE_SERVICE_ROLE_KEY"));
+const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
 const APPLY = process.argv.includes("--apply"), ALL = process.argv.includes("--all");
 const GA = "3b1cc0e2-4acd-4a27-a7bc-d345c347f18d";
 const num = (v: any) => v == null ? null : Number(v);
@@ -32,7 +33,7 @@ const derivePitDepth = (pwar: number, rv: number) => PIT_ROLES.map((r) => [r, Ma
 (async () => {
   // customer_team_id → conference
   const { data: cts } = await sb.from("customer_teams").select("id, school_team_id");
-  const teamIds = [...new Set((cts || []).map((c: any) => String(c.school_team_id)).filter(Boolean))];
+  const teamIds = [...new Set((cts || []).map((c: any) => c.school_team_id).filter(Boolean).map(String))];
   const teamConf = new Map<string, string>();
   for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) teamConf.set(String(t.id), t.conference); }
   const ctConf = new Map<string, string>(); for (const c of (cts || [])) { const cf = teamConf.get(String(c.school_team_id)); if (cf) ctConf.set(c.id, cf); }

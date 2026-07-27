@@ -26,6 +26,10 @@ import { DEFAULT_PITCHING_WEIGHTS as EQ } from "../src/lib/pitchingEquations";
 const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.local";
 const APPLY = process.argv.includes("--apply");
 const SHOW_ALL = process.argv.includes("--all");
+// --market: also recompute a stale market (correct WAR, but stored $ ≠ f(WAR) by
+// >2%, e.g. missing the IF/pos multiplier or carrying the dropped pitcher PVF).
+// Off by default so the routine heal stays narrow (WAR/zeroed-market only).
+const MKT = process.argv.includes("--market");
 const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
 const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
 console.log(`### DB: ${ENV}  APPLY=${APPLY} ###`);
@@ -48,7 +52,7 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
 
 (async () => {
   const { data: cts } = await sb.from("customer_teams").select("id, school_team_id");
-  const teamIds = [...new Set((cts || []).map((c: any) => String(c.school_team_id)).filter(Boolean))];
+  const teamIds = [...new Set((cts || []).map((c: any) => c.school_team_id).filter(Boolean).map(String))];
   const teamConf = new Map<string, string>();
   for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) teamConf.set(String(t.id), t.conference); }
   const ctConf = new Map<string, string>(); for (const c of (cts || [])) { const cf = teamConf.get(String(c.school_team_id)); if (cf) ctConf.set(c.id, cf); }
@@ -81,14 +85,19 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
   let noConf = 0;
   for (const r of rows) {
     if (!r.neu || !/^[0-9a-f-]{36}$/i.test(String(r.pid)) || !r.snap) continue;
-    const side: "P" | "H" = isPit(r.slot ?? (num(r.neu.p_rv_plus) != null ? "SP" : "")) ? "P" : "H";
+    // Side by the NEUTRAL's data shape, not the slot label — a mis-slotted hitter
+    // (e.g. a utility bat parked in an "RP4" slot) must still heal as a hitter.
+    // Only a genuine TWP row carries both sides, so fall back to the slot then.
+    const neuHasH = num(r.neu.p_wrc_plus) != null || num(r.neu.o_war) != null;
+    const neuHasP = num(r.neu.p_rv_plus) != null || num(r.neu.p_war) != null;
+    const side: "P" | "H" = (neuHasP && !neuHasH) ? "P" : (neuHasH && !neuHasP) ? "H" : (isPit(r.slot ?? "") ? "P" : "H");
     const snapWar = side === "P" ? num(r.snap.p_war) : num(r.snap[r.warHitKey] ?? r.snap.o_war ?? r.snap.owar); if (snapWar == null) continue;
     const notes = parseNotes(r.notes) ?? {};
     const devAgg = Number(notes?.devAggressiveness ?? 0) || 0;
     let depth = notes?.depthRole ?? (side === "P" ? r.neu.pitcher_depth_role : r.neu.hitter_depth_role);
     if (side === "P" && !PIT_ROLES.includes(String(depth))) depth = r.neu.pitcher_depth_role ?? depth;
     const sessionRole = side === "P" ? sessionRoleFor(r.pid, r.ctid, r.slot, r.where) : undefined;
-    const { owar, pwar, roleChanged, rates } = projectEffectiveWar(r.neu, { ...notes, depthRole: depth }, EQ, sessionRole as any);
+    const { owar, pwar, roleChanged, rates, hitterRates } = projectEffectiveWar(r.neu, { ...notes, depthRole: depth }, EQ, sessionRole as any);
     const fWar = side === "P" ? pwar : owar; if (fWar == null) continue;
     // devScale proven faithful → heal any devAgg
     const conf = r.ctid ? ctConf.get(r.ctid) ?? "" : ""; if (!conf) { noConf++; continue; }
@@ -107,7 +116,16 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
       newMkt = computePitcherMarketValue(fWar, { conference: conf, role: pitcherRoleFromDepthRole(depth as any), team: nm.get(r.pid) ?? null }, EQ);
       if (isTwp) { s.twp_pitcher_market_value = newMkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = newMkt; }
     } else {
-      for (const k of HIT_FIELDS) if (r.neu[k] !== undefined) s[k] = r.neu[k];
+      // Write the DEV-AGG-ADJUSTED slash + wRC+ (the displayed line) so wRC+ stays
+      // consistent with the adjusted oWAR. devAgg=0 → hitterRates == neutral, so
+      // untoggled hitters are byte-identical to the old neutral-copy behaviour.
+      if (hitterRates) {
+        if (hitterRates.p_avg != null) s.p_avg = hitterRates.p_avg;
+        if (hitterRates.p_obp != null) s.p_obp = hitterRates.p_obp;
+        if (hitterRates.p_slg != null) s.p_slg = hitterRates.p_slg;
+        if (hitterRates.p_iso != null) s.p_iso = hitterRates.p_iso;
+        if (hitterRates.p_wrc_plus != null) s.p_wrc_plus = hitterRates.p_wrc_plus;
+      } else for (const k of HIT_FIELDS) if (r.neu[k] !== undefined) s[k] = r.neu[k];
       s[r.warHitKey] = fWar; if (r.warHitKey !== "o_war" && "o_war" in s) s.o_war = fWar; s.hitter_depth_role = depth;
       newMkt = computeHitterMarketValue(fWar, { conference: conf, position: pos.get(r.pid) });
       if (isTwp) { s.twp_hitter_market_value = newMkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = newMkt; }
@@ -119,8 +137,17 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
     // effectively missing. (Small market wobble is a separate, non-urgent consistency pass.)
     const warDrift = Math.abs(fWar - snapWar) > 0.02;
     const mktZeroed = newMkt != null && newMkt > 1000 && (storedMkt == null || storedMkt < 1);
-    if (!warDrift && !mktZeroed) continue;                       // fully in sync
-    heal.push({ row: r, side, before: r.snap, after: s, snapWar, fWar, depth, trans: !!roleChanged, mktOnly: !warDrift && mktZeroed });
+    // wRC+ drift: a dev-agg-toggled hitter whose oWAR is already correct but whose
+    // stored wRC+ is still the NEUTRAL value (≠ the adjusted wRC+ its oWAR implies).
+    // This is the class verify-all §2 flags as oWAR≠recompute(stored wRC+).
+    const wrcDrift = side === "H" && hitterRates?.p_wrc_plus != null && num(r.snap.p_wrc_plus) != null
+      && Math.abs(Number(hitterRates.p_wrc_plus) - Number(r.snap.p_wrc_plus)) >= 1;
+    // market drift (opt-in --market): correct WAR but stored $ off from f(WAR) by
+    // >2% — the IF/pos-multiplier + dropped-PVF migration from this branch.
+    const mktDrift = MKT && newMkt != null && storedMkt != null
+      && Math.abs(newMkt - storedMkt) > Math.max(500, 0.02 * Math.abs(newMkt));
+    if (!warDrift && !mktZeroed && !wrcDrift && !mktDrift) continue;   // fully in sync
+    heal.push({ row: r, side, before: r.snap, after: s, snapWar, fWar, depth, trans: !!roleChanged, mktOnly: !warDrift && !wrcDrift && (mktZeroed || mktDrift) });
   }
 
   heal.sort((a, b) => Math.abs(b.fWar - b.snapWar) - Math.abs(a.fWar - a.snapWar));

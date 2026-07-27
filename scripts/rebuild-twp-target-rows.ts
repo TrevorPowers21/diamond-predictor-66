@@ -10,8 +10,9 @@
 import { createClient } from "@supabase/supabase-js";
 import * as fs from "fs";
 import { resolveActiveBuildId } from "../src/lib/activeBuild";
+const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.local";
 const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
-const sb = createClient(rd(".env.local", "VITE_SUPABASE_URL"), rd(".env.local", "SUPABASE_SERVICE_ROLE_KEY"));
+const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
 const APPLY = process.argv.includes("--apply");
 const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 const hitterFromRoster = (ps: any) => ({ is_twp: true, nil_valuation: null, p_avg: ps.p_avg ?? null, p_obp: ps.p_obp ?? null, p_slg: ps.p_slg ?? null, p_wrc_plus: ps.p_wrc_plus ?? null, owar: ps.o_war ?? null, o_war: ps.o_war ?? null, hitter_depth_role: ps.hitter_depth_role ?? null, twp_hitter_market_value: ps.twp_hitter_market_value ?? null });

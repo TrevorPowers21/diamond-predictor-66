@@ -9,8 +9,9 @@ import { computePitcherWar, paForHitterDepthRole, pitcherExpectedIp, computeHitt
 import { computeOWarFromWrcPlus } from "../src/lib/playerCalcs";
 import { DEFAULT_PITCHING_WEIGHTS as EQ } from "../src/lib/pitchingEquations";
 import { resolveActiveBuildId } from "../src/lib/activeBuild";
+const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.local";
 const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
-const sb = createClient(rd(".env.local", "VITE_SUPABASE_URL"), rd(".env.local", "SUPABASE_SERVICE_ROLE_KEY"));
+const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
 const num = (v: any) => v == null ? null : Number(v);
 const near = (a: any, b: any, tol: number) => a != null && b != null && Math.abs(Number(a) - Number(b)) <= tol;
 const mnear = (a: any, b: any) => a != null && b != null && Math.abs(Number(a) - Number(b)) <= Math.max(500, Math.abs(Number(b)) * 0.02);
@@ -23,7 +24,7 @@ let issues = 0; const flag = (s: string) => { issues++; console.log(`  ❌ ${s}`
 (async () => {
   // program → conference (school_team_id → Teams Table.id)
   const { data: cts } = await sb.from("customer_teams").select("id, name, school_team_id");
-  const teamIds = [...new Set((cts || []).map((c: any) => String(c.school_team_id)).filter(Boolean))];
+  const teamIds = [...new Set((cts || []).map((c: any) => c.school_team_id).filter(Boolean).map(String))];
   const teamConf = new Map<string, string>();
   for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) teamConf.set(String(t.id), t.conference); }
   const ctConf = new Map<string, string>(), ctName = new Map<string, string>();
@@ -81,7 +82,10 @@ let issues = 0; const flag = (s: string) => { issues++; console.log(`  ❌ ${s}`
       const who = `${ctName.get(ctid)}/${meta.first_name} ${meta.last_name}`;
       if (depthOf(rp.production_notes) !== depthOf(board.production_notes)) flag(`${who}: board notes depth "${depthOf(board.production_notes)}" ≠ roster "${depthOf(rp.production_notes)}"`);
       const ps = rp.player_snapshot || {}, ts = board.transfer_snapshot || {};
-      if (isPit(rp.position_slot)) { if (!near(num(ps.p_war), num(ts.p_war), 0.02)) flag(`${who}: roster pWAR ${num(ps.p_war)?.toFixed(3)} ≠ board ${num(ts.p_war)?.toFixed(3)}`); }
+      // Classify by the snapshot's own data shape (a hitter carries o_war), not the
+      // slot — a hitter mis-slotted into a pitcher slot must still compare as a hitter.
+      const rpIsPit = num(ps.o_war) == null && num(ps.p_war) != null;
+      if (rpIsPit) { if (!near(num(ps.p_war), num(ts.p_war), 0.02)) flag(`${who}: roster pWAR ${num(ps.p_war)?.toFixed(3)} ≠ board ${num(ts.p_war)?.toFixed(3)}`); }
       else { if (!near(num(ps.o_war), num(ts.owar ?? ts.o_war), 0.01)) flag(`${who}: roster oWAR ${num(ps.o_war)?.toFixed(3)} ≠ board ${num(ts.owar ?? ts.o_war)?.toFixed(3)}`); }
     }
   }
