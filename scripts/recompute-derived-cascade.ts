@@ -104,7 +104,11 @@ const nearM = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.005 * M
   console.log(`scanned ${scanned}  rows to update ${updates.length}  (pRV+round ${rvR}, wRC+round ${wrcR}, IP ${ipF}, pWAR ${pwF}, oWAR ${owF}, pMkt ${pmF}, hMkt ${hmF}, noConf ${noConf})`);
   console.log("samples:"); sample.forEach((s) => console.log(s));
   if (!APPLY) { console.log("\n(dry-run — no writes. Add --apply.)"); return; }
-  let done = 0;
-  for (const u of updates) { const { error } = await sb.from("player_predictions").update(u.patch).eq("id", u.id); if (error) console.error("err", u.id, error.message); else if (++done % 2000 === 0) process.stdout.write(`\r  ${done}/${updates.length}`); }
-  console.log(`\n✅ applied ${done}/${updates.length} (derived cascade; rates untouched)`);
+  let done = 0; const CHUNK = 25;
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const slice = updates.slice(i, i + CHUNK);
+    await Promise.all(slice.map(async (u) => { const { error } = await sb.from("player_predictions").update(u.patch).eq("id", u.id); if (error) console.error("err", u.id, error.message); else done++; }));
+    if (i % 5000 < CHUNK) console.log(`${done}/${updates.length}`);
+  }
+  console.log(`✅ applied ${done}/${updates.length} (derived cascade; rates untouched)`);
 })();
