@@ -20,12 +20,36 @@ per-script rationale + staging counts.
 
 ---
 
-## Phase 0 — Schema migrations (apply first; columns the data ops need)
-1. `target_board` add `player_snapshot`, `production_notes` (if not already on prod).
-2. `supabase/migrations/20260724120000_target_board_twp_two_row.sql` — `position_slot` +
-   drop ALL unique constraints + slot-aware unique index.
-3. `supabase/migrations/20260724130000_neutral_snapshot.sql` — `neutral_snapshot jsonb` on
-   `team_build_players` + `target_board`.
+## Phase 0 — Schema migrations (SAFE to pre-apply before the deploy)
+**Verified 2026-07-27 against prod:** missing = `target_board.production_notes`,
+`target_board.position_slot`, `target_board.neutral_snapshot`, `team_build_players.neutral_snapshot`.
+(`target_board.transfer_snapshot`, `team_build_players.player_snapshot`/`production_notes` already exist.)
+**Safe to run BEFORE the main merge:** columns are additive; the unique-constraint swap is safe
+because current prod code (`origin/main` useTargetBoard) uses `.insert()`, NOT `.upsert(onConflict)`,
+so no ON CONFLICT clause references the dropped constraints, and the new slot-aware index still
+dedupes its null-slot inserts. Paste this block (Supabase SQL editor → PROD):
+```sql
+-- target_board.production_notes (added ad-hoc on staging 2026-07-22; no migration file)
+ALTER TABLE public.target_board ADD COLUMN IF NOT EXISTS production_notes jsonb;
+
+-- TWP two-row (migration 20260724120000): position_slot + slot-aware uniqueness
+ALTER TABLE public.target_board ADD COLUMN IF NOT EXISTS position_slot text;
+DO $$ DECLARE cname text; BEGIN
+  FOR cname IN SELECT conname FROM pg_constraint
+    WHERE conrelid='public.target_board'::regclass AND contype='u'
+  LOOP EXECUTE format('ALTER TABLE public.target_board DROP CONSTRAINT IF EXISTS %I', cname); END LOOP;
+END $$;
+DROP INDEX IF EXISTS public.target_board_user_team_player_slot_uidx;
+CREATE UNIQUE INDEX target_board_user_team_player_slot_uidx
+  ON public.target_board (user_id, customer_team_id, player_id, coalesce(position_slot, ''));
+
+-- neutral_snapshot (migration 20260724130000)
+ALTER TABLE public.team_build_players ADD COLUMN IF NOT EXISTS neutral_snapshot jsonb;
+ALTER TABLE public.target_board        ADD COLUMN IF NOT EXISTS neutral_snapshot jsonb;
+
+NOTIFY pgrst, 'reload schema';
+```
+Verify: re-run the 4 column probes → all exist.
 
 ## Phase 1 — WAR / market base fixes (handoff §8 + §9)
 4. Prod SQL batch: pRV+/wRC+ rounding + `p_war`/`o_war` recompute + `projected_ip`=depth-role
