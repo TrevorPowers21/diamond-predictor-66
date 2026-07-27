@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
+import { useAuth } from "@/hooks/useAuth";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
@@ -153,6 +154,7 @@ export default function PlayerHub() {
   const setTab = (t: TabKey) => setParams((p) => { p.set("tab", t); return p; }, { replace: true });
 
   const gm = useGmRoster();
+  const { effectiveTeamId } = useAuth();
 
   const row = useMemo(
     () => [...gm.hitters, ...gm.pitchers].find((r) => r.player_id === playerId) ?? null,
@@ -208,18 +210,21 @@ export default function PlayerHub() {
   const isProgramPlayer = onLiveBuild === true;
   const resolving = gm.isLoading || (!!liveBuildId && membershipLoading);
 
-  // Target board: a non-rostered player who's on the program's target board is
+  // Target board: a non-rostered player who's on the VIEWING program's target board is
   // shown DISPLAY-ONLY, reading its stored transfer_snapshot — the SAME line the
-  // TB board + targets page read — never the live preview. RLS scopes the board to
-  // the program, so player_id alone is enough. Null → pure scouting (interactive).
-  // A TWP has TWO board rows (hitter slot + pitcher slot) → fetch both and pick the
-  // side matching this profile's classification below. One-way = a single row.
+  // TB board + targets page read — never the live preview. Null → pure scouting (interactive).
+  // MUST scope to effectiveTeamId: a multi-program user sees their board rows across ALL
+  // programs (RLS is per-user, not per-program), so without this filter a target on another
+  // program's board (e.g. a Grand Canyon target) wrongly pinned the profile read-only when
+  // viewed from Georgia. A TWP has TWO board rows (hitter slot + pitcher slot) → fetch both
+  // and pick the side matching this profile's classification below. One-way = a single row.
   const { data: targetSnapRows = [] } = useQuery({
-    queryKey: ["player-hub-target-snapshot", playerId],
-    enabled: !!playerId && !isProgramPlayer,
+    queryKey: ["player-hub-target-snapshot", playerId, effectiveTeamId],
+    enabled: !!playerId && !isProgramPlayer && !!effectiveTeamId,
     queryFn: async () => {
       const { data } = await (supabase as any).from("target_board")
-        .select("transfer_snapshot, production_notes, position_slot").eq("player_id", playerId);
+        .select("transfer_snapshot, production_notes, position_slot")
+        .eq("player_id", playerId).eq("customer_team_id", effectiveTeamId);
       return (data ?? []) as any[];
     },
   });
