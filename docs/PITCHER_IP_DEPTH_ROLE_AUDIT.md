@@ -77,6 +77,19 @@ STAGING has the pitcher-market bleed bug (e.g. Michael Anderson IF, 232 PA / 1.6
 $3,567 pitcher vs prod $53,473 hitter — prod right). Later cleanup: fix staging + run
 `recomputeTwpStatus` on prod for flag consistency (Tague Davis pos=TWP but is_twp=false).
 
+## Two-way bleed — SEALED (2026-07-27)
+`recompute-derived-cascade.ts` now has a position-ownership guard: the shared `market_value`
+only ever receives the player's PRIMARY side by position (matching the app's
+`position.in.(SP,RP,CL,P,LHP,RHP)` hitter/pitcher split). A position player's sub-threshold
+pitching can no longer clobber their hitter market (and vice-versa); TWP rows route to twp_*
+fields. Prod residual dropped 115 → 37 → 0. Both app and cascade are now position-gated.
+- **Durable root fix (separate rate re-run):** gate the pitcher-side write in
+  `createPredictionsFromMaster` on IP ≥ 5 so sub-threshold pitching never merges into a hitter row.
+- **Staging bleed: LEFT AS-IS (intentional).** Staging has `team_id = NULL` for these players
+  (known stale-copy staleness, `project_players_team_id_null`), so the cascade can't resolve
+  their conference to fix the market. Accepted going into the prod promotion — staging is a test
+  copy; the guard fixes it automatically once staging's team_id is ever backfilled.
+
 ## Already done (this session)
 - Kenny Ishikawa hand-fixed consistently (pitcher row @ swing_starter 30 IP, pWAR 0.026, $975).
 - Snapshot-level consistency (wRC+/oWAR, market migration, side-detection) — see PROD_PROMOTION_HANDOFF.md.
