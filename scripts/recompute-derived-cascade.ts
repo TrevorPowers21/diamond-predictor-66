@@ -35,7 +35,9 @@ if (PROD && !/trbvxuoliwrfowibatkm/.test(url)) { console.error("--prod but URL n
 if (!PROD && /trbvxuoliwrfowibatkm/.test(url)) { console.error("no --prod but URL looks prod."); process.exit(1); }
 const sb = createClient(url, rd("SUPABASE_SERVICE_ROLE_KEY"));
 const n = (v: any) => (v == null ? null : Number(v));
-const nearWar = (a: number, b: number) => Math.abs(a - b) <= 0.02;
+// Tight: p_war/o_war must land on the EXACT recompute so market (derived from it)
+// stays consistent. 1e-6 absorbs pure float-storage noise only.
+const nearWar = (a: number, b: number) => Math.abs(a - b) <= 1e-6;
 const nearM = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.005 * Math.abs(b));
 
 (async () => {
@@ -74,8 +76,10 @@ const nearM = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.005 * M
         if (n(r.projected_ip) == null || Math.abs(Number(r.projected_ip) - ip) > 0.5) { patch.projected_ip = ip; ipF++; }
         const pWar = computePitcherWar(rvWhole, ip, EQ);
         if (pWar != null && (n(r.p_war) == null || !nearWar(Number(r.p_war), pWar))) { patch.p_war = pWar; pwF++; }
-        if (conf != null && pWar != null) {
-          const m = computePitcherMarketValue(pWar, { conference: conf, role: pitcherRoleFromDepthRole(r.pitcher_depth_role as any), team: pteam.get(r.player_id) ?? "x" }, EQ);
+        // market derived from the FINAL stored WAR (updated value if we wrote it, else current)
+        const finalPWar = pWar ?? n(r.p_war);
+        if (conf != null && finalPWar != null) {
+          const m = computePitcherMarketValue(finalPWar, { conference: conf, role: pitcherRoleFromDepthRole(r.pitcher_depth_role as any), team: pteam.get(r.player_id) ?? "x" }, EQ);
           const stored = isTwp ? n(r.twp_pitcher_market_value) : n(r.market_value);
           if (m != null && stored != null && !nearM(stored, m)) { if (isTwp) patch.twp_pitcher_market_value = m; else patch.market_value = m; pmF++; }
         }
@@ -86,8 +90,9 @@ const nearM = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.005 * M
         if (Number(r.p_wrc_plus) !== wrcWhole) { patch.p_wrc_plus = wrcWhole; wrcR++; }
         const oWar = computeHitterOWar(wrcWhole, null, r.hitter_depth_role as any);
         if (oWar != null && (n(r.o_war) == null || !nearWar(Number(r.o_war), oWar))) { patch.o_war = oWar; owF++; }
-        if (conf != null && oWar != null) {
-          const m = computeHitterMarketValue(oWar, { conference: conf, position: ppos.get(r.player_id) });
+        const finalOWar = oWar ?? n(r.o_war);
+        if (conf != null && finalOWar != null) {
+          const m = computeHitterMarketValue(finalOWar, { conference: conf, position: ppos.get(r.player_id) });
           const stored = isTwp ? n(r.twp_hitter_market_value) : n(r.market_value);
           if (m != null && stored != null && !nearM(stored, m)) { if (isTwp) patch.twp_hitter_market_value = m; else patch.market_value = m; hmF++; }
         }
