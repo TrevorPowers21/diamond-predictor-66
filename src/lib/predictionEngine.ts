@@ -15,6 +15,7 @@ import {
   defaultHitterDepthRoleFromActualPa,
   paForHitterDepthRole,
   pitcherExpectedIp,
+  derivePitcherDepthRole,
 } from "@/lib/depthRoles";
 
 // Fetch player meta needed to derive stored p_war / o_war / market_value
@@ -36,30 +37,8 @@ async function fetchPlayerMetaForDerived(playerId: string | null | undefined) {
   };
 }
 
-// Derive pitcher depth role from real IP + coarse role. Mirrors
-// defaultPitcherDepthRoleFromIp in src/pages/team-builder/helpers.ts.
-function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP" | "SM"): string {
-  const r: "SP" | "RP" = role === "SP" ? "SP" : "RP";
-  const ipNum = Number(ip);
-  if (!Number.isFinite(ipNum) || ipNum <= 0) {
-    return r === "SP" ? "weekend_starter" : "high_leverage_reliever";
-  }
-  if (r === "SP") {
-    if (ipNum >= 65) return "weekend_starter";
-    if (ipNum >= 35) return "weekday_starter";
-    // Thin-sample SPs (<10 IP) drop to specialist_reliever — without this a
-    // 3-IP arm gets swing_starter's ~30 projected IP (and previously ~85),
-    // scaling pWAR / market way too high. Mirrors defaultPitcherDepthRoleFromIp
-    // (helpers) so both classifiers agree.
-    if (ipNum < 10) return "specialist_reliever";
-    return "swing_starter";
-  }
-  if (ipNum >= 40) return "workhorse_reliever";
-  if (ipNum >= 25) return "high_leverage_reliever";
-  if (ipNum >= 15) return "mid_leverage_reliever";
-  if (ipNum >= 8) return "low_impact_reliever";
-  return "specialist_reliever";
-}
+// derivePitcherDepthRole now lives in src/lib/depthRoles.ts (shared with the live
+// projection paths so precompute + overlay agree on depth → projected IP).
 
 // Compute pitcher derived columns from a freshly-recalculated row.
 // Exported so the precompute scripts derive projected_ip / p_war / depth role
@@ -843,6 +822,7 @@ function recalcPitcher(
     role: scouting?.Role ?? null,
     g: scouting?.G ?? null,
     gs: scouting?.GS ?? null,
+    ip: (scouting as any)?.IP ?? null,
     team: player.team ?? scouting?.Team ?? null,
     teamId: player.teamId ?? scouting?.TeamID ?? null,
     conference: player.conference ?? scouting?.Conference ?? null,

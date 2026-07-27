@@ -248,6 +248,7 @@ export default function HighFollowList({ embedded = false }: HighFollowListProps
           role: (r as any).Role ?? null,
           g: (r as any).G ?? null,
           gs: (r as any).GS ?? null,
+          ip: (r as any).IP ?? null,
           team: teamName,
           teamId: (r as any).TeamID ?? null,
           conference: teamMatch?.conference ?? (r as any).Conference ?? null,

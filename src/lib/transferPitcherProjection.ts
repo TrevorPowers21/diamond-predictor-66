@@ -1,5 +1,6 @@
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
+import { projectedIpFromRealIp } from "@/lib/depthRoles";
 
 // Canonical transfer-pitcher projection — answers "given a pitcher's stats at
 // from-school, how do they project at to-school?" Used by:
@@ -215,6 +216,8 @@ export type TransferPitcherInput = {
   };
   // Base role (from PM Role column, or G/GS-derived). Used for role-transition.
   baseRole: "SP" | "RP" | "SM" | null;
+  // Real (last-season) IP — drives the DEPTH ROLE → projected IP for pWAR.
+  ip: number | null;
   // Pre-resolved conference + plus stats for from + to schools
   fromEraPlus: number | null;
   toEraPlus: number | null;
@@ -321,7 +324,8 @@ export function computeTransferPitcherProjection(
   const { eq } = ctx;
   const baseRole = toPitchingRole(input.baseRole);
   const projectedRole: "SP" | "RP" | "SM" = ctx.roleOverride || baseRole || "SM";
-  const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  // Projected IP from real IP via the DEPTH ROLE, coarse-role fallback when IP missing.
+  const projectedIp = projectedIpFromRealIp(input.ip, projectedRole, eq);
 
   // Validate every required input. If any missing, return blocked result so
   // callers can fall back to base projection or surface the gap explicitly.

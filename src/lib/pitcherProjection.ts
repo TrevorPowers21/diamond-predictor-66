@@ -1,6 +1,7 @@
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { resolveMetricParkFactor, type ParkFactorsMap } from "@/lib/parkFactors";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
+import { projectedIpFromRealIp } from "@/lib/depthRoles";
 
 // Canonical pitcher projection pipeline — mirrors PitcherProfile's
 // projectedPitching useMemo exactly. The sequence is:
@@ -41,6 +42,7 @@ export type PitcherProjectionInput = {
   role: string | null;
   g: number | null;
   gs: number | null;
+  ip: number | null;
   team: string | null;
   teamId: string | null;
   conference: string | null;
@@ -379,7 +381,10 @@ export function computePitcherProjection(
     ? ((starts / games) < 0.5 ? "RP" : "SP")
     : null);
   const projectedRole: "SP" | "RP" | "SM" = ctx.roleOverride || baseRole || "SM";
-  const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  // Projected IP from real IP via the DEPTH ROLE (not the coarse SP/RP/SM role) —
+  // falls back to coarse role IP only when real IP is missing. Keeps live overlay
+  // pWAR consistent with the precompute's derivePitcherStored.
+  const projectedIp = projectedIpFromRealIp(input.ip, projectedRole, eq);
 
   // Score each scouting metric against NCAA avg/sd.
   const scoreObj = {
