@@ -3152,7 +3152,11 @@ export default function TeamBuilder() {
       const pitcherRole: "SP" | "RP" = /weekend|weekday|swing|_starter$/.test(String(ts.pitcher_depth_role || "")) ? "SP" : "RP";
       const hitDepth = VALID_HIT.includes(ts.hitter_depth_role) ? ts.hitter_depth_role : (VALID_HIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "everyday_starter");
       const pitDepth = VALID_PIT.includes(ts.pitcher_depth_role) ? ts.pitcher_depth_role : (VALID_PIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "high_leverage_reliever");
-      const pMeta = { first_name: sbRow.first_name || "", last_name: sbRow.last_name || "", class_year: sbRow.class_year ?? null, bats_hand: sbRow.bats_hand ?? null, team: sbRow.team ?? null, from_team: sbRow.team ?? null, conference: sbRow.conference ?? null };
+      // is_twp MUST ride along: updatePlayer's "add both sides" branch gates on
+      // player.is_twp, so a board-loaded TWP target without it adds only the clicked
+      // side (Overbeek: adding the hitter didn't bring the pitcher). Rendering splits
+      // on position_slot so the two rows showed regardless — only add-both was broken.
+      const pMeta = { first_name: sbRow.first_name || "", last_name: sbRow.last_name || "", class_year: sbRow.class_year ?? null, bats_hand: sbRow.bats_hand ?? null, team: sbRow.team ?? null, from_team: sbRow.team ?? null, conference: sbRow.conference ?? null, is_twp: isTwp };
       const base: any = {
         player_id: sbRow.player_id, source: "portal", custom_name: `${sbRow.first_name || ""} ${sbRow.last_name || ""}`.trim() || null,
         depth_order: 1, nil_value: 0, production_notes: sbRow.production_notes ?? null,
