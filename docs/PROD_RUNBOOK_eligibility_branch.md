@@ -57,9 +57,14 @@ per-script rationale + staging counts.
     `--apply` needs `RSTR_AUTOMATION_TOKEN` or `--yes`.)
 
 ## Phase 5 — Verify (must be 0)
-18. `verify-all.ts` (prod env) → **0 issues across all programs**.
+18. `verify-all.ts` (prod env) → **0 issues across all programs**. Now includes **§5 no-zeroed-markets**
+    (roster + target, both sides) — a green run *guarantees* no positive-WAR player is stuck at $0
+    market (the Cespedes class). If §5 flags anything, re-run the heal (#17) — it auto-fixes the zeroed case.
 19. `audit-georgia.ts` (prod env) → **0 inconsistencies**.
 20. Full-row consistency spot check → snapshot == f(neutral,notes).
+- **Note:** the neutral backfill (#16) now carries the pitcher `market_value`, so the live toggle
+  recompute passes the market-eligibility gate on prod too (no $0 on a rostered transfer). This was a
+  staging-only bug (prod's predictionMap fallback already had market_value) — but run the FIXED backfill.
 
 ## Phase 6 — Enable the self-heal sweep (ONLY after Phase 4)
 21. Follow `docs/SELF_HEAL_SWEEP.md`: dry-run on prod, one manual `--apply`, then

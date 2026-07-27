@@ -106,5 +106,36 @@ let issues = 0; const flag = (s: string) => { issues++; console.log(`  ❌ ${s}`
   }
   console.log(`  TWP (player,team) groups checked: ${twpChk}`);
 
+  // ---- 5. no zeroed markets (positive WAR but stored market ~$0) — roster + target ----
+  // Catches the eligibility-gate class (e.g. a pitcher neutral missing market_value →
+  // dirty recompute returns $0 → saved). Only flags the unambiguous zeroed case, so no
+  // false positives on position/tier market wobble.
+  console.log("\n=== 5. no zeroed markets (positive WAR, stored market ~$0) — roster + target ===");
+  const buildConf = new Map<string, string>(); for (const b of builds) { const cf = ctConf.get(b.customer_team_id); if (cf) buildConf.set(b.id, cf); }
+  const allBps = await page("team_build_players", "player_id, build_id, position_slot, player_snapshot", (q) => q);
+  const need = [...new Set(allBps.map((r: any) => r.player_id).filter((id: any) => id && !pmeta.has(id) && /^[0-9a-f-]{36}$/i.test(String(id))))];
+  for (let i = 0; i < need.length; i += 200) { const { data } = await sb.from("players").select("id, first_name, last_name, position, is_twp").in("id", need.slice(i, i + 200)); for (const p of (data || [])) pmeta.set(p.id, p); }
+  let zChk = 0;
+  const checkZero = (who: string, side: "P" | "H", war: number | null, conf: string | undefined, position: string | undefined, depthRole: string | null, lastName: string, storedMkt: number | null) => {
+    if (war == null || war <= 0 || !conf) return; zChk++;
+    const e = side === "P"
+      ? computePitcherMarketValue(war, { conference: conf, role: pitcherRoleFromDepthRole(depthRole || "workhorse_reliever"), team: lastName }, EQ)
+      : computeHitterMarketValue(war, { conference: conf, position });
+    if (e != null && e > 1000 && (storedMkt == null || storedMkt < 1)) flag(`${who}: ${side === "P" ? "pitcher" : "hitter"} market ~$0 but should be ~$${Math.round(e)} (WAR ${war.toFixed(2)})`);
+  };
+  for (const r of allBps) {
+    const s = r.player_snapshot; if (!s) continue; const meta = pmeta.get(r.player_id) || {}; const isTwp = !!s.is_twp;
+    const side: "P" | "H" = isPit(r.position_slot ?? (num(s.p_rv_plus) != null ? "SP" : "")) ? "P" : "H";
+    checkZero(meta.first_name + " " + meta.last_name, side, side === "P" ? num(s.p_war) : num(s.o_war), buildConf.get(r.build_id), meta.position, s.pitcher_depth_role, meta.last_name,
+      side === "P" ? (isTwp ? num(s.twp_pitcher_market_value) : num(s.market_value)) : (isTwp ? num(s.twp_hitter_market_value) : num(s.market_value)));
+  }
+  for (const r of tb) {
+    const s = r.transfer_snapshot; if (!s) continue; const meta = pmeta.get(r.player_id) || {}; const isTwp = !!s.is_twp;
+    const side: "P" | "H" = isPit(r.position_slot ?? (num(s.p_rv_plus) != null ? "SP" : "")) ? "P" : "H";
+    checkZero(`${ctName.get(r.customer_team_id)}/${meta.first_name} ${meta.last_name}`, side, side === "P" ? num(s.p_war) : num(s.owar ?? s.o_war), ctConf.get(r.customer_team_id), meta.position, s.pitcher_depth_role, meta.last_name,
+      side === "P" ? (isTwp ? num(s.twp_pitcher_market_value) : num(s.nil_valuation)) : (isTwp ? num(s.twp_hitter_market_value) : num(s.nil_valuation)));
+  }
+  console.log(`  snapshots market-checked for zeroing: ${zChk}`);
+
   console.log(`\n===== ${issues === 0 ? "✅ ALL CONSISTENT — 0 issues across all programs" : `❌ ${issues} issue(s)`} =====`);
 })();
