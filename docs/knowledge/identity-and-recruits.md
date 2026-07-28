@@ -72,7 +72,17 @@ The one sentence: **the person's identity is ours and vendor-neutral (`players.i
 ## Build sequence (Trevor, 2026-07-28)
 1. **Storage foundation** — ✅ **BUILT + verified on staging 2026-07-28.** Migrations `20260728120000` (crosswalk + `data_status='prospect'`) and `20260728121000` (`resolve_or_create_prospect` RPC) on `feature/recruit-ids-mobile-board`. Round-trip verified in-DB (mint → prospect row + rstr/pbr crosswalk → same-external-key resolves w/o dup → fresh-mint fallback → empty-name guard). **Not on prod yet** — promotes with the feature PR (Trevor drives the main merge).
 2. **Agree this spec** — ✅ open questions resolved.
-3. **Mobile add page** — ⏳ NEXT: coach's logged-in phone view (NOT a public share link — Trevor). View team-shared target board, add a new player via the RPC, jot notes. Stitch-first (UI change).
+3. **Mobile add page** — ⏳ NEXT: coach's logged-in phone view (NOT a public share link — Trevor). View team-shared target board, add a new player via the RPC, jot notes. Stitch-first (UI change). **Ships to prod WITH the identity foundation** — one feature PR (Trevor: design mobile before pushing to prod).
+
+### mobile-is-a-condensed-capture-surface: trim to what matters in the car; web carries the rest
+- **Rule (Trevor, 2026-07-28):** the mobile page is a *condensed* capture surface — identify the player + drop a note, fast. Mobile fields = first/last name, position, team/high-school, note, optional PBR/PG link (status defaults WATCHING). Everything richer (stage funnel, tier, contacts, travel org, state, level, asking price / target offer / scholarship %, offer amount, projection recipe) is **web-only**, keyed to the same `player_id` so nothing is lost — the coach fleshes it out on web later.
+- **Why:** a coach at a game can't fill a 20-field form; forcing it kills adoption. Condensed mobile + full web, same identity underneath.
+- **Status:** confirmed (Trevor).
+
+### notes-are-a-dated-authored-log-compliance: never a single overwrite field
+- **Rule (Trevor, 2026-07-28):** every note must carry its **own date + author** — an append-only log — for **compliance**. Not a single `notes` text column that gets overwritten. Reuse an existing dated log: `gm_target_notes` (has explicit `note_date DATE` default today + `author` + `created_at`, team-scoped `is_team_member`) or `coach_notes` (`content`, `user_id`, `created_at`). **Build task: write mobile notes to whichever log the WEB target board already reads, so mobile/web stay consistent.**
+- **Why / protecting against:** compliance needs a defensible dated record of every contact/observation; an overwrite field destroys history. `note_date` being settable (not just `created_at`) lets a coach log "called yesterday" accurately.
+- **Status:** confirmed (Trevor).
 
 ## Verified facts from the build (2026-07-28)
 - **`resolve_or_create_prospect` enforces confirm-don't-guess IN SQL:** it auto-resolves an identity ONLY when an exact `(source, external_id)` crosswalk key already exists (e.g. a shared PBR profile). It has **no name-based matching at all** — picking an existing player from a name search stays the UI's job (coach-confirmed). This is the load-bearing safety property: the writer physically cannot silently merge a coach's add onto a wrong same-name player.
