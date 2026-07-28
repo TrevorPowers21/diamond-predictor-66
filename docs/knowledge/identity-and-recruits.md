@@ -62,11 +62,12 @@ The one sentence: **the person's identity is ours and vendor-neutral (`players.i
 - `players.data_status` CHECK: `complete | partial | no_data | outlier` (a `'prospect'` value would need adding).
 - `syntheticSourceId` minted ids already exist in the `source_player_id` space (`d2-<hash>`), 4 copies.
 
-## Open questions (unresolved — update as Trevor answers)
+## Resolved (Trevor, 2026-07-28)
 
-1. **`data_status` for a coach-added/not-yet-real player** — new `'prospect'` value (clearer, small migration; my lean) vs reuse `'no_data'` (no migration, muddier). *(explained to Trevor 2026-07-28; awaiting answer)*
-2. **Mobile add surface** — near-term adds to the **target board**; do HS/JUCO recruits (no stats) also flow through it, or stay on the GM recruiting board (`gm_recruits`)? One unified "add a player" or target-board-only for now?
-3. **`player_external_ids` RLS** — app-wide readable (like `players`), or scoped?
+1. **`data_status` for a coach-added/not-yet-real player = new `'prospect'` value** (self-documenting; cleanly excluded from rankings/projections until real data links in). Small CHECK-constraint migration + update `data_status` switch sites. *(Proceeding unless Trevor countermands.)*
+2. **Mobile add surface = the target board.** The mobile page is a **quick coach tool** — see a player already on the board, **add a new player**, consolidate notes, "from the car" — that syncs to the **team-shared** target board so the head coach / other assistants see it on the web. Writes to `target_board`, NOT `gm_recruits`. HS/JUCO recruit profiles are a separate later concern. The add-new path still needs resolve-or-create (target board's NOT NULL FK).
+   - **Dependency:** "other staff see it on the web" requires `target_board` to be **team-shared** (program-scoped read) — it is (`reference_rls_scoping`); the `unique(user_id, …)` means rows are user-owned but program-readable. Verify during build.
+3. **`player_external_ids` RLS = app-wide readable.** Identity is global and the crosswalk holds only identity↔vendor-key mappings (no program-private data), so no bleed-over. Writes controlled (service / authenticated-with-care).
 
 ## Build sequence (Trevor, 2026-07-28)
 1. **Storage foundation first** — `player_external_ids` (+RLS), shared mint helper, resolve-or-create `players` path (kills the blob). This is what makes an add store properly.
