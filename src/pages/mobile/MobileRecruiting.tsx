@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useGmRecruits, RECRUIT_LEVELS, RECRUIT_STAGES, recruitTypeForPosition,
-  recruitEntryClass, type GmRecruit, type NewRecruit, type RecruitType, type RecruitLevel,
+  type GmRecruit, type NewRecruit, type RecruitType, type RecruitLevel,
 } from "@/gm/hooks/useGmRecruits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -241,9 +241,6 @@ function AddRecruitSheet({ open, onOpenChange, defaultYear, onAdd }: {
           <Field label="PBR / PG Profile Link" hint="optional">
             <Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" />
           </Field>
-          <p className="text-[11px] text-muted-foreground">
-            Enters D1 as <b className="text-foreground">{recruitEntryClass(level)}</b> · {defaultYear} class · stage starts Evaluating. Log contact notes after saving.
-          </p>
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={!canSave} style={OSWALD} className="uppercase tracking-wide">Add to Recruiting Board</Button>
