@@ -62,6 +62,20 @@ Unchanged and central: `target_board` (by `user_id`/`customer_team_id`), `gm_rec
 2. **Agree this spec** — ✅ open questions resolved (see above).
 3. **Mobile add page** — ⏳ NEXT: the phone-friendly coach tool — view the team-shared target board, **add a new player** (→ `resolve_or_create_prospect` → insert into `target_board`), consolidate notes. Built on #1 so every add stores correctly. Design via Stitch first (UI change).
 
+## Mobile V1 — locked design (Trevor confirmed 2026-07-28)
+
+**Principle:** mobile is a *condensed* capture surface — "add the player, drop the note, from the car." The web version carries everything richer; mobile trims to what matters in the moment. The coach reviews/fills the rest on web.
+
+**Mobile fields (add-new player):** first name, last name, **position**, **team / high school**, **note**, and an **optional PBR/PG link** (the de-dup anchor; kept for V1, may need user validation — Trevor isn't the end user). Status defaults to `WATCHING`. Adding an *existing* player (search hit) skips all of this — just tap and note.
+
+**Notes are a dated, authored append-only LOG — compliance requirement (Trevor).** Every note carries its own date + author; never a single overwrite field. Reuse an existing dated log — `gm_target_notes` (has explicit `note_date DATE` + `author` + `created_at`, team-scoped `is_team_member`) or `coach_notes` (`content`, `user_id`, `created_at`). **Build task: confirm which one the web target board reads, and write mobile notes to that same log so mobile/web are consistent.**
+
+**Web-only (carries more values, not on mobile):** stage funnel, projection tier, phone/email/guardian/coach contacts, travel org, state, level, asking price / target offer / scholarship %, offer amount, projection recipe. All keyed to the same `player_id`, so a mobile add is fully fleshed out later on web with nothing lost.
+
+**Two motions on the screen:** (1) *see* the team-shared target board as a scannable phone list (name · position · team · status); (2) *add* (search existing → tap → note; or ＋new → the fields above). Note-first: tap any player → add a dated note.
+
+**Ships to prod WITH the identity foundation** (Trevor: design mobile before we push this to prod) — one feature PR.
+
 ## Resolved (Trevor, 2026-07-28)
 
 - **`data_status` for a coach-added/not-yet-real player:** new dedicated **`'prospect'`** value (self-documenting; cleanly excluded from rankings/projections until real data links in). *Proceeding with this unless Trevor says otherwise — small CHECK-constraint migration + update the places that switch on `data_status`.*
