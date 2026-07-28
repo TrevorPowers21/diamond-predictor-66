@@ -62,7 +62,13 @@ Unchanged and central: `target_board` (by `user_id`/`customer_team_id`), `gm_rec
 2. **Agree this spec** — ✅ open questions resolved (see above).
 3. **Mobile add page** — ⏳ NEXT: the phone-friendly coach tool — view the team-shared target board, **add a new player** (→ `resolve_or_create_prospect` → insert into `target_board`), consolidate notes. Built on #1 so every add stores correctly. Design via Stitch first (UI change).
 
-## Mobile V1 — locked design (Trevor confirmed 2026-07-28)
+## ⚠️ Surface correction (Trevor, 2026-07-28) — mobile = RECRUITING BOARD, not target board
+
+The mobile page is the **freshman/JUCO recruiting board** (`gm_recruits`), NOT the transfer target board — **portal is a separate surface**. This snaps back to the original roadmap wording ("mobile link for the recruiting board"). Consequence: the mobile add writes a **`gm_recruits`** row (program-owned recruit record), and notes are the **dated contact TIMELINE** (`gm_recruit_events`: `event_date` + `note`) — which already exists, nothing to add. The identity foundation (`player_external_ids` / `resolve_or_create_prospect`) is the **later linking spine** (used when a recruit's real data arrives), NOT wired into the mobile add.
+
+**BUILT 2026-07-28:** `src/pages/mobile/MobileRecruiting.tsx`, route `/m/recruiting` (ProtectedRoute). Year dropdown + position-group toggle (replaces desktop 3 columns), scannable recruit list, condensed add (first/last/position/level/HS + optional PBR link), dated timeline notes via `useGmRecruits().addEvent`. tsc clean. Reuses `useGmRecruits` wholesale.
+
+## Mobile V1 — earlier target-board framing (SUPERSEDED by the correction above)
 
 **Principle:** mobile is a *condensed* capture surface — "add the player, drop the note, from the car." The web version carries everything richer; mobile trims to what matters in the moment. The coach reviews/fills the rest on web.
 
