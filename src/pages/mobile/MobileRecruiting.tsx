@@ -24,7 +24,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Plus, CalendarDays, MessageSquarePlus, ChevronRight, Link2 } from "lucide-react";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Plus, CalendarDays, MessageSquarePlus, ChevronRight } from "lucide-react";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const GOLD = "#D4AF37";
@@ -214,46 +215,41 @@ function AddRecruitSheet({ open, onOpenChange, defaultYear, onAdd }: {
   };
 
   return (
-    <Sheet open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
-      <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto bg-background">
-        <SheetHeader>
-          <SheetTitle className="uppercase tracking-[0.15em] text-[#D4AF37]" style={OSWALD}>Add Recruit</SheetTitle>
-        </SheetHeader>
-        <div className="mt-3 flex flex-col gap-3">
-          <div className="flex gap-2">
-            <Field label="First"><Input value={first} onChange={(e) => setFirst(e.target.value)} className="bg-card" /></Field>
-            <Field label="Last"><Input value={last} onChange={(e) => setLast(e.target.value)} className="bg-card" /></Field>
+    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
+      <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
+        <DialogHeader><DialogTitle style={OSWALD}>Add Recruit</DialogTitle></DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="First Name"><Input value={first} onChange={(e) => setFirst(e.target.value)} className="h-9 text-sm" /></Field>
+            <Field label="Last Name"><Input value={last} onChange={(e) => setLast(e.target.value)} className="h-9 text-sm" /></Field>
           </div>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-3">
             <Field label="Position">
               <Select value={position} onValueChange={setPosition}>
-                <SelectTrigger className="bg-card"><SelectValue placeholder="Pos" /></SelectTrigger>
-                <SelectContent>{POS_OPTIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>{POS_OPTIONS.map((p) => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
             <Field label="Level">
               <Select value={level} onValueChange={(v) => setLevel(v as RecruitLevel)}>
-                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
-                <SelectContent>{RECRUIT_LEVELS.map((l) => <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>)}</SelectContent>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{RECRUIT_LEVELS.map((l) => <SelectItem key={l.value} value={l.value} className="text-xs">{l.label}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
           </div>
-          <Field label="High School / Team"><Input value={hs} onChange={(e) => setHs(e.target.value)} className="bg-card" /></Field>
-          <Field label="PBR / PG profile link" hint="optional">
-            <div className="flex items-center gap-2 rounded-md border border-input bg-card px-2">
-              <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="border-0 bg-transparent px-0" />
-            </div>
+          <Field label="High School / Team"><Input value={hs} onChange={(e) => setHs(e.target.value)} className="h-9 text-sm" /></Field>
+          <Field label="PBR / PG Profile Link" hint="optional">
+            <Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" />
           </Field>
           <p className="text-[11px] text-muted-foreground">
-            Enters D1 as <b className="text-foreground">{recruitEntryClass(level)}</b> · {defaultYear} class · stage starts Evaluating. Add contact notes after saving.
+            Enters D1 as <b className="text-foreground">{recruitEntryClass(level)}</b> · {defaultYear} class · stage starts Evaluating. Log contact notes after saving.
           </p>
-          <Button onClick={save} disabled={!canSave}
-            className="mt-1 h-11 w-full font-bold uppercase tracking-wide disabled:opacity-40"
-            style={{ ...OSWALD, backgroundColor: GOLD, color: SIDEBAR }}>Add to Recruiting Board</Button>
         </div>
-      </SheetContent>
-    </Sheet>
+        <DialogFooter>
+          <Button onClick={save} disabled={!canSave} style={OSWALD} className="uppercase tracking-wide">Add to Recruiting Board</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -321,8 +317,8 @@ function TimelineSheet({ recruit, onOpenChange, events, onAddNote }: {
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-1 flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+    <label className="block">
+      <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>
         {label}{hint ? <span className="ml-1 lowercase tracking-normal opacity-70">({hint})</span> : null}
       </span>
       {children}
