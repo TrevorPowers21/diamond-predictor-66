@@ -61,8 +61,11 @@ Unchanged and central: `target_board` (by `user_id`/`customer_team_id`), `gm_rec
 2. **Agree this spec** (recruit-profile scope, linking policy, `data_status` value).
 3. **Mobile add page** — the phone-friendly "add a player to the target board" UI, built on top of #1 so every add stores correctly. (Independent of the recruit-profile phase.)
 
-## Open questions for Trevor
+## Resolved (Trevor, 2026-07-28)
 
-- **`data_status` for a coach-added/not-yet-real player:** add a `'prospect'` enum value, or reuse `'no_data'`? (Affects how these are filtered out of rankings/projections until real data arrives.)
-- **Mobile add surface:** the near-term page adds to the **target board** — do recruits (HS/JUCO, no stats) also go through this, or do those stay on the GM **recruiting board** (`gm_recruits`)? i.e., is the mobile add one unified "add a player" or target-board-only for now?
-- **Crosswalk RLS:** app-wide readable (like `players`), or scoped?
+- **`data_status` for a coach-added/not-yet-real player:** new dedicated **`'prospect'`** value (self-documenting; cleanly excluded from rankings/projections until real data links in). *Proceeding with this unless Trevor says otherwise — small CHECK-constraint migration + update the places that switch on `data_status`.*
+- **Mobile add surface = the target board.** The mobile page is a **quick coach tool**: see a player already on the board, **add a new player**, and consolidate notes — "from the car." It syncs to the **team-shared** target board so the head coach and other assistants see it on the web version. So the mobile add writes to `target_board` (not the GM `gm_recruits` recruiting board). HS/JUCO recruit profiles stay a separate, later concern. The add-new path still needs the resolve-or-create storage foundation (target board's NOT NULL FK).
+- **`player_external_ids` RLS = app-wide readable.** Identity is global, and the crosswalk holds only identity↔vendor-key mappings (no program-private data), so there's no bleed-over risk. Writes controlled (service / authenticated-with-care).
+
+## Dependency to confirm during build
+The mobile page's "other staff see it on the web" requires the **target board to be team-shared** (program-scoped read), which the RLS is (`reference_rls_scoping`: `target_board` scoped by `customer_team_id`). Verify a coach's mobile add is visible to the whole staff (the `unique(user_id, …)` on `target_board` means rows are user-owned but program-readable) before relying on it.
