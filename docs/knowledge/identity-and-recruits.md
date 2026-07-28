@@ -70,6 +70,12 @@ The one sentence: **the person's identity is ours and vendor-neutral (`players.i
 3. **`player_external_ids` RLS = app-wide readable.** Identity is global and the crosswalk holds only identity↔vendor-key mappings (no program-private data), so no bleed-over. Writes controlled (service / authenticated-with-care).
 
 ## Build sequence (Trevor, 2026-07-28)
-1. **Storage foundation first** — `player_external_ids` (+RLS), shared mint helper, resolve-or-create `players` path (kills the blob). This is what makes an add store properly.
-2. **Agree this spec.**
-3. **Mobile add page** — phone-friendly "add a player to the target board," built on #1. (#1 mobile = the coach's own logged-in phone view, not a public share link — Trevor, 2026-07-28.)
+1. **Storage foundation** — ✅ **BUILT + verified on staging 2026-07-28.** Migrations `20260728120000` (crosswalk + `data_status='prospect'`) and `20260728121000` (`resolve_or_create_prospect` RPC) on `feature/recruit-ids-mobile-board`. Round-trip verified in-DB (mint → prospect row + rstr/pbr crosswalk → same-external-key resolves w/o dup → fresh-mint fallback → empty-name guard). **Not on prod yet** — promotes with the feature PR (Trevor drives the main merge).
+2. **Agree this spec** — ✅ open questions resolved.
+3. **Mobile add page** — ⏳ NEXT: coach's logged-in phone view (NOT a public share link — Trevor). View team-shared target board, add a new player via the RPC, jot notes. Stitch-first (UI change).
+
+## Verified facts from the build (2026-07-28)
+- **`resolve_or_create_prospect` enforces confirm-don't-guess IN SQL:** it auto-resolves an identity ONLY when an exact `(source, external_id)` crosswalk key already exists (e.g. a shared PBR profile). It has **no name-based matching at all** — picking an existing player from a name search stays the UI's job (coach-confirmed). This is the load-bearing safety property: the writer physically cannot silently merge a coach's add onto a wrong same-name player.
+- **The rstr key lives in the same space as `source_player_id`:** a minted prospect gets `players.source_player_id = 'rstr-<uuid-hex>'` AND a `('rstr', same)` crosswalk row (`= players.source_player_id`). This is Trevor's "same structure … carries in from freshman" — the id is real from day one; when TruMedia data later arrives, linking reconciles (add `('trumedia', …)`; keep or repoint per the linking policy).
+- **Cross-program de-dup without a fuzzy match:** if a second program pastes the same external profile key, the RPC's exact-key branch resolves to the SAME identity — the multi-team "one person, two private boards" outcome, achieved by a deterministic key, not a guess.
+- **`target_board` is already team-shared** (`target_board_select` = `is_team_member(customer_team_id)`), so a coach's mobile add is visible to the whole staff on the web with no RLS change. Rows are user-owned (`unique(user_id, customer_team_id, player_id, …)`) but program-readable.
