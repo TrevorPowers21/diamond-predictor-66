@@ -89,7 +89,7 @@ export default function MobileRecruiting() {
     return [...set].sort((a, b) => a - b);
   }, [years]);
   const [year, setYear] = useState<number | null>(null);
-  const activeYear = year ?? (years.length ? years[years.length - 1] : yearOptions[0]);
+  const activeYear = year ?? (years.length ? years[0] : yearOptions[0]);
   const [group, setGroup] = useState<RecruitType>("hitter");
 
   const list = useMemo(
