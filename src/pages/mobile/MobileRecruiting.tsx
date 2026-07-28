@@ -261,7 +261,7 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
   );
 }
 
-// ---------- Recruit detail: dated scouting reports (main) + contact timeline ----------
+// ---------- Recruit detail: condensed reports + contact timeline; add via popups ----------
 function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onAddEvent }: {
   recruit: GmRecruit | null; onOpenChange: (o: boolean) => void;
   reports: { id: string; report_date: string; body: string | null; projection_tier: RecruitTier | null; author: string | null }[];
@@ -269,86 +269,138 @@ function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onA
   onAddReport: (date: string, body: string, tier?: RecruitTier | null) => void;
   onAddEvent: (date: string, note: string) => void;
 }) {
-  const [rptDate, setRptDate] = useState(today()); const [rptBody, setRptBody] = useState(""); const [rptTier, setRptTier] = useState<string>("");
-  const [evDate, setEvDate] = useState(today()); const [evNote, setEvNote] = useState("");
-  const submitReport = () => { if (rptBody.trim()) { onAddReport(rptDate, rptBody.trim(), (rptTier || null) as RecruitTier | null); setRptBody(""); setRptTier(""); setRptDate(today()); } };
-  const submitEvent = () => { if (evNote.trim()) { onAddEvent(evDate, evNote.trim()); setEvNote(""); setEvDate(today()); } };
+  const [reportOpen, setReportOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [expR, setExpR] = useState<Set<string>>(new Set());
+  const [expE, setExpE] = useState<Set<string>>(new Set());
+  const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (id: string) =>
+    setter((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
-    <Sheet open={!!recruit} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto bg-background">
-        <SheetHeader>
-          <SheetTitle className="uppercase tracking-[0.12em] text-foreground" style={OSWALD}>
-            {recruit ? `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() : ""}
-          </SheetTitle>
-          {recruit && (
-            <p className="text-[12px] text-muted-foreground">
-              {[recruit.position, recruit.high_school, levelLabel(recruit.level)].filter(Boolean).join(" · ")}
-            </p>
-          )}
-        </SheetHeader>
+    <>
+      <Sheet open={!!recruit} onOpenChange={onOpenChange}>
+        <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto bg-background">
+          <SheetHeader>
+            <SheetTitle className="uppercase tracking-[0.12em] text-foreground" style={OSWALD}>
+              {recruit ? `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() : ""}
+            </SheetTitle>
+            {recruit && (
+              <p className="text-[12px] text-muted-foreground">
+                {[recruit.position, recruit.high_school, levelLabel(recruit.level)].filter(Boolean).join(" · ")}
+              </p>
+            )}
+          </SheetHeader>
 
-        {/* SCOUTING REPORTS — the main purpose */}
-        <section className="mt-3 rounded-md border border-border/60 bg-card/40 p-3">
-          <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-[#D4AF37]" style={OSWALD}>
-            <ClipboardList className="h-4 w-4" /> Scouting Report
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 rounded-md border border-input bg-card px-2 py-1.5">
-              <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <input type="date" value={rptDate} max={today()} onChange={(e) => setRptDate(e.target.value)} className="bg-transparent text-[13px] text-foreground outline-none" style={{ colorScheme: "dark" }} />
-            </div>
-            <Select value={rptTier} onValueChange={setRptTier}>
-              <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Grade (optional)" /></SelectTrigger>
-              <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <Textarea value={rptBody} onChange={(e) => setRptBody(e.target.value)} rows={3} placeholder="Live look: plus arm, quick hands, chase needs work…" className="mt-2 bg-card" />
-          <Button onClick={submitReport} disabled={!rptBody.trim()} className="mt-2 h-9 w-full font-semibold uppercase tracking-wide disabled:opacity-40" style={{ ...OSWALD, backgroundColor: GOLD, color: SIDEBAR }}>Save Report</Button>
-
-          <div className="mt-3 flex flex-col gap-2">
+          {/* SCOUTING REPORTS */}
+          <section className="mt-4">
+            <SectionHead icon={<ClipboardList className="h-4 w-4" />} title="Scouting Reports" count={reports.length}
+              accent onAdd={() => setReportOpen(true)} />
             {reports.length === 0 ? (
-              <p className="py-2 text-center text-[12px] text-muted-foreground">No reports yet.</p>
-            ) : reports.map((r) => {
-              const tm = tierMeta(r.projection_tier);
-              return (
-                <div key={r.id} className="rounded-md border-l-2 border-[#D4AF37]/40 bg-card/40 px-3 py-2">
-                  <div className="mb-1 flex items-center gap-2">
-                    <span className="text-[12px] font-semibold text-[#D4AF37]" style={OSWALD}>{fmtDate(r.report_date)}</span>
-                    {tm && <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", toneClass(tm.tone))} style={OSWALD}>{tm.label}</span>}
-                    {r.author && <span className="ml-auto truncate text-[10px] text-muted-foreground">{r.author}</span>}
-                  </div>
-                  <p className="text-[13px] leading-snug text-foreground">{r.body}</p>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+              <p className="py-3 text-center text-[12px] text-muted-foreground">No reports yet — tap Add.</p>
+            ) : (
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {reports.map((r) => {
+                  const tm = tierMeta(r.projection_tier); const open = expR.has(r.id);
+                  return (
+                    <li key={r.id}>
+                      <button onClick={() => toggle(setExpR)(r.id)} className="w-full rounded-md border-l-2 border-[#D4AF37]/40 bg-card/40 px-3 py-2 text-left">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-semibold text-[#D4AF37]" style={OSWALD}>{fmtDate(r.report_date)}</span>
+                          {tm && <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", toneClass(tm.tone))} style={OSWALD}>{tm.label}</span>}
+                          <span className="ml-auto text-[10px] text-muted-foreground">{open ? "collapse" : "read"}</span>
+                        </div>
+                        <p className={cn("mt-0.5 text-[13px] leading-snug text-foreground", !open && "line-clamp-1")}>{r.body}</p>
+                        {open && r.author && <p className="mt-1 text-[10px] text-muted-foreground">— {r.author}</p>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
 
-        {/* CONTACT TIMELINE */}
-        <section className="mt-4 mb-6">
-          <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground" style={OSWALD}>
-            <MessageSquarePlus className="h-4 w-4" /> Contact Timeline
-          </div>
+          {/* CONTACT TIMELINE */}
+          <section className="mt-5 mb-6">
+            <SectionHead icon={<MessageSquarePlus className="h-4 w-4" />} title="Contact Timeline" count={events.length}
+              onAdd={() => setContactOpen(true)} />
+            {events.length === 0 ? (
+              <p className="py-3 text-center text-[12px] text-muted-foreground">No contact logged — tap Add.</p>
+            ) : (
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {events.map((e) => {
+                  const open = expE.has(e.id);
+                  return (
+                    <li key={e.id}>
+                      <button onClick={() => toggle(setExpE)(e.id)} className="flex w-full gap-3 border-l-2 border-border pl-3 text-left">
+                        <span className="w-14 shrink-0 py-0.5 text-[12px] font-semibold text-muted-foreground" style={OSWALD}>{fmtDate(e.event_date)}</span>
+                        <span className={cn("py-0.5 text-[13px] leading-snug text-foreground", !open && "line-clamp-1")}>{e.note}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </SheetContent>
+      </Sheet>
+
+      {/* composer popups */}
+      <EntryComposer open={reportOpen} onOpenChange={setReportOpen} title="New Scouting Report" withTier
+        rows={7} placeholder="Full write-up — mechanics, tools, makeup, projection…"
+        onSave={(date, body, tier) => onAddReport(date, body, (tier || null) as RecruitTier | null)} />
+      <EntryComposer open={contactOpen} onOpenChange={setContactOpen} title="Log Contact"
+        rows={5} placeholder="Who you talked to and what was said — keep it detailed for compliance…"
+        onSave={(date, body) => onAddEvent(date, body)} />
+    </>
+  );
+}
+
+function SectionHead({ icon, title, count, accent, onAdd }: { icon: React.ReactNode; title: string; count: number; accent?: boolean; onAdd: () => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className={cn("flex items-center gap-2 text-[11px] uppercase tracking-[0.15em]", accent ? "text-[#D4AF37]" : "text-muted-foreground")} style={OSWALD}>
+        {icon} {title}{count ? <span className="opacity-70">({count})</span> : null}
+      </div>
+      <button onClick={onAdd} className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-[#D4AF37]" style={OSWALD}>
+        <Plus className="h-3.5 w-3.5" /> Add
+      </button>
+    </div>
+  );
+}
+
+// A popup composer: date + (optional tier) + a roomy textarea, so a coach can
+// write something detailed and review the whole excerpt before saving.
+function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder, onSave }: {
+  open: boolean; onOpenChange: (o: boolean) => void; title: string; withTier?: boolean; rows: number; placeholder: string;
+  onSave: (date: string, body: string, tier?: string) => void;
+}) {
+  const [date, setDate] = useState(today()); const [body, setBody] = useState(""); const [tier, setTier] = useState("");
+  const reset = () => { setDate(today()); setBody(""); setTier(""); };
+  const save = () => { if (body.trim()) { onSave(date, body.trim(), tier || undefined); reset(); onOpenChange(false); } };
+  return (
+    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
+      <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
+        <DialogHeader><DialogTitle style={OSWALD}>{title}</DialogTitle></DialogHeader>
+        <div className="space-y-3 py-1">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 rounded-md border border-input bg-card px-2 py-1.5">
               <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <input type="date" value={evDate} max={today()} onChange={(e) => setEvDate(e.target.value)} className="bg-transparent text-[13px] text-foreground outline-none" style={{ colorScheme: "dark" }} />
+              <input type="date" value={date} max={today()} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-[13px] text-foreground outline-none" style={{ colorScheme: "dark" }} />
             </div>
-            <Input value={evNote} onChange={(e) => setEvNote(e.target.value)} placeholder="Called his coach…" className="h-9 flex-1 text-sm" />
-            <Button onClick={submitEvent} disabled={!evNote.trim()} size="sm" variant="secondary" className="h-9 shrink-0">Log</Button>
+            {withTier && (
+              <Select value={tier} onValueChange={setTier}>
+                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Grade (optional)" /></SelectTrigger>
+                <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
           </div>
-          <ul className="mt-2 flex flex-col gap-2">
-            {events.map((e) => (
-              <li key={e.id} className="flex gap-3 border-l-2 border-border pl-3">
-                <span className="w-14 shrink-0 text-[12px] font-semibold text-muted-foreground" style={OSWALD}>{fmtDate(e.event_date)}</span>
-                <span className="text-[13px] leading-snug text-foreground">{e.note}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      </SheetContent>
-    </Sheet>
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={rows} placeholder={placeholder} className="bg-card" autoFocus />
+        </div>
+        <DialogFooter>
+          <Button onClick={save} disabled={!body.trim()} style={OSWALD} className="uppercase tracking-wide">Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
