@@ -514,16 +514,19 @@ export async function computeAndStorePitchingScores(
         // (era_pr_plus etc.) instead of projected rates. Used as the
         // "last-year pRV+" for WAR snapshots and any historical pRV+ view.
         // Null when any input is missing — caller must handle.
-        p_rv_plus: round2(
+        // pRV+ stored whole (mirrors wRC+). Math.round on the composite only —
+        // null stays null (Math.round(null) would wrongly be 0).
+        p_rv_plus:
           [ratings.eraPrPlus, ratings.fipPrPlus, ratings.whipPrPlus, ratings.k9PrPlus, ratings.bb9PrPlus, ratings.hr9PrPlus].every((v) => v != null)
-            ? (Number(ratings.eraPrPlus) * pitchingEq.era_plus_weight) +
+            ? Math.round(
+              (Number(ratings.eraPrPlus) * pitchingEq.era_plus_weight) +
               (Number(ratings.fipPrPlus) * pitchingEq.fip_plus_weight) +
               (Number(ratings.whipPrPlus) * pitchingEq.whip_plus_weight) +
               (Number(ratings.k9PrPlus) * pitchingEq.k9_plus_weight) +
               (Number(ratings.bb9PrPlus) * pitchingEq.bb9_plus_weight) +
               (Number(ratings.hr9PrPlus) * pitchingEq.hr9_plus_weight)
-            : null
-        ),
+            )
+            : null,
         combined_used: blended.combined,
         combined_ip: blended.combined ? blended.totalIp : null,
         combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,

@@ -13,6 +13,8 @@ export type TransferSnapshot = {
   p_war?: number | null;
   owar: number | null;
   nil_valuation: number | null;
+  twp_hitter_market_value?: number | null;
+  twp_pitcher_market_value?: number | null;
   from_team: string | null;
   from_conference: string | null;
 };
@@ -105,6 +107,14 @@ export type BuildPlayer = {
     model_type: "returner" | "transfer" | string | null;
     status: string | null;
   } | null;
+  // Phase B: the NEUTRAL base (dev_agg=0 precompute line) the toggle handler
+  // recomputes from — kept separate from `prediction`, which holds the adjusted
+  // snapshot once Slice 1 lands. Loose shape; read like `prediction`.
+  neutralPrediction?: Record<string, any> | null;
+  // Phase B (transient, never persisted): true when a toggle moved this session,
+  // so the sim recomputes this row from neutral instead of reading its snapshot.
+  // Cleared on save. Clean rows read the stored adjusted snapshot (no flicker).
+  _dirty?: boolean;
   nilVal?: number | null;
   nil_owar?: number | null;
   team_metrics?: TeamMetricInputs | null;
