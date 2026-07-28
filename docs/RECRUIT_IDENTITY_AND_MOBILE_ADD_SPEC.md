@@ -57,9 +57,10 @@ Unchanged and central: `target_board` (by `user_id`/`customer_team_id`), `gm_rec
 
 ## Sequenced build plan
 
-1. **Storage foundation (do first):** `player_external_ids` table (+ RLS); shared `src/lib/mintSyntheticSourceId` helper (retire the 4 copies); the resolve-or-create `players` path so a new add stores as a real entity; replace the `localPlayer` blob for new adds. This is what makes an add "store properly."
-2. **Agree this spec** (recruit-profile scope, linking policy, `data_status` value).
-3. **Mobile add page** — the phone-friendly "add a player to the target board" UI, built on top of #1 so every add stores correctly. (Independent of the recruit-profile phase.)
+1. **Storage foundation** — ✅ **DONE + verified on staging (2026-07-28).** `player_external_ids` crosswalk (+ app-wide read RLS), `data_status='prospect'`, and `resolve_or_create_prospect()` RPC (single authoritative writer; exact-external-key auto-link only, else fresh mint). Migrations `20260728120000` + `20260728121000`. Round-trip verified in-DB (mint → prospect row + rstr/pbr crosswalk → same-key resolves, no dup → fresh mint fallback → empty-name guard). *Not yet on prod — promotes with the feature PR, Trevor drives.*
+   - Remaining minor cleanup: consolidate the 4 `syntheticSourceId` copies into one `src/lib/` helper (the deterministic `d2-` import-script id — separate from the RPC's rstr mint; low priority).
+2. **Agree this spec** — ✅ open questions resolved (see above).
+3. **Mobile add page** — ⏳ NEXT: the phone-friendly coach tool — view the team-shared target board, **add a new player** (→ `resolve_or_create_prospect` → insert into `target_board`), consolidate notes. Built on #1 so every add stores correctly. Design via Stitch first (UI change).
 
 ## Resolved (Trevor, 2026-07-28)
 
