@@ -56,6 +56,7 @@ import RoleGuard from "@/components/RoleGuard";
 import HighFollowList from "./pages/HighFollowList";
 import Targets from "./pages/Targets";
 import Settings from "./pages/Settings";
+const MobileRecruiting = lazy(() => import("./pages/mobile/MobileRecruiting"));
 
 const queryClient = new QueryClient();
 
@@ -120,6 +121,8 @@ const router = createBrowserRouter([
       { path: "/dashboard/pitcher/:id/stats", element: <ProtectedRoute><PitcherStatsPage /></ProtectedRoute> },
       { path: "/dashboard/team-builder", element: <ProtectedRoute><TeamBuilder /></ProtectedRoute> },
       { path: "/dashboard/targets", element: <ProtectedRoute><Targets /></ProtectedRoute> },
+      // Mobile recruiting board — phone-first coach tool (freshman/JUCO recruits + dated timeline notes)
+      { path: "/m/recruiting", element: <ProtectedRoute><Suspense fallback={null}><MobileRecruiting /></Suspense></ProtectedRoute> },
       // Legacy /dashboard/high-follow URL still works — renders the standalone page so bookmarks don't break.
       { path: "/dashboard/high-follow", element: <ProtectedRoute><HighFollowList /></ProtectedRoute> },
       { path: "/dashboard/admin", element: <ProtectedRoute><AdminDashboard /></ProtectedRoute> },
