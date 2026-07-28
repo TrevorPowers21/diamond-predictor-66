@@ -42,6 +42,8 @@ One file per domain. Current set (will grow):
 
 - `db-safety-and-process.md` — migrations, staging→prod flow, RLS, PR/merge discipline, the runner gotchas.
 - `data-and-numbers.md` — the #1 rule: precompute/returner lines, no live calc, identical stat everywhere incl. toggles. *(to draft)*
+- `snapshots-and-recompute.md` — the neutral/player/transfer snapshot model, the derived-cascade conventions (whole-rv+ rounding, depth-role IP, position-owned market), and the full-recompute process. Toggles are sacred.
+- `eligibility-and-class.md` — `class_year` as source of truth, `class_transition` derivation, the stale-`SJ` bug + verified prod audit.
 - `money-and-budget.md` — Actual Pay/finalize, vendors, allocations↔contracts, committed-only totals. *(to draft)*
 - `projections-and-scouting.md` — WAR/wRC+/Stuff+, JUCO baselines, risk framework, competition translation. *(to draft)*
 - `access-and-tenancy.md` — RBAC, user_team_access, customer_teams, the active build. *(to draft)*
