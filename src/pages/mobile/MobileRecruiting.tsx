@@ -191,7 +191,7 @@ export default function MobileRecruiting() {
       </button>
 
       <AddRecruitDialog open={addOpen} onOpenChange={setAddOpen} defaultYear={activeYear}
-        onAdd={(r) => { addRecruit(r); setAddOpen(false); }} />
+        onAdd={(r, rpt) => { addRecruit(r, rpt); setAddOpen(false); }} />
       <RecruitSheet
         recruit={openRecruit} onOpenChange={(o) => !o && setOpenRecruit(null)}
         reports={openRecruit ? reportsByRecruit.get(openRecruit.id) ?? [] : []}
@@ -205,14 +205,16 @@ export default function MobileRecruiting() {
 
 // ---------- Add Recruit (matches the desktop board's Dialog; position = groups) ----------
 function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
-  open: boolean; onOpenChange: (o: boolean) => void; defaultYear: number; onAdd: (r: NewRecruit) => void;
+  open: boolean; onOpenChange: (o: boolean) => void; defaultYear: number;
+  onAdd: (r: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }) => void;
 }) {
   const [first, setFirst] = useState(""); const [last, setLast] = useState("");
   const [groupKey, setGroupKey] = useState<GroupKey>("c"); const [hs, setHs] = useState("");
   const [level, setLevel] = useState<RecruitLevel>("hs"); const [link, setLink] = useState("");
+  const [rptDate, setRptDate] = useState(today()); const [rptTier, setRptTier] = useState(""); const [rptBody, setRptBody] = useState("");
   const canSave = first.trim() && last.trim();
 
-  const reset = () => { setFirst(""); setLast(""); setGroupKey("c"); setHs(""); setLevel("hs"); setLink(""); };
+  const reset = () => { setFirst(""); setLast(""); setGroupKey("c"); setHs(""); setLevel("hs"); setLink(""); setRptDate(today()); setRptTier(""); setRptBody(""); };
   const save = () => {
     const grp = POS_GROUPS.find((g) => g.key === groupKey)!;
     const r: NewRecruit = {
@@ -224,7 +226,8 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
       phone: null, email: null, guardian_name: null, guardian_phone: null,
       coach_name: null, coach_phone: null, extra_contacts: null,
     };
-    onAdd(r); reset();
+    const initialReport = rptBody.trim() ? { report_date: rptDate, body: rptBody.trim(), tier: (rptTier || null) as RecruitTier | null } : undefined;
+    onAdd(r, initialReport); reset();
   };
 
   return (
@@ -252,6 +255,24 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
           </div>
           <Field label="High School / Team"><Input value={hs} onChange={(e) => setHs(e.target.value)} className="h-9 text-sm" /></Field>
           <Field label="PBR / PG Profile Link" hint="optional"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" /></Field>
+
+          {/* Optional first scouting report — consolidate notes at add time */}
+          <div className="mt-1 border-t border-border/60 pt-3">
+            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-[#D4AF37]" style={OSWALD}>
+              <ClipboardList className="h-4 w-4" /> Scouting Report <span className="lowercase tracking-normal opacity-70">(optional)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 rounded-md border border-input bg-card px-2 py-1.5">
+                <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <input type="date" value={rptDate} max={today()} onChange={(e) => setRptDate(e.target.value)} className="bg-transparent text-[13px] text-foreground outline-none" style={{ colorScheme: "dark" }} />
+              </div>
+              <Select value={rptTier} onValueChange={setRptTier}>
+                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Grade (optional)" /></SelectTrigger>
+                <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <Textarea value={rptBody} onChange={(e) => setRptBody(e.target.value)} rows={4} placeholder="Consolidate your notes now, or leave blank and add later…" className="mt-2 bg-card" />
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={!canSave} style={OSWALD} className="uppercase tracking-wide">Add to Recruiting Board</Button>
