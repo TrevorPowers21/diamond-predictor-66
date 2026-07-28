@@ -348,6 +348,8 @@ async function main() {
             p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg,
             p_wrc_plus: pred.p_wrc_plus, o_war: pred.o_war,
             market_value: pred.twp_hitter_market_value ?? pred.market_value,
+            twp_hitter_market_value: pred.twp_hitter_market_value ?? null,
+            twp_pitcher_market_value: pred.twp_pitcher_market_value ?? null,
             hitter_depth_role: pred.hitter_depth_role,
           } : null,
         });
@@ -370,6 +372,8 @@ async function main() {
             p_rv_plus: pred.p_rv_plus, p_war: pred.p_war,
             pitcher_role: pred.pitcher_role, pitcher_depth_role: pred.pitcher_depth_role,
             market_value: pred.twp_pitcher_market_value ?? pred.market_value,
+            twp_hitter_market_value: pred.twp_hitter_market_value ?? null,
+            twp_pitcher_market_value: pred.twp_pitcher_market_value ?? null,
           } : null,
         });
       } else {

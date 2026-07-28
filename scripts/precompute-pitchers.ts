@@ -23,6 +23,8 @@ import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors";
 import { fetchConferenceStats } from "@/lib/supabaseQueries";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { resolveClassTransition } from "@/lib/classTransitionUtils";
+import { derivePitcherStored } from "@/lib/predictionEngine";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 import {
@@ -254,7 +256,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status, is_twp, ip"),
+      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status, is_twp, ip, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => {
@@ -363,7 +365,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("player_predictions")
-        .select("id, player_id, model_type, variant, status, updated_at, class_transition, dev_aggressiveness")
+        .select("id, player_id, model_type, variant, status, updated_at, class_transition, class_transition_overridden, dev_aggressiveness")
         .in("player_id", idsChunk)
         .in("model_type", ["returner", "transfer"])
         .is("customer_team_id", null)
@@ -413,6 +415,10 @@ async function main() {
 
   for (const p of pitchers) {
     const pred = bestPredByPlayer.get(p.id);
+    // class_year is the source of truth for class_transition (dev factor + display);
+    // a coach override wins. Derived here so the next precompute self-corrects the
+    // pervasive stale "SJ" default. See docs/knowledge/eligibility-and-class.md.
+    const resolvedCt = resolveClassTransition((p as any).class_year, pred);
     const pmRow = findPm(p);
 
     // Resolve from team: prefer PM TeamID → players.team_id → name lookup
@@ -444,7 +450,7 @@ async function main() {
         team: p.team,
         team_id: p.team_id,
         source_player_id: p.source_player_id,
-        class_transition: pred?.class_transition ?? null,
+        class_transition: resolvedCt,
         dev_aggressiveness: Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : null,
       },
       fromTeam: fromTeamRow,
@@ -481,7 +487,7 @@ async function main() {
     }
 
     const final = applyTransferPitcherPostprocess(projected, {
-      classTransition: pred?.class_transition ?? null,
+      classTransition: resolvedCt,
       devAggressiveness: pred?.dev_aggressiveness ?? null,
       isJucoSource: result.isJucoSource,
       pitchingEq,
@@ -491,14 +497,17 @@ async function main() {
 
     bumpDiv(p.division, "computed");
 
-    // projected_ip drives pWAR — base SP/RP/SM lookup from equation weights.
-    // Display overlays (depth_role) modify this at read time; the stored
-    // value is the base-role IP estimate.
-    const projectedIp = final.pitcher_role === "SP"
-      ? pitchingEq.pwar_ip_sp
-      : final.pitcher_role === "RP"
-        ? pitchingEq.pwar_ip_rp
-        : pitchingEq.pwar_ip_sm;
+    // Derive projected_ip + p_war + depth role through the canonical path (classify
+    // the fine depth role from real IP → that role's IP), matching the recalc engine
+    // + returner precompute. One writer owns projected_ip / p_war / depth role / market
+    // — no coarse SP/RP/SM IP fork (which under-counted every fine reliever bucket).
+    const actualIp = Number(pmRow?.regular_season_ip ?? pmRow?.IP ?? (p as any).ip) || 0;
+    const derived = derivePitcherStored(
+      final.p_rv_plus,
+      final.pitcher_role,
+      { conference: toConference, team: toTeam.name, is_twp: !!(p as any).is_twp, ip: actualIp },
+      pitchingEq,
+    );
 
     upserts.push({
       player_id: p.id,
@@ -507,7 +516,7 @@ async function main() {
       variant: "precomputed",
       season,
       status: "active",
-      class_transition: pred?.class_transition ?? null,
+      class_transition: resolvedCt,
       dev_aggressiveness: pred?.dev_aggressiveness ?? null,
       p_era: final.p_era,
       p_fip: final.p_fip,
@@ -516,10 +525,12 @@ async function main() {
       p_bb9: final.p_bb9,
       p_hr9: final.p_hr9,
       p_rv_plus: final.p_rv_plus,
-      p_war: final.p_war,
-      market_value: final.market_value,
-      projected_ip: projectedIp,
+      p_war: derived.p_war,
+      market_value: derived.market_value,
+      twp_pitcher_market_value: (derived as any).twp_pitcher_market_value ?? null,
+      projected_ip: derived.projected_ip,
       pitcher_role: final.pitcher_role,
+      pitcher_depth_role: derived.pitcher_depth_role,
       // Keep precompute rows unlocked so subsequent runs can refresh them.
       // protect_locked_predictions trigger reverts rate columns when locked=true.
       locked: false,

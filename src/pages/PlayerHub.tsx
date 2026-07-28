@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
+import { useAuth } from "@/hooks/useAuth";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
@@ -153,6 +154,7 @@ export default function PlayerHub() {
   const setTab = (t: TabKey) => setParams((p) => { p.set("tab", t); return p; }, { replace: true });
 
   const gm = useGmRoster();
+  const { effectiveTeamId } = useAuth();
 
   const row = useMemo(
     () => [...gm.hitters, ...gm.pitchers].find((r) => r.player_id === playerId) ?? null,
@@ -208,11 +210,60 @@ export default function PlayerHub() {
   const isProgramPlayer = onLiveBuild === true;
   const resolving = gm.isLoading || (!!liveBuildId && membershipLoading);
 
+  // Target board: a non-rostered player who's on the VIEWING program's target board is
+  // shown DISPLAY-ONLY, reading its stored transfer_snapshot — the SAME line the
+  // TB board + targets page read — never the live preview. Null → pure scouting (interactive).
+  // MUST scope to effectiveTeamId: a multi-program user sees their board rows across ALL
+  // programs (RLS is per-user, not per-program), so without this filter a target on another
+  // program's board (e.g. a Grand Canyon target) wrongly pinned the profile read-only when
+  // viewed from Georgia. A TWP has TWO board rows (hitter slot + pitcher slot) → fetch both
+  // and pick the side matching this profile's classification below. One-way = a single row.
+  const { data: targetSnapRows = [] } = useQuery({
+    queryKey: ["player-hub-target-snapshot", playerId, effectiveTeamId],
+    enabled: !!playerId && !isProgramPlayer && !!effectiveTeamId,
+    queryFn: async () => {
+      const { data } = await (supabase as any).from("target_board")
+        .select("transfer_snapshot, production_notes, position_slot")
+        .eq("player_id", playerId).eq("customer_team_id", effectiveTeamId);
+      return (data ?? []) as any[];
+    },
+  });
+
   const dbName = dbPlayer ? [dbPlayer.first_name, dbPlayer.last_name].filter(Boolean).join(" ") : "";
   const name = (row?.name ?? dbName) || "Player";
   const position = row?.position ?? dbPlayer?.position ?? null;
   const classYr = row?.eligibility_class ?? row?.class_year ?? dbPlayer?.class_year ?? null;
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
+  // Pick the board row for the side this profile shows (TWP has two; else one).
+  const targetSnap = useMemo(() => {
+    const rows = targetSnapRows || [];
+    if (rows.length <= 1) return rows[0]?.transfer_snapshot ?? null;
+    const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+    return (rows.find((r) => isPit(r.position_slot) === isPitcher) ?? rows[0]).transfer_snapshot ?? null;
+  }, [targetSnapRows, isPitcher]);
+  // The target's saved dev-agg + depth (production_notes) for the matching side, passed
+  // as overrides so the profile's "2027 Projected Stats" slash + the dev-agg/depth toggle
+  // controls reflect the TOGGLED target line, not the neutral (dev-0) prediction. Without
+  // these the profile seeded sessionDevAgg from the neutral, so the slash showed stale.
+  const targetOverrides = useMemo(() => {
+    const rows = targetSnapRows || [];
+    if (!rows.length) return { dev: undefined as number | undefined, depth: undefined as string | undefined };
+    const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+    const m = rows.length <= 1 ? rows[0] : (rows.find((r) => isPit(r.position_slot) === isPitcher) ?? rows[0]);
+    let pn: any = m?.production_notes; try { pn = typeof pn === "string" ? JSON.parse(pn) : pn; } catch { pn = null; }
+    return { dev: Number.isFinite(Number(pn?.devAggressiveness)) ? Number(pn.devAggressiveness) : undefined, depth: pn?.depthRole ?? undefined };
+  }, [targetSnapRows, isPitcher]);
+  // For a board target: WAR/market from transfer_snapshot (owar / nil_valuation /
+  // twp_* field names), passed as overrides so the profile renders DISPLAY-ONLY.
+  const isTwp = !!dbPlayer?.is_twp;
+  const targetWar: number | null | undefined = targetSnap
+    ? (isPitcher ? (targetSnap.p_war ?? null) : (targetSnap.o_war ?? targetSnap.owar ?? null))
+    : undefined;
+  const targetMarket: number | null | undefined = targetSnap
+    ? (isTwp
+        ? (isPitcher ? (targetSnap.twp_pitcher_market_value ?? null) : (targetSnap.twp_hitter_market_value ?? null))
+        : (targetSnap.nil_valuation ?? null))
+    : undefined;
   const c = row ? playerComp(row) : null;
   const schMode = gm.budget?.scholarship_mode ?? "pct";
   const schDisplay = row?.scholarship_amount == null ? "—" : (schMode === "dollar" ? money(row.scholarship_amount) : `${Math.round(row.scholarship_amount)}%`);
@@ -353,8 +404,8 @@ export default function PlayerHub() {
     return (
       <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>}>
         {isPitcher
-          ? <PitcherProfile embedded idOverride={playerId} />
-          : <PlayerProfile embedded idOverride={playerId} />}
+          ? <PitcherProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} devAggOverride={targetOverrides.dev} roleOverride={targetOverrides.depth} />
+          : <PlayerProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} devAggOverride={targetOverrides.dev} roleOverride={targetOverrides.depth} />}
       </Suspense>
     );
   }

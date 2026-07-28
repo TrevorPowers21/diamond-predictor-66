@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
-import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole } from "@/lib/depthRoles";
+import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole, computeHitterMarketValue } from "@/lib/depthRoles";
 import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
@@ -39,7 +39,7 @@ import {
   pitcherRoleFromSlot,
 } from "../helpers";
 import type { BuildPlayer, TeamRow } from "../types";
-import { pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
 
 // ── Module-level pure helpers ────────────────────────────────────────────────
 
@@ -684,12 +684,23 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const storedMult = 1 + devAggClassAdj + storedDevAgg * 0.06;
       const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
       const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
-      const overlayScale = depthScale * devAggScale;
-
-      const owar = storedOwar != null ? storedOwar * overlayScale : null;
-      // market_value may be absent from p.prediction (saved build data). Fall back
-      // to transfer_snapshot.nil_valuation which IS populated from the load-build query.
-      const nil_valuation = storedMarket != null ? storedMarket * overlayScale : (p.transfer_snapshot?.nil_valuation ?? null);
+      void depthScale; // depth now flows through session PA in computeOWar below
+      // oWAR REBUILT from the dev-adjusted wRC+ over the session depth PA
+      // (computeOWar) — NOT scaled from stored oWAR. oWAR is affine in wRC+, so
+      // scaling double-scaled the replacement constant and inverted ordering
+      // (Souza/Traeger). Same fix as the returner path + PlayerProfile + precompute.
+      const adjWrc = lp.p_wrc_plus != null ? Math.round(Number(lp.p_wrc_plus) * devAggScale) : null;
+      const owar = adjWrc != null ? computeOWarFromWrcPlus(adjWrc, sessionPa) : null;
+      // Market is COMPUTED (not scaled) from oWAR at the DESTINATION conference
+      // (this build's team) + the current position — so same oWAR + same position
+      // + same conference always yields the identical dollar value, a position
+      // toggle flows through posMult, and a transfer is valued at the program
+      // building the roster, never its old school. Falls back to stored/snapshot
+      // only when oWAR is unavailable.
+      const nil_valuation = computeHitterMarketValue(
+        owar,
+        { conference: selectedTeamConference, position: p.position_slot ?? (p.player as any)?.position ?? (livePlayer as any)?.position ?? null },
+      ) ?? ((storedMarket as number | null) ?? p.transfer_snapshot?.nil_valuation ?? null);
       return {
         p_avg: lp.p_avg ?? null,
         p_obp: lp.p_obp ?? null,
@@ -806,6 +817,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
             hr9: pPower?.hr9PrPlus ?? null,
           },
           baseRole,
+          ip: (pStats as any)?.ip ?? null,
           fromEraPlus: fromPC?.era_plus ?? null,
           toEraPlus: toPC?.era_plus ?? null,
           fromFipPlus: fromPC?.fip_plus ?? null,
@@ -870,13 +882,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
       const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
 
+      // pRV+ stored/displayed whole (mirrors wRC+) so display and WAR share the integer.
       const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
-        ? (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
+        ? Math.round(
+          (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
           (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
           (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
           (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
           (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
           (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
+        )
         : result.p_rv_plus;
 
       return {
@@ -1141,7 +1156,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block M: computePitcherPwar ───────────────────────────────────────────────
   const computePitcherPwar = useCallback((p: BuildPlayer, source: any) => {
     const pRvPlusRaw = source?.p_rv_plus ?? source?.p_wrc_plus ?? p.transfer_snapshot?.p_rv_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
-    const pRvPlus = Number(pRvPlusRaw);
+    // pRV+ is whole everywhere (mirrors wRC+); round so WAR matches the displayed integer.
+    const pRvPlus = Math.round(Number(pRvPlusRaw));
     if (!Number.isFinite(pRvPlus) || pitchingEq.pwar_runs_per_win === 0) return null;
     const sourceId = (p.player as any)?.source_player_id ?? null;
     const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
@@ -1238,6 +1254,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         role: stats.role ?? null,
         g: stats.g ?? null,
         gs: stats.gs ?? null,
+        ip: stats.ip ?? null,
         team: teamName || null,
         teamId: teamRowForPark?.id ?? null,
         conference: teamRowForPark?.conference ?? null,
@@ -1281,6 +1298,40 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block O: playerProjection ────────────────────────────────────────────────
   const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
+    // ── Phase B: CLEAN read ──────────────────────────────────────────────────
+    // A CLEAN row (no toggle changed this session) reads its STORED adjusted
+    // snapshot directly — synchronous, no async recompute, so no load flicker.
+    // Only a DIRTY row (a toggle moved this session) falls through to recompute,
+    // and that recompute uses neutralPrediction (below) so it can't compound.
+    // Applies to ROSTERED transfers too (Hanley/Cespedes): they carry a real
+    // adjusted build snapshot in p.prediction just like returners. The field
+    // guards below (p_war / o_war present) protect against a wrong-side row, so
+    // a board target without a real snapshot simply falls through.
+    // A ROSTERED target reads its build player_snapshot ALWAYS — never live-compute
+    // (its toggles go through the roster save). Without this, a rostered TWP hitter
+    // fell through to the live path and computed off a wrong-team transfer wRC+
+    // (e.g. 113 → 1.42) instead of reading its snapshot (cornerstone → 1.499).
+    // CLEAN rows (no toggle moved this session) read their stored snapshot — including a
+    // rostered target, whose saved line then matches the roster. But a DIRTY rostered
+    // target must recompute LIVE like a returner (from its build neutralPrediction, below)
+    // so the coach actually sees the toggle move. A `|| rosteredTarget` clause used to force
+    // the snapshot read even when dirty, which made every toggle inert on transfer rows.
+    if (!(p as any)._dirty) {
+      // Build snapshot for rostered rows; transfer_snapshot (captured at add-time)
+      // for board targets — so targets read their stored line INSTANTLY instead of
+      // waiting on the async liveTargetPredictions query (kills the piecemeal load).
+      const snap: any = p.prediction ?? p.transfer_snapshot;
+      if (snap) {
+        if (treatAsPitcher && snap.p_war != null && snap.p_rv_plus != null) {
+          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_rv_plus)), owar: Number(snap.p_war), pwar: Number(snap.p_war) };
+        }
+        // transfer_snapshot stores oWAR as `owar`; build snapshot as `o_war`.
+        const hitterWar = snap.o_war ?? snap.owar;
+        if (!treatAsPitcher && hitterWar != null && snap.p_wrc_plus != null) {
+          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)), owar: Number(hitterWar), pwar: null };
+        }
+      }
+    }
     const storedPrecomputed = p.roster_status === "target" && p.player_id
       ? liveTargetPredictionByPlayerId.get(p.player_id)
       : null;
@@ -1300,9 +1351,17 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // reads) so TB values match what coaches see elsewhere. Fall back to the
     // live computeReturnerPitchingProjection only when no stored row exists
     // (e.g. a newly-added player whose precompute hasn't run yet).
-    const shown = (p.roster_status === "target")
+    // Returner compute base = neutralPrediction (the immutable dev_agg=0 line), so
+    // a DIRTY row's overlay recomputes from neutral and never stacks on an already-
+    // adjusted snapshot. Targets keep their live-target base.
+    // Only a BOARD-ONLY target (not yet on the roster) recomputes off its stored precomputed
+    // transfer line. A ROSTERED target recomputes from its build neutralPrediction — the same
+    // immutable dev_agg=0 base a returner uses — so a dirty toggle scales the correct neutral
+    // (not a wrong-team transfer number, the bug the old snapshot-always guard was papering over).
+    const boardOnlyTarget = p.roster_status === "target" && !(p as any).included_in_roster;
+    const shown = boardOnlyTarget
       ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
-      : (treatAsPitcher ? (p.prediction ?? computeReturnerPitchingProjection(p)) : p.prediction);
+      : (treatAsPitcher ? ((p.neutralPrediction ?? p.prediction) ?? computeReturnerPitchingProjection(p)) : (p.neutralPrediction ?? p.prediction));
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       // Mirror hitter dev_agg pattern: one ratio formula, no target-only gate,
@@ -1328,8 +1387,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         p_k9:       sourceBase.p_k9       != null ? Number(sourceBase.p_k9)       * devAggScalePitch    : null,
         p_bb9:      sourceBase.p_bb9      != null ? Number(sourceBase.p_bb9)      * invDevAggScalePitch : null,
         p_hr9:      sourceBase.p_hr9      != null ? Number(sourceBase.p_hr9)      * invDevAggScalePitch : null,
-        p_rv_plus:  sourceBase.p_rv_plus  != null ? Number(sourceBase.p_rv_plus)  * devAggScalePitch    : null,
-        p_wrc_plus: sourceBase.p_rv_plus  != null ? Number(sourceBase.p_rv_plus)  * devAggScalePitch    : (sourceBase.p_wrc_plus ?? null),
+        p_rv_plus:  sourceBase.p_rv_plus  != null ? Math.round(Number(sourceBase.p_rv_plus)  * devAggScalePitch)    : null,
+        p_wrc_plus: sourceBase.p_rv_plus  != null ? Math.round(Number(sourceBase.p_rv_plus)  * devAggScalePitch)    : (sourceBase.p_wrc_plus ?? null),
       } : sourceBase;
       // SP↔RP role-transition adjustment to rates. Mirrors PitcherProfile:
       // when the session role bucket differs from the stored role, scale rates
@@ -1366,9 +1425,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         const bb9P  = calcPitchingPlus(rtBb9,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
         const hr9P  = calcPitchingPlus(rtHr9,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
         const rtPRvPlus = [eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)
-          ? (Number(eraP) * pitchingEq.era_plus_weight) + (Number(fipP) * pitchingEq.fip_plus_weight) +
+          ? Math.round(
+            (Number(eraP) * pitchingEq.era_plus_weight) + (Number(fipP) * pitchingEq.fip_plus_weight) +
             (Number(whipP) * pitchingEq.whip_plus_weight) + (Number(k9P) * pitchingEq.k9_plus_weight) +
             (Number(bb9P) * pitchingEq.bb9_plus_weight) + (Number(hr9P) * pitchingEq.hr9_plus_weight)
+          )
           : (devSource.p_rv_plus ?? devSource.p_wrc_plus ?? null);
         return {
           ...devSource,
@@ -1405,12 +1466,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
           default:                      return pitchingEq.pwar_ip_rp;
         }
       })();
-      const adjRvForWar = source?.p_rv_plus != null ? Number(source.p_rv_plus) : null;
+      // pRV+ is whole everywhere; round base-path (unadjusted) source too so the
+      // displayed pRV+ and this WAR always share the same integer.
+      const adjRvForWar = source?.p_rv_plus != null ? Math.round(Number(source.p_rv_plus)) : null;
       const pwar = adjRvForWar != null && Number.isFinite(adjRvForWar)
         ? ((((adjRvForWar - 100) / 100) * (sessionIpForRow / 9) * pitchingEq.pwar_r_per_9)
            + ((sessionIpForRow / 9) * pitchingEq.pwar_replacement_runs_per_9)) / pitchingEq.pwar_runs_per_win
         : null;
-      return { sim, shown: source, shownWrc: source?.p_rv_plus ?? source?.p_wrc_plus ?? null, owar: pwar ?? 0, pwar };
+      const shownPRv = source?.p_rv_plus != null ? Math.round(Number(source.p_rv_plus))
+        : source?.p_wrc_plus != null ? Math.round(Number(source.p_wrc_plus)) : null;
+      return { sim, shown: source, shownWrc: shownPRv, owar: pwar ?? 0, pwar };
     }
     const shownWrc = (() => {
       if (shown?.p_wrc_plus != null) return shown.p_wrc_plus;
@@ -1449,7 +1514,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
     const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
 
-    const owar = storedOwar != null ? storedOwar * depthScale * devAggScale : null;
+    // oWAR is REBUILT from the toggle-adjusted wRC+ over the session depth PA
+    // (computeOWar), not scaled from stored oWAR — oWAR is affine in wRC+, so
+    // scaling broke ordering. Matches PlayerProfile + the precompute exactly.
+    void storedOwar; void depthScale;
+    const adjWrcForOwar = shownWrc != null ? Math.round(shownWrc * devAggScale) : null;
+    const owar = adjWrcForOwar != null ? computeOWarFromWrcPlus(adjWrcForOwar, sessionPa) : null;
 
     // Apply devAgg scale to slash stats — mirrors PlayerProfile.applyDevScale.
     // Depth role only affects PA → oWAR, not the rate stats themselves.
@@ -1512,6 +1582,30 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
   const projectedNilForPlayer = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;
+    // Phase B: CLEAN row → stored market straight from the snapshot (no async
+    // conference-tier recompute → no market flicker). Applies to rostered
+    // transfers too. TWP pitcher side stores its value in twp_pitcher_market_value
+    // (raw market_value is the hitter side / mis-sided), so read the right field.
+    // Dirty rows / snapshots without a stored market fall through.
+    if (!(p as any)._dirty) {
+      // Build snapshot (market_value) or, for board targets, transfer_snapshot
+      // (nil_valuation) — read the stored market instantly, no async recompute.
+      const snap: any = p.prediction ?? p.transfer_snapshot;
+      const rap = side === "pitcher" || (side == null && isPitcher(p));
+      const isTwpP = !!(p.player as any)?.is_twp;
+      // Side-aware via the canonical helper: a TWP reads its hitter/pitcher split,
+      // never the shared field (which is NULL for TWPs). Normalize the field-name
+      // gap first — transfer_snapshot uses nil_valuation, build snapshot market_value.
+      const normalized = {
+        market_value: snap?.market_value ?? snap?.nil_valuation ?? null,
+        twp_hitter_market_value: snap?.twp_hitter_market_value,
+        twp_pitcher_market_value: snap?.twp_pitcher_market_value,
+      };
+      const m = rap
+        ? pickPitcherMarketValue(normalized, isTwpP)
+        : pickHitterMarketValue(normalized, isTwpP);
+      if (m != null && Number.isFinite(Number(m))) return Math.max(0, Number(m));
+    }
     const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
     if (renderAsPitcher) {
       const projection = playerProjection(p, "pitcher");
@@ -1529,7 +1623,13 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const eligibleForMv = storedMv != null && Number.isFinite(storedMv);
       const pwarForMv = projection?.pwar;
       if (eligibleForMv && pwarForMv != null && Number.isFinite(Number(pwarForMv))) {
-        const confForMv = (p.player as any)?.conference ?? (source as any)?.conference ?? null;
+        // Tier comes from the DESTINATION (this build's team), not the player's
+        // own conference. A transfer target is valued at the program building the
+        // roster (e.g. a Big Ten arm added to a Georgia/SEC build is worth SEC
+        // dollars). Using player.conference leaked the old school's tier — a
+        // regression. Compute (never scale) so same role + same WAR + same
+        // conference always yields the identical market.
+        const confForMv = selectedTeamConference ?? (source as any)?.conference ?? (p.player as any)?.conference ?? null;
         const tierForMv = getProgramTierMultiplierByConference(confForMv, pitchingTierMultipliers);
         return Math.max(0, Number(pwarForMv) * pitchingEq.market_dollars_per_war * tierForMv);
       }
@@ -1539,7 +1639,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       return 0;
     }
     return projectedPlayerScore(p) * nilBasePerOWar;
-  }, [nilBasePerOWar, pitchingEq, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, teamByKey, pitchingStatsByNameTeam]);
+  }, [nilBasePerOWar, pitchingEq, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, selectedTeamConference, teamByKey, pitchingStatsByNameTeam]);
 
   // Per-player projected budget share (proportional allocation of remaining
   // budget after overrides). Defined here so effectiveNilForPlayer can use it

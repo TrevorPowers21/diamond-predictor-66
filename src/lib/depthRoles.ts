@@ -106,7 +106,7 @@ export function pitcherExpectedIp(
   eq: Pick<PitchingEquationWeights, "pwar_ip_sp" | "pwar_ip_sm" | "pwar_ip_rp">,
 ): number {
   switch (depthRole) {
-    case "weekend_starter":        return eq.pwar_ip_sp;  // ~80 IP — Fri/Sat/Sun
+    case "weekend_starter":        return eq.pwar_ip_sp;  // ~85 IP — Fri/Sat/Sun
     case "weekday_starter":        return eq.pwar_ip_sm;  // ~50 IP — midweek SP
     case "swing_starter":          return 30;             // long relief / spot start
     case "workhorse_reliever":     return 50;             // closer/setup workhorse
@@ -116,6 +116,46 @@ export function pitcherExpectedIp(
     case "specialist_reliever":    return 6;              // LOOGY/situational
     default:                       return eq.pwar_ip_rp;  // RP fallback
   }
+}
+
+// Derive the granular pitcher depth role from real (last-season) IP + coarse
+// role. The depth role — NOT a coarse SP/RP/SM role — is what drives projected
+// IP (pitcherExpectedIp) and therefore pWAR/market. Mirrors
+// defaultPitcherDepthRoleFromIp in src/pages/team-builder/helpers.ts.
+export function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP" | "SM"): string {
+  const r: "SP" | "RP" = role === "SP" ? "SP" : "RP";
+  const ipNum = Number(ip);
+  if (!Number.isFinite(ipNum) || ipNum <= 0) {
+    return r === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (r === "SP") {
+    if (ipNum >= 65) return "weekend_starter";
+    if (ipNum >= 35) return "weekday_starter";
+    // Thin-sample SPs (<10 IP) drop to specialist_reliever — without this a
+    // 3-IP arm gets swing_starter's ~30 projected IP (and previously ~85),
+    // scaling pWAR / market way too high.
+    if (ipNum < 10) return "specialist_reliever";
+    return "swing_starter";
+  }
+  if (ipNum >= 40) return "workhorse_reliever";
+  if (ipNum >= 25) return "high_leverage_reliever";
+  if (ipNum >= 15) return "mid_leverage_reliever";
+  if (ipNum >= 8) return "low_impact_reliever";
+  return "specialist_reliever";
+}
+
+// Projected IP for the pWAR formula, derived from real IP via the depth role —
+// the canonical replacement for the coarse `role ? pwar_ip_sp : pwar_ip_rp : pwar_ip_sm`.
+// Falls back to the coarse role IP only when real IP is missing.
+export function projectedIpFromRealIp(
+  ip: number | null | undefined,
+  role: "SP" | "RP" | "SM",
+  eq: Pick<PitchingEquationWeights, "pwar_ip_sp" | "pwar_ip_sm" | "pwar_ip_rp">,
+): number {
+  if (ip == null || !Number.isFinite(Number(ip)) || Number(ip) <= 0) {
+    return role === "SP" ? eq.pwar_ip_sp : role === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  }
+  return pitcherExpectedIp(derivePitcherDepthRole(ip, role) as AnyDepthRole, eq);
 }
 
 // Pitcher depth roles bucket into one of three projected-role categories
@@ -220,8 +260,11 @@ export function computePitcherMarketValue(
     juco: 0.35,
   };
   const ptm = getProgramTierMultiplierByConference(ctx.conference, tiers);
-  const pvm = getPitchingPvfForRole(ctx.role, eq);
-  const raw = pWar * eq.market_dollars_per_war * ptm * pvm;
+  // PVF dropped: a starter's role value is already in WAR through IP (85 vs 35
+  // innings), so a PVF premium on top double-counts. Market = pWAR × $/WAR × tier,
+  // matching the returner path + Team Builder. `ctx.role` kept for call-site parity.
+  void ctx.role;
+  const raw = pWar * eq.market_dollars_per_war * ptm;
   return Math.max(0, raw);
 }
 

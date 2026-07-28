@@ -54,7 +54,7 @@ const saveOrder = (teamId: string | null, scope: string, order: string[]) => {
 const applyOrder = (rows: GmTarget[], order: string[]): GmTarget[] => {
   if (order.length === 0) return rows;
   const idx = new Map<string, number>(); order.forEach((id, i) => idx.set(id, i));
-  return [...rows].sort((a, b) => (idx.has(a.player_id) ? idx.get(a.player_id)! : Infinity) - (idx.has(b.player_id) ? idx.get(b.player_id)! : Infinity));
+  return [...rows].sort((a, b) => (idx.has(a.id) ? idx.get(a.id)! : Infinity) - (idx.has(b.id) ? idx.get(b.id)! : Infinity));
 };
 
 /** Live-formatting currency input; saves the raw number on blur. */
@@ -147,9 +147,9 @@ export default function GMTargets() {
   const onDragEnd = (sorted: GmTarget[], scope: ScopeKey) => (e: DragEndEvent) => {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    const oldI = sorted.findIndex((r) => r.player_id === active.id), newI = sorted.findIndex((r) => r.player_id === over.id);
+    const oldI = sorted.findIndex((r) => r.id === active.id), newI = sorted.findIndex((r) => r.id === over.id);
     if (oldI === -1 || newI === -1) return;
-    const next = arrayMove(sorted, oldI, newI).map((r) => r.player_id);
+    const next = arrayMove(sorted, oldI, newI).map((r) => r.id);
     setOrders((prev) => ({ ...prev, [scope]: next }));
     saveOrder(effectiveTeamId, scope, next);
     setSortKey("manual");
@@ -188,7 +188,7 @@ export default function GMTargets() {
               {sorted.map((t, i) => {
                 const onRoster = gm.onBuildPlayerIds.has(t.player_id);
                 return (
-                  <SortableRow key={t.player_id} id={t.player_id}>
+                  <SortableRow key={t.id} id={t.id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
                         <TableCell className="w-[28px] p-0 text-center align-middle">

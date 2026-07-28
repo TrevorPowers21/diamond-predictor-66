@@ -5,8 +5,10 @@
  *   (model_type='returner', variant='regular', customer_team_id=NULL, season)
  *
  * Writes p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war,
- * market_value, projected_ip, pitcher_role. Does NOT touch class_transition or
- * dev_aggressiveness (those are coach-owned).
+ * market_value, projected_ip, pitcher_role, and class_transition (D1 path:
+ * class_year-authoritative + override-safe via resolveClassTransition — a coach
+ * override or existing value is preserved). Does NOT touch dev_aggressiveness
+ * (coach-owned). JUCO path leaves class_transition null (class adj is zeroed).
  *
  * Math goes through `computePitcherProjection` in src/lib/pitcherProjection.ts
  * — same engine PitcherProfile / the live recalc path use. Equation weights
@@ -29,11 +31,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { resolveClassTransition } from "@/lib/classTransitionUtils";
 import {
   computePitcherProjection,
   type PitcherProjectionInput,
 } from "@/lib/pitcherProjection";
-import { pitcherExpectedIp } from "@/lib/depthRoles";
+import { derivePitcherStored } from "@/lib/predictionEngine";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 import { projectJucoReturnerPitcher } from "@/lib/jucoReturnerPitcherProjection";
 
@@ -160,7 +163,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, is_twp"),
+      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, is_twp, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const pitcherTest = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(pos || ""));
@@ -224,7 +227,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("player_predictions")
-        .select("id, player_id, model_type, variant, status, class_transition, dev_aggressiveness, pitcher_role")
+        .select("id, player_id, model_type, variant, status, class_transition, class_transition_overridden, dev_aggressiveness, pitcher_role")
         .in("player_id", idsChunk)
         .eq("model_type", "returner")
         .eq("variant", "regular")
@@ -433,7 +436,11 @@ async function main() {
       hr9: pmRow.hr9_pr_plus ?? null,
     };
 
-    const classTransition = (pred?.class_transition as "FS" | "SJ" | "JS" | "GR" | undefined) ?? "SJ";
+    // class_year-authoritative, override-safe (see eligibility-and-class.md).
+    // resolvedCt preserves a coach override / existing value and is null only
+    // when there is genuinely nothing to store — so writing it back can't erase.
+    const resolvedCt = resolveClassTransition((p as any).class_year, pred);
+    const classTransition = (resolvedCt ?? "SJ") as "FS" | "SJ" | "JS" | "GR";
     const devAggressiveness = Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : 0;
 
     const result = computePitcherProjection(input, {
@@ -453,11 +460,15 @@ async function main() {
       continue;
     }
 
-    // projected_ip from the engine's projected_role (matches transfer script).
-    const projectedIp = pitcherExpectedIp(
-      result.projected_role === "SP" ? "weekend_starter"
-        : result.projected_role === "SM" ? "weekday_starter"
-          : null, // RP fallback in pitcherExpectedIp returns pwar_ip_rp
+    // Derive projected_ip + p_war + depth role through the SAME canonical path as
+    // the recalc engine: classify the fine depth role from real IP, then use that
+    // role's IP (not the coarse SP/SM/RP default). Keeps stored == live and lets
+    // one writer own (projected_ip, p_war, pitcher_depth_role, market).
+    const actualIp = Number(pmRow.IP) || 0;
+    const derived = derivePitcherStored(
+      result.p_rv_plus,
+      result.projected_role,
+      { conference, team: teamName, is_twp: !!(p as any).is_twp, ip: actualIp },
       pitchingEq,
     );
 
@@ -475,10 +486,13 @@ async function main() {
       p_bb9: result.p_bb9,
       p_hr9: result.p_hr9,
       p_rv_plus: result.p_rv_plus,
-      p_war: result.p_war,
-      market_value: result.market_value,
-      projected_ip: projectedIp,
+      p_war: derived.p_war,
+      market_value: derived.market_value,
+      twp_pitcher_market_value: (derived as any).twp_pitcher_market_value ?? null,
+      projected_ip: derived.projected_ip,
       pitcher_role: result.projected_role,
+      pitcher_depth_role: derived.pitcher_depth_role,
+      class_transition: resolvedCt,
       // Unlock so future runs can refresh; trigger reverts rates when locked=true.
       locked: false,
       updated_at: new Date().toISOString(),
@@ -524,13 +538,20 @@ async function main() {
   console.log(`\n${C.green}✓ done${C.reset}`);
 
   // Forward pitcher scouting scores onto the new precomputed rows.
-  console.log(`${C.cyan}→${C.reset} propagating pitcher scores to predictions...`);
-  const { data: propagated, error: propErr } = await (supabase as any).rpc(
-    "propagate_pitcher_scores_to_predictions",
-    { target_season: CURRENT_SEASON },
-  );
-  if (propErr) console.error(`${C.red}✗ propagate failed: ${propErr.message}${C.reset}`);
-  else console.log(`${C.green}✓ propagated scores to ${propagated ?? 0} prediction rows${C.reset}`);
+  // Skippable: this refreshes whiff/barrel/bb/stuff SCOUTING-score columns from
+  // Pitching Master (unrelated to the IP/pWAR/market fix). Pass --no-propagate
+  // when those scores are already current and must not be touched.
+  if (process.argv.includes("--no-propagate")) {
+    console.log(`${C.dim}↷ skipping pitcher-score propagation (--no-propagate)${C.reset}`);
+  } else {
+    console.log(`${C.cyan}→${C.reset} propagating pitcher scores to predictions...`);
+    const { data: propagated, error: propErr } = await (supabase as any).rpc(
+      "propagate_pitcher_scores_to_predictions",
+      { target_season: CURRENT_SEASON },
+    );
+    if (propErr) console.error(`${C.red}✗ propagate failed: ${propErr.message}${C.reset}`);
+    else console.log(`${C.green}✓ propagated scores to ${propagated ?? 0} prediction rows${C.reset}`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -76,6 +76,8 @@ type TransferSnapshot = {
   p_war?: number | null;
   owar: number | null;
   nil_valuation: number | null;
+  twp_hitter_market_value?: number | null;
+  twp_pitcher_market_value?: number | null;
   from_team: string | null;
   from_conference: string | null;
 };
@@ -97,6 +99,9 @@ type BuildPlayer = {
   dev_aggressiveness_overridden?: boolean;
   // Target board "shopping list" gate. See types.ts BuildPlayer for full docs.
   included_in_roster?: boolean;
+  // Phase B: neutral base (dev_agg=0) for recompute; transient dirty flag. See types.ts.
+  neutralPrediction?: Record<string, any> | null;
+  _dirty?: boolean;
   // joined
   player?: {
     first_name: string;
@@ -461,7 +466,7 @@ const pitcherExpectedIp = (
 ): number => {
   switch (depthRole) {
     // Starters
-    case "weekend_starter":     return pitchingEq.pwar_ip_sp;  // ~80 IP — Fri/Sat/Sun rotation
+    case "weekend_starter":     return pitchingEq.pwar_ip_sp;  // ~85 IP — Fri/Sat/Sun rotation
     case "weekday_starter":     return pitchingEq.pwar_ip_sm;  // ~50 IP — midweek SP
     case "swing_starter":       return 30;                     // long relief / spot start
     // Relievers — graduated by leverage + workload
@@ -1925,7 +1930,50 @@ export default function TeamBuilder() {
           // Only newly added targets land as false; the "+" toggle on the
           // target board flips this to true.
           included_in_roster: rp.included_in_roster ?? true,
-          player_snapshot: rp.prediction ?? null,
+          // Phase B: persist the DISPLAYED (adjusted) line = f(neutral, toggles).
+          // playerProjection returns the stored snapshot for clean rows and the
+          // recompute-from-neutral for dirty rows, so this captures the correct
+          // value either way. Safe now that the read path reads the snapshot
+          // directly for clean rows (no re-overlay → no double dev-agg on reload).
+          player_snapshot: (() => {
+            const proj = playerProjection(rp);
+            if (!proj) return rp.prediction ?? null;
+            const base: any = rp.prediction ? { ...rp.prediction } : (rp.neutralPrediction ? { ...rp.neutralPrediction } : {});
+            const shown: any = proj.shown ?? {};
+            const isTwp = !!(rp.player as any)?.is_twp;
+            if (proj.pwar != null) {
+              base.p_era = shown.p_era ?? base.p_era ?? null;
+              base.p_fip = shown.p_fip ?? base.p_fip ?? null;
+              base.p_whip = shown.p_whip ?? base.p_whip ?? null;
+              base.p_k9 = shown.p_k9 ?? base.p_k9 ?? null;
+              base.p_bb9 = shown.p_bb9 ?? base.p_bb9 ?? null;
+              base.p_hr9 = shown.p_hr9 ?? base.p_hr9 ?? null;
+              base.p_rv_plus = proj.shownWrc ?? shown.p_rv_plus ?? base.p_rv_plus ?? null;
+              base.p_war = proj.pwar ?? null;
+              base.pitcher_depth_role = rp.depth_role ?? base.pitcher_depth_role ?? null;
+              // TWP pitcher slot is OWN-SIDE ONLY — never carry the hitter side.
+              if (isTwp) { base.o_war = null; base.p_avg = null; base.p_obp = null; base.p_slg = null; base.p_wrc_plus = null; base.hitter_depth_role = null; base.twp_hitter_market_value = null; }
+            } else {
+              base.p_avg = shown.p_avg ?? base.p_avg ?? null;
+              base.p_obp = shown.p_obp ?? base.p_obp ?? null;
+              base.p_slg = shown.p_slg ?? base.p_slg ?? null;
+              base.p_wrc_plus = proj.shownWrc ?? shown.p_wrc_plus ?? base.p_wrc_plus ?? null;
+              base.o_war = proj.owar ?? null;
+              base.hitter_depth_role = rp.depth_role ?? base.hitter_depth_role ?? null;
+              // TWP hitter slot is OWN-SIDE ONLY — never carry the pitcher side.
+              if (isTwp) { base.p_era = null; base.p_fip = null; base.p_whip = null; base.p_k9 = null; base.p_bb9 = null; base.p_hr9 = null; base.p_rv_plus = null; base.p_war = null; base.pitcher_depth_role = null; base.twp_pitcher_market_value = null; }
+            }
+            const mkt = projectedNilForPlayer(rp);
+            if (isTwp) {
+              // TWP market lives in the side split; the shared market_value stays null.
+              if (proj.pwar != null) base.twp_pitcher_market_value = mkt ?? null;
+              else base.twp_hitter_market_value = mkt ?? null;
+              base.market_value = null;
+            } else if (mkt != null) {
+              base.market_value = mkt;
+            }
+            return base;
+          })(),
           production_notes: serializeBuildPlayerMeta(
             rp.production_notes,
             rp.team_metrics ?? null,
@@ -1950,9 +1998,51 @@ export default function TeamBuilder() {
             rp.projection_tier ?? null,
             rp.nil_value_overridden ?? false,
           ),
+          // Persist the NEUTRAL base so a re-save never wipes it (this insert
+          // replaces the build's rows). It's the immutable dev_agg=0 line the toggle
+          // recompute reads; keeping it on the row means it can't go null and compound.
+          neutral_snapshot: ((rp as any).neutralPrediction ?? (rp as any).neutral_snapshot ?? null) as any,
         }));
         const { error } = await supabase.from("team_build_players").insert(rows);
         if (error) throw error;
+
+        // Keep the universal target board's RECIPE in lockstep with the roster: a
+        // rostered target's target_board.production_notes must match the roster's,
+        // so the board shows the same toggle state the coach set on the roster.
+        // (The snapshot is kept 1:1 by saveTargetToggle + the rostered-consistency
+        // backfill; this closes the bulk-save gap that left board notes NULL.)
+        // One-way only — a TWP is two roster rows → one merged board row today, so
+        // its notes ride the per-side toggle lockstep, not this bulk mirror (which
+        // would clobber the other side). TWP two-row board is a separate step.
+        //
+        // GATE: only the ACTIVE build's roster drives the universal target board
+        // (GM rule — a non-active scenario build must never write board notes). If
+        // this save isn't the active build, skip. Fail-safe: no flag → no mirror.
+        const { data: activeRow } = await (supabase as any).from("team_builds")
+          .select("id").eq("customer_team_id", effectiveTeamId ?? "").eq("is_active", true).maybeSingle();
+        const isActiveBuild = !!activeRow && (activeRow as any).id === buildId;
+        if (effectiveTeamId && isActiveBuild) {
+          const rosteredTargets = persistableRoster.filter(
+            (rp) => (rp.roster_status ?? "returner") === "target"
+              && (rp as any).included_in_roster !== false
+              && !((rp.player as any)?.is_twp)
+              && rp.player_id,
+          );
+          for (const rp of rosteredTargets) {
+            const notes = serializeBuildPlayerMeta(
+              rp.production_notes, rp.team_metrics ?? null, rp.team_power_plus ?? null,
+              rp.roster_status ?? null, rp.depth_role ?? null, rp.class_transition ?? null,
+              rp.dev_aggressiveness ?? null, rp.class_transition_overridden ?? false,
+              rp.dev_aggressiveness_overridden ?? false, rp.transfer_snapshot ?? null,
+              rp.player ? { first_name: rp.player.first_name || "", last_name: rp.player.last_name || "", position: rp.player.position ?? null, team: rp.player.team ?? null, from_team: rp.player.from_team ?? null, conference: rp.player.conference ?? null } : null,
+              (rp as any).projection_tier ?? null, (rp as any).nil_value_overridden ?? false,
+            );
+            // production_notes column exists on target_board (staging migration); the
+            // generated types lag, so cast the payload like the other board writes.
+            await supabase.from("target_board").update({ production_notes: notes } as any)
+              .eq("customer_team_id", effectiveTeamId).eq("player_id", rp.player_id!);
+          }
+        }
       }
 
       setSelectedBuildId(buildId);
@@ -1964,6 +2054,11 @@ export default function TeamBuilder() {
       setHasSavedOnce(true);
       toast({ title: result?.saveAs ? `Build saved as "${result.targetName}"` : "Build saved" });
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
+      // Phase B: reload the saved build so every row comes back CLEAN — the
+      // persisted adjusted snapshots load into p.prediction with no _dirty, so the
+      // build returns to pure snapshot reads (zero live compute). The clean-read
+      // is synchronous, so this reload has no flicker.
+      if (result?.buildId) loadBuild(result.buildId);
     },
     onError: (e: any) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
@@ -2167,9 +2262,161 @@ export default function TeamBuilder() {
     }
   }, [rosterPlayers, removeFromSupabaseBoard]);
 
+  // ── Phase B for TARGETS — auto-save a target toggle to the universal board ──
+  // A board target has no saved build; any toggle on its TB row auto-persists to
+  // target_board (transfer_snapshot + production_notes), mirroring the roster's
+  // Phase B save. If the target is also on THIS build's roster (included_in_roster),
+  // the same toggle also writes the roster's player_snapshot + production_notes so
+  // board and roster stay in lockstep. The row then reads snapshot-only again.
+  // Neutral stays player_predictions (the sim recomputes a dirty target from the
+  // live neutral), so this can't compound.
+  const rosterPlayersRef = useRef<BuildPlayer[]>(rosterPlayers);
+  useEffect(() => { rosterPlayersRef.current = rosterPlayers; }, [rosterPlayers]);
+  const targetSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const saveTargetToggle = useCallback(async (player: BuildPlayer) => {
+    if (!effectiveTeamId || !player.player_id) return;
+    const pid = player.player_id;
+    const isTwp = !!(player.player as any)?.is_twp;
+    const treatAsPitcher = isPitcher(player);
+    const proj = playerProjection(player);
+    if (!proj) return;
+    // NEVER persist a neutral line. If the recompute didn't yield an adjusted value
+    // (e.g. the live neutral wasn't loaded when the debounce fired), abort — leave
+    // the row dirty (still showing the live-adjusted value) instead of writing/
+    // reverting to neutral. This is what caused "toggle → reverts to neutral".
+    const projValid = treatAsPitcher
+      ? (proj.pwar != null && Number.isFinite(Number(proj.pwar)))
+      : (proj.owar != null && Number.isFinite(Number(proj.owar)));
+    if (!projValid) return;
+    const shown: any = proj.shown ?? {};
+    // Merge onto the existing snapshot so a TWP's OTHER side (its own rosterPlayers
+    // row, same player_id) is preserved when only this side's toggle moved.
+    // TWP now has TWO board rows (one per slot) — fetch/write only the matching
+    // side, else maybeSingle() sees two rows. One-way = a single row (no filter).
+    const twpPitSlots = ["SP", "RP", "CL", "P", "LHP", "RHP"];
+    const twpPitCsv = "(SP,RP,CL,P,LHP,RHP)";
+    const withTwpSide = (q: any) => isTwp ? (treatAsPitcher ? q.in("position_slot", twpPitSlots) : q.not("position_slot", "in", twpPitCsv)) : q;
+    const { data: existing } = await withTwpSide(
+      supabase.from("target_board").select("transfer_snapshot")
+        .eq("customer_team_id", effectiveTeamId).eq("player_id", pid),
+    ).maybeSingle();
+    const t: any = { ...(((existing as any)?.transfer_snapshot) ?? player.transfer_snapshot ?? {}) };
+    const bp: any = { ...t }; // roster player_snapshot mirror (o_war / market_value field names)
+    t.is_twp = isTwp; bp.is_twp = isTwp;
+    const mkt = projectedNilForPlayer(player, treatAsPitcher ? "pitcher" : "hitter");
+    if (treatAsPitcher) {
+      const f = { p_era: shown.p_era ?? t.p_era ?? null, p_fip: shown.p_fip ?? t.p_fip ?? null, p_whip: shown.p_whip ?? t.p_whip ?? null, p_k9: shown.p_k9 ?? t.p_k9 ?? null, p_bb9: shown.p_bb9 ?? t.p_bb9 ?? null, p_hr9: shown.p_hr9 ?? t.p_hr9 ?? null, p_rv_plus: proj.shownWrc ?? shown.p_rv_plus ?? t.p_rv_plus ?? null, p_war: proj.pwar ?? null, pitcher_depth_role: player.depth_role ?? t.pitcher_depth_role ?? null };
+      Object.assign(t, f); Object.assign(bp, f);
+      if (isTwp) { t.twp_pitcher_market_value = mkt; bp.twp_pitcher_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
+      else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
+    } else {
+      const f = { p_avg: shown.p_avg ?? t.p_avg ?? null, p_obp: shown.p_obp ?? t.p_obp ?? null, p_slg: shown.p_slg ?? t.p_slg ?? null, p_wrc_plus: proj.shownWrc ?? shown.p_wrc_plus ?? t.p_wrc_plus ?? null, hitter_depth_role: player.depth_role ?? t.hitter_depth_role ?? null };
+      Object.assign(t, f); Object.assign(bp, f);
+      t.owar = proj.owar ?? null; t.o_war = proj.owar ?? null; bp.o_war = proj.owar ?? null;
+      if (isTwp) { t.twp_hitter_market_value = mkt; bp.twp_hitter_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
+      else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
+    }
+    // Both the board line (t) and the roster mirror (bp) are OWN-SIDE ONLY for a
+    // TWP — each is written to the matching slot's row only, so a slot's snapshot
+    // never carries the other side's data.
+    if (isTwp) {
+      if (treatAsPitcher) {
+        bp.o_war = null; bp.p_avg = null; bp.p_obp = null; bp.p_slg = null; bp.p_wrc_plus = null; bp.hitter_depth_role = null; bp.twp_hitter_market_value = null;
+        t.owar = null; t.o_war = null; t.p_avg = null; t.p_obp = null; t.p_slg = null; t.p_wrc_plus = null; t.hitter_depth_role = null; t.twp_hitter_market_value = null;
+      } else {
+        bp.p_era = null; bp.p_fip = null; bp.p_whip = null; bp.p_k9 = null; bp.p_bb9 = null; bp.p_hr9 = null; bp.p_rv_plus = null; bp.p_war = null; bp.pitcher_depth_role = null; bp.twp_pitcher_market_value = null;
+        t.p_era = null; t.p_fip = null; t.p_whip = null; t.p_k9 = null; t.p_bb9 = null; t.p_hr9 = null; t.p_rv_plus = null; t.p_war = null; t.pitcher_depth_role = null; t.twp_pitcher_market_value = null;
+      }
+    }
+    const playerMeta = player.player
+      ? { first_name: player.player.first_name || "", last_name: player.player.last_name || "", position: player.player.position ?? null, team: player.player.team ?? null, from_team: player.player.from_team ?? null, conference: player.player.conference ?? null }
+      : null;
+    const notes = serializeBuildPlayerMeta(
+      player.production_notes, player.team_metrics ?? null, player.team_power_plus ?? null,
+      player.roster_status ?? null, player.depth_role ?? null, player.class_transition ?? null,
+      player.dev_aggressiveness ?? null, player.class_transition_overridden ?? false,
+      player.dev_aggressiveness_overridden ?? false, t, playerMeta,
+      (player as any).projection_tier ?? null, (player as any).nil_value_overridden ?? false,
+    );
+    // 1) Universal target board — always. TWP: only the matching side's row.
+    const { error: tbErr } = await withTwpSide(
+      supabase.from("target_board")
+        .update({ transfer_snapshot: t, production_notes: notes })
+        .eq("customer_team_id", effectiveTeamId).eq("player_id", pid),
+    );
+    if (tbErr) { toast({ title: "Target save failed", description: tbErr.message, variant: "destructive" }); return; }
+    // 2) Roster lockstep — if this target is on the loaded build's roster, mirror
+    //    the exact same line into team_build_players.
+    if ((player as any).included_in_roster && selectedBuildId) {
+      let q = supabase.from("team_build_players")
+        .update({ player_snapshot: bp, production_notes: notes })
+        .eq("build_id", selectedBuildId).eq("player_id", pid);
+      // A TWP has two slot rows — write only the matching side's slot so the other
+      // slot keeps its own-side snapshot.
+      if (isTwp) {
+        const pitSlots = "(SP,RP,CL,P,LHP,RHP)";
+        q = treatAsPitcher ? q.in("position_slot", ["SP", "RP", "CL", "P", "LHP", "RHP"]) : q.not("position_slot", "in", pitSlots);
+      }
+      await q;
+    }
+    // Local: adopt the saved snapshot + clear dirty for the TOGGLED side. Force
+    // prediction=null so the clean-read (p.prediction ?? p.transfer_snapshot) uses
+    // the just-saved adjusted transfer_snapshot, not a shadowing neutral prediction.
+    // A TWP has two rows — settle only the toggled side, since `t` is now own-side;
+    // the other side keeps its own snapshot untouched.
+    setRosterPlayers((prev) => prev.map((p) =>
+      p.player_id === pid && (p.roster_status || "returner") === "target" && (!isTwp || isPitcher(p) === treatAsPitcher)
+        ? { ...p, prediction: null, transfer_snapshot: t, _dirty: false } : p));
+  }, [effectiveTeamId, playerProjection, projectedNilForPlayer, selectedBuildId]);
+  const saveTargetToggleRef = useRef(saveTargetToggle);
+  useEffect(() => { saveTargetToggleRef.current = saveTargetToggle; }, [saveTargetToggle]);
+
   const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
-    setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
+    // Phase B: a value-affecting toggle marks the row DIRTY so the sim recomputes
+    // it from neutral this session (instead of reading the stored snapshot). Save
+    // clears it. included_in_roster / roster_status are NOT toggles — the player's
+    // numbers don't change — so they don't dirty the row.
+    const markDirty = (["depth_role", "dev_aggressiveness", "position_slot", "class_transition"] as const)
+      .some((k) => k in updates);
+    const withDirty = (p: BuildPlayer): BuildPlayer =>
+      markDirty ? ({ ...p, ...updates, _dirty: true }) : ({ ...p, ...updates });
+    setRosterPlayers((prev) => {
+      const target = prev[idx];
+      // Two-way players occupy BOTH sides (one hitter row + one pitcher row,
+      // same player_id). ASYMMETRIC by design:
+      //   ADD (included_in_roster -> true) brings in BOTH sides — you're
+      //     evaluating the whole player, so clicking "+" on either side puts
+      //     him on the roster as both hitter and pitcher.
+      //   REMOVE (-> false) drops ONLY the clicked side, so a coach can keep
+      //     just the bat or just the arm ("he'll hit for us but not pitch").
+      // Everything else (depth role, dev agg, position slot) stays per-side.
+      if (target && (updates as any).included_in_roster === true && (target.player as any)?.is_twp && target.player_id) {
+        const pid = target.player_id;
+        return prev.map((p, i) => {
+          if (i === idx) return withDirty(p);
+          if (p.player_id === pid && (p.roster_status || "returner") === "target") {
+            return { ...p, included_in_roster: true };
+          }
+          return p;
+        });
+      }
+      return prev.map((p, i) => (i === idx ? withDirty(p) : p));
+    });
     setDirty(true);
+    // Phase B for targets: a toggle on a board target auto-saves (debounced) to
+    // the universal target_board — and to the roster too if it's rostered. Uses
+    // the ref so this []-dep callback always calls the latest saver / sim state.
+    if (markDirty) {
+      const cur = rosterPlayersRef.current[idx];
+      if (cur && (cur.roster_status || "returner") === "target" && cur.player_id) {
+        const updated: BuildPlayer = { ...cur, ...updates, _dirty: true };
+        const pid = cur.player_id;
+        const timers = targetSaveTimers.current;
+        if (timers.has(pid)) clearTimeout(timers.get(pid)!);
+        timers.set(pid, setTimeout(() => { timers.delete(pid); saveTargetToggleRef.current(updated); }, 500));
+      }
+    }
   }, []);
 
   const updatePlayerWithRecalc = useCallback(async (idx: number, updates: Partial<BuildPlayer>) => {
@@ -2724,6 +2971,10 @@ export default function TeamBuilder() {
           p_wrc_plus: stored?.p_wrc_plus ?? null,
           owar: stored?.o_war ?? null,
           nil_valuation: isTwp ? (stored?.twp_hitter_market_value ?? null) : (stored?.market_value ?? null),
+          // Carry BOTH side market values so pickHitter/PitcherMarketValue can
+          // resolve a TWP's per-side market from either row's snapshot.
+          twp_hitter_market_value: stored?.twp_hitter_market_value ?? null,
+          twp_pitcher_market_value: stored?.twp_pitcher_market_value ?? null,
           from_team: fromTeamName,
           from_conference: fromConference,
         },
@@ -2754,6 +3005,10 @@ export default function TeamBuilder() {
           p_war: stored?.p_war ?? null,
           owar: stored?.p_war ?? null,
           nil_valuation: isTwp ? (stored?.twp_pitcher_market_value ?? null) : (stored?.market_value ?? null),
+          // Carry BOTH side market values so pickHitter/PitcherMarketValue can
+          // resolve a TWP's per-side market from either row's snapshot.
+          twp_hitter_market_value: stored?.twp_hitter_market_value ?? null,
+          twp_pitcher_market_value: stored?.twp_pitcher_market_value ?? null,
           from_team: fromTeamName,
           from_conference: fromConference,
         },
@@ -2831,6 +3086,97 @@ export default function TeamBuilder() {
     if (targetBoardLoading) return;
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
+    // Phase B for targets — overlay each loaded target's SAVED transfer_snapshot +
+    // toggle state (target_board.transfer_snapshot / production_notes) onto its row,
+    // so a persisted toggle survives refresh instead of the rebuilt-neutral line the
+    // add path produces. Idempotent (skips rows already equal); never touches a DIRTY
+    // row (an in-session edge mid-save).
+    const overlaySavedTargets = () => {
+      const savedByPid = new Map<string, any>();
+      for (const sbRow of supabaseTargetBoard) if ((sbRow as any).transfer_snapshot) savedByPid.set(sbRow.player_id, sbRow);
+      if (savedByPid.size === 0) return;
+      setRosterPlayers((prev) => {
+        let changed = false;
+        const next = prev.map((p) => {
+          if ((p.roster_status || "returner") !== "target" || !p.player_id || (p as any)._dirty) return p;
+          const saved = savedByPid.get(p.player_id);
+          const s: any = saved?.transfer_snapshot;
+          if (!s) return p;
+          // ON roster reads its build player_snapshot (p.prediction); OFF roster reads
+          // transfer_snapshot. transfer_snapshot is kept 1:1 with player_snapshot by the
+          // lockstep + consistency backfill, so a ROSTERED target SELF-HEALS its
+          // (possibly stale) in-memory prediction from the fresh 1:1 transfer_snapshot —
+          // no manual build reload needed. Each TWP row reads its own side from the line.
+          if ((p as any).included_in_roster === true) {
+            const norm: any = { ...s, o_war: s.o_war ?? s.owar, market_value: s.market_value ?? s.nil_valuation };
+            const cur: any = p.prediction;
+            const same = cur && cur.o_war === norm.o_war && cur.p_war === norm.p_war && cur.p_wrc_plus === norm.p_wrc_plus
+              && cur.p_rv_plus === norm.p_rv_plus && cur.twp_hitter_market_value === norm.twp_hitter_market_value && cur.twp_pitcher_market_value === norm.twp_pitcher_market_value;
+            if (same) return p;
+            changed = true;
+            return { ...p, prediction: norm, _dirty: false };
+          }
+          const cur: any = p.transfer_snapshot;
+          const same = cur && cur.owar === s.owar && cur.p_war === s.p_war && cur.p_wrc_plus === s.p_wrc_plus
+            && cur.p_rv_plus === s.p_rv_plus && cur.nil_valuation === s.nil_valuation
+            && cur.twp_hitter_market_value === s.twp_hitter_market_value && cur.twp_pitcher_market_value === s.twp_pitcher_market_value;
+          if (same) return p;
+          changed = true;
+          const meta = parseBuildPlayerMeta(saved.production_notes);
+          return {
+            ...p, transfer_snapshot: s, prediction: null, _dirty: false,
+            depth_role: meta?.depthRole ?? p.depth_role,
+            dev_aggressiveness: meta?.devAggressiveness ?? p.dev_aggressiveness,
+            class_transition: meta?.classTransition ?? p.class_transition,
+            dev_aggressiveness_overridden: meta?.devAggressivenessOverridden ?? p.dev_aggressiveness_overridden,
+            class_transition_overridden: meta?.classTransitionOverridden ?? p.class_transition_overridden,
+          };
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    // Build target rows SYNCHRONOUSLY from the board data (transfer_snapshot +
+    // production_notes) — no per-player player_predictions fetch. Replaces the
+    // addPlayerFromTargetSearch await-loop that made targets trickle in one at a
+    // time (the flicker). A TWP spawns two rows (hitter / pitcher), each with a
+    // VALIDATED per-side depth role, so a hitter row can never hold a pitcher role.
+    const VALID_HIT = ["cornerstone", "everyday_starter", "platoon_starter", "utility", "bench"];
+    const VALID_PIT = ["weekend_starter", "weekday_starter", "swing_starter", "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"];
+    const buildTargetRowsFromBoard = (sbRow: any): BuildPlayer[] => {
+      const ts: any = sbRow.transfer_snapshot ?? {};
+      const meta = parseBuildPlayerMeta(sbRow.production_notes);
+      const isTwp = !!ts.is_twp;
+      const dbPos = sbRow.position ?? null;
+      const isPitPos = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(dbPos || ""));
+      const pitcherRole: "SP" | "RP" = /weekend|weekday|swing|_starter$/.test(String(ts.pitcher_depth_role || "")) ? "SP" : "RP";
+      const hitDepth = VALID_HIT.includes(ts.hitter_depth_role) ? ts.hitter_depth_role : (VALID_HIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "everyday_starter");
+      const pitDepth = VALID_PIT.includes(ts.pitcher_depth_role) ? ts.pitcher_depth_role : (VALID_PIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "high_leverage_reliever");
+      // is_twp MUST ride along: updatePlayer's "add both sides" branch gates on
+      // player.is_twp, so a board-loaded TWP target without it adds only the clicked
+      // side (Overbeek: adding the hitter didn't bring the pitcher). Rendering splits
+      // on position_slot so the two rows showed regardless — only add-both was broken.
+      const pMeta = { first_name: sbRow.first_name || "", last_name: sbRow.last_name || "", class_year: sbRow.class_year ?? null, bats_hand: sbRow.bats_hand ?? null, team: sbRow.team ?? null, from_team: sbRow.team ?? null, conference: sbRow.conference ?? null, is_twp: isTwp };
+      const base: any = {
+        player_id: sbRow.player_id, source: "portal", custom_name: `${sbRow.first_name || ""} ${sbRow.last_name || ""}`.trim() || null,
+        depth_order: 1, nil_value: 0, production_notes: sbRow.production_notes ?? null,
+        roster_status: "target", included_in_roster: false, prediction: null,
+        class_transition: meta?.classTransition ?? classTransitionFromYearOrDefault(sbRow.class_year),
+        dev_aggressiveness: meta?.devAggressiveness ?? 0,
+        class_transition_overridden: meta?.classTransitionOverridden ?? false,
+        dev_aggressiveness_overridden: meta?.devAggressivenessOverridden ?? false,
+        team_metrics: null, team_power_plus: null, nilVal: null, nil_owar: null,
+        transfer_snapshot: ts,
+      };
+      if (isTwp) {
+        return [
+          { ...base, position_slot: (isPitPos ? null : dbPos), depth_role: hitDepth, player: { ...pMeta, position: (isPitPos ? null : dbPos) } },
+          { ...base, position_slot: pitcherRole, depth_role: pitDepth, player: { ...pMeta, position: pitcherRole } },
+        ];
+      }
+      return [{ ...base, position_slot: isPitPos ? pitcherRole : dbPos, depth_role: isPitPos ? pitDepth : hitDepth, player: { ...pMeta, position: dbPos } }];
+    };
+
     // Push roster targets → Supabase (deduped against in-session push history)
     const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
     for (const p of rosterTargets) {
@@ -2871,30 +3217,28 @@ export default function TeamBuilder() {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
       if (newFromSupabase.length > 0) {
-        (async () => {
-          for (const sb of newFromSupabase) {
-            await addPlayerFromTargetSearch({
-              id: sb.player_id,
-              first_name: sb.first_name,
-              last_name: sb.last_name,
-              position: sb.position,
-              class_year: sb.class_year ?? null,
-              bats_hand: (sb as any).bats_hand ?? null,
-              team: sb.team,
-              from_team: sb.team,
-              conference: sb.conference ?? null,
-              source_player_id: (sb as any).source_player_id ?? null,
-              // __sync flag suppresses the "Added to targets" toast inside
-              // addPlayerFromTargetSearch — the originating surface (Profile /
-              // Dashboard / Portal) already showed its own "Added to Target
-              // Board" toast, so a second one fires for every cross-surface
-              // pull. Cross-surface pulls also shouldn't mark the build dirty.
-              __sync: true,
+        // Every board row carries a transfer_snapshot (created at add-time) → build
+        // ALL rows in ONE synchronous batch: every name/stat/toggle at once, no async,
+        // no trickle-in flicker. (A row missing a snapshot — legacy — is skipped here
+        // and picked up by overlaySavedTargets / the next add.)
+        const sideKey = (slot: any, pos: any) => `${/^(SP|RP|CL|P|LHP|RHP)/i.test(String(slot || pos || "")) ? "P" : "H"}`;
+        const rows = newFromSupabase.filter((sb) => (sb as any).transfer_snapshot).flatMap((sb) => buildTargetRowsFromBoard(sb));
+        if (rows.length > 0) {
+          setRosterPlayers((prev) => {
+            const seen = new Set(prev.map((p) => `${p.player_id}|${sideKey(p.position_slot, p.player?.position)}`));
+            const toAdd = rows.filter((r) => {
+              const k = `${r.player_id}|${sideKey(r.position_slot, r.player?.position)}`;
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
             });
-          }
-        })();
+            return toAdd.length ? [...prev, ...toAdd] : prev;
+          });
+        }
       }
     }
+    // Already-loaded targets (saved-build load, or no new pulls): overlay now too.
+    overlaySavedTargets();
 
     // Reverse-direction sync: when target_board entries get deleted on
     // another surface (Targets page trash icon, Player Profile remove, etc.),

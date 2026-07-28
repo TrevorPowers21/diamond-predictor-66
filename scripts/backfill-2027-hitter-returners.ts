@@ -124,14 +124,14 @@ async function main() {
   // mid-major market values regardless of where they actually play.
   console.log(`${C.cyan}→${C.reset} loading player meta (position + conference + pa)...`);
   const playerIds = Array.from(new Set(rows.map((r) => r.player_id as string)));
-  const playerMeta = new Map<string, { position: string | null; conference: string | null; pa: number | null; division: string | null }>();
+  const playerMeta = new Map<string, { position: string | null; conference: string | null; pa: number | null; division: string | null; is_twp: boolean }>();
   const PLAYER_BATCH = 200;
-  const rawPlayers: Array<{ id: string; position: string | null; conference: string | null; pa: number | null; source_team_id: string | null; team: string | null; division: string | null }> = [];
+  const rawPlayers: Array<{ id: string; position: string | null; conference: string | null; pa: number | null; source_team_id: string | null; team: string | null; division: string | null; is_twp: boolean }> = [];
   for (let i = 0; i < playerIds.length; i += PLAYER_BATCH) {
     const ids = playerIds.slice(i, i + PLAYER_BATCH);
     const { data, error } = await supabase
       .from("players")
-      .select("id, position, conference, pa, source_team_id, team, division")
+      .select("id, position, conference, pa, source_team_id, team, division, is_twp")
       .in("id", ids);
     if (error) throw error;
     for (const p of (data || []) as any[]) rawPlayers.push(p);
@@ -167,7 +167,7 @@ async function main() {
     } else {
       confUnresolved++;
     }
-    playerMeta.set(p.id, { position: p.position, conference: conf, pa: p.pa, division: p.division ?? null });
+    playerMeta.set(p.id, { position: p.position, conference: conf, pa: p.pa, division: p.division ?? null, is_twp: !!p.is_twp });
   }
   console.log(`  conference resolution: ${confFromPlayer} from players.conference, ${confFromSourceId} from source_team_id, ${confFromName} from team name, ${confUnresolved} unresolved`);
 
@@ -191,7 +191,7 @@ async function main() {
     for (const it of internals || []) byId.set((it as any).prediction_id, it);
 
     for (const row of slice) {
-      const meta = playerMeta.get(row.player_id) ?? { position: null, conference: null, pa: null, division: null };
+      const meta = playerMeta.get(row.player_id) ?? { position: null, conference: null, pa: null, division: null, is_twp: false };
 
       // ── JUCO branch ─────────────────────────────────────────────────────
       // JUCO returner regular rows DO NOT go through recalcReturner. The D1
@@ -277,6 +277,10 @@ async function main() {
         conference: meta.conference,
         position: meta.position,
       });
+      // TWPs keep the hitter market in twp_hitter_market_value and NULL the shared
+      // market_value column — same convention as the transfer precompute /
+      // deriveHitterStored. Writing the shared column for a TWP is a bug that
+      // pollutes any surface reading market_value directly (the target board).
       updates.push({
         id: row.id,
         patch: {
@@ -288,7 +292,8 @@ async function main() {
           p_wrc: result.p_wrc,
           p_wrc_plus: result.p_wrc_plus,
           o_war: oWar,
-          market_value: marketValue,
+          market_value: meta.is_twp ? null : marketValue,
+          ...(meta.is_twp ? { twp_hitter_market_value: marketValue } : {}),
           projected_pa: projectedPa,
           hitter_depth_role: hitterDepthRole,
           // Unlock so future runs can refresh; trigger reverts rates when locked=true.
