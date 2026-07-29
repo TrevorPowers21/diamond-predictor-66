@@ -116,12 +116,14 @@ export default function MobileRecruiting() {
   const [year, setYear] = useState<number | null>(null);
   const activeYear = year ?? (years.length ? years[0] : yearOptions[0]);
   const [group, setGroup] = useState<RecruitType>("hitter");
+  const [levelFilter, setLevelFilter] = useState<"all" | "hs" | "juco">("all");
+  const matchLevel = (r: GmRecruit) => levelFilter === "all" || (levelFilter === "hs" ? r.level === "hs" : r.level !== "hs");
 
   const list = useMemo(
     () => recruits
-      .filter((r) => r.class_year === activeYear && recruitTypeForPosition(r.position || "") === group)
+      .filter((r) => r.class_year === activeYear && recruitTypeForPosition(r.position || "") === group && matchLevel(r))
       .sort((a, b) => a.sort_order - b.sort_order),
-    [recruits, activeYear, group],
+    [recruits, activeYear, group, levelFilter], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const [addOpen, setAddOpen] = useState(false);
@@ -140,27 +142,36 @@ export default function MobileRecruiting() {
           <span className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Team-shared</span>
         </div>
 
+        {/* row 1: class year + HS/JUCO level filter */}
         <div className="flex items-center gap-2">
           <Select value={String(activeYear)} onValueChange={(v) => setYear(Number(v))}>
             <SelectTrigger className="h-9 w-[92px] bg-card border-border/60 font-bold uppercase tracking-wide" style={OSWALD}><SelectValue /></SelectTrigger>
             <SelectContent>{yearOptions.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
           </Select>
-
           <div className="flex flex-1 overflow-hidden rounded-md border border-border/60">
-            {GROUPS.map((g) => {
-              const on = group === g.key;
+            {([["all", "All"], ["hs", "HS"], ["juco", "JUCO"]] as const).map(([v, label]) => {
+              const on = levelFilter === v;
               return (
-                <button key={g.key} onClick={() => setGroup(g.key)}
-                  className={cn(
-                    "flex-1 cursor-pointer py-2 text-[12px] font-semibold uppercase tracking-wide transition-colors duration-150",
-                    on ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:bg-muted/60",
-                  )}
-                  style={OSWALD}>
-                  {g.label}
-                </button>
+                <button key={v} onClick={() => setLevelFilter(v)}
+                  className={cn("flex-1 cursor-pointer py-2 text-[12px] font-semibold uppercase tracking-wide transition-colors duration-150",
+                    on ? "bg-blue-500/15 text-blue-400" : "text-muted-foreground hover:bg-muted/60")}
+                  style={OSWALD}>{label}</button>
               );
             })}
           </div>
+        </div>
+
+        {/* row 2: position group */}
+        <div className="mt-2 flex overflow-hidden rounded-md border border-border/60">
+          {GROUPS.map((g) => {
+            const on = group === g.key;
+            return (
+              <button key={g.key} onClick={() => setGroup(g.key)}
+                className={cn("flex-1 cursor-pointer py-2 text-[12px] font-semibold uppercase tracking-wide transition-colors duration-150",
+                  on ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:bg-muted/60")}
+                style={OSWALD}>{g.label}</button>
+            );
+          })}
         </div>
       </div>
 
