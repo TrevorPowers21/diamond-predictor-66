@@ -127,10 +127,23 @@ Individual dated reports = the **evidence/history**. A **consensus** = one **pro
 ## Video (LAST phase)
 Store + share film on a recruit. Supabase **storage bucket** + a `gm_recruit_video` table (team-scoped). Lean: attach **per-recruit** (their film library), not per-report. Heaviest piece (upload/playback/hosting) → deferred to last.
 
-## OPEN DECISIONS (unanswered — pick up here)
-1. **Sequencing** — ship fixed defaults first (grades on mobile+web fast), or build the customizable template up front? *(Claude lean: defaults-first; storage designed so customization layers on without rework.)*
-2. **Customization depth + where edited** — rename-only vs. full add/remove/reorder + custom fields; edited on a **web GM settings screen** that the mobile grader inherits? *(Claude lean: full add/rename/reorder, web-edited, mobile inherits.)*
-3. **Default fields + scale** — confirm the 5 words (or 6 with a low end) and the hitter/pitcher lists above.
-4. **Video** — confirm last-phase + per-recruit attach.
+## DECISIONS — RESOLVED (Trevor, 2026-07-29)
+1. **Sequencing = fully-customizable template UP FRONT** (not defaults-first). Phase 1 includes the editable template.
+2. **Customization = full.** Staff can **rename / add / remove / reorder** fields AND **rename the grade-scale words**. Separate templates per **hitter / pitcher / TWP**. TWP = hitter set ∪ pitcher set (all 10 fields) with a **single shared Athleticism**. Defaults seeded (below), all editable.
+   - **Edited on WEB, under a new "GM Settings" area** — what's now the recruiting board's "Edit Budget" button moves under GM Settings, alongside **Scouting Template** and any future editable config. Mobile grader + web report both READ the one team template.
+   - **Roles deferred** — team_admin/head coach in practice; no explicit gating now (folded into the later role-access pass).
+3. **Scale = 5 words** (`Below Avg · Average · Above Average · Plus · Elite`), labels editable per team; no low-end 6th. **Default fields:** hitters Hit/Power/Run/Field/Arm/Athleticism; pitchers Velocity (free text) + FB/Breaking/Change/Command/Athleticism. Templates must let a staff **add pitches** (2nd breaking ball, splitter, cutter…). Keep the tier.
+4. **Video = in scope, per-recruit, team-RLS'd (zero bleed-over), attached to the account** — but **NOT stored forever: auto-scrub after a set age** (retention/lifecycle from day one). Bucket + `gm_recruit_video` (recruit_id, customer_team_id, storage_path, created_at, expires_at). Owner-restricted storage setup goes through the dashboard.
 
-Once decided: write to agent knowledge → Phase 1 migration (staging-first: `grades` JSONB + `gm_scout_template`) → mobile grader → mirror onto the web GM report → (later) consensus slot → (last) video.
+### Storage guardrail (makes "customizable + history" safe)
+Grades in the `grades` JSONB are keyed by a **stable field `key`** and store a **scale ordinal (1–5)**, NOT the visible label. Renaming a field or relabeling the scale only changes the template's `key→label` map — **old graded reports never break**. Velocity/free-text fields store their raw string.
+
+### Template shape (`gm_scout_template`)
+Per `(customer_team_id, player_type)`: an ordered list of fields `{ key, label, type: 'grade' | 'text', order }` + a per-team scale `[{ ordinal, label }]` (default 5 words). Seeded with the defaults; edited on the web GM Settings → Scouting Template screen. Both surfaces render the grader dynamically from this.
+
+### Build sequence (Phase 1 = the whole customizable grader)
+1. **Migrations (staging-first):** `gm_recruit_reports.grades` JSONB; `gm_scout_template` (+RLS team-scoped); seed defaults per existing team; `gm_recruit_video` (+RLS) + storage bucket with a lifecycle/expiry.
+2. **Web GM Settings** area — house Budget (moved) + new **Scouting Template** editor (add/rename/remove/reorder fields, relabel scale, per hitter/pitcher/TWP).
+3. **Dynamic grader** rendered from the team template — on the **mobile** report composer (grades after the write-up, per-look history, carry-forward prefill) AND the **web** GM report.
+4. **Video** — per-recruit upload/list/playback with auto-scrub.
+5. **(later)** consensus Final-Grade slot on the recruit (reuses the grader).
