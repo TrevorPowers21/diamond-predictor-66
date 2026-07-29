@@ -23,7 +23,7 @@ import {
   type GmRecruit, type NewRecruit, type RecruitType, type RecruitLevel, type RecruitTier,
 } from "@/gm/hooks/useGmRecruits";
 import { useScoutTemplate } from "@/gm/hooks/useScoutTemplate";
-import { scaleLabel, hasGrades, gradeFilled, type ScoutTemplate, type ScoutGrades, type VeloValue } from "@/gm/lib/scoutTemplate";
+import { scaleLabel, hasGrades, gradeFilled, customFieldsIn, type ScoutTemplate, type ScoutGrades, type VeloValue, type CustomGrade } from "@/gm/lib/scoutTemplate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -497,15 +497,19 @@ function SectionHead({ icon, title, count, accent, onAdd }: { icon: React.ReactN
 // team template's labels + scale words, so renames never break old reports).
 const gradesSummary = (grades: ScoutGrades | null | undefined, template: ScoutTemplate): string => {
   if (!grades) return "";
-  return template.fields
-    .filter((f) => gradeFilled(grades[f.key]))
-    .map((f) => {
-      const val = grades[f.key];
-      if (f.type === "velo") { const vv = (val ?? {}) as VeloValue; return `${f.label}: ${[vv.range, vv.max ? `${vv.max} max` : ""].filter(Boolean).join(" / ")}`; }
-      if (f.type === "text") return `${f.label}: ${val}`;
-      return `${f.label}: ${scaleLabel(template.scale, Number(val))}`;
-    })
-    .join("  ·  ");
+  const parts: string[] = [];
+  for (const f of template.fields) {
+    if (!gradeFilled(grades[f.key])) continue;
+    const val = grades[f.key];
+    if (f.type === "velo") { const vv = (val ?? {}) as VeloValue; parts.push(`${f.label}: ${[vv.range, vv.max ? `${vv.max} max` : ""].filter(Boolean).join(" / ")}`); }
+    else if (f.type === "text") parts.push(`${f.label}: ${val}`);
+    else parts.push(`${f.label}: ${scaleLabel(template.scale, Number(val))}`);
+  }
+  for (const cf of customFieldsIn(grades, template)) {
+    const cg = grades[cf.key] as CustomGrade;
+    if (cg?.ord != null) parts.push(`${cf.label || "Pitch"}: ${scaleLabel(template.scale, cg.ord)}`);
+  }
+  return parts.join("  ·  ");
 };
 
 // A popup composer: date + tier + a roomy write-up, THEN the grades
@@ -520,8 +524,20 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
   const [grades, setGrades] = useState<ScoutGrades>({});
   // Seed fresh (or from the entry being edited / carried-forward) each open.
   useEffect(() => { if (open) { setDate(initial?.date ?? today()); setBody(initial?.body ?? ""); setTier(initial?.tier ?? ""); setGrades(initial?.grades ?? {}); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const setG = (key: string, val: number | string | VeloValue | null) => setGrades((g) => ({ ...g, [key]: val }));
-  const save = () => { if (body.trim()) { onSave(date, body.trim(), tier || undefined, template ? grades : undefined); onOpenChange(false); } };
+  const setG = (key: string, val: number | string | VeloValue | CustomGrade | null) => setGrades((g) => ({ ...g, [key]: val }));
+  const addPitch = () => setGrades((g) => ({ ...g, [`c${Math.random().toString(36).slice(2, 9)}`]: { label: "", ord: null } }));
+  const removeField = (key: string) => setGrades((g) => { const n = { ...g }; delete n[key]; return n; });
+  const save = () => {
+    if (!body.trim()) return;
+    // Drop ad-hoc pitches that were added but never named.
+    const clean: ScoutGrades = {};
+    for (const [k, val] of Object.entries(grades)) {
+      if (val && typeof val === "object" && "ord" in val && !((val as CustomGrade).label || "").trim()) continue;
+      clean[k] = val;
+    }
+    onSave(date, body.trim(), tier || undefined, template ? clean : undefined);
+    onOpenChange(false);
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
@@ -563,7 +579,23 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
                     )}
                   </div>
                 ))}
+                {customFieldsIn(grades, template).map((cf) => {
+                  const cg = (grades[cf.key] ?? { label: "", ord: null }) as CustomGrade;
+                  return (
+                    <div key={cf.key} className="flex items-center gap-2">
+                      <Input value={cg.label ?? ""} onChange={(e) => setG(cf.key, { ...cg, label: e.target.value })} placeholder="Pitch name" autoComplete="new-password" className="h-8 flex-1 text-sm" />
+                      <Select value={cg.ord != null ? String(cg.ord) : ""} onValueChange={(val) => setG(cf.key, { ...cg, ord: Number(val) })}>
+                        <SelectTrigger className="h-8 w-32 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectContent>{template.scale.map((s) => <SelectItem key={s.ordinal} value={String(s.ordinal)} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <button type="button" onClick={() => removeField(cf.key)} className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground" aria-label="Remove pitch"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  );
+                })}
               </div>
+              <button type="button" onClick={addPitch} className="mt-2 inline-flex w-fit items-center gap-1.5 rounded border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-2.5 py-1 text-[11px] font-semibold text-[#D4AF37] transition-opacity hover:opacity-80" style={OSWALD}>
+                <Plus className="h-3.5 w-3.5" /> Add Pitch
+              </button>
             </div>
           )}
         </div>

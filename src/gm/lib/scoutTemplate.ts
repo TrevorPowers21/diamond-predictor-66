@@ -16,8 +16,12 @@ export interface ScoutTemplate { fields: ScoutField[]; scale: ScoutScaleLevel[] 
 
 // A velocity field stores a range + a single max number.
 export interface VeloValue { range?: string; max?: string }
-// A recruit's stored grades: field key → ordinal (grade), raw string (text), or velo.
-export type ScoutGrades = Record<string, number | string | VeloValue | null>;
+// A per-report ad-hoc pitch a coach named on the fly. Its name travels WITH the
+// value because the field isn't in the team template (label + a scale ordinal).
+export interface CustomGrade { label: string; ord: number | null }
+// A recruit's stored grades: field key → ordinal (grade), raw string (text),
+// velo range+max, or a per-report custom pitch.
+export type ScoutGrades = Record<string, number | string | VeloValue | CustomGrade | null>;
 
 export const DEFAULT_SCALE: ScoutScaleLevel[] = [
   { ordinal: 1, label: "Below Avg" },
@@ -46,12 +50,21 @@ export const DEFAULT_TEMPLATES: Record<RecruitType, ScoutTemplate> = {
 export const scaleLabel = (scale: ScoutScaleLevel[], ordinal: number | null | undefined): string =>
   ordinal == null ? "" : (scale.find((s) => s.ordinal === ordinal)?.label ?? "");
 
-/** Is a single grade value "filled"? (handles velo objects.) */
-export const gradeFilled = (val: number | string | VeloValue | null | undefined): boolean => {
+/** Is a single grade value "filled"? (handles velo + custom-pitch objects.) */
+export const gradeFilled = (val: number | string | VeloValue | CustomGrade | null | undefined): boolean => {
   if (val == null || val === "") return false;
-  if (typeof val === "object") return !!(val.range || val.max);
+  if (typeof val === "object") return "ord" in val ? val.ord != null : !!(val.range || val.max);
   return true;
 };
 /** Are there any non-empty grades in this blob? */
 export const hasGrades = (grades: ScoutGrades | null | undefined): boolean =>
   !!grades && Object.values(grades).some(gradeFilled);
+
+/** Per-report ad-hoc pitch fields present in a grades blob (keys not in the team template). */
+export const customFieldsIn = (grades: ScoutGrades | null | undefined, template: ScoutTemplate): { key: string; label: string }[] => {
+  if (!grades) return [];
+  const tk = new Set(template.fields.map((f) => f.key));
+  return Object.entries(grades)
+    .filter(([k, v]) => !tk.has(k) && !!v && typeof v === "object" && "ord" in (v as object))
+    .map(([k, v]) => ({ key: k, label: (v as CustomGrade).label }));
+};
