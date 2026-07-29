@@ -23,7 +23,7 @@ import {
   type GmRecruit, type NewRecruit, type RecruitType, type RecruitLevel, type RecruitTier,
 } from "@/gm/hooks/useGmRecruits";
 import { useScoutTemplate } from "@/gm/hooks/useScoutTemplate";
-import { scaleLabel, hasGrades, type ScoutTemplate, type ScoutGrades } from "@/gm/lib/scoutTemplate";
+import { scaleLabel, hasGrades, gradeFilled, type ScoutTemplate, type ScoutGrades, type VeloValue } from "@/gm/lib/scoutTemplate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -498,8 +498,13 @@ function SectionHead({ icon, title, count, accent, onAdd }: { icon: React.ReactN
 const gradesSummary = (grades: ScoutGrades | null | undefined, template: ScoutTemplate): string => {
   if (!grades) return "";
   return template.fields
-    .filter((f) => grades[f.key] != null && grades[f.key] !== "")
-    .map((f) => `${f.label}: ${f.type === "text" ? grades[f.key] : scaleLabel(template.scale, Number(grades[f.key]))}`)
+    .filter((f) => gradeFilled(grades[f.key]))
+    .map((f) => {
+      const val = grades[f.key];
+      if (f.type === "velo") { const vv = (val ?? {}) as VeloValue; return `${f.label}: ${[vv.range, vv.max ? `${vv.max} max` : ""].filter(Boolean).join(" / ")}`; }
+      if (f.type === "text") return `${f.label}: ${val}`;
+      return `${f.label}: ${scaleLabel(template.scale, Number(val))}`;
+    })
     .join("  ·  ");
 };
 
@@ -515,7 +520,7 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
   const [grades, setGrades] = useState<ScoutGrades>({});
   // Seed fresh (or from the entry being edited / carried-forward) each open.
   useEffect(() => { if (open) { setDate(initial?.date ?? today()); setBody(initial?.body ?? ""); setTier(initial?.tier ?? ""); setGrades(initial?.grades ?? {}); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const setG = (key: string, v: number | string | null) => setGrades((g) => ({ ...g, [key]: v }));
+  const setG = (key: string, val: number | string | VeloValue | null) => setGrades((g) => ({ ...g, [key]: val }));
   const save = () => { if (body.trim()) { onSave(date, body.trim(), tier || undefined, template ? grades : undefined); onOpenChange(false); } };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -542,10 +547,16 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
                 {template.fields.map((f) => (
                   <div key={f.key} className="flex items-center justify-between gap-2">
                     <span className="text-[12px] text-foreground">{f.label}</span>
-                    {f.type === "text" ? (
+                    {f.type === "velo" ? (
+                      <div className="flex items-center gap-1.5">
+                        <Input value={(grades[f.key] as VeloValue | undefined)?.range ?? ""} onChange={(e) => setG(f.key, { ...(grades[f.key] as VeloValue), range: e.target.value })} placeholder="90-93" autoComplete="new-password" className="h-8 w-[4.5rem] text-sm" />
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">max</span>
+                        <Input value={(grades[f.key] as VeloValue | undefined)?.max ?? ""} onChange={(e) => setG(f.key, { ...(grades[f.key] as VeloValue), max: e.target.value })} inputMode="numeric" placeholder="95" autoComplete="new-password" className="h-8 w-14 text-sm" />
+                      </div>
+                    ) : f.type === "text" ? (
                       <Input value={String(grades[f.key] ?? "")} onChange={(e) => setG(f.key, e.target.value)} placeholder="e.g. 90-93" autoComplete="new-password" className="h-8 w-28 text-sm" />
                     ) : (
-                      <Select value={grades[f.key] != null ? String(grades[f.key]) : ""} onValueChange={(v) => setG(f.key, Number(v))}>
+                      <Select value={grades[f.key] != null ? String(grades[f.key]) : ""} onValueChange={(val) => setG(f.key, Number(val))}>
                         <SelectTrigger className="h-8 w-40 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
                         <SelectContent>{template.scale.map((s) => <SelectItem key={s.ordinal} value={String(s.ordinal)} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
                       </Select>

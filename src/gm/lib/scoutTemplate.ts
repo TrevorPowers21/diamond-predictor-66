@@ -9,13 +9,15 @@
  */
 import type { RecruitType } from "@/gm/hooks/useGmRecruits";
 
-export type ScoutFieldType = "grade" | "text";
+export type ScoutFieldType = "grade" | "text" | "velo";
 export interface ScoutField { key: string; label: string; type: ScoutFieldType; order: number }
 export interface ScoutScaleLevel { ordinal: number; label: string }
 export interface ScoutTemplate { fields: ScoutField[]; scale: ScoutScaleLevel[] }
 
-// A recruit's stored grades: field key → ordinal (grade) or raw string (text).
-export type ScoutGrades = Record<string, number | string | null>;
+// A velocity field stores a range + a single max number.
+export interface VeloValue { range?: string; max?: string }
+// A recruit's stored grades: field key → ordinal (grade), raw string (text), or velo.
+export type ScoutGrades = Record<string, number | string | VeloValue | null>;
 
 export const DEFAULT_SCALE: ScoutScaleLevel[] = [
   { ordinal: 1, label: "Below Avg" },
@@ -26,13 +28,13 @@ export const DEFAULT_SCALE: ScoutScaleLevel[] = [
 ];
 
 const g = (key: string, label: string, order: number): ScoutField => ({ key, label, type: "grade", order });
-const t = (key: string, label: string, order: number): ScoutField => ({ key, label, type: "text", order });
+const v = (key: string, label: string, order: number): ScoutField => ({ key, label, type: "velo", order });
 
-// Hitter tools, pitcher (velo free-text + 4 pitch/command grades), and TWP =
-// hitter ∪ pitcher fields with a SINGLE shared Athleticism (Trevor 2026-07-29).
+// Hitter tools; pitcher = FB Velocity (range + max) + 4 pitch/command grades;
+// TWP = hitter ∪ pitcher fields with a SINGLE shared Athleticism (Trevor 2026-07-29).
 const HITTER: ScoutField[] = [g("hit", "Hit", 0), g("power", "Power", 1), g("run", "Run", 2), g("field", "Defense", 3), g("arm", "Arm Strength", 4), g("athleticism", "Athleticism", 5)];
-const PITCHER: ScoutField[] = [t("velocity", "Velocity", 0), g("fb", "FB", 1), g("breaking", "Breaking", 2), g("change", "Change", 3), g("command", "Command", 4), g("athleticism", "Athleticism", 5)];
-const TWP: ScoutField[] = [g("hit", "Hit", 0), g("power", "Power", 1), g("run", "Run", 2), g("field", "Defense", 3), g("arm", "Arm Strength", 4), t("velocity", "Velocity", 5), g("fb", "FB", 6), g("breaking", "Breaking", 7), g("change", "Change", 8), g("command", "Command", 9), g("athleticism", "Athleticism", 10)];
+const PITCHER: ScoutField[] = [v("velocity", "FB Velocity", 0), g("fb", "Fastball", 1), g("breaking", "Breaking Ball", 2), g("change", "Change-up", 3), g("command", "Command", 4), g("athleticism", "Athleticism", 5)];
+const TWP: ScoutField[] = [g("hit", "Hit", 0), g("power", "Power", 1), g("run", "Run", 2), g("field", "Defense", 3), g("arm", "Arm Strength", 4), v("velocity", "FB Velocity", 5), g("fb", "Fastball", 6), g("breaking", "Breaking Ball", 7), g("change", "Change-up", 8), g("command", "Command", 9), g("athleticism", "Athleticism", 10)];
 
 export const DEFAULT_TEMPLATES: Record<RecruitType, ScoutTemplate> = {
   hitter: { fields: HITTER, scale: DEFAULT_SCALE },
@@ -44,6 +46,12 @@ export const DEFAULT_TEMPLATES: Record<RecruitType, ScoutTemplate> = {
 export const scaleLabel = (scale: ScoutScaleLevel[], ordinal: number | null | undefined): string =>
   ordinal == null ? "" : (scale.find((s) => s.ordinal === ordinal)?.label ?? "");
 
+/** Is a single grade value "filled"? (handles velo objects.) */
+export const gradeFilled = (val: number | string | VeloValue | null | undefined): boolean => {
+  if (val == null || val === "") return false;
+  if (typeof val === "object") return !!(val.range || val.max);
+  return true;
+};
 /** Are there any non-empty grades in this blob? */
 export const hasGrades = (grades: ScoutGrades | null | undefined): boolean =>
-  !!grades && Object.values(grades).some((v) => v != null && v !== "");
+  !!grades && Object.values(grades).some(gradeFilled);

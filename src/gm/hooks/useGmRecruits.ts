@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { logGmActivity, deleteGmActivityByRef } from "@/gm/lib/logGmActivity";
 import { toast } from "sonner";
+import type { ScoutGrades } from "@/gm/lib/scoutTemplate";
 
 export type RecruitType = "hitter" | "pitcher" | "twp";
 
@@ -95,7 +96,7 @@ export interface GmRecruitReport {
   report_date: string; // YYYY-MM-DD
   body: string | null;
   projection_tier: RecruitTier | null; // the tier this coach assigned in this report
-  grades: Record<string, number | string | null> | null; // per-look grades (stable key → ordinal/text)
+  grades: ScoutGrades | null; // per-look grades (stable key → ordinal/text)
 }
 
 /** Position → recruit section. TWP is its own group. */
@@ -181,7 +182,7 @@ export function useGmRecruits() {
   }, [reports]);
 
   const addReport = useMutation({
-    mutationFn: async ({ recruitId, reportDate, body, tier, grades }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null; grades?: Record<string, number | string | null> | null }) => {
+    mutationFn: async ({ recruitId, reportDate, body, tier, grades }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades | null }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const { data: inserted, error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, grades: grades ?? null, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
@@ -205,7 +206,7 @@ export function useGmRecruits() {
   });
 
   const addRecruit = useMutation({
-    mutationFn: async ({ recruit: r, initialReport, initialEvent }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: Record<string, number | string | null> | null }; initialEvent?: { event_date: string; note: string } }) => {
+    mutationFn: async ({ recruit: r, initialReport, initialEvent }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades | null }; initialEvent?: { event_date: string; note: string } }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const peers = recruits.filter((x) => x.class_year === r.class_year && x.player_type === r.player_type);
       const nextOrder = peers.length ? Math.max(...peers.map((x) => x.sort_order)) + 1 : 0;
@@ -311,7 +312,7 @@ export function useGmRecruits() {
     recruits,
     years,
     isLoading,
-    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: Record<string, number | string | null> | null }, initialEvent?: { event_date: string; note: string }) => addRecruit.mutate({ recruit, initialReport, initialEvent }),
+    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades | null }, initialEvent?: { event_date: string; note: string }) => addRecruit.mutate({ recruit, initialReport, initialEvent }),
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
@@ -321,7 +322,7 @@ export function useGmRecruits() {
     addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutate({ recruitId, eventDate, note }),
     removeEvent: (id: string) => removeEvent.mutate(id),
     reportsByRecruit,
-    addReport: (recruitId: string, reportDate: string, body: string, tier?: RecruitTier | null, grades?: Record<string, number | string | null> | null) => addReport.mutate({ recruitId, reportDate, body, tier, grades }),
+    addReport: (recruitId: string, reportDate: string, body: string, tier?: RecruitTier | null, grades?: ScoutGrades | null) => addReport.mutate({ recruitId, reportDate, body, tier, grades }),
     removeReport: (id: string) => removeReport.mutate(id),
   };
 }
