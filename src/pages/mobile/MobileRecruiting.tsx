@@ -216,6 +216,7 @@ export default function MobileRecruiting() {
       </button>
 
       <AddRecruitDialog open={addOpen} onOpenChange={setAddOpen} defaultYear={activeYear}
+        existing={recruits} onOpenExisting={(r) => { setAddOpen(false); setOpenRecruit(r); }}
         onAdd={(r, rpt, evt) => { addRecruit(r, rpt, evt); setAddOpen(false); }} />
       <RecruitSheet
         recruit={openRecruit} onOpenChange={(o) => !o && setOpenRecruit(null)}
@@ -229,8 +230,9 @@ export default function MobileRecruiting() {
 }
 
 // ---------- Add Recruit (matches the desktop board's Dialog; position = groups) ----------
-function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
+function AddRecruitDialog({ open, onOpenChange, defaultYear, existing, onOpenExisting, onAdd }: {
   open: boolean; onOpenChange: (o: boolean) => void; defaultYear: number;
+  existing: GmRecruit[]; onOpenExisting: (r: GmRecruit) => void;
   onAdd: (r: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }, initialEvent?: { event_date: string; note: string }) => void;
 }) {
   const [first, setFirst] = useState(""); const [last, setLast] = useState("");
@@ -241,6 +243,10 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
   const [contact, setContact] = useState<{ date: string; body: string } | null>(null);
   const [reportOpen, setReportOpen] = useState(false); const [contactOpen, setContactOpen] = useState(false);
   const canSave = first.trim() && last.trim();
+  // Live dup-detection: existing board recruits whose name matches what's typed.
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const typed = norm(`${first}${last}`);
+  const dupes = typed.length >= 3 ? existing.filter((r) => norm(`${r.first_name ?? ""}${r.last_name ?? ""}`).includes(typed)).slice(0, 4) : [];
 
   const reset = () => { setFirst(""); setLast(""); setGroupKey("c"); setHs(""); setLevel("hs"); setLink(""); setPhone(""); setEmail(""); setReport(null); setContact(null); };
   const save = () => {
@@ -271,6 +277,20 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
               <Field label="First Name"><Input value={first} onChange={(e) => setFirst(e.target.value)} autoComplete="new-password" className="h-9 text-sm" /></Field>
               <Field label="Last Name"><Input value={last} onChange={(e) => setLast(e.target.value)} autoComplete="new-password" className="h-9 text-sm" /></Field>
             </div>
+            {dupes.length > 0 && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-500" style={OSWALD}>Already on the board — open instead?</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {dupes.map((r) => (
+                    <button key={r.id} onClick={() => onOpenExisting(r)}
+                      className="rounded border border-border/60 bg-card px-2 py-1 text-[12px] text-foreground transition-colors hover:border-[#D4AF37]/50">
+                      {`${r.first_name ?? ""} ${r.last_name ?? ""}`.trim()}
+                      <span className="text-muted-foreground"> · {[r.position, r.class_year].filter(Boolean).join(" · ")}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Cell Phone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="(555) 123-4567" autoComplete="new-password" className="h-9 text-sm" /></Field>
               <Field label="Email"><Input value={email} onChange={(e) => setEmail(e.target.value)} inputMode="email" placeholder="player@email.com" autoComplete="new-password" className="h-9 text-sm" /></Field>
