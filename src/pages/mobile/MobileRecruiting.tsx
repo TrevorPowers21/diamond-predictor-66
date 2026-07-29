@@ -28,6 +28,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Plus, CalendarDays, ClipboardList, MessageSquarePlus, ChevronRight, X } from "lucide-react";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -71,11 +73,34 @@ const levelLabel = (v: RecruitLevel) => RECRUIT_LEVELS.find((l) => l.value === v
 const isJuco = (v: RecruitLevel) => v === "juco_fr" || v === "juco_so";
 const initials = (r: GmRecruit) => `${(r.first_name || "?")[0] ?? ""}${(r.last_name || "")[0] ?? ""}`.toUpperCase();
 const today = () => new Date().toISOString().slice(0, 10);
+const toYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const fmtDate = (d?: string | null) => {
   if (!d) return "";
   const dt = new Date(d + "T00:00:00");
   return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 };
+
+// App-consistent date picker (Popover + Calendar) — replaces the native
+// <input type="date"> so there's no Chrome-specific dropdown. Caps at today.
+function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? new Date(value + "T00:00:00") : undefined;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-input bg-card px-2.5 py-2 text-[13px] text-foreground transition-colors hover:bg-muted/40">
+          <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+          {selected ? selected.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Pick date"}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar mode="single" selected={selected} defaultMonth={selected}
+          onSelect={(d) => { if (d) { onChange(toYmd(d)); setOpen(false); } }}
+          disabled={(d) => d > new Date()} initialFocus />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export default function MobileRecruiting() {
   const { effectiveTeamId, availableTeams } = useAuth();
@@ -445,10 +470,7 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
         <DialogHeader><DialogTitle style={OSWALD}>{title}</DialogTitle></DialogHeader>
         <div className="space-y-3 py-1">
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 rounded-md border border-input bg-card px-2 py-1.5">
-              <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <input type="date" value={date} max={today()} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-[13px] text-foreground outline-none" style={{ colorScheme: "dark" }} />
-            </div>
+            <DatePicker value={date} onChange={setDate} />
             {withTier && (
               <Select value={tier} onValueChange={setTier}>
                 <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Grade (optional)" /></SelectTrigger>
