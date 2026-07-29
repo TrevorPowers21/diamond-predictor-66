@@ -30,9 +30,9 @@ const t = (key: string, label: string, order: number): ScoutField => ({ key, lab
 
 // Hitter tools, pitcher (velo free-text + 4 pitch/command grades), and TWP =
 // hitter ∪ pitcher fields with a SINGLE shared Athleticism (Trevor 2026-07-29).
-const HITTER: ScoutField[] = [g("hit", "Hit", 0), g("power", "Power", 1), g("run", "Run", 2), g("field", "Field", 3), g("arm", "Arm", 4), g("athleticism", "Athleticism", 5)];
+const HITTER: ScoutField[] = [g("hit", "Hit", 0), g("power", "Power", 1), g("run", "Run", 2), g("field", "Defense", 3), g("arm", "Arm Strength", 4), g("athleticism", "Athleticism", 5)];
 const PITCHER: ScoutField[] = [t("velocity", "Velocity", 0), g("fb", "FB", 1), g("breaking", "Breaking", 2), g("change", "Change", 3), g("command", "Command", 4), g("athleticism", "Athleticism", 5)];
-const TWP: ScoutField[] = [g("hit", "Hit", 0), g("power", "Power", 1), g("run", "Run", 2), g("field", "Field", 3), g("arm", "Arm", 4), t("velocity", "Velocity", 5), g("fb", "FB", 6), g("breaking", "Breaking", 7), g("change", "Change", 8), g("command", "Command", 9), g("athleticism", "Athleticism", 10)];
+const TWP: ScoutField[] = [g("hit", "Hit", 0), g("power", "Power", 1), g("run", "Run", 2), g("field", "Defense", 3), g("arm", "Arm Strength", 4), t("velocity", "Velocity", 5), g("fb", "FB", 6), g("breaking", "Breaking", 7), g("change", "Change", 8), g("command", "Command", 9), g("athleticism", "Athleticism", 10)];
 
 export const DEFAULT_TEMPLATES: Record<RecruitType, ScoutTemplate> = {
   hitter: { fields: HITTER, scale: DEFAULT_SCALE },

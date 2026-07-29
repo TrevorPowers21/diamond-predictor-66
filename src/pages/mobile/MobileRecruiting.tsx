@@ -503,7 +503,7 @@ const gradesSummary = (grades: ScoutGrades | null | undefined, template: ScoutTe
     .join("  ·  ");
 };
 
-// A popup composer: date + (optional tier) + a roomy write-up, THEN the grades
+// A popup composer: date + tier + a roomy write-up, THEN the grades
 // (rendered from the team template) — grades come after a detailed report.
 function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder, initial, template, onSave }: {
   open: boolean; onOpenChange: (o: boolean) => void; title: string; withTier?: boolean; rows: number; placeholder: string;
@@ -526,7 +526,7 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
             <DatePicker value={date} onChange={setDate} />
             {withTier && (
               <Select value={tier} onValueChange={setTier}>
-                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Tier (optional)" /></SelectTrigger>
+                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Tier" /></SelectTrigger>
                 <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
               </Select>
             )}
@@ -536,7 +536,7 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
           {template && (
             <div className="rounded-md border border-border/60 bg-card/40 p-2.5">
               <div className="mb-2 text-[11px] uppercase tracking-[0.15em] text-[#D4AF37]" style={OSWALD}>
-                Grades <span className="lowercase tracking-normal text-muted-foreground">· optional</span>
+                Grades
               </div>
               <div className="flex flex-col gap-1.5">
                 {template.fields.map((f) => (
