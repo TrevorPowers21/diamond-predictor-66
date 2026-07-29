@@ -15,7 +15,7 @@
  * Styled with the app's semantic theme tokens + the real /rstr-iq-logo.png so it
  * matches the website. Reuses `useGmRecruits` wholesale.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -28,7 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, CalendarDays, ClipboardList, MessageSquarePlus, ChevronRight } from "lucide-react";
+import { Plus, CalendarDays, ClipboardList, MessageSquarePlus, ChevronRight, X } from "lucide-react";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const GOLD = "#D4AF37";
@@ -191,7 +191,7 @@ export default function MobileRecruiting() {
       </button>
 
       <AddRecruitDialog open={addOpen} onOpenChange={setAddOpen} defaultYear={activeYear}
-        onAdd={(r, rpt) => { addRecruit(r, rpt); setAddOpen(false); }} />
+        onAdd={(r, rpt, evt) => { addRecruit(r, rpt, evt); setAddOpen(false); }} />
       <RecruitSheet
         recruit={openRecruit} onOpenChange={(o) => !o && setOpenRecruit(null)}
         reports={openRecruit ? reportsByRecruit.get(openRecruit.id) ?? [] : []}
@@ -206,15 +206,17 @@ export default function MobileRecruiting() {
 // ---------- Add Recruit (matches the desktop board's Dialog; position = groups) ----------
 function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
   open: boolean; onOpenChange: (o: boolean) => void; defaultYear: number;
-  onAdd: (r: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }) => void;
+  onAdd: (r: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }, initialEvent?: { event_date: string; note: string }) => void;
 }) {
   const [first, setFirst] = useState(""); const [last, setLast] = useState("");
   const [groupKey, setGroupKey] = useState<GroupKey>("c"); const [hs, setHs] = useState("");
   const [level, setLevel] = useState<RecruitLevel>("hs"); const [link, setLink] = useState("");
-  const [rptDate, setRptDate] = useState(today()); const [rptTier, setRptTier] = useState(""); const [rptBody, setRptBody] = useState("");
+  const [report, setReport] = useState<{ date: string; body: string; tier: string } | null>(null);
+  const [contact, setContact] = useState<{ date: string; body: string } | null>(null);
+  const [reportOpen, setReportOpen] = useState(false); const [contactOpen, setContactOpen] = useState(false);
   const canSave = first.trim() && last.trim();
 
-  const reset = () => { setFirst(""); setLast(""); setGroupKey("c"); setHs(""); setLevel("hs"); setLink(""); setRptDate(today()); setRptTier(""); setRptBody(""); };
+  const reset = () => { setFirst(""); setLast(""); setGroupKey("c"); setHs(""); setLevel("hs"); setLink(""); setReport(null); setContact(null); };
   const save = () => {
     const grp = POS_GROUPS.find((g) => g.key === groupKey)!;
     const r: NewRecruit = {
@@ -226,59 +228,87 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
       phone: null, email: null, guardian_name: null, guardian_phone: null,
       coach_name: null, coach_phone: null, extra_contacts: null,
     };
-    const initialReport = rptBody.trim() ? { report_date: rptDate, body: rptBody.trim(), tier: (rptTier || null) as RecruitTier | null } : undefined;
-    onAdd(r, initialReport); reset();
+    onAdd(r,
+      report ? { report_date: report.date, body: report.body, tier: (report.tier || null) as RecruitTier | null } : undefined,
+      contact ? { event_date: contact.date, note: contact.body } : undefined,
+    );
+    reset();
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
-      <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
-        <DialogHeader><DialogTitle style={OSWALD}>Add Recruit</DialogTitle></DialogHeader>
-        <div className="space-y-3 py-1">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="First Name"><Input value={first} onChange={(e) => setFirst(e.target.value)} className="h-9 text-sm" /></Field>
-            <Field label="Last Name"><Input value={last} onChange={(e) => setLast(e.target.value)} className="h-9 text-sm" /></Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Position">
-              <Select value={groupKey} onValueChange={(v) => setGroupKey(v as GroupKey)}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{POS_GROUPS.map((g) => <SelectItem key={g.key} value={g.key} className="text-xs">{g.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
-            <Field label="Level">
-              <Select value={level} onValueChange={(v) => setLevel(v as RecruitLevel)}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{RECRUIT_LEVELS.map((l) => <SelectItem key={l.value} value={l.value} className="text-xs">{l.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
-          </div>
-          <Field label="High School / Team"><Input value={hs} onChange={(e) => setHs(e.target.value)} className="h-9 text-sm" /></Field>
-          <Field label="PBR / PG Profile Link" hint="optional"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" /></Field>
+    <>
+      <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
+        <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
+          <DialogHeader><DialogTitle style={OSWALD}>Add Recruit</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="First Name"><Input value={first} onChange={(e) => setFirst(e.target.value)} className="h-9 text-sm" /></Field>
+              <Field label="Last Name"><Input value={last} onChange={(e) => setLast(e.target.value)} className="h-9 text-sm" /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Position">
+                <Select value={groupKey} onValueChange={(v) => setGroupKey(v as GroupKey)}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>{POS_GROUPS.map((g) => <SelectItem key={g.key} value={g.key} className="text-xs">{g.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+              <Field label="Level">
+                <Select value={level} onValueChange={(v) => setLevel(v as RecruitLevel)}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>{RECRUIT_LEVELS.map((l) => <SelectItem key={l.value} value={l.value} className="text-xs">{l.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <Field label="High School / Team"><Input value={hs} onChange={(e) => setHs(e.target.value)} className="h-9 text-sm" /></Field>
+            <Field label="PBR / PG Profile Link" hint="optional"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" /></Field>
 
-          {/* Optional first scouting report — consolidate notes at add time */}
-          <div className="mt-1 border-t border-border/60 pt-3">
-            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-[#D4AF37]" style={OSWALD}>
-              <ClipboardList className="h-4 w-4" /> Scouting Report <span className="lowercase tracking-normal opacity-70">(optional)</span>
+            {/* Consolidate notes at add time — separate scouting eval from a contact log */}
+            <div className="mt-1 flex flex-col gap-2 border-t border-border/60 pt-3">
+              <AttachRow icon={<ClipboardList className="h-4 w-4" />} label="Scouting Report"
+                value={report ? `${fmtDate(report.date)}${report.tier ? " · " + (tierMeta(report.tier)?.label ?? "") : ""}` : null}
+                onAdd={() => setReportOpen(true)} onClear={() => setReport(null)} />
+              <AttachRow icon={<MessageSquarePlus className="h-4 w-4" />} label="Contact"
+                value={contact ? `${fmtDate(contact.date)} · logged` : null}
+                onAdd={() => setContactOpen(true)} onClear={() => setContact(null)} />
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 rounded-md border border-input bg-card px-2 py-1.5">
-                <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <input type="date" value={rptDate} max={today()} onChange={(e) => setRptDate(e.target.value)} className="bg-transparent text-[13px] text-foreground outline-none" style={{ colorScheme: "dark" }} />
-              </div>
-              <Select value={rptTier} onValueChange={setRptTier}>
-                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Grade (optional)" /></SelectTrigger>
-                <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <Textarea value={rptBody} onChange={(e) => setRptBody(e.target.value)} rows={4} placeholder="Consolidate your notes now, or leave blank and add later…" className="mt-2 bg-card" />
           </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={save} disabled={!canSave} style={OSWALD} className="uppercase tracking-wide">Add to Recruiting Board</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button onClick={save} disabled={!canSave} style={OSWALD} className="uppercase tracking-wide">Add to Recruiting Board</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* same composer popups the detail sheet uses */}
+      <EntryComposer open={reportOpen} onOpenChange={setReportOpen} title="Scouting Report" withTier rows={7}
+        placeholder="Full write-up — mechanics, tools, makeup, projection…"
+        initial={report ? { date: report.date, body: report.body, tier: report.tier } : undefined}
+        onSave={(date, body, tier) => setReport({ date, body, tier: tier ?? "" })} />
+      <EntryComposer open={contactOpen} onOpenChange={setContactOpen} title="Log Contact" rows={5}
+        placeholder="Talked to the player / his coach after the game…"
+        initial={contact ? { date: contact.date, body: contact.body } : undefined}
+        onSave={(date, body) => setContact({ date, body })} />
+    </>
+  );
+}
+
+// A one-line "+ Add" row that flips to a filled chip once an entry is attached.
+function AttachRow({ icon, label, value, onAdd, onClear }: { icon: React.ReactNode; label: string; value: string | null; onAdd: () => void; onClear: () => void }) {
+  if (!value) {
+    return (
+      <button onClick={onAdd} className="inline-flex w-fit items-center gap-1.5 rounded px-1 py-0.5 text-[12px] font-semibold text-muted-foreground transition-colors hover:text-[#D4AF37]" style={OSWALD}>
+        <Plus className="h-3.5 w-3.5" /> {label}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-[#D4AF37]/30 bg-[#D4AF37]/5 px-2.5 py-1.5">
+      <span className="text-[#D4AF37]">{icon}</span>
+      <button onClick={onAdd} className="min-w-0 flex-1 text-left">
+        <span className="block text-[12px] font-semibold text-foreground" style={OSWALD}>{label}</span>
+        <span className="block truncate text-[11px] text-muted-foreground">{value} · tap to edit</span>
+      </button>
+      <button onClick={onClear} className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground" aria-label={`Remove ${label}`}><X className="h-3.5 w-3.5" /></button>
+    </div>
   );
 }
 
@@ -391,15 +421,17 @@ function SectionHead({ icon, title, count, accent, onAdd }: { icon: React.ReactN
 
 // A popup composer: date + (optional tier) + a roomy textarea, so a coach can
 // write something detailed and review the whole excerpt before saving.
-function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder, onSave }: {
+function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder, initial, onSave }: {
   open: boolean; onOpenChange: (o: boolean) => void; title: string; withTier?: boolean; rows: number; placeholder: string;
+  initial?: { date?: string; body?: string; tier?: string };
   onSave: (date: string, body: string, tier?: string) => void;
 }) {
   const [date, setDate] = useState(today()); const [body, setBody] = useState(""); const [tier, setTier] = useState("");
-  const reset = () => { setDate(today()); setBody(""); setTier(""); };
-  const save = () => { if (body.trim()) { onSave(date, body.trim(), tier || undefined); reset(); onOpenChange(false); } };
+  // Seed fresh (or from the entry being edited) each time it opens.
+  useEffect(() => { if (open) { setDate(initial?.date ?? today()); setBody(initial?.body ?? ""); setTier(initial?.tier ?? ""); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = () => { if (body.trim()) { onSave(date, body.trim(), tier || undefined); onOpenChange(false); } };
   return (
-    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
         <DialogHeader><DialogTitle style={OSWALD}>{title}</DialogTitle></DialogHeader>
         <div className="space-y-3 py-1">

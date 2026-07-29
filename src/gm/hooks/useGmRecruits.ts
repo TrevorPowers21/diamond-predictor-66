@@ -204,7 +204,7 @@ export function useGmRecruits() {
   });
 
   const addRecruit = useMutation({
-    mutationFn: async ({ recruit: r, initialReport }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null } }) => {
+    mutationFn: async ({ recruit: r, initialReport, initialEvent }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }; initialEvent?: { event_date: string; note: string } }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const peers = recruits.filter((x) => x.class_year === r.class_year && x.player_type === r.player_type);
       const nextOrder = peers.length ? Math.max(...peers.map((x) => x.sort_order)) + 1 : 0;
@@ -215,10 +215,13 @@ export function useGmRecruits() {
       if (initialReport && initialReport.body.trim()) {
         await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, created_by_user_id: user?.id ?? null });
       }
+      if (initialEvent && initialEvent.note.trim()) {
+        await (supabase as any).from("gm_recruit_events").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, event_date: initialEvent.event_date, note: initialEvent.note.trim(), created_by_user_id: user?.id ?? null });
+      }
       const nm = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "a recruit";
       await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${nm} to the recruiting board`, `/gm/recruiting?reports=${inserted.id}`, inserted.id);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: eventsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit added"); },
     onError: (e: any) => toast.error(`Add failed: ${e.message}`),
   });
 
@@ -307,7 +310,7 @@ export function useGmRecruits() {
     recruits,
     years,
     isLoading,
-    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }) => addRecruit.mutate({ recruit, initialReport }),
+    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }, initialEvent?: { event_date: string; note: string }) => addRecruit.mutate({ recruit, initialReport, initialEvent }),
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
