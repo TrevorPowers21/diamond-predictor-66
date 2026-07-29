@@ -211,12 +211,13 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
   const [first, setFirst] = useState(""); const [last, setLast] = useState("");
   const [groupKey, setGroupKey] = useState<GroupKey>("c"); const [hs, setHs] = useState("");
   const [level, setLevel] = useState<RecruitLevel>("hs"); const [link, setLink] = useState("");
+  const [phone, setPhone] = useState(""); const [email, setEmail] = useState("");
   const [report, setReport] = useState<{ date: string; body: string; tier: string } | null>(null);
   const [contact, setContact] = useState<{ date: string; body: string } | null>(null);
   const [reportOpen, setReportOpen] = useState(false); const [contactOpen, setContactOpen] = useState(false);
   const canSave = first.trim() && last.trim();
 
-  const reset = () => { setFirst(""); setLast(""); setGroupKey("c"); setHs(""); setLevel("hs"); setLink(""); setReport(null); setContact(null); };
+  const reset = () => { setFirst(""); setLast(""); setGroupKey("c"); setHs(""); setLevel("hs"); setLink(""); setPhone(""); setEmail(""); setReport(null); setContact(null); };
   const save = () => {
     const grp = POS_GROUPS.find((g) => g.key === groupKey)!;
     const r: NewRecruit = {
@@ -225,7 +226,7 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
       state: null, travel_org: null, position: grp.addPos, notes: null, scouting_report_date: null,
       projection_tier: null, asking_price: null, target_offer: null, scholarship_pct: null,
       level, link: link.trim() || null, stage: "evaluating",
-      phone: null, email: null, guardian_name: null, guardian_phone: null,
+      phone: phone.trim() || null, email: email.trim() || null, guardian_name: null, guardian_phone: null,
       coach_name: null, coach_phone: null, extra_contacts: null,
     };
     onAdd(r,
@@ -261,13 +262,17 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
             </div>
             <Field label="High School / Team"><Input value={hs} onChange={(e) => setHs(e.target.value)} className="h-9 text-sm" /></Field>
             <Field label="PBR / PG Profile Link" hint="optional"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Cell Phone" hint="optional"><Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="(555) 123-4567" className="h-9 text-sm" /></Field>
+              <Field label="Email" hint="optional"><Input value={email} onChange={(e) => setEmail(e.target.value)} inputMode="email" placeholder="player@email.com" className="h-9 text-sm" /></Field>
+            </div>
 
             {/* Consolidate notes at add time — separate scouting eval from a contact log */}
             <div className="mt-1 flex flex-col gap-2 border-t border-border/60 pt-3">
               <AttachRow icon={<ClipboardList className="h-4 w-4" />} label="Scouting Report"
                 value={report ? `${fmtDate(report.date)}${report.tier ? " · " + (tierMeta(report.tier)?.label ?? "") : ""}` : null}
                 onAdd={() => setReportOpen(true)} onClear={() => setReport(null)} />
-              <AttachRow icon={<MessageSquarePlus className="h-4 w-4" />} label="Contact Notes"
+              <AttachRow icon={<MessageSquarePlus className="h-4 w-4" />} label="Notes"
                 value={contact ? `${fmtDate(contact.date)} · logged` : null}
                 onAdd={() => setContactOpen(true)} onClear={() => setContact(null)} />
             </div>
