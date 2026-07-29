@@ -95,6 +95,7 @@ export interface GmRecruitReport {
   report_date: string; // YYYY-MM-DD
   body: string | null;
   projection_tier: RecruitTier | null; // the tier this coach assigned in this report
+  grades: Record<string, number | string | null> | null; // per-look grades (stable key → ordinal/text)
 }
 
 /** Position → recruit section. TWP is its own group. */
@@ -167,7 +168,7 @@ export function useGmRecruits() {
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async (): Promise<GmRecruitReport[]> => {
       const { data } = await (supabase as any)
-        .from("gm_recruit_reports").select("id, recruit_id, author, report_date, body, projection_tier")
+        .from("gm_recruit_reports").select("id, recruit_id, author, report_date, body, projection_tier, grades")
         .eq("customer_team_id", effectiveTeamId)
         .order("report_date", { ascending: false }).order("created_at", { ascending: false });
       return (data || []) as GmRecruitReport[];
@@ -180,9 +181,9 @@ export function useGmRecruits() {
   }, [reports]);
 
   const addReport = useMutation({
-    mutationFn: async ({ recruitId, reportDate, body, tier }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null }) => {
+    mutationFn: async ({ recruitId, reportDate, body, tier, grades }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null; grades?: Record<string, number | string | null> | null }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      const { data: inserted, error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, created_by_user_id: user?.id ?? null }).select("id").single();
+      const { data: inserted, error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, grades: grades ?? null, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
       // A report authors the projection tier — mirror the latest onto the recruit for its stable badge.
       if (tier) await (supabase as any).from("gm_recruits").update({ projection_tier: tier, updated_at: new Date().toISOString() }).eq("id", recruitId);
@@ -204,7 +205,7 @@ export function useGmRecruits() {
   });
 
   const addRecruit = useMutation({
-    mutationFn: async ({ recruit: r, initialReport, initialEvent }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }; initialEvent?: { event_date: string; note: string } }) => {
+    mutationFn: async ({ recruit: r, initialReport, initialEvent }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: Record<string, number | string | null> | null }; initialEvent?: { event_date: string; note: string } }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const peers = recruits.filter((x) => x.class_year === r.class_year && x.player_type === r.player_type);
       const nextOrder = peers.length ? Math.max(...peers.map((x) => x.sort_order)) + 1 : 0;
@@ -213,7 +214,7 @@ export function useGmRecruits() {
       const { data: inserted, error } = await (supabase as any).from("gm_recruits").insert({ ...r, projection_tier: tier, customer_team_id: effectiveTeamId, sort_order: nextOrder, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
       if (initialReport && initialReport.body.trim()) {
-        await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, created_by_user_id: user?.id ?? null });
+        await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, grades: initialReport.grades ?? null, created_by_user_id: user?.id ?? null });
       }
       if (initialEvent && initialEvent.note.trim()) {
         await (supabase as any).from("gm_recruit_events").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, event_date: initialEvent.event_date, note: initialEvent.note.trim(), created_by_user_id: user?.id ?? null });
@@ -310,7 +311,7 @@ export function useGmRecruits() {
     recruits,
     years,
     isLoading,
-    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }, initialEvent?: { event_date: string; note: string }) => addRecruit.mutate({ recruit, initialReport, initialEvent }),
+    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: Record<string, number | string | null> | null }, initialEvent?: { event_date: string; note: string }) => addRecruit.mutate({ recruit, initialReport, initialEvent }),
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
@@ -320,7 +321,7 @@ export function useGmRecruits() {
     addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutate({ recruitId, eventDate, note }),
     removeEvent: (id: string) => removeEvent.mutate(id),
     reportsByRecruit,
-    addReport: (recruitId: string, reportDate: string, body: string, tier?: RecruitTier | null) => addReport.mutate({ recruitId, reportDate, body, tier }),
+    addReport: (recruitId: string, reportDate: string, body: string, tier?: RecruitTier | null, grades?: Record<string, number | string | null> | null) => addReport.mutate({ recruitId, reportDate, body, tier, grades }),
     removeReport: (id: string) => removeReport.mutate(id),
   };
 }

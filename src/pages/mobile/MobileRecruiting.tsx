@@ -22,6 +22,8 @@ import {
   useGmRecruits, RECRUIT_LEVELS, RECRUIT_STAGES, RECRUIT_TIERS, recruitTypeForPosition,
   type GmRecruit, type NewRecruit, type RecruitType, type RecruitLevel, type RecruitTier,
 } from "@/gm/hooks/useGmRecruits";
+import { useScoutTemplate } from "@/gm/hooks/useScoutTemplate";
+import { scaleLabel, hasGrades, type ScoutTemplate, type ScoutGrades } from "@/gm/lib/scoutTemplate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -233,7 +235,7 @@ export default function MobileRecruiting() {
         recruit={openRecruit} onOpenChange={(o) => !o && setOpenRecruit(null)}
         reports={openRecruit ? reportsByRecruit.get(openRecruit.id) ?? [] : []}
         events={openRecruit ? eventsByRecruit.get(openRecruit.id) ?? [] : []}
-        onAddReport={(date, body, tier) => { if (openRecruit) addReport(openRecruit.id, date, body, tier); }}
+        onAddReport={(date, body, tier, grades) => { if (openRecruit) addReport(openRecruit.id, date, body, tier, grades); }}
         onAddEvent={(date, note) => { if (openRecruit) addEvent(openRecruit.id, date, note); }}
       />
     </div>
@@ -244,15 +246,16 @@ export default function MobileRecruiting() {
 function AddRecruitDialog({ open, onOpenChange, defaultYear, existing, onOpenExisting, onAdd }: {
   open: boolean; onOpenChange: (o: boolean) => void; defaultYear: number;
   existing: GmRecruit[]; onOpenExisting: (r: GmRecruit) => void;
-  onAdd: (r: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }, initialEvent?: { event_date: string; note: string }) => void;
+  onAdd: (r: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades }, initialEvent?: { event_date: string; note: string }) => void;
 }) {
   const [first, setFirst] = useState(""); const [last, setLast] = useState("");
   const [groupKey, setGroupKey] = useState<GroupKey>("c"); const [hs, setHs] = useState("");
   const [level, setLevel] = useState<RecruitLevel>("hs"); const [link, setLink] = useState("");
   const [phone, setPhone] = useState(""); const [email, setEmail] = useState("");
-  const [report, setReport] = useState<{ date: string; body: string; tier: string } | null>(null);
+  const [report, setReport] = useState<{ date: string; body: string; tier: string; grades: ScoutGrades } | null>(null);
   const [contact, setContact] = useState<{ date: string; body: string } | null>(null);
   const [reportOpen, setReportOpen] = useState(false); const [contactOpen, setContactOpen] = useState(false);
+  const template = useScoutTemplate(recruitTypeForPosition(POS_GROUPS.find((g) => g.key === groupKey)!.addPos));
   const canSave = first.trim() && last.trim();
   // Live dup-detection: existing board recruits whose name matches what's typed.
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -272,7 +275,7 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, existing, onOpenExi
       coach_name: null, coach_phone: null, extra_contacts: null,
     };
     onAdd(r,
-      report ? { report_date: report.date, body: report.body, tier: (report.tier || null) as RecruitTier | null } : undefined,
+      report ? { report_date: report.date, body: report.body, tier: (report.tier || null) as RecruitTier | null, grades: report.grades } : undefined,
       contact ? { event_date: contact.date, note: contact.body } : undefined,
     );
     reset();
@@ -341,9 +344,10 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, existing, onOpenExi
 
       {/* same composer popups the detail sheet uses */}
       <EntryComposer open={reportOpen} onOpenChange={setReportOpen} title="Scouting Report" withTier rows={7}
+        template={template}
         placeholder="Full write-up — mechanics, tools, makeup, projection…"
-        initial={report ? { date: report.date, body: report.body, tier: report.tier } : undefined}
-        onSave={(date, body, tier) => setReport({ date, body, tier: tier ?? "" })} />
+        initial={report ? { date: report.date, body: report.body, tier: report.tier, grades: report.grades } : undefined}
+        onSave={(date, body, tier, grades) => setReport({ date, body, tier: tier ?? "", grades: grades ?? {} })} />
       <EntryComposer open={contactOpen} onOpenChange={setContactOpen} title="Log Contact" rows={5}
         placeholder="Talked to the player / his coach after the game…"
         initial={contact ? { date: contact.date, body: contact.body } : undefined}
@@ -380,11 +384,13 @@ function AttachRow({ icon, label, value, tone = "gold", onAdd, onClear }: { icon
 // ---------- Recruit detail: condensed reports + contact timeline; add via popups ----------
 function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onAddEvent }: {
   recruit: GmRecruit | null; onOpenChange: (o: boolean) => void;
-  reports: { id: string; report_date: string; body: string | null; projection_tier: RecruitTier | null; author: string | null }[];
+  reports: { id: string; report_date: string; body: string | null; projection_tier: RecruitTier | null; author: string | null; grades: ScoutGrades | null }[];
   events: { id: string; event_date: string; note: string | null }[];
-  onAddReport: (date: string, body: string, tier?: RecruitTier | null) => void;
+  onAddReport: (date: string, body: string, tier?: RecruitTier | null, grades?: ScoutGrades) => void;
   onAddEvent: (date: string, note: string) => void;
 }) {
+  const template = useScoutTemplate(recruit?.player_type ?? "hitter");
+  const latest = reports[0]; // newest-first → carry-forward source for a new report
   const [reportOpen, setReportOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [expR, setExpR] = useState<Set<string>>(new Set());
@@ -426,6 +432,7 @@ function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onA
                           <span className="ml-auto text-[10px] text-muted-foreground">{open ? "collapse" : "read"}</span>
                         </div>
                         <p className={cn("mt-0.5 text-[13px] leading-snug text-foreground", !open && "line-clamp-1")}>{r.body}</p>
+                        {hasGrades(r.grades) && <p className={cn("mt-1 text-[11px] text-muted-foreground", !open && "line-clamp-1")}>{gradesSummary(r.grades, template)}</p>}
                         {open && r.author && <p className="mt-1 text-[10px] text-muted-foreground">— {r.author}</p>}
                       </button>
                     </li>
@@ -463,7 +470,9 @@ function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onA
       {/* composer popups */}
       <EntryComposer open={reportOpen} onOpenChange={setReportOpen} title="New Scouting Report" withTier
         rows={7} placeholder="Full write-up — mechanics, tools, makeup, projection…"
-        onSave={(date, body, tier) => onAddReport(date, body, (tier || null) as RecruitTier | null)} />
+        template={template}
+        initial={{ grades: latest?.grades ?? undefined, tier: latest?.projection_tier ?? undefined }}
+        onSave={(date, body, tier, grades) => onAddReport(date, body, (tier || null) as RecruitTier | null, grades)} />
       <EntryComposer open={contactOpen} onOpenChange={setContactOpen} title="Log Contact"
         rows={5} placeholder="Who you talked to and what was said — keep it detailed for compliance…"
         onSave={(date, body) => onAddEvent(date, body)} />
@@ -484,17 +493,30 @@ function SectionHead({ icon, title, count, accent, onAdd }: { icon: React.ReactN
   );
 }
 
-// A popup composer: date + (optional tier) + a roomy textarea, so a coach can
-// write something detailed and review the whole excerpt before saving.
-function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder, initial, onSave }: {
+// Compact "Field: value" grade line for a saved report (maps stable keys → the
+// team template's labels + scale words, so renames never break old reports).
+const gradesSummary = (grades: ScoutGrades | null | undefined, template: ScoutTemplate): string => {
+  if (!grades) return "";
+  return template.fields
+    .filter((f) => grades[f.key] != null && grades[f.key] !== "")
+    .map((f) => `${f.label}: ${f.type === "text" ? grades[f.key] : scaleLabel(template.scale, Number(grades[f.key]))}`)
+    .join("  ·  ");
+};
+
+// A popup composer: date + (optional tier) + a roomy write-up, THEN the grades
+// (rendered from the team template) — grades come after a detailed report.
+function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder, initial, template, onSave }: {
   open: boolean; onOpenChange: (o: boolean) => void; title: string; withTier?: boolean; rows: number; placeholder: string;
-  initial?: { date?: string; body?: string; tier?: string };
-  onSave: (date: string, body: string, tier?: string) => void;
+  initial?: { date?: string; body?: string; tier?: string; grades?: ScoutGrades };
+  template?: ScoutTemplate;
+  onSave: (date: string, body: string, tier?: string, grades?: ScoutGrades) => void;
 }) {
   const [date, setDate] = useState(today()); const [body, setBody] = useState(""); const [tier, setTier] = useState("");
-  // Seed fresh (or from the entry being edited) each time it opens.
-  useEffect(() => { if (open) { setDate(initial?.date ?? today()); setBody(initial?.body ?? ""); setTier(initial?.tier ?? ""); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const save = () => { if (body.trim()) { onSave(date, body.trim(), tier || undefined); onOpenChange(false); } };
+  const [grades, setGrades] = useState<ScoutGrades>({});
+  // Seed fresh (or from the entry being edited / carried-forward) each open.
+  useEffect(() => { if (open) { setDate(initial?.date ?? today()); setBody(initial?.body ?? ""); setTier(initial?.tier ?? ""); setGrades(initial?.grades ?? {}); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setG = (key: string, v: number | string | null) => setGrades((g) => ({ ...g, [key]: v }));
+  const save = () => { if (body.trim()) { onSave(date, body.trim(), tier || undefined, template ? grades : undefined); onOpenChange(false); } };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
@@ -504,12 +526,35 @@ function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder,
             <DatePicker value={date} onChange={setDate} />
             {withTier && (
               <Select value={tier} onValueChange={setTier}>
-                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Grade (optional)" /></SelectTrigger>
+                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Tier (optional)" /></SelectTrigger>
                 <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
               </Select>
             )}
           </div>
           <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={rows} placeholder={placeholder} className="bg-card" autoComplete="off" autoFocus />
+
+          {template && (
+            <div className="rounded-md border border-border/60 bg-card/40 p-2.5">
+              <div className="mb-2 text-[11px] uppercase tracking-[0.15em] text-[#D4AF37]" style={OSWALD}>
+                Grades <span className="lowercase tracking-normal text-muted-foreground">· optional</span>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {template.fields.map((f) => (
+                  <div key={f.key} className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] text-foreground">{f.label}</span>
+                    {f.type === "text" ? (
+                      <Input value={String(grades[f.key] ?? "")} onChange={(e) => setG(f.key, e.target.value)} placeholder="e.g. 90-93" autoComplete="new-password" className="h-8 w-28 text-sm" />
+                    ) : (
+                      <Select value={grades[f.key] != null ? String(grades[f.key]) : ""} onValueChange={(v) => setG(f.key, Number(v))}>
+                        <SelectTrigger className="h-8 w-40 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectContent>{template.scale.map((s) => <SelectItem key={s.ordinal} value={String(s.ordinal)} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={!body.trim()} style={OSWALD} className="uppercase tracking-wide">Save</Button>
