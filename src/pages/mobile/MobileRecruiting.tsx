@@ -267,7 +267,7 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
               <AttachRow icon={<ClipboardList className="h-4 w-4" />} label="Scouting Report"
                 value={report ? `${fmtDate(report.date)}${report.tier ? " · " + (tierMeta(report.tier)?.label ?? "") : ""}` : null}
                 onAdd={() => setReportOpen(true)} onClear={() => setReport(null)} />
-              <AttachRow icon={<MessageSquarePlus className="h-4 w-4" />} label="Contact"
+              <AttachRow icon={<MessageSquarePlus className="h-4 w-4" />} label="Contact Notes"
                 value={contact ? `${fmtDate(contact.date)} · logged` : null}
                 onAdd={() => setContactOpen(true)} onClear={() => setContact(null)} />
             </div>
@@ -296,7 +296,7 @@ function AttachRow({ icon, label, value, onAdd, onClear }: { icon: React.ReactNo
   if (!value) {
     return (
       <button onClick={onAdd} className="inline-flex w-fit items-center gap-1.5 rounded px-1 py-0.5 text-[12px] font-semibold text-muted-foreground transition-colors hover:text-[#D4AF37]" style={OSWALD}>
-        <Plus className="h-3.5 w-3.5" /> {label}
+        <Plus className="h-3.5 w-3.5" /> Add {label}
       </button>
     );
   }
