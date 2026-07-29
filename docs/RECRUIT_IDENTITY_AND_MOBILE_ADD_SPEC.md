@@ -90,3 +90,47 @@ The mobile page is the **freshman/JUCO recruiting board** (`gm_recruits`), NOT t
 
 ## Dependency to confirm during build
 The mobile page's "other staff see it on the web" requires the **target board to be team-shared** (program-scoped read), which the RLS is (`reference_rls_scoping`: `target_board` scoped by `customer_team_id`). Verify a coach's mobile add is visible to the whole staff (the `unique(user_id, …)` on `target_board` means rows are user-owned but program-readable) before relying on it.
+
+---
+
+# Mobile Recruiting Board — AS BUILT (2026-07-29)
+
+Route **`/m/recruiting`** (ProtectedRoute), `src/pages/mobile/MobileRecruiting.tsx`, reuses `useGmRecruits` wholesale. Coach's phone tool; superadmin must impersonate a team. NOT on prod — ships with the feature PR. Distribution TBD (login-gated URL → home-screen bookmark, or a nav link).
+
+- **Controls:** class-year dropdown + **All/HS/JUCO** level filter (blue, mirrors desktop `matchLevel`) + **Hitters/Pitchers/Two-Way** position toggle (gold). Defaults to the nearest class (`years[0]`).
+- **Rows:** gold-initial chip · name · position/level/HS · stage badge · report/note count. Tap → detail sheet.
+- **＋Add Recruit dialog** (matches desktop `Dialog` style): First/Last · **Cell Phone + Email** (contact info) · **Position GROUPS** (Catcher/Corner IF/Middle IF/OF/Pitcher/TWP — stores a representative position so the desktop board groups it) · Level · High School · PBR link. **Live dup-detection:** typing a name surfaces matching board recruits as "open instead" chips (avoids double-add). **＋Add Scouting Report** (gold) and **＋Add Notes** (green) open the *shared composer popup*; attach as editable chips; written on save via `addRecruit(recruit, initialReport, initialEvent)`.
+- **Detail sheet:** condensed one-line rows (tap to expand) for **Scouting Reports** (`gm_recruit_reports`) + **Contact Timeline** (`gm_recruit_events`); ＋Add opens roomy composer popups; app **Popover+Calendar** date picker (no native date input); `autoComplete="new-password"` kills Chrome autofill.
+- **Hook change:** `useGmRecruits.addRecruit` now also takes an optional `initialEvent` (writes a first `gm_recruit_events` row).
+
+---
+
+# Scouting Report v2 — grades / velo / consensus / video (DESIGN — not built; Trevor 2026-07-28→29)
+
+The scouting report becomes the product's core: a coach on the road consolidates evaluations on a player. Applies to the **mobile grader AND the web GM report**.
+
+## Model (settled)
+- A report is a **detailed write-up (text) first, grades after.** All **optional/progressive** — save just text now, grade later. **Keep the tier** (Draft Prospect → Developmental).
+- **Grades are word-based, NOT 20–80** (Trevor: 20–80 is baseball-specific, not every staff uses it). Scale: **Below Avg · Average · Above Average · Plus · Elite** (open: add a low-end "Well Below" for 6?).
+- **Default fields** (a team can change them later):
+  - **Hitters:** Hit, Power, Run, Field, Arm, Athleticism.
+  - **Pitchers:** **Velocity** (FREE TEXT — accepts a number *or* a range like `90–93`, NOT graded) + FB, Breaking, Change, Command, Athleticism (word scale).
+- **Grades are PER-LOOK HISTORY, never overwritten** ⭐ — each dated report carries its own `grades`, so you get a timeline (velo 88→91, Hit Above Avg→Plus). The **latest report = the "current" grade** (mirror the latest onto the recruit card, same as the tier is mirrored today). **Carry-forward UX:** ＋Add Report pre-fills the last report's grades so a coach nudges what changed — still saved as a NEW dated snapshot.
+
+## Storage (recommended)
+- **Grades** = a `grades` JSONB blob on `gm_recruit_reports` (the "works like production notes" model). One row = one dated look with text + grades.
+- **Team template** = a `gm_scout_template` config (per team, per hitter/pitcher: ordered `{key, label, type: grade | text}`), seeded with the defaults — the thing that makes fields renameable/addable per staff, RLS team-scoped.
+
+## Consensus final grade (DESIGNED-FOR, BUILT-LATER)
+Individual dated reports = the **evidence/history**. A **consensus** = one **program-official grade per recruit** — the staff sits down in a board meeting, pulls the individual looks side by side, and sets one agreed grade. Reuses the **exact same grader UI**, just writes to a **recruit-level "Final Grade" slot** (editable when they re-meet); it's what would drive the card badge / tier / rankings. **Not Phase 1** — but the JSONB grade shape means it's a drop-in later (one consensus slot on the recruit, a "Set Final Grade" action). Trevor unsure it's necessary; flip on if a program formalizes board meetings.
+
+## Video (LAST phase)
+Store + share film on a recruit. Supabase **storage bucket** + a `gm_recruit_video` table (team-scoped). Lean: attach **per-recruit** (their film library), not per-report. Heaviest piece (upload/playback/hosting) → deferred to last.
+
+## OPEN DECISIONS (unanswered — pick up here)
+1. **Sequencing** — ship fixed defaults first (grades on mobile+web fast), or build the customizable template up front? *(Claude lean: defaults-first; storage designed so customization layers on without rework.)*
+2. **Customization depth + where edited** — rename-only vs. full add/remove/reorder + custom fields; edited on a **web GM settings screen** that the mobile grader inherits? *(Claude lean: full add/rename/reorder, web-edited, mobile inherits.)*
+3. **Default fields + scale** — confirm the 5 words (or 6 with a low end) and the hitter/pitcher lists above.
+4. **Video** — confirm last-phase + per-recruit attach.
+
+Once decided: write to agent knowledge → Phase 1 migration (staging-first: `grades` JSONB + `gm_scout_template`) → mobile grader → mirror onto the web GM report → (later) consensus slot → (last) video.
