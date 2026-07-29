@@ -119,8 +119,23 @@ The `/m/recruiting` page (`src/pages/mobile/MobileRecruiting.tsx`, `feature/recr
 - **Why:** don't design the grade storage in a way that blocks a later program-consensus layer; per-report history + a recruit-level consensus slot cover both without rework.
 - **Status:** parked (designed-for, built-later).
 
-### OPEN DECISIONS (pick up here before Phase 1)
-1. **Sequencing** — fixed defaults first (grades on mobile+web fast) vs. customizable template up front. *(lean: defaults-first.)*
-2. **Customization depth + where edited** — rename-only vs. full add/remove/reorder + custom fields; web GM settings that mobile inherits. *(lean: full, web-edited, mobile inherits.)*
-3. **Default fields + scale** — confirm 5 words (or 6) + the hitter/pitcher lists.
-4. **Video** — LAST phase; storage bucket + `gm_recruit_video`; attach per-recruit (film library). *(lean: confirm.)*
+### scouting-template-is-fully-customizable-per-team (RESOLVED, Trevor 2026-07-29)
+- **Rule:** the grade template is **fully customizable per team, up front** (not defaults-first). A staff can **rename / add / remove / reorder** fields AND **rename the 5 scale words** (`Below Avg…Elite`, no low-end 6th). Separate templates per **hitter / pitcher / TWP**; **TWP = hitter ∪ pitcher fields (all 10) with ONE shared Athleticism**. Templates must support **adding pitches** (2nd breaking ball, splitter…). Defaults (Hit/Power/Run/Field/Arm/Athleticism; Velocity-free-text + FB/Breaking/Change/Command/Athleticism) are seeded but editable. Keep the tier.
+- **Edited on WEB under a new "GM Settings" area** — the recruiting board's "Edit Budget" button MOVES under GM Settings, alongside **Scouting Template** + future editable config. Mobile grader + web report both READ the one team template. **Roles deferred** (team_admin/head coach in practice; no gating now → later role-access pass).
+- **Storage:** `gm_scout_template` per `(customer_team_id, player_type)` = ordered fields `{key,label,type:grade|text,order}` + per-team scale `[{ordinal,label}]`. RLS team-scoped.
+- **Status:** confirmed.
+
+### grades-stored-by-stable-key-and-ordinal-not-label ⭐ (RESOLVED)
+- **Rule:** the `grades` JSONB keys by a **stable field `key`** and stores a **scale ordinal (1–5)**, NEVER the visible label. Renaming a field or relabeling the scale only updates the template's `key→label` map — **old graded reports never break**. Free-text (velocity) stores its raw string.
+- **Why / protecting against:** "fully customizable + full history" is only safe if stored grades don't reference mutable labels; otherwise a rename orphans/corrupts every prior report. This is the load-bearing storage decision.
+- **Status:** confirmed.
+
+### recruit-video-per-recruit-team-rls-with-auto-scrub (RESOLVED)
+- **Rule:** video is **in scope**, **per-recruit**, **team-RLS'd with zero bleed-over**, attached to the account — but **NOT stored forever**: it **auto-scrubs after a set age** (retention/lifecycle from day one). `gm_recruit_video` (recruit_id, customer_team_id, storage_path, created_at, expires_at) + a storage bucket with expiry. Owner-restricted storage setup via the dashboard (not the service-role runner — see db-safety).
+- **Status:** confirmed.
+
+### Phase 1 build (the whole customizable grader — Trevor wants it up front)
+1. Migrations staging-first: `gm_recruit_reports.grades` JSONB; `gm_scout_template` (+RLS, seed defaults per team); `gm_recruit_video` (+RLS) + bucket w/ lifecycle.
+2. Web **GM Settings** area — move Budget in + new **Scouting Template** editor (add/rename/remove/reorder fields, relabel scale, per hitter/pitcher/TWP).
+3. **Dynamic grader** from the team template — mobile report composer (grades after the write-up, per-look history, carry-forward prefill) + web GM report.
+4. Video per-recruit (upload/list/playback + auto-scrub). 5. (later) consensus Final-Grade slot.
