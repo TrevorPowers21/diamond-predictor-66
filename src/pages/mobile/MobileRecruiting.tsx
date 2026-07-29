@@ -247,6 +247,10 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
               <Field label="Last Name"><Input value={last} onChange={(e) => setLast(e.target.value)} className="h-9 text-sm" /></Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
+              <Field label="Cell Phone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="(555) 123-4567" className="h-9 text-sm" /></Field>
+              <Field label="Email"><Input value={email} onChange={(e) => setEmail(e.target.value)} inputMode="email" placeholder="player@email.com" className="h-9 text-sm" /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <Field label="Position">
                 <Select value={groupKey} onValueChange={(v) => setGroupKey(v as GroupKey)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
@@ -261,11 +265,7 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
               </Field>
             </div>
             <Field label="High School / Team"><Input value={hs} onChange={(e) => setHs(e.target.value)} className="h-9 text-sm" /></Field>
-            <Field label="PBR / PG Profile Link" hint="optional"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" /></Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Cell Phone" hint="optional"><Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="(555) 123-4567" className="h-9 text-sm" /></Field>
-              <Field label="Email" hint="optional"><Input value={email} onChange={(e) => setEmail(e.target.value)} inputMode="email" placeholder="player@email.com" className="h-9 text-sm" /></Field>
-            </div>
+            <Field label="PBR / PG Profile Link"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" /></Field>
 
             {/* Consolidate notes at add time — separate scouting eval from a contact log */}
             <div className="mt-1 flex flex-col gap-2 border-t border-border/60 pt-3">
@@ -300,7 +300,7 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
 function AttachRow({ icon, label, value, onAdd, onClear }: { icon: React.ReactNode; label: string; value: string | null; onAdd: () => void; onClear: () => void }) {
   if (!value) {
     return (
-      <button onClick={onAdd} className="inline-flex w-fit items-center gap-1.5 rounded px-1 py-0.5 text-[12px] font-semibold text-muted-foreground transition-colors hover:text-[#D4AF37]" style={OSWALD}>
+      <button onClick={onAdd} className="inline-flex w-fit items-center gap-1.5 rounded border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-2.5 py-1.5 text-[12px] font-semibold text-[#D4AF37] transition-opacity hover:opacity-80" style={OSWALD}>
         <Plus className="h-3.5 w-3.5" /> Add {label}
       </button>
     );
@@ -417,7 +417,7 @@ function SectionHead({ icon, title, count, accent, onAdd }: { icon: React.ReactN
       <div className={cn("flex items-center gap-2 text-[11px] uppercase tracking-[0.15em]", accent ? "text-[#D4AF37]" : "text-muted-foreground")} style={OSWALD}>
         {icon} {title}{count ? <span className="opacity-70">({count})</span> : null}
       </div>
-      <button onClick={onAdd} className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-[#D4AF37]" style={OSWALD}>
+      <button onClick={onAdd} className="inline-flex shrink-0 items-center gap-1 rounded border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-2 py-0.5 text-[11px] font-semibold text-[#D4AF37] transition-opacity hover:opacity-80" style={OSWALD}>
         <Plus className="h-3.5 w-3.5" /> Add
       </button>
     </div>
