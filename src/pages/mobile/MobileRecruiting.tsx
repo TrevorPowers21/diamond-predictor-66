@@ -268,11 +268,11 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
             <Field label="PBR / PG Profile Link"><Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" className="h-9 text-sm" /></Field>
 
             {/* Consolidate notes at add time — separate scouting eval from a contact log */}
-            <div className="mt-1 flex flex-col gap-2 border-t border-border/60 pt-3">
-              <AttachRow icon={<ClipboardList className="h-4 w-4" />} label="Scouting Report"
+            <div className="mt-1 flex flex-wrap items-start gap-3 border-t border-border/60 pt-3">
+              <AttachRow icon={<ClipboardList className="h-4 w-4" />} label="Scouting Report" tone="gold"
                 value={report ? `${fmtDate(report.date)}${report.tier ? " · " + (tierMeta(report.tier)?.label ?? "") : ""}` : null}
                 onAdd={() => setReportOpen(true)} onClear={() => setReport(null)} />
-              <AttachRow icon={<MessageSquarePlus className="h-4 w-4" />} label="Notes"
+              <AttachRow icon={<MessageSquarePlus className="h-4 w-4" />} label="Notes" tone="green"
                 value={contact ? `${fmtDate(contact.date)} · logged` : null}
                 onAdd={() => setContactOpen(true)} onClear={() => setContact(null)} />
             </div>
@@ -296,18 +296,22 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, onAdd }: {
   );
 }
 
-// A one-line "+ Add" row that flips to a filled chip once an entry is attached.
-function AttachRow({ icon, label, value, onAdd, onClear }: { icon: React.ReactNode; label: string; value: string | null; onAdd: () => void; onClear: () => void }) {
+// A "+ Add" pill that flips to a filled chip once an entry is attached. tone
+// gold = scouting eval, green = notes (so coaches read them apart at a glance).
+function AttachRow({ icon, label, value, tone = "gold", onAdd, onClear }: { icon: React.ReactNode; label: string; value: string | null; tone?: "gold" | "green"; onAdd: () => void; onClear: () => void }) {
+  const c = tone === "green"
+    ? { text: "text-emerald-500", border: "border-emerald-500/40", bg: "bg-emerald-500/10" }
+    : { text: "text-[#D4AF37]", border: "border-[#D4AF37]/40", bg: "bg-[#D4AF37]/10" };
   if (!value) {
     return (
-      <button onClick={onAdd} className="inline-flex w-fit items-center gap-1.5 rounded border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-2.5 py-1.5 text-[12px] font-semibold text-[#D4AF37] transition-opacity hover:opacity-80" style={OSWALD}>
+      <button onClick={onAdd} className={cn("inline-flex w-fit items-center gap-1.5 rounded border px-2.5 py-1.5 text-[12px] font-semibold transition-opacity hover:opacity-80", c.border, c.bg, c.text)} style={OSWALD}>
         <Plus className="h-3.5 w-3.5" /> Add {label}
       </button>
     );
   }
   return (
-    <div className="flex items-center gap-2 rounded-md border border-[#D4AF37]/30 bg-[#D4AF37]/5 px-2.5 py-1.5">
-      <span className="text-[#D4AF37]">{icon}</span>
+    <div className={cn("flex min-w-[9rem] flex-1 items-center gap-2 rounded-md border px-2.5 py-1.5", c.border, c.bg)}>
+      <span className={c.text}>{icon}</span>
       <button onClick={onAdd} className="min-w-0 flex-1 text-left">
         <span className="block text-[12px] font-semibold text-foreground" style={OSWALD}>{label}</span>
         <span className="block truncate text-[11px] text-muted-foreground">{value} · tap to edit</span>
