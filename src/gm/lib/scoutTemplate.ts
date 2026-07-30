@@ -68,3 +68,26 @@ export const customFieldsIn = (grades: ScoutGrades | null | undefined, template:
     .filter(([k, v]) => !tk.has(k) && !!v && typeof v === "object" && "ord" in (v as object))
     .map(([k, v]) => ({ key: k, label: (v as CustomGrade).label }));
 };
+
+/**
+ * Compact "Field: value" line summarizing a saved report's grades — maps stable
+ * keys → the team template's current labels + scale words, so renaming a field
+ * or relabeling the scale never breaks how old reports read. Shared by the
+ * mobile composer + the web GM report.
+ */
+export const gradesSummary = (grades: ScoutGrades | null | undefined, template: ScoutTemplate): string => {
+  if (!grades) return "";
+  const parts: string[] = [];
+  for (const f of template.fields) {
+    if (!gradeFilled(grades[f.key])) continue;
+    const val = grades[f.key];
+    if (f.type === "velo") { const vv = (val ?? {}) as VeloValue; parts.push(`${f.label}: ${[vv.range, vv.max ? `${vv.max} max` : ""].filter(Boolean).join(" / ")}`); }
+    else if (f.type === "text") parts.push(`${f.label}: ${val}`);
+    else parts.push(`${f.label}: ${scaleLabel(template.scale, Number(val))}`);
+  }
+  for (const cf of customFieldsIn(grades, template)) {
+    const cg = grades[cf.key] as CustomGrade;
+    if (cg?.ord != null) parts.push(`${cf.label || "Pitch"}: ${scaleLabel(template.scale, cg.ord)}`);
+  }
+  return parts.join("  ·  ");
+};

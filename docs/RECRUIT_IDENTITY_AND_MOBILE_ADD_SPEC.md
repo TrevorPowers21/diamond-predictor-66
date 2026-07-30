@@ -1,6 +1,6 @@
 # Spec — Player Identity, "Add a Player" storage, & the mobile add flow
 
-> Status: **DRAFT for Trevor's review.** Worked through 2026-07-28. This is the "acknowledge how we do that" before we build. Nothing here is built yet. Sequenced: (1) get the storage right, (2) agree this spec, (3) build the mobile add page.
+> Status: **APPROVED (Trevor, 2026-07-30).** The identity + matching/linking policy below is LOCKED: split identity/tracking/vendor-keys; **confirm-never-guess** matching (certain=shared external id → auto-link; probable=name+HS+grad-year+"committed" → suggest, coach confirms; unknown → start fresh); **lazy linking** at real-competition-data arrival, nudged by the coach's "committed" click. Storage foundation is built + staging-verified (`player_external_ids`, `data_status='prospect'`, `resolve_or_create_prospect()`). **NOT yet wired into the add flow, and NOT on prod** — that's the next build (see "Sequenced build plan").
 
 ## Why this exists (the problem, from the code)
 
@@ -59,7 +59,8 @@ Unchanged and central: `target_board` (by `user_id`/`customer_team_id`), `gm_rec
 
 1. **Storage foundation** — ✅ **DONE + verified on staging (2026-07-28).** `player_external_ids` crosswalk (+ app-wide read RLS), `data_status='prospect'`, and `resolve_or_create_prospect()` RPC (single authoritative writer; exact-external-key auto-link only, else fresh mint). Migrations `20260728120000` + `20260728121000`. Round-trip verified in-DB (mint → prospect row + rstr/pbr crosswalk → same-key resolves, no dup → fresh mint fallback → empty-name guard). *Not yet on prod — promotes with the feature PR, Trevor drives.*
    - Remaining minor cleanup: consolidate the 4 `syntheticSourceId` copies into one `src/lib/` helper (the deterministic `d2-` import-script id — separate from the RPC's rstr mint; low priority).
-2. **Agree this spec** — ✅ open questions resolved (see above).
+2. **Agree this spec** — ✅ **APPROVED (Trevor, 2026-07-30).** Matching/linking policy locked (see Status). Clear to build the wiring.
+   - **Not yet wired (next build):** (a) mint/attach a canonical identity when a recruit is added (call `resolve_or_create_prospect` from the add flow); (b) the lazy **link-on-real-data-arrival** step (Masters / pitch-log recognition), nudged by the coach's "committed" click; (c) the "probable → suggest, coach confirms" UI. None on prod yet.
 3. **Mobile add page** — ⏳ NEXT: the phone-friendly coach tool — view the team-shared target board, **add a new player** (→ `resolve_or_create_prospect` → insert into `target_board`), consolidate notes. Built on #1 so every add stores correctly. Design via Stitch first (UI change).
 
 ## ⚠️ Surface correction (Trevor, 2026-07-28) — mobile = RECRUITING BOARD, not target board

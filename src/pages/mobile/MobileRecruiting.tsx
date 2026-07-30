@@ -23,16 +23,16 @@ import {
   type GmRecruit, type NewRecruit, type RecruitType, type RecruitLevel, type RecruitTier,
 } from "@/gm/hooks/useGmRecruits";
 import { useScoutTemplate } from "@/gm/hooks/useScoutTemplate";
-import { scaleLabel, hasGrades, gradeFilled, customFieldsIn, type ScoutTemplate, type ScoutGrades, type VeloValue, type CustomGrade } from "@/gm/lib/scoutTemplate";
+import { hasGrades, type ScoutGrades } from "@/gm/lib/scoutTemplate";
+import { ScoutEntryComposer as EntryComposer } from "@/gm/components/ScoutEntryComposer";
+import { ScoutGradeChips } from "@/gm/components/ScoutGradeChips";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Plus, CalendarDays, ClipboardList, MessageSquarePlus, ChevronRight, X } from "lucide-react";
+import { Plus, ClipboardList, MessageSquarePlus, ChevronRight, X } from "lucide-react";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const GOLD = "#D4AF37";
@@ -75,34 +75,11 @@ const levelLabel = (v: RecruitLevel) => RECRUIT_LEVELS.find((l) => l.value === v
 const isJuco = (v: RecruitLevel) => v === "juco_fr" || v === "juco_so";
 const initials = (r: GmRecruit) => `${(r.first_name || "?")[0] ?? ""}${(r.last_name || "")[0] ?? ""}`.toUpperCase();
 const today = () => new Date().toISOString().slice(0, 10);
-const toYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const fmtDate = (d?: string | null) => {
   if (!d) return "";
   const dt = new Date(d + "T00:00:00");
   return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 };
-
-// App-consistent date picker (Popover + Calendar) — replaces the native
-// <input type="date"> so there's no Chrome-specific dropdown. Caps at today.
-function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const selected = value ? new Date(value + "T00:00:00") : undefined;
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-input bg-card px-2.5 py-2 text-[13px] text-foreground transition-colors hover:bg-muted/40">
-          <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-          {selected ? selected.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Pick date"}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
-        <Calendar mode="single" selected={selected} defaultMonth={selected}
-          onSelect={(d) => { if (d) { onChange(toYmd(d)); setOpen(false); } }}
-          disabled={(d) => d > new Date()} initialFocus />
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 export default function MobileRecruiting() {
   const { effectiveTeamId, availableTeams } = useAuth();
@@ -230,7 +207,7 @@ export default function MobileRecruiting() {
 
       <AddRecruitDialog open={addOpen} onOpenChange={setAddOpen} defaultYear={activeYear}
         existing={recruits} onOpenExisting={(r) => { setAddOpen(false); setOpenRecruit(r); }}
-        onAdd={(r, rpt, evt) => { addRecruit(r, rpt, evt); setAddOpen(false); }} />
+        onAdd={(r, rpt, evt) => { addRecruit(r, rpt ? [rpt] : undefined, evt ? [evt] : undefined); setAddOpen(false); }} />
       <RecruitSheet
         recruit={openRecruit} onOpenChange={(o) => !o && setOpenRecruit(null)}
         reports={openRecruit ? reportsByRecruit.get(openRecruit.id) ?? [] : []}
@@ -255,7 +232,8 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, existing, onOpenExi
   const [report, setReport] = useState<{ date: string; body: string; tier: string; grades: ScoutGrades } | null>(null);
   const [contact, setContact] = useState<{ date: string; body: string } | null>(null);
   const [reportOpen, setReportOpen] = useState(false); const [contactOpen, setContactOpen] = useState(false);
-  const template = useScoutTemplate(recruitTypeForPosition(POS_GROUPS.find((g) => g.key === groupKey)!.addPos));
+  const playerType = recruitTypeForPosition(POS_GROUPS.find((g) => g.key === groupKey)!.addPos);
+  const template = useScoutTemplate(playerType);
   const canSave = first.trim() && last.trim();
   // Live dup-detection: existing board recruits whose name matches what's typed.
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -344,7 +322,7 @@ function AddRecruitDialog({ open, onOpenChange, defaultYear, existing, onOpenExi
 
       {/* same composer popups the detail sheet uses */}
       <EntryComposer open={reportOpen} onOpenChange={setReportOpen} title="Scouting Report" withTier rows={7}
-        template={template}
+        template={template} playerType={playerType}
         placeholder="Full write-up — mechanics, tools, makeup, projection…"
         initial={report ? { date: report.date, body: report.body, tier: report.tier, grades: report.grades } : undefined}
         onSave={(date, body, tier, grades) => setReport({ date, body, tier: tier ?? "", grades: grades ?? {} })} />
@@ -389,8 +367,8 @@ function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onA
   onAddReport: (date: string, body: string, tier?: RecruitTier | null, grades?: ScoutGrades) => void;
   onAddEvent: (date: string, note: string) => void;
 }) {
-  const template = useScoutTemplate(recruit?.player_type ?? "hitter");
-  const latest = reports[0]; // newest-first → carry-forward source for a new report
+  const playerType = recruit?.player_type ?? "hitter";
+  const template = useScoutTemplate(playerType);
   const [reportOpen, setReportOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [expR, setExpR] = useState<Set<string>>(new Set());
@@ -432,7 +410,7 @@ function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onA
                           <span className="ml-auto text-[10px] text-muted-foreground">{open ? "collapse" : "read"}</span>
                         </div>
                         <p className={cn("mt-0.5 text-[13px] leading-snug text-foreground", !open && "line-clamp-1")}>{r.body}</p>
-                        {hasGrades(r.grades) && <p className={cn("mt-1 text-[11px] text-muted-foreground", !open && "line-clamp-1")}>{gradesSummary(r.grades, template)}</p>}
+                        {hasGrades(r.grades) && <ScoutGradeChips grades={r.grades} template={template} playerType={playerType} compact={!open} className="mt-1" />}
                         {open && r.author && <p className="mt-1 text-[10px] text-muted-foreground">— {r.author}</p>}
                       </button>
                     </li>
@@ -468,10 +446,11 @@ function RecruitSheet({ recruit, onOpenChange, reports, events, onAddReport, onA
       </Sheet>
 
       {/* composer popups */}
+      {/* A new report starts BLANK — no carry-forward from the last one (avoid
+          anchoring the next evaluation to the previous grades). */}
       <EntryComposer open={reportOpen} onOpenChange={setReportOpen} title="New Scouting Report" withTier
         rows={7} placeholder="Full write-up — mechanics, tools, makeup, projection…"
-        template={template}
-        initial={{ grades: latest?.grades ?? undefined, tier: latest?.projection_tier ?? undefined }}
+        template={template} playerType={playerType}
         onSave={(date, body, tier, grades) => onAddReport(date, body, (tier || null) as RecruitTier | null, grades)} />
       <EntryComposer open={contactOpen} onOpenChange={setContactOpen} title="Log Contact"
         rows={5} placeholder="Who you talked to and what was said — keep it detailed for compliance…"
@@ -493,119 +472,6 @@ function SectionHead({ icon, title, count, accent, onAdd }: { icon: React.ReactN
   );
 }
 
-// Compact "Field: value" grade line for a saved report (maps stable keys → the
-// team template's labels + scale words, so renames never break old reports).
-const gradesSummary = (grades: ScoutGrades | null | undefined, template: ScoutTemplate): string => {
-  if (!grades) return "";
-  const parts: string[] = [];
-  for (const f of template.fields) {
-    if (!gradeFilled(grades[f.key])) continue;
-    const val = grades[f.key];
-    if (f.type === "velo") { const vv = (val ?? {}) as VeloValue; parts.push(`${f.label}: ${[vv.range, vv.max ? `${vv.max} max` : ""].filter(Boolean).join(" / ")}`); }
-    else if (f.type === "text") parts.push(`${f.label}: ${val}`);
-    else parts.push(`${f.label}: ${scaleLabel(template.scale, Number(val))}`);
-  }
-  for (const cf of customFieldsIn(grades, template)) {
-    const cg = grades[cf.key] as CustomGrade;
-    if (cg?.ord != null) parts.push(`${cf.label || "Pitch"}: ${scaleLabel(template.scale, cg.ord)}`);
-  }
-  return parts.join("  ·  ");
-};
-
-// A popup composer: date + tier + a roomy write-up, THEN the grades
-// (rendered from the team template) — grades come after a detailed report.
-function EntryComposer({ open, onOpenChange, title, withTier, rows, placeholder, initial, template, onSave }: {
-  open: boolean; onOpenChange: (o: boolean) => void; title: string; withTier?: boolean; rows: number; placeholder: string;
-  initial?: { date?: string; body?: string; tier?: string; grades?: ScoutGrades };
-  template?: ScoutTemplate;
-  onSave: (date: string, body: string, tier?: string, grades?: ScoutGrades) => void;
-}) {
-  const [date, setDate] = useState(today()); const [body, setBody] = useState(""); const [tier, setTier] = useState("");
-  const [grades, setGrades] = useState<ScoutGrades>({});
-  // Seed fresh (or from the entry being edited / carried-forward) each open.
-  useEffect(() => { if (open) { setDate(initial?.date ?? today()); setBody(initial?.body ?? ""); setTier(initial?.tier ?? ""); setGrades(initial?.grades ?? {}); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const setG = (key: string, val: number | string | VeloValue | CustomGrade | null) => setGrades((g) => ({ ...g, [key]: val }));
-  const addPitch = () => setGrades((g) => ({ ...g, [`c${Math.random().toString(36).slice(2, 9)}`]: { label: "", ord: null } }));
-  const removeField = (key: string) => setGrades((g) => { const n = { ...g }; delete n[key]; return n; });
-  const save = () => {
-    if (!body.trim()) return;
-    // Drop ad-hoc pitches that were added but never named.
-    const clean: ScoutGrades = {};
-    for (const [k, val] of Object.entries(grades)) {
-      if (val && typeof val === "object" && "ord" in val && !((val as CustomGrade).label || "").trim()) continue;
-      clean[k] = val;
-    }
-    onSave(date, body.trim(), tier || undefined, template ? clean : undefined);
-    onOpenChange(false);
-  };
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
-        <DialogHeader><DialogTitle style={OSWALD}>{title}</DialogTitle></DialogHeader>
-        <div className="space-y-3 py-1">
-          <div className="flex items-center gap-2">
-            <DatePicker value={date} onChange={setDate} />
-            {withTier && (
-              <Select value={tier} onValueChange={setTier}>
-                <SelectTrigger className="h-9 flex-1 text-sm"><SelectValue placeholder="Tier" /></SelectTrigger>
-                <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-              </Select>
-            )}
-          </div>
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={rows} placeholder={placeholder} className="bg-card" autoComplete="off" autoFocus />
-
-          {template && (
-            <div className="rounded-md border border-border/60 bg-card/40 p-2.5">
-              <div className="mb-2 text-[11px] uppercase tracking-[0.15em] text-[#D4AF37]" style={OSWALD}>
-                Grades
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {template.fields.map((f) => (
-                  <div key={f.key} className="flex items-center justify-between gap-2">
-                    <span className="text-[12px] text-foreground">{f.label}</span>
-                    {f.type === "velo" ? (
-                      <div className="flex items-center gap-1.5">
-                        <Input value={(grades[f.key] as VeloValue | undefined)?.range ?? ""} onChange={(e) => setG(f.key, { ...(grades[f.key] as VeloValue), range: e.target.value })} placeholder="90-93" autoComplete="new-password" className="h-8 w-[4.5rem] text-sm" />
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">max</span>
-                        <Input value={(grades[f.key] as VeloValue | undefined)?.max ?? ""} onChange={(e) => setG(f.key, { ...(grades[f.key] as VeloValue), max: e.target.value })} inputMode="numeric" placeholder="95" autoComplete="new-password" className="h-8 w-14 text-sm" />
-                      </div>
-                    ) : f.type === "text" ? (
-                      <Input value={String(grades[f.key] ?? "")} onChange={(e) => setG(f.key, e.target.value)} placeholder="e.g. 90-93" autoComplete="new-password" className="h-8 w-28 text-sm" />
-                    ) : (
-                      <Select value={grades[f.key] != null ? String(grades[f.key]) : ""} onValueChange={(val) => setG(f.key, Number(val))}>
-                        <SelectTrigger className="h-8 w-40 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
-                        <SelectContent>{template.scale.map((s) => <SelectItem key={s.ordinal} value={String(s.ordinal)} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                ))}
-                {customFieldsIn(grades, template).map((cf) => {
-                  const cg = (grades[cf.key] ?? { label: "", ord: null }) as CustomGrade;
-                  return (
-                    <div key={cf.key} className="flex items-center gap-2">
-                      <Input value={cg.label ?? ""} onChange={(e) => setG(cf.key, { ...cg, label: e.target.value })} placeholder="Pitch name" autoComplete="new-password" className="h-8 flex-1 text-sm" />
-                      <Select value={cg.ord != null ? String(cg.ord) : ""} onValueChange={(val) => setG(cf.key, { ...cg, ord: Number(val) })}>
-                        <SelectTrigger className="h-8 w-32 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
-                        <SelectContent>{template.scale.map((s) => <SelectItem key={s.ordinal} value={String(s.ordinal)} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
-                      </Select>
-                      <button type="button" onClick={() => removeField(cf.key)} className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground" aria-label="Remove pitch"><X className="h-3.5 w-3.5" /></button>
-                    </div>
-                  );
-                })}
-              </div>
-              <button type="button" onClick={addPitch} className="mt-2 inline-flex w-fit items-center gap-1.5 rounded border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-2.5 py-1 text-[11px] font-semibold text-[#D4AF37] transition-opacity hover:opacity-80" style={OSWALD}>
-                <Plus className="h-3.5 w-3.5" /> Add Pitch
-              </button>
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button onClick={save} disabled={!body.trim()} style={OSWALD} className="uppercase tracking-wide">Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (

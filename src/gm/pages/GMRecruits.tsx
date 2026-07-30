@@ -14,7 +14,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock, Settings } from "lucide-react";
+import { MoneyInput, parseMoney } from "@/gm/components/MoneyInput";
+import { RecruitingBudgetEditor } from "@/gm/components/settings/RecruitingBudgetEditor";
+import { ScoutingGradesEditor } from "@/gm/components/settings/ScoutingGradesEditor";
+import { ScoutEntryComposer } from "@/gm/components/ScoutEntryComposer";
+import { ScoutGradeChips, ScoutGradesReadout } from "@/gm/components/ScoutGradeChips";
+import { useScoutTemplate } from "@/gm/hooks/useScoutTemplate";
+import { hasGrades, type ScoutGrades, type ScoutTemplate } from "@/gm/lib/scoutTemplate";
+import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -25,16 +32,32 @@ const money = (v: number | null | undefined) => {
   if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1).replace(/\.?0+$/, "")}K`;
   return `${sign}$${Math.round(a).toLocaleString()}`;
 };
-const parseMoney = (s: string): number | null => { const t = s.replace(/[^0-9.]/g, ""); if (!t) return null; const n = Number(t); return Number.isNaN(n) ? null : n; };
-// Live $ + comma formatting for a dollar text input. Stores the formatted
-// string; parseMoney() strips it back to a number on save.
-const fmtMoneyInput = (s: string): string => { const d = String(s).replace(/[^0-9]/g, ""); return d ? `$${Number(d).toLocaleString()}` : ""; };
-function MoneyInput({ value, onChange, placeholder, className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
-  return <Input value={fmtMoneyInput(value)} onChange={(e) => onChange(fmtMoneyInput(e.target.value))} placeholder={placeholder} inputMode="numeric" className={className} />;
-}
 const today = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
+// Recruiting positions mirror the MOBILE board's GROUPS — for HS/JUCO prospects the
+// exact spot isn't known, so a coach picks a group and we store one representative
+// position per group (which the board groups on).
+const POSITION_OPTIONS = [
+  { label: "Catcher", pos: "C" },
+  { label: "Corner Infield", pos: "1B" },
+  { label: "Middle Infield", pos: "SS" },
+  { label: "OF", pos: "OF" },
+  { label: "Pitcher", pos: "P" },
+  { label: "TWP", pos: "TWP" },
+] as const;
+// Map any stored position (including legacy exact ones) to its group option value,
+// so editing an older recruit still shows the correct group selected.
+const posGroupValue = (p: string): string => {
+  const u = (p || "").toUpperCase();
+  if (u === "C") return "C";
+  if (["1B", "3B", "DH"].includes(u)) return "1B";
+  if (["2B", "SS"].includes(u)) return "SS";
+  if (["LF", "CF", "RF", "OF"].includes(u)) return "OF";
+  if (["P", "RHP", "LHP", "SP", "RP"].includes(u)) return "P";
+  if (u === "TWP") return "TWP";
+  return "";
+};
 const YEARS = [PROJECTION_SEASON, PROJECTION_SEASON + 1, PROJECTION_SEASON + 2, PROJECTION_SEASON + 3];
 const SECTIONS: { type: RecruitType; title: string }[] = [
   { type: "hitter", title: "Position Players" },
@@ -62,6 +85,57 @@ function toneClass(tone: string): string {
     case "red": return "bg-red-500/15 text-red-400";
     default: return "bg-muted text-muted-foreground";
   }
+}
+
+// A unified display item for a report / contact — sourced from saved rows (existing
+// recruit) OR from unsaved pending entries (a brand-new recruit being added).
+type RItem = { key: string; date: string; author: string | null; tier: RecruitTier | null; body: string; grades: ScoutGrades | null; pending: boolean };
+type NItem = { key: string; date: string; body: string; pending: boolean };
+// Pending (unsaved) entries stacked in the Add dialog before the recruit exists.
+type PendReport = { id: string; date: string; body: string; tier: string; grades: ScoutGrades };
+type PendNote = { id: string; date: string; body: string };
+
+// Shared metadata row (date · author · unsaved · tier) — branded, tabular date.
+// size="lg" is used in the report/contact VIEW so the whole readout reads bigger.
+function MetaLine({ date, author, pending, tier, size = "sm" }: { date: string; author?: string | null; pending?: boolean; tier?: RecruitTier | null; size?: "sm" | "lg" }) {
+  const tm = tier ? RECRUIT_TIERS.find((t) => t.value === tier) : undefined;
+  const lg = size === "lg";
+  return (
+    <div className="flex items-center gap-2">
+      <span className={cn("font-semibold uppercase tracking-wider text-white/60 tabular-nums", lg ? "text-[13px]" : "text-[11px]")} style={OSWALD}>{fmtDate(date)}</span>
+      {author && <span className={cn("text-white/45", lg ? "text-[12px]" : "text-[11px]")}>· {author.split("@")[0]}</span>}
+      {pending && <span className={cn("font-semibold uppercase tracking-wide text-[#D4AF37]", lg ? "text-[11px]" : "text-[10px]")}>Unsaved</span>}
+      {tm && <span className={cn("ml-auto rounded font-bold uppercase tracking-wider", toneClass(tm.tone), lg ? "px-2.5 py-1 text-[10px]" : "px-2 py-0.5 text-[9px]")} style={OSWALD}>{tm.label}</span>}
+    </div>
+  );
+}
+
+/** One scouting-report preview row (date · author · tier · one-line grades · snippet). */
+function ReportPreviewRow({ it, template, playerType, onClick, size = "sm" }: { it: RItem; template: ScoutTemplate; playerType: RecruitType; onClick: () => void; size?: "sm" | "lg" }) {
+  const lg = size === "lg";
+  return (
+    <button type="button" onClick={onClick} className={cn("w-full cursor-pointer rounded-md border border-[#1f2d52] bg-[#0a1428] text-left transition-colors duration-200 hover:border-[#D4AF37]/60", lg ? "p-4" : "p-3")}>
+      <MetaLine date={it.date} author={it.author} pending={it.pending} tier={it.tier} size={size} />
+      <p className={cn("line-clamp-2 leading-snug text-white/85", lg ? "mt-2 text-[14px]" : "mt-1.5 text-[13px]")}>{it.body}</p>
+      {hasGrades(it.grades) && <ScoutGradeChips grades={it.grades} template={template} playerType={playerType} compact className={lg ? "mt-2.5" : "mt-2"} />}
+    </button>
+  );
+}
+
+/** One contact-timeline preview row (date · snippet). */
+function ContactPreviewRow({ it, onClick, size = "sm" }: { it: NItem; onClick: () => void; size?: "sm" | "lg" }) {
+  const lg = size === "lg";
+  return (
+    <button type="button" onClick={onClick} className={cn("w-full cursor-pointer rounded-md border border-[#1f2d52] bg-[#0a1428] text-left transition-colors duration-200 hover:border-[#D4AF37]/60", lg ? "p-4" : "p-3")}>
+      <MetaLine date={it.date} pending={it.pending} size={size} />
+      <p className={cn("line-clamp-2 leading-snug text-white/85", lg ? "mt-2 text-[14px]" : "mt-1.5 text-[13px]")}>{it.body}</p>
+    </button>
+  );
+}
+
+/** A gold "+ Add" pill used in the section headers + list/view dialogs. */
+function AddPill({ onClick }: { onClick: () => void }) {
+  return <button type="button" onClick={onClick} className="inline-flex cursor-pointer items-center gap-1 rounded border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#D4AF37] transition-opacity hover:opacity-80" style={OSWALD}><Plus className="h-3 w-3" /> Add</button>;
 }
 
 /** Stage badge that's also the editor — coaches advance the funnel here. */
@@ -96,7 +170,7 @@ function TierBadge({ value }: { value: RecruitTier | null }) {
   return <span className={cn("inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>{info.label}</span>;
 }
 
-function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports, onContact, onDeal }: { recruit: GmRecruit; index: number; onEdit: () => void; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void; onContact: () => void; onDeal: () => void }) {
+function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports, onAddReport, onContact, onDeal }: { recruit: GmRecruit; index: number; onEdit: () => void; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void; onAddReport: () => void; onContact: () => void; onDeal: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
@@ -143,8 +217,11 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
               <Plus className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onClick={onReports} className="gap-2 text-xs"><FileText className="h-3.5 w-3.5" /> Add Scouting Report</DropdownMenuItem>
-              <DropdownMenuItem onClick={onTimeline} className="gap-2 text-xs"><CalendarClock className="h-3.5 w-3.5" /> Add Event</DropdownMenuItem>
+              {/* stopPropagation: menu content is portaled, but React events bubble
+                  through the component tree — without this the click also hits the
+                  card's onClick={onEdit} and opens the Edit dialog instead. */}
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onAddReport(); }} className="gap-2 text-xs"><FileText className="h-3.5 w-3.5" /> Add Scouting Report</DropdownMenuItem>
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onTimeline(); }} className="gap-2 text-xs"><CalendarClock className="h-3.5 w-3.5" /> Add Notes</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -161,19 +238,75 @@ export default function GMRecruits() {
   const [levelFilter, setLevelFilter] = useState<"all" | "hs" | "juco">("all");
   const [addOpen, setAddOpen] = useState(false);
   const [editingRecruit, setEditingRecruit] = useState<GmRecruit | null>(null);
+  // Focus for the STANDALONE reports drill-down (card "Reports" button / deep-link),
+  // when the Add/Edit dialog isn't the source.
+  const [reportsRecruit, setReportsRecruit] = useState<GmRecruit | null>(null);
   const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "", scholarship_pct: "", level: "hs" as RecruitLevel, extra_contacts: [] as ExtraContact[] };
   const [form, setForm] = useState(BLANK_FORM);
+  // Reports + contacts composed in the Add/Edit dialog. Existing recruit → written
+  // immediately (add/update mutations); brand-new recruit → stacked as pending and
+  // all written on "Add To Board". Drill-down: level-1 list, level-2 view, composer.
+  const [pendingReports, setPendingReports] = useState<PendReport[]>([]);
+  const [pendingNotes, setPendingNotes] = useState<PendNote[]>([]);
+  const [reportListOpen, setReportListOpen] = useState(false);
+  const [viewReportKey, setViewReportKey] = useState<string | null>(null);
+  const [reportComposerOpen, setReportComposerOpen] = useState(false);
+  const [reportEditKey, setReportEditKey] = useState<string | null>(null);
+  const [contactListOpen, setContactListOpen] = useState(false);
+  const [viewContactKey, setViewContactKey] = useState<string | null>(null);
+  const [contactComposerOpen, setContactComposerOpen] = useState(false);
+  const [contactEditKey, setContactEditKey] = useState<string | null>(null);
+  // The drill-down (list/view/composer) operates on the FOCUS recruit: the one being
+  // edited, else the one opened from the card's Reports button. A brand-new recruit
+  // (no focus) uses the pending arrays. Template follows the focus recruit's type.
+  const focusRecruit = editingRecruit ?? reportsRecruit;
+  const formPlayerType = focusRecruit?.player_type ?? recruitTypeForPosition(form.position);
+  const formTemplate = useScoutTemplate(formPlayerType);
+  const rid = () => `p${Math.random().toString(36).slice(2, 10)}`;
+  // Unified items — saved rows (existing) or reversed pending (new, newest-first).
+  const reportItems: RItem[] = focusRecruit
+    ? (gm.reportsByRecruit.get(focusRecruit.id) ?? []).map((r) => ({ key: r.id, date: r.report_date, author: r.author, tier: r.projection_tier, body: r.body ?? "", grades: r.grades, pending: false }))
+    : [...pendingReports].reverse().map((p) => ({ key: p.id, date: p.date, author: null, tier: (p.tier || null) as RecruitTier | null, body: p.body, grades: p.grades, pending: true }));
+  const noteItems: NItem[] = focusRecruit
+    ? (gm.eventsByRecruit.get(focusRecruit.id) ?? []).map((e) => ({ key: e.id, date: e.event_date, body: e.note ?? "", pending: false }))
+    : [...pendingNotes].reverse().map((p) => ({ key: p.id, date: p.date, body: p.body, pending: true }));
+  const viewedReport = viewReportKey ? reportItems.find((i) => i.key === viewReportKey) ?? null : null;
+  const viewedContact = viewContactKey ? noteItems.find((i) => i.key === viewContactKey) ?? null : null;
+  const reportEditItem = reportEditKey ? reportItems.find((i) => i.key === reportEditKey) ?? null : null;
+  const contactEditItem = contactEditKey ? noteItems.find((i) => i.key === contactEditKey) ?? null : null;
+
+  // Add/edit writes in place — the open list + the level-0 preview just re-render
+  // with the new entry (no popup opens on the newly-added one).
+  const saveReport = (date: string, body: string, tier: string | undefined, grades: ScoutGrades | undefined, editKey?: string | null) => {
+    const t = (tier || null) as RecruitTier | null;
+    if (focusRecruit) {
+      if (editKey) gm.updateReport(editKey, date, body, t, grades ?? null);
+      else gm.addReport(focusRecruit.id, date, body, t, grades ?? null);
+    } else if (editKey) setPendingReports((ps) => ps.map((p) => (p.id === editKey ? { ...p, date, body, tier: tier ?? "", grades: grades ?? {} } : p)));
+    else setPendingReports((ps) => [...ps, { id: rid(), date, body, tier: tier ?? "", grades: grades ?? {} }]);
+  };
+  const saveNote = (date: string, body: string, editKey?: string | null) => {
+    if (focusRecruit) {
+      if (editKey) gm.updateEvent(editKey, date, body);
+      else gm.addEvent(focusRecruit.id, date, body);
+    } else if (editKey) setPendingNotes((ns) => ns.map((p) => (p.id === editKey ? { ...p, date, body } : p)));
+    else setPendingNotes((ns) => [...ns, { id: rid(), date, body }]);
+  };
+  const openReportComposer = (editKey: string | null) => { setReportEditKey(editKey); setReportComposerOpen(true); };
+  const openContactComposer = (editKey: string | null) => { setContactEditKey(editKey); setContactComposerOpen(true); };
+  // Click the section preview: 1 → that report; >1 → the list; 0 → add a new one.
+  const openReportsFlow = () => { if (reportItems.length > 1) setReportListOpen(true); else if (reportItems.length === 1) setViewReportKey(reportItems[0].key); else openReportComposer(null); };
+  const openContactsFlow = () => { if (noteItems.length > 1) setContactListOpen(true); else if (noteItems.length === 1) setViewContactKey(noteItems[0].key); else openContactComposer(null); };
   const addFormNumber = () => setForm((f) => ({ ...f, extra_contacts: [...f.extra_contacts, { label: "", value: "" }] }));
   const setFormNumber = (i: number, field: keyof ExtraContact, val: string) => setForm((f) => ({ ...f, extra_contacts: f.extra_contacts.map((c, j) => (j === i ? { ...c, [field]: val } : c)) }));
   const removeFormNumber = (i: number) => setForm((f) => ({ ...f, extra_contacts: f.extra_contacts.filter((_, j) => j !== i) }));
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
   const [eventDate, setEventDate] = useState<string>(today);
   const [eventNote, setEventNote] = useState("");
-  const [reportsRecruit, setReportsRecruit] = useState<GmRecruit | null>(null);
-  const [reportDate, setReportDate] = useState<string>(today);
-  const [reportBody, setReportBody] = useState("");
-  const [reportTier, setReportTier] = useState<RecruitTier | "">("");
-  const openReports = (r: GmRecruit) => { setReportBody(""); setReportDate(today()); setReportTier(r.projection_tier ?? ""); setReportsRecruit(r); };
+  // Card "Reports" button → the scrollable preview LIST for that recruit (drill-down).
+  const openReports = (r: GmRecruit) => { setViewReportKey(null); setReportComposerOpen(false); setReportsRecruit(r); setReportListOpen(true); };
+  // Card "+ Add Scouting Report" → a blank composer for that recruit.
+  const openAddReport = (r: GmRecruit) => { setReportsRecruit(r); openReportComposer(null); };
   // Deep-link from Recent Activity: ?reports=<recruit_id> opens that recruit's reports.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
@@ -221,15 +354,10 @@ export default function GMRecruits() {
   const classSchol = classRecruits.filter(isLockedIn).reduce((s, r) => s + (r.scholarship_pct ?? 0), 0) / 100; // committed/signed only
   const cfg = gm.configByYear.get(year);
 
-  // Edit Budget (per class year) dialog state.
+  // Inline "GM Settings" dropdown popups — each hosts a shared settings editor
+  // (same component the central GM Settings page renders), so they can't drift.
   const [budgetOpen, setBudgetOpen] = useState(false);
-  const [budgetDraft, setBudgetDraft] = useState<Record<number, { budget: string; scholarships: string }>>({});
-  const openBudget = () => {
-    const d: Record<number, { budget: string; scholarships: string }> = {};
-    for (const y of YEARS) { const c = gm.configByYear.get(y); d[y] = { budget: c?.budget != null ? String(c.budget) : "", scholarships: c?.scholarships != null ? String(c.scholarships) : "" }; }
-    setBudgetDraft(d); setBudgetOpen(true);
-  };
-  const saveBudget = () => { for (const y of YEARS) { const d = budgetDraft[y]; gm.saveClassConfig({ class_year: y, budget: parseMoney(d?.budget ?? ""), scholarships: parseMoney(d?.scholarships ?? "") }); } setBudgetOpen(false); };
+  const [gradesOpen, setGradesOpen] = useState(false);
 
   const onDragEnd = (list: GmRecruit[]) => (event: DragEndEvent) => {
     const { active, over } = event;
@@ -240,9 +368,11 @@ export default function GMRecruits() {
     gm.reorder(arrayMove(list, oldI, newI).map((r) => r.id));
   };
 
-  const openAdd = (position?: string) => { setEditingRecruit(null); setForm({ ...BLANK_FORM, class_year: year, position: position ?? "" }); setAddOpen(true); };
+  const resetReportFlow = () => { setReportsRecruit(null); setPendingReports([]); setPendingNotes([]); setReportListOpen(false); setViewReportKey(null); setReportComposerOpen(false); setReportEditKey(null); setContactListOpen(false); setViewContactKey(null); setContactComposerOpen(false); setContactEditKey(null); };
+  const openAdd = (position?: string) => { setEditingRecruit(null); resetReportFlow(); setForm({ ...BLANK_FORM, class_year: year, position: position ?? "" }); setAddOpen(true); };
   const openEdit = (r: GmRecruit) => {
     setEditingRecruit(r);
+    resetReportFlow();
     setForm({
       first_name: r.first_name ?? "", last_name: r.last_name ?? "", position: r.position ?? "",
       high_school: r.high_school ?? "", state: r.state ?? "", travel_org: r.travel_org ?? "",
@@ -258,12 +388,13 @@ export default function GMRecruits() {
     setAddOpen(true);
   };
   const submit = () => {
-    const tier = form.projection_tier || null;
+    // The projection tier is authored on the scouting report (like mobile) — the
+    // hook mirrors it onto the recruit. So `core` doesn't set it (leaving an
+    // existing recruit's tier untouched when no new report is attached).
     const core = {
       class_year: form.class_year,
       player_type: recruitTypeForPosition(form.position),
       stage: form.stage,
-      projection_tier: tier,
       asking_price: parseMoney(form.asking_price),
       target_offer: parseMoney(form.target_offer),
       scholarship_pct: parseMoney(form.scholarship_pct),
@@ -284,10 +415,16 @@ export default function GMRecruits() {
       extra_contacts: form.extra_contacts.filter((c) => c.value.trim()).map((c) => ({ label: c.label.trim(), value: c.value.trim() })),
     };
     if (editingRecruit) {
+      // Reports/notes already wrote immediately as they were added/edited.
       gm.updateRecruit(editingRecruit.id, core);
-      if (form.notes.trim()) gm.addReport(editingRecruit.id, today(), form.notes.trim(), tier);
     } else {
-      gm.addRecruit({ ...core, notes: null, scouting_report_date: null }, (form.notes.trim() || tier) ? { report_date: today(), body: form.notes.trim(), tier } : undefined);
+      // Brand-new recruit: create it, then write all pending reports + notes.
+      const firstTier = (pendingReports.find((p) => p.tier)?.tier || null) as RecruitTier | null;
+      gm.addRecruit(
+        { ...core, projection_tier: firstTier, notes: null, scouting_report_date: null },
+        pendingReports.filter((p) => p.body.trim()).map((p) => ({ report_date: p.date, body: p.body.trim(), tier: (p.tier || null) as RecruitTier | null, grades: p.grades })),
+        pendingNotes.filter((p) => p.body.trim()).map((p) => ({ event_date: p.date, note: p.body.trim() })),
+      );
     }
     setAddOpen(false); setEditingRecruit(null);
   };
@@ -300,29 +437,34 @@ export default function GMRecruits() {
           <p className="text-sm text-muted-foreground">Future classes · HS &amp; JUCO prospects</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={openBudget}><Settings className="h-3.5 w-3.5" /> Edit Budget</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs"><SlidersHorizontal className="h-3.5 w-3.5" /> GM Settings</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={() => setBudgetOpen(true)}>Edit Budget</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setGradesOpen(true)}>Scouting Grades</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openAdd()}><Plus className="h-3.5 w-3.5" /> Add Player</Button>
         </div>
       </div>
 
-      {/* Edit class budgets + scholarships (per year) */}
+      {/* GM Settings → Edit Budget — shared editor, same as the central page */}
       <Dialog open={budgetOpen} onOpenChange={setBudgetOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle style={OSWALD}>Recruiting Budget by Class</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground">Set the recruiting budget and scholarships available (equivalencies) for each class year.</p>
-          <div className="space-y-3 py-1">
-            <div className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>
-              <span>Class</span><span>Budget ($)</span><span>Scholarships</span>
-            </div>
-            {YEARS.map((y) => (
-              <div key={y} className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2">
-                <span className="text-sm font-semibold tabular-nums">{y}</span>
-                <MoneyInput value={budgetDraft[y]?.budget ?? ""} onChange={(v) => setBudgetDraft((d) => ({ ...d, [y]: { ...d[y], budget: v } }))} placeholder="$1,500,000" className="h-9 text-sm" />
-                <Input value={budgetDraft[y]?.scholarships ?? ""} onChange={(e) => setBudgetDraft((d) => ({ ...d, [y]: { ...d[y], scholarships: e.target.value } }))} placeholder="e.g. 11.7" inputMode="decimal" className="h-9 text-sm" />
-              </div>
-            ))}
-          </div>
-          <DialogFooter><Button size="sm" onClick={saveBudget}>Save Budgets</Button></DialogFooter>
+          <div className="py-1"><RecruitingBudgetEditor onSaved={() => setBudgetOpen(false)} /></div>
+        </DialogContent>
+      </Dialog>
+
+      {/* GM Settings → Scouting Grades — shared editor, same as the central page */}
+      <Dialog open={gradesOpen} onOpenChange={setGradesOpen}>
+        <DialogContent className="max-h-[88vh] max-w-2xl overflow-y-auto">
+          <DialogHeader><DialogTitle style={OSWALD}>Scouting Grades</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">The grade fields + scale your staff grades recruits on — separate per player type. Coaches inherit these on mobile &amp; the web report.</p>
+          <div className="py-1"><ScoutingGradesEditor /></div>
         </DialogContent>
       </Dialog>
 
@@ -405,7 +547,7 @@ export default function GMRecruits() {
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                   <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                     <div className="space-y-2">
-                      {list.map((r, i) => <SortableRecruitCard key={r.id} recruit={r} index={i + 1} onEdit={() => openEdit(r)} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} onDeal={() => openDeal(r)} />)}
+                      {list.map((r, i) => <SortableRecruitCard key={r.id} recruit={r} index={i + 1} onEdit={() => openEdit(r)} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onAddReport={() => openAddReport(r)} onContact={() => openContact(r)} onDeal={() => openDeal(r)} />)}
                     </div>
                   </SortableContext>
                 </DndContext>
@@ -425,19 +567,19 @@ export default function GMRecruits() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>First Name</span>
-                  <Input value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} className="h-9 text-sm" />
                 </div>
                 <div>
                   <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Last Name</span>
-                  <Input value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} className="h-9 text-sm" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Position</span>
-                  <Select value={form.position} onValueChange={(v) => setForm((f) => ({ ...f, position: v }))}>
+                  <Select value={posGroupValue(form.position)} onValueChange={(v) => setForm((f) => ({ ...f, position: v }))}>
                     <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>{POSITIONS.map((p) => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}</SelectContent>
+                    <SelectContent>{POSITION_OPTIONS.map((o) => <SelectItem key={o.pos} value={o.pos} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div>
@@ -467,16 +609,16 @@ export default function GMRecruits() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>School</span>
-                  <Input value={form.high_school} onChange={(e) => setForm((f) => ({ ...f, high_school: e.target.value }))} className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.high_school} onChange={(e) => setForm((f) => ({ ...f, high_school: e.target.value }))} className="h-9 text-sm" />
                 </div>
                 <div>
                   <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>State</span>
-                  <Input value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} placeholder="e.g. TX" className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} placeholder="e.g. TX" className="h-9 text-sm" />
                 </div>
               </div>
               <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Travel Organization <span className="text-muted-foreground/50">(optional)</span></span>
-                <Input value={form.travel_org} onChange={(e) => setForm((f) => ({ ...f, travel_org: e.target.value }))} className="h-9 text-sm" />
+                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Travel Organization</span>
+                <Input autoComplete="new-password" value={form.travel_org} onChange={(e) => setForm((f) => ({ ...f, travel_org: e.target.value }))} className="h-9 text-sm" />
               </div>
               {/* Contact — kept with the identity fields on the left */}
               <div className="border-t border-border/40 pt-3">
@@ -485,19 +627,19 @@ export default function GMRecruits() {
                   <button type="button" onClick={addFormNumber} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"><Plus className="h-3 w-3" /> Add Number</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Player phone" className="h-9 text-sm" />
-                  <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="Player email" className="h-9 text-sm" />
-                  <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} placeholder="Parent / guardian" className="h-9 text-sm" />
-                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} placeholder="Guardian phone" className="h-9 text-sm" />
-                  <Input value={form.coach_name} onChange={(e) => setForm((f) => ({ ...f, coach_name: e.target.value }))} placeholder="Coach" className="h-9 text-sm" />
-                  <Input value={form.coach_phone} onChange={(e) => setForm((f) => ({ ...f, coach_phone: e.target.value }))} placeholder="Coach phone" className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Player phone" className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="Player email" className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} placeholder="Parent / guardian" className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} placeholder="Guardian phone" className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.coach_name} onChange={(e) => setForm((f) => ({ ...f, coach_name: e.target.value }))} placeholder="Coach" className="h-9 text-sm" />
+                  <Input autoComplete="new-password" value={form.coach_phone} onChange={(e) => setForm((f) => ({ ...f, coach_phone: e.target.value }))} placeholder="Coach phone" className="h-9 text-sm" />
                 </div>
                 {form.extra_contacts.length > 0 && (
                   <div className="mt-2 space-y-2">
                     {form.extra_contacts.map((c, i) => (
                       <div key={i} className="flex items-center gap-2">
-                        <Input value={c.label} onChange={(e) => setFormNumber(i, "label", e.target.value)} placeholder="Label (e.g. Dad)" className="h-9 w-28 text-sm" />
-                        <Input value={c.value} onChange={(e) => setFormNumber(i, "value", e.target.value)} placeholder="Phone / email" className="h-9 flex-1 text-sm" />
+                        <Input autoComplete="new-password" value={c.label} onChange={(e) => setFormNumber(i, "label", e.target.value)} placeholder="Label (e.g. Dad)" className="h-9 w-28 text-sm" />
+                        <Input autoComplete="new-password" value={c.value} onChange={(e) => setFormNumber(i, "value", e.target.value)} placeholder="Phone / email" className="h-9 flex-1 text-sm" />
                         <button type="button" onClick={() => removeFormNumber(i)} className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
                       </div>
                     ))}
@@ -522,26 +664,37 @@ export default function GMRecruits() {
                   </div>
                   <div>
                     <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scholarship %</span>
-                    <Input value={form.scholarship_pct} onChange={(e) => setForm((f) => ({ ...f, scholarship_pct: e.target.value }))} placeholder="e.g. 75" inputMode="numeric" className="h-9 text-sm" />
+                    <Input autoComplete="new-password" value={form.scholarship_pct} onChange={(e) => setForm((f) => ({ ...f, scholarship_pct: e.target.value }))} placeholder="e.g. 75" inputMode="numeric" className="h-9 text-sm" />
                   </div>
                 </div>
               </div>
 
-              {/* Scouting report — gold header, authors the projection tier */}
+              {/* Scouting reports — most recent shown; click it to view all (if >1)
+                  or that one report. + Add is the only way to start a new one. */}
               <div className="border-t border-border/40 pt-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Scouting Report</span>
-                  <Select value={form.projection_tier || undefined} onValueChange={(v) => setForm((f) => ({ ...f, projection_tier: v as RecruitTier }))}>
-                    <SelectTrigger className="h-7 w-auto gap-1 text-xs"><SelectValue placeholder="Projection tier" /></SelectTrigger>
-                    <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-                  </Select>
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Scouting Report{reportItems.length > 1 ? ` (${reportItems.length})` : ""}</span>
+                  <AddPill onClick={() => openReportComposer(null)} />
                 </div>
-                <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Tools, projection, makeup…" className="min-h-[130px] text-sm" />
+                {reportItems.length === 0
+                  ? <p className="text-xs text-muted-foreground">No report yet — click Add to grade this recruit.</p>
+                  : <ReportPreviewRow it={reportItems[0]} template={formTemplate} playerType={formPlayerType} onClick={openReportsFlow} />}
+              </div>
+
+              {/* Contact timeline — same pattern: most recent → all (if >1) → one. */}
+              <div className="border-t border-border/40 pt-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Contact Timeline{noteItems.length > 1 ? ` (${noteItems.length})` : ""}</span>
+                  <AddPill onClick={() => openContactComposer(null)} />
+                </div>
+                {noteItems.length === 0
+                  ? <p className="text-xs text-muted-foreground">No notes yet — click Add to log contact.</p>
+                  : <ContactPreviewRow it={noteItems[0]} onClick={openContactsFlow} />}
               </div>
 
               <div>
                 <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Link (PBR / PG)</span>
-                <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
+                <Input autoComplete="new-password" value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
               </div>
             </div>
           </div>
@@ -551,17 +704,90 @@ export default function GMRecruits() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Scouting report drill-down: composer (add/edit) · list (all) · view (one) ── */}
+      {/* A new report starts BLANK (no carry-forward — avoid anchoring bias). */}
+      <ScoutEntryComposer open={reportComposerOpen} onOpenChange={setReportComposerOpen}
+        title={reportEditKey ? "Edit Scouting Report" : "Scouting Report"} withTier rows={7}
+        template={formTemplate} playerType={formPlayerType}
+        placeholder="Full write-up — mechanics, tools, makeup, projection…"
+        initial={reportEditItem ? { date: reportEditItem.date, body: reportEditItem.body, tier: reportEditItem.tier ?? undefined, grades: reportEditItem.grades ?? undefined } : undefined}
+        onSave={(date, body, tier, grades) => saveReport(date, body, tier, grades, reportEditKey)} />
+
+      <Dialog open={reportListOpen} onOpenChange={(o) => { setReportListOpen(o); if (!o) { setViewReportKey(null); if (!editingRecruit) setReportsRecruit(null); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle style={OSWALD} className="flex items-center justify-between gap-3 pr-6 text-lg"><span>Scouting Reports ({reportItems.length})</span><AddPill onClick={() => openReportComposer(null)} /></DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[62vh] space-y-2.5 overflow-y-auto">
+            {reportItems.map((it) => <ReportPreviewRow key={it.key} it={it} template={formTemplate} playerType={formPlayerType} onClick={() => setViewReportKey(it.key)} size="lg" />)}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!viewReportKey} onOpenChange={(o) => { if (!o) setViewReportKey(null); }}>
+        <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle style={OSWALD} className="flex items-center justify-between gap-3 pr-6 text-lg"><span>Scouting Report</span><AddPill onClick={() => openReportComposer(null)} /></DialogTitle>
+          </DialogHeader>
+          {viewedReport && (
+            <div className="space-y-4">
+              <MetaLine date={viewedReport.date} author={viewedReport.author} tier={viewedReport.tier} size="lg" />
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/90">{viewedReport.body}</p>
+              {hasGrades(viewedReport.grades) && <ScoutGradesReadout grades={viewedReport.grades} template={formTemplate} />}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => viewedReport && openReportComposer(viewedReport.key)}>Edit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Contact timeline drill-down: composer (add/edit) · list (all) · view (one) ── */}
+      <ScoutEntryComposer open={contactComposerOpen} onOpenChange={setContactComposerOpen}
+        title={contactEditKey ? "Edit Contact Note" : "Contact Note"} rows={5}
+        placeholder="What happened — call, visit, camp, note…"
+        initial={contactEditItem ? { date: contactEditItem.date, body: contactEditItem.body } : undefined}
+        onSave={(date, body) => saveNote(date, body, contactEditKey)} />
+
+      <Dialog open={contactListOpen} onOpenChange={setContactListOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle style={OSWALD} className="flex items-center justify-between gap-3 pr-6 text-lg"><span>Contact Timeline ({noteItems.length})</span><AddPill onClick={() => openContactComposer(null)} /></DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[62vh] space-y-2.5 overflow-y-auto">
+            {noteItems.map((it) => <ContactPreviewRow key={it.key} it={it} onClick={() => setViewContactKey(it.key)} size="lg" />)}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!viewContactKey} onOpenChange={(o) => { if (!o) setViewContactKey(null); }}>
+        <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle style={OSWALD} className="flex items-center justify-between gap-3 pr-6 text-lg"><span>Contact Note</span><AddPill onClick={() => openContactComposer(null)} /></DialogTitle>
+          </DialogHeader>
+          {viewedContact && (
+            <div className="space-y-4">
+              <MetaLine date={viewedContact.date} size="lg" />
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-white/90">{viewedContact.body}</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => viewedContact && openContactComposer(viewedContact.key)}>Edit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Recruit timeline — scouting report + dated event log */}
       <Dialog open={!!timelineRecruit} onOpenChange={(o) => { if (!o) setTimelineRecruit(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle style={OSWALD}>{`${timelineRecruit?.first_name ?? ""} ${timelineRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Timeline</DialogTitle>
+            <DialogTitle style={OSWALD}>{`${timelineRecruit?.first_name ?? ""} ${timelineRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Notes</DialogTitle>
           </DialogHeader>
-          {/* Add event */}
+          {/* Add note */}
           <div className="space-y-2 rounded-md border border-border/60 p-2.5">
             <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="h-8 w-auto text-xs" />
             <Textarea value={eventNote} onChange={(e) => setEventNote(e.target.value)} placeholder="What happened — call, visit, camp, note…" className="min-h-[50px] text-sm" />
-            <Button size="sm" className="w-full" disabled={!eventNote.trim()} onClick={() => { if (timelineRecruit) { gm.addEvent(timelineRecruit.id, eventDate, eventNote.trim()); setEventNote(""); } }}>Add Event</Button>
+            <Button size="sm" className="w-full" disabled={!eventNote.trim()} onClick={() => { if (timelineRecruit) { gm.addEvent(timelineRecruit.id, eventDate, eventNote.trim()); setEventNote(""); } }}>Add Note</Button>
           </div>
           {/* Timeline */}
           <div className="max-h-[40vh] space-y-2.5 overflow-y-auto">
@@ -580,72 +806,6 @@ export default function GMRecruits() {
       </Dialog>
 
       {/* Scouting reports — multiple, authored + dated, independent */}
-      <Dialog open={!!reportsRecruit} onOpenChange={(o) => { if (!o) setReportsRecruit(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle style={OSWALD} className="flex items-center gap-2">
-              <span>{`${reportsRecruit?.first_name ?? ""} ${reportsRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Scouting Reports</span>
-              {(() => { const info = RECRUIT_TIERS.find((t) => t.value === reportsRecruit?.projection_tier); return info ? <span className={cn("rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>{info.label}</span> : null; })()}
-            </DialogTitle>
-          </DialogHeader>
-          {/* New report — authors the projection tier for this recruit */}
-          <div className="space-y-2 rounded-md border border-border/60 p-2.5">
-            <div className="flex items-center gap-2">
-              <Input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} className="h-8 w-auto text-xs" />
-              <Select value={reportTier || undefined} onValueChange={(v) => setReportTier(v as RecruitTier)}>
-                <SelectTrigger className="h-8 w-auto gap-1 text-xs"><SelectValue placeholder="Projection tier" /></SelectTrigger>
-                <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <Textarea value={reportBody} onChange={(e) => setReportBody(e.target.value)} placeholder="Tools, projection, makeup…" className="min-h-[70px] text-sm" />
-            <Button size="sm" className="w-full" disabled={!reportBody.trim()} onClick={() => { if (reportsRecruit) { gm.addReport(reportsRecruit.id, reportDate, reportBody.trim(), reportTier || null); setReportBody(""); } }}>Add Report</Button>
-          </div>
-          {/* Tier by coach — each coach's latest call, side by side to compare */}
-          {(() => {
-            const list = gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []; // newest first
-            const latestByAuthor = new Map<string, GmRecruitReport>();
-            for (const r of list) { if (!r.projection_tier) continue; const a = r.author ?? "—"; if (!latestByAuthor.has(a)) latestByAuthor.set(a, r); }
-            if (latestByAuthor.size === 0) return null;
-            return (
-              <div className="rounded-md border border-border/60 bg-muted/10 p-2.5">
-                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Tier by Coach</div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                  {[...latestByAuthor.entries()].map(([author, r]) => {
-                    const tier = RECRUIT_TIERS.find((t) => t.value === r.projection_tier)!;
-                    return (
-                      <div key={author} className="flex items-center gap-1.5">
-                        <span className="text-xs text-foreground/80">{author.split("@")[0]}</span>
-                        <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", toneClass(tier.tone))} style={OSWALD}>{tier.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
-          {/* Report list — each independent */}
-          <div className="max-h-[45vh] space-y-2.5 overflow-y-auto">
-            {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).map((r) => {
-              const tier = RECRUIT_TIERS.find((t) => t.value === r.projection_tier);
-              return (
-              <div key={r.id} className="rounded-md border border-border/60 bg-muted/20 p-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground">{r.author ? `${r.author.split("@")[0]} · ` : ""}{fmtDate(r.report_date)}</span>
-                    {tier && <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", toneClass(tier.tone))} style={OSWALD}>{tier.label}</span>}
-                  </div>
-                  <button onClick={() => gm.removeReport(r.id)} className="text-muted-foreground/40 hover:text-destructive" title="Delete"><X className="h-3.5 w-3.5" /></button>
-                </div>
-                <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">{r.body}</div>
-              </div>
-            ); })}
-            {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).length === 0 && (
-              <p className="py-3 text-center text-xs text-muted-foreground">No reports yet.</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {/* Contact — team-wide; any coach can pull up and edit */}
       <Dialog open={!!contactRecruit} onOpenChange={(o) => { if (!o) setContactRecruit(null); }}>
         <DialogContent className="max-w-md">
@@ -655,27 +815,27 @@ export default function GMRecruits() {
           <div className="grid grid-cols-2 gap-3 py-1">
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Player Phone</span>
-              <Input value={contact.phone} onChange={(e) => setContact((c) => ({ ...c, phone: e.target.value }))} className="h-9 text-sm" />
+              <Input autoComplete="new-password" value={contact.phone} onChange={(e) => setContact((c) => ({ ...c, phone: e.target.value }))} className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Player Email</span>
-              <Input value={contact.email} onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))} className="h-9 text-sm" />
+              <Input autoComplete="new-password" value={contact.email} onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))} className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Parent / Guardian</span>
-              <Input value={contact.guardian_name} onChange={(e) => setContact((c) => ({ ...c, guardian_name: e.target.value }))} className="h-9 text-sm" />
+              <Input autoComplete="new-password" value={contact.guardian_name} onChange={(e) => setContact((c) => ({ ...c, guardian_name: e.target.value }))} className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Guardian Phone</span>
-              <Input value={contact.guardian_phone} onChange={(e) => setContact((c) => ({ ...c, guardian_phone: e.target.value }))} className="h-9 text-sm" />
+              <Input autoComplete="new-password" value={contact.guardian_phone} onChange={(e) => setContact((c) => ({ ...c, guardian_phone: e.target.value }))} className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Coach</span>
-              <Input value={contact.coach_name} onChange={(e) => setContact((c) => ({ ...c, coach_name: e.target.value }))} className="h-9 text-sm" />
+              <Input autoComplete="new-password" value={contact.coach_name} onChange={(e) => setContact((c) => ({ ...c, coach_name: e.target.value }))} className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Coach Phone</span>
-              <Input value={contact.coach_phone} onChange={(e) => setContact((c) => ({ ...c, coach_phone: e.target.value }))} className="h-9 text-sm" />
+              <Input autoComplete="new-password" value={contact.coach_phone} onChange={(e) => setContact((c) => ({ ...c, coach_phone: e.target.value }))} className="h-9 text-sm" />
             </div>
           </div>
           {/* Extra numbers — add as many as needed */}
@@ -686,8 +846,8 @@ export default function GMRecruits() {
             </div>
             {contact.extra_contacts.map((c, i) => (
               <div key={i} className="flex items-center gap-2">
-                <Input value={c.label} onChange={(e) => setContactNumber(i, "label", e.target.value)} placeholder="Label (e.g. Dad)" className="h-9 w-28 text-sm" />
-                <Input value={c.value} onChange={(e) => setContactNumber(i, "value", e.target.value)} placeholder="Phone / email" className="h-9 flex-1 text-sm" />
+                <Input autoComplete="new-password" value={c.label} onChange={(e) => setContactNumber(i, "label", e.target.value)} placeholder="Label (e.g. Dad)" className="h-9 w-28 text-sm" />
+                <Input autoComplete="new-password" value={c.value} onChange={(e) => setContactNumber(i, "value", e.target.value)} placeholder="Phone / email" className="h-9 flex-1 text-sm" />
                 <button type="button" onClick={() => removeContactNumber(i)} className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
               </div>
             ))}
@@ -715,7 +875,7 @@ export default function GMRecruits() {
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scholarship %</span>
-              <Input value={deal.scholarship_pct} onChange={(e) => setDeal((d) => ({ ...d, scholarship_pct: e.target.value }))} placeholder="e.g. 75" inputMode="numeric" className="h-9 text-sm" />
+              <Input autoComplete="new-password" value={deal.scholarship_pct} onChange={(e) => setDeal((d) => ({ ...d, scholarship_pct: e.target.value }))} placeholder="e.g. 75" inputMode="numeric" className="h-9 text-sm" />
             </div>
           </div>
           <DialogFooter>

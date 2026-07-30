@@ -16,7 +16,7 @@ const NAV = [
   { label: "The Situation Room", href: "/gm/scenarios", icon: FlaskConical, description: "What-if & build compare" },
   { label: "Program Analytics", href: "/gm/analytics", icon: BarChart3, description: "Pay per position & per win" },
   { label: "Recruiting Board", href: "/gm/recruiting", icon: ClipboardList, description: "Future classes & commits" },
-  { label: "Settings", href: "/gm/settings", icon: Settings, description: "Scouting template & budgets" },
+  { label: "GM Settings", href: "/gm/settings", icon: Settings, description: "Scouting grades & budgets" },
 ];
 
 /**
