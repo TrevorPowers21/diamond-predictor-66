@@ -43,7 +43,8 @@ const POSITION_OPTIONS = [
   { label: "Corner Infield", pos: "1B" },
   { label: "Middle Infield", pos: "SS" },
   { label: "OF", pos: "OF" },
-  { label: "Pitcher", pos: "P" },
+  { label: "RHP", pos: "RHP" },
+  { label: "LHP", pos: "LHP" },
   { label: "TWP", pos: "TWP" },
 ] as const;
 // Map any stored position (including legacy exact ones) to its group option value,
@@ -54,7 +55,8 @@ const posGroupValue = (p: string): string => {
   if (["1B", "3B", "DH"].includes(u)) return "1B";
   if (["2B", "SS"].includes(u)) return "SS";
   if (["LF", "CF", "RF", "OF"].includes(u)) return "OF";
-  if (["P", "RHP", "LHP", "SP", "RP"].includes(u)) return "P";
+  if (u === "LHP") return "LHP";
+  if (["RHP", "P", "SP", "RP", "CL"].includes(u)) return "RHP"; // legacy generic pitcher → RHP default
   if (u === "TWP") return "TWP";
   return "";
 };

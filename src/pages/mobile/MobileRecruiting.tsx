@@ -54,7 +54,8 @@ const POS_GROUPS = [
   { key: "cif", label: "Corner Infield", addPos: "1B" },
   { key: "mif", label: "Middle Infield", addPos: "SS" },
   { key: "of", label: "OF", addPos: "OF" },
-  { key: "p", label: "Pitcher", addPos: "P" },
+  { key: "rhp", label: "RHP", addPos: "RHP" },
+  { key: "lhp", label: "LHP", addPos: "LHP" },
   { key: "twp", label: "TWP", addPos: "TWP" },
 ] as const;
 type GroupKey = (typeof POS_GROUPS)[number]["key"];
