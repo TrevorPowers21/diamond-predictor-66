@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import AreaToggle from "@/components/AreaToggle";
-import { LogOut, Menu, LayoutDashboard, Users, BarChart3, ClipboardList, FlaskConical, Target, Wallet, FileText, ChevronRight } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, Users, BarChart3, ClipboardList, FlaskConical, Target, Wallet, FileText, ChevronRight, Settings } from "lucide-react";
 
 const NAV = [
   { label: "Dashboard", href: "/gm", icon: LayoutDashboard, description: "Front office overview" },
@@ -16,6 +16,7 @@ const NAV = [
   { label: "The Situation Room", href: "/gm/scenarios", icon: FlaskConical, description: "What-if & build compare" },
   { label: "Program Analytics", href: "/gm/analytics", icon: BarChart3, description: "Pay per position & per win" },
   { label: "Recruiting Board", href: "/gm/recruiting", icon: ClipboardList, description: "Future classes & commits" },
+  { label: "GM Settings", href: "/gm/settings", icon: Settings, description: "Scouting grades & budgets" },
 ];
 
 /**

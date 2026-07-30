@@ -213,7 +213,7 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
             ))}
           </div>
 
-          <Field label="Internal notes" full><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" className="min-h-[60px] text-sm" /></Field>
+          <Field label="Internal notes" full><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[60px] text-sm" /></Field>
 
           {/* When a PDF pre-filled fields, the coach must confirm they've reviewed them. */}
           {autoFilled && (

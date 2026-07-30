@@ -33,6 +33,7 @@ const GMScenarios = lazy(() => import("@/gm/pages/GMScenarios"));
 const GMTargets = lazy(() => import("@/gm/pages/GMTargets"));
 const GMAllocations = lazy(() => import("@/gm/pages/GMAllocations"));
 const GMContracts = lazy(() => import("@/gm/pages/GMContracts"));
+const GMSettings = lazy(() => import("@/gm/pages/GMSettings"));
 const PlayerHub = lazy(() => import("@/pages/PlayerHub"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
@@ -56,6 +57,7 @@ import RoleGuard from "@/components/RoleGuard";
 import HighFollowList from "./pages/HighFollowList";
 import Targets from "./pages/Targets";
 import Settings from "./pages/Settings";
+const MobileRecruiting = lazy(() => import("./pages/mobile/MobileRecruiting"));
 
 const queryClient = new QueryClient();
 
@@ -120,6 +122,8 @@ const router = createBrowserRouter([
       { path: "/dashboard/pitcher/:id/stats", element: <ProtectedRoute><PitcherStatsPage /></ProtectedRoute> },
       { path: "/dashboard/team-builder", element: <ProtectedRoute><TeamBuilder /></ProtectedRoute> },
       { path: "/dashboard/targets", element: <ProtectedRoute><Targets /></ProtectedRoute> },
+      // Mobile recruiting board — phone-first coach tool (freshman/JUCO recruits + dated timeline notes)
+      { path: "/m/recruiting", element: <ProtectedRoute><Suspense fallback={null}><MobileRecruiting /></Suspense></ProtectedRoute> },
       // Legacy /dashboard/high-follow URL still works — renders the standalone page so bookmarks don't break.
       { path: "/dashboard/high-follow", element: <ProtectedRoute><HighFollowList /></ProtectedRoute> },
       { path: "/dashboard/admin", element: <ProtectedRoute><AdminDashboard /></ProtectedRoute> },
@@ -181,6 +185,7 @@ const router = createBrowserRouter([
           { path: "player/:playerId", element: <Suspense fallback={null}><PlayerHub /></Suspense> },
           { path: "analytics", element: <Suspense fallback={null}><GMAnalytics /></Suspense> },
           { path: "recruiting", element: <Suspense fallback={null}><GMRecruits /></Suspense> },
+          { path: "settings", element: <Suspense fallback={null}><GMSettings /></Suspense> },
         ],
       },
       { path: "*", element: <NotFound /> },
