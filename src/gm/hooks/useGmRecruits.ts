@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { logGmActivity, deleteGmActivityByRef } from "@/gm/lib/logGmActivity";
 import { toast } from "sonner";
+import type { ScoutGrades } from "@/gm/lib/scoutTemplate";
 
 export type RecruitType = "hitter" | "pitcher" | "twp";
 
@@ -95,6 +96,7 @@ export interface GmRecruitReport {
   report_date: string; // YYYY-MM-DD
   body: string | null;
   projection_tier: RecruitTier | null; // the tier this coach assigned in this report
+  grades: ScoutGrades | null; // per-look grades (stable key → ordinal/text)
 }
 
 /** Position → recruit section. TWP is its own group. */
@@ -147,8 +149,9 @@ export function useGmRecruits() {
   const addEvent = useMutation({
     mutationFn: async ({ recruitId, eventDate, note }: { recruitId: string; eventDate: string; note: string }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      const { error } = await (supabase as any).from("gm_recruit_events").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, event_date: eventDate, note, created_by_user_id: user?.id ?? null });
+      const { data, error } = await (supabase as any).from("gm_recruit_events").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, event_date: eventDate, note, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
+      return (data?.id ?? null) as string | null;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: eventsKey }); toast.success("Event logged"); },
     onError: (e: any) => toast.error(`Add event failed: ${e.message}`),
@@ -160,6 +163,15 @@ export function useGmRecruits() {
     onError: (e: any) => toast.error(`Remove event failed: ${e.message}`),
   });
 
+  const updateEvent = useMutation({
+    mutationFn: async ({ id, eventDate, note }: { id: string; eventDate: string; note: string }) => {
+      const { error } = await (supabase as any).from("gm_recruit_events").update({ event_date: eventDate, note: note.trim() }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: eventsKey }); toast.success("Note updated"); },
+    onError: (e: any) => toast.error(`Update note failed: ${e.message}`),
+  });
+
   // Scouting reports — multiple per recruit, authored + dated, newest first.
   const reportsKey = ["gm-recruit-reports", effectiveTeamId ?? null];
   const { data: reports = [] } = useQuery({
@@ -167,7 +179,7 @@ export function useGmRecruits() {
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async (): Promise<GmRecruitReport[]> => {
       const { data } = await (supabase as any)
-        .from("gm_recruit_reports").select("id, recruit_id, author, report_date, body, projection_tier")
+        .from("gm_recruit_reports").select("id, recruit_id, author, report_date, body, projection_tier, grades")
         .eq("customer_team_id", effectiveTeamId)
         .order("report_date", { ascending: false }).order("created_at", { ascending: false });
       return (data || []) as GmRecruitReport[];
@@ -180,18 +192,29 @@ export function useGmRecruits() {
   }, [reports]);
 
   const addReport = useMutation({
-    mutationFn: async ({ recruitId, reportDate, body, tier }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null }) => {
+    mutationFn: async ({ recruitId, reportDate, body, tier, grades }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades | null }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      const { data: inserted, error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, created_by_user_id: user?.id ?? null }).select("id").single();
+      const { data: inserted, error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, grades: grades ?? null, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
       // A report authors the projection tier — mirror the latest onto the recruit for its stable badge.
       if (tier) await (supabase as any).from("gm_recruits").update({ projection_tier: tier, updated_at: new Date().toISOString() }).eq("id", recruitId);
       const rec = recruits.find((x) => x.id === recruitId);
       const nm = rec ? `${rec.first_name ?? ""} ${rec.last_name ?? ""}`.trim() || "a recruit" : "a recruit";
       await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a scouting report on ${nm}`, `/gm/recruiting?reports=${recruitId}`, inserted?.id ?? null);
+      return (inserted?.id ?? null) as string | null;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Report added"); },
     onError: (e: any) => toast.error(`Add report failed: ${e.message}`),
+  });
+  const updateReport = useMutation({
+    mutationFn: async ({ id, reportDate, body, tier, grades }: { id: string; reportDate: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades | null }) => {
+      const { error } = await (supabase as any).from("gm_recruit_reports").update({ report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, grades: grades ?? null }).eq("id", id);
+      if (error) throw error;
+      // Keep the recruit's tier badge in sync when this edit sets a tier.
+      if (tier) { const { data: row } = await (supabase as any).from("gm_recruit_reports").select("recruit_id").eq("id", id).single(); if (row?.recruit_id) await (supabase as any).from("gm_recruits").update({ projection_tier: tier, updated_at: new Date().toISOString() }).eq("id", row.recruit_id); }
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Report updated"); },
+    onError: (e: any) => toast.error(`Update report failed: ${e.message}`),
   });
   const removeReport = useMutation({
     mutationFn: async (id: string) => {
@@ -204,21 +227,43 @@ export function useGmRecruits() {
   });
 
   const addRecruit = useMutation({
-    mutationFn: async ({ recruit: r, initialReport }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null } }) => {
+    mutationFn: async ({ recruit: r, initialReports, initialEvents }: { recruit: NewRecruit; initialReports?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades | null }[]; initialEvents?: { event_date: string; note: string }[] }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const peers = recruits.filter((x) => x.class_year === r.class_year && x.player_type === r.player_type);
       const nextOrder = peers.length ? Math.max(...peers.map((x) => x.sort_order)) + 1 : 0;
-      // The tier is authored on the initial report; mirror it onto the recruit for its badge.
-      const tier = initialReport?.tier ?? r.projection_tier ?? null;
-      const { data: inserted, error } = await (supabase as any).from("gm_recruits").insert({ ...r, projection_tier: tier, customer_team_id: effectiveTeamId, sort_order: nextOrder, created_by_user_id: user?.id ?? null }).select("id").single();
+      // The tier is authored on a scouting report; mirror one onto the recruit for its badge.
+      const tier = (initialReports ?? []).find((x) => x.tier)?.tier ?? r.projection_tier ?? null;
+      // Identity spine: mint / attach a canonical (global) RSTR IQ identity so a
+      // recruit tracked now deterministically links to their college data later
+      // (via the shared PBR/PG key), not a fuzzy backfill. Needs a full name;
+      // never blocks the add if identity minting fails.
+      let playerId: string | null = null;
+      const pf = (r.first_name ?? "").trim(), pl = (r.last_name ?? "").trim();
+      if (pf && pl) {
+        const link = (r.link ?? "").trim();
+        const extSource = link ? (/prepbaseballreport|pbr/i.test(link) ? "pbr" : /perfectgame/i.test(link) ? "pg" : "profile") : null;
+        const { data: pid, error: idErr } = await (supabase as any).rpc("resolve_or_create_prospect", {
+          p_first: pf, p_last: pl, p_position: r.position ?? null,
+          p_team: r.high_school ?? null, p_team_id: null, p_class_year: String(r.class_year),
+          p_ext_source: extSource, p_ext_id: link || null,
+        });
+        if (idErr) console.warn("resolve_or_create_prospect failed", idErr);
+        else if (pid) playerId = pid as string;
+      }
+      const { data: inserted, error } = await (supabase as any).from("gm_recruits").insert({ ...r, projection_tier: tier, player_id: playerId, customer_team_id: effectiveTeamId, sort_order: nextOrder, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
-      if (initialReport && initialReport.body.trim()) {
-        await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, created_by_user_id: user?.id ?? null });
+      for (const rep of (initialReports ?? [])) {
+        if (!rep.body.trim()) continue;
+        await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: rep.report_date, body: rep.body.trim(), projection_tier: rep.tier ?? null, grades: rep.grades ?? null, created_by_user_id: user?.id ?? null });
+      }
+      for (const ev of (initialEvents ?? [])) {
+        if (!ev.note.trim()) continue;
+        await (supabase as any).from("gm_recruit_events").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, event_date: ev.event_date, note: ev.note.trim(), created_by_user_id: user?.id ?? null });
       }
       const nm = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "a recruit";
       await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${nm} to the recruiting board`, `/gm/recruiting?reports=${inserted.id}`, inserted.id);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: eventsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit added"); },
     onError: (e: any) => toast.error(`Add failed: ${e.message}`),
   });
 
@@ -307,17 +352,19 @@ export function useGmRecruits() {
     recruits,
     years,
     isLoading,
-    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }) => addRecruit.mutate({ recruit, initialReport }),
+    addRecruit: (recruit: NewRecruit, initialReports?: { report_date: string; body: string; tier?: RecruitTier | null; grades?: ScoutGrades | null }[], initialEvents?: { event_date: string; note: string }[]) => addRecruit.mutate({ recruit, initialReports, initialEvents }),
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
     configByYear,
     saveClassConfig: (cfg: GmClassConfig) => saveClassConfig.mutate(cfg),
     eventsByRecruit,
-    addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutate({ recruitId, eventDate, note }),
+    addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutateAsync({ recruitId, eventDate, note }).catch(() => null),
+    updateEvent: (id: string, eventDate: string, note: string) => updateEvent.mutate({ id, eventDate, note }),
     removeEvent: (id: string) => removeEvent.mutate(id),
     reportsByRecruit,
-    addReport: (recruitId: string, reportDate: string, body: string, tier?: RecruitTier | null) => addReport.mutate({ recruitId, reportDate, body, tier }),
+    addReport: (recruitId: string, reportDate: string, body: string, tier?: RecruitTier | null, grades?: ScoutGrades | null) => addReport.mutateAsync({ recruitId, reportDate, body, tier, grades }).catch(() => null),
+    updateReport: (id: string, reportDate: string, body: string, tier?: RecruitTier | null, grades?: ScoutGrades | null) => updateReport.mutate({ id, reportDate, body, tier, grades }),
     removeReport: (id: string) => removeReport.mutate(id),
   };
 }

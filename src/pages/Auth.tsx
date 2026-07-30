@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -31,8 +31,13 @@ function detectIsInvite(): boolean {
 export default function Auth() {
   const { session, loading, devBypassed, disableDevBypass, enableDevBypass, isDevBypassAllowed, isRecoveringPassword } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [mode, setMode] = useState<Mode>(detectInitialMode);
   const [isInvite] = useState<boolean>(detectIsInvite);
+  // Where to land after login: an internal-only ?redirect= path (e.g. the shared
+  // /m/recruiting link), else the dashboard. Guarded against open-redirects.
+  const rawRedirect = searchParams.get("redirect");
+  const postLoginDest = rawRedirect && rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") ? rawRedirect : "/dashboard";
 
   // Sync mode with the global recovery flag so any path that lands the user
   // here with a recovery session (including landing on / or /dashboard
@@ -53,7 +58,7 @@ export default function Auth() {
   // the user is technically signed in (recovery session) but needs to set
   // a password before being kicked into the dashboard.
   if (session && !devBypassed && mode !== "recovery" && !isRecoveringPassword) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={postLoginDest} replace />;
   }
 
   return (
@@ -110,7 +115,7 @@ export default function Auth() {
                     ? "Set a password to finish creating your account."
                     : "Enter a new password for your account."}
                 </CardDescription>
-                <SetNewPasswordForm isInvite={isInvite} onDone={() => navigate("/dashboard")} />
+                <SetNewPasswordForm isInvite={isInvite} onDone={() => navigate(postLoginDest)} />
               </>
             )}
           </CardHeader>
