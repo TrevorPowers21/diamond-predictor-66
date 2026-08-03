@@ -169,10 +169,15 @@ events non-negative range; 463 GDP splits DP 4 & 6. Tier 3 season sanity: league
 ≈0 per component; SS/CF lead plays-above-avg, 1B trails; anchor eyeball vs staff
 consensus. Folded Tier-1 item: confirm SprayAng sign vs parsed hit zones.
 
-## 12. Deferred: dWAR Conversion Layer
-Out of scope. When dRS validated: positional-adjustment ladder (re-derived or
-MLB-scaled to ~56g), D1 runs-per-win (~2× league R/G, ~12–14), replacement level.
-Reads `player_season_defense`, writes its own table. No changes to this spec.
+## 12. Deferred: dWAR Conversion + Defensive Projection Layer
+**Now spec'd in `docs/DWAR_CONVERSION_AND_PROJECTION_SPEC.md` (Addendum v1.0, design
+locked 2026-08-03).** That addendum SUPERSEDES this paragraph's "MLB-scaled positional
+adjustment" idea: positional adjustment is replaced by **empirical per-position scales**
+derived from our own full-season data (the MLB ladder is explicitly NOT imported), average
+is learned (not assumed to self-center), and replacement is learned per position from the
+depth tier. D1 runs-per-win (~2× league R/G) stands. Reads `player_season_defense` + a new
+`position_defense_scales`, writes `player_season_dwar`. No changes to this spec. **Build
+blocked on the full-season import** (dependency chain starts with Open Item #5 below).
 
 ## 13. Open Items
 1. Confirm remaining error grammar (`6E3`, dropped-fly) from messier exports — Trevor.

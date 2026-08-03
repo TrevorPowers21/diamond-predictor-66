@@ -83,6 +83,42 @@ Full spec: `docs/DEFENSIVE_RUNS_ENGINE_SPEC.md`. Reconciliation: `docs/drs-refer
   on `int(r["pitchNumInGame"])`/`gameId` if absent). *Protects against:* the mixed,
   date-organized dump breaking the ingest.
 
+## dWAR + defensive-projection layer (→ defense-and-drs) — design-locked, build-blocked
+
+Captured from the dWAR Conversion + Projection Addendum v1.0
+(`docs/DWAR_CONVERSION_AND_PROJECTION_SPEC.md`). Blocked on the full-season import; the
+locked design decisions the agent should carry:
+
+- **Average is LEARNED, not assumed.** dRS does not self-center at zero — that only holds if
+  xAVG is perfectly calibrated, and it isn't (validation showed league net range +6.55 /
+  +2.91). Each position's average accrual rate is measured empirically from the full-season
+  distribution, per position (SS accrues via range+DP, 1B via a narrow easy-chance set, C via
+  framing volume). *Protects against:* trusting a theoretical zero-center and shipping a
+  systematically biased baseline.
+- **Empirical positional scales REPLACE the MLB positional-adjustment ladder — do NOT import
+  external constants when you can derive from your own data.** The per-position empirical
+  centering IS the positional adjustment. Same instinct as "constants come from the D1 RE24
+  matrix, not MLB defaults." *Protects against:* importing MLB-calibrated numbers into a
+  metal-bat/college-fielder environment.
+- **Replacement applied EXACTLY ONCE across the WAR combiner (critical guardrail).** dWAR is
+  built above positional replacement, so if oWAR (`src/savant/lib/war.ts`) already carries a
+  replacement treatment, the combiner must not subtract it again. Encode as a unit test: a
+  league-average player's total WAR equals the replacement gap exactly once. *Protects
+  against:* silent double-counting of replacement between the offensive and defensive sides.
+- **Rate denominator = responsibility OPPORTUNITIES, not innings.** Opportunities are the
+  skill-rate unit (decontaminated from staff GB/FB profile); innings are only the
+  projection-time volume unit. Project off the regressed rate (floor), never raw. *Protects
+  against:* a transfer's rate being polluted by his old staff's batted-ball mix.
+- **ONE bucket tag drives BOTH offensive PA and defensive innings projection — they can never
+  disagree.** Shared cornerstone/everyday/platoon/depth/bench tag. Innings anchors are
+  empirical, per position (catcher structurally differs — never share one innings number).
+  Same no-drift principle as the shared-editor pattern. *Protects against:* a player projected
+  as an everyday bat but a depth glove (or vice versa).
+- **Each season measured against its OWN fixtures** (own RE24, own league rates, own constants
+  stamp) for cross-season comparability; no-history players (FR/JUCO) get a hard-regressed
+  position-average prior with a wide floor/ceiling (v1), cohort priors once two seasons exist
+  (v2), coach-overridable in the GM workflow.
+
 ## Process note carried forward
 
 - **Capture-then-confirm on a big multi-phase build.** The user said "remembered" + "we
