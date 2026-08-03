@@ -1,0 +1,5 @@
+# Raw TruMedia exports + the received zip are data, not source — do not commit.
+*.csv
+!*.expected.csv
+*.zip
+incoming/
