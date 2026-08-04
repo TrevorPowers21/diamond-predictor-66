@@ -65,6 +65,15 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // RSTR IQ brand tokens (canonical per design-system/rstr-iq/MASTER.md).
+        // Additive only — nothing consumes these yet; migrating usages onto them is a
+        // later color-sweep phase (visual verification required for #162241 border).
+        "navy-bg": "#040810",
+        "navy-card": "#0a1428",
+        "navy-border": "#162241",
+        "gold": "#D4AF37",
+        "text-secondary": "#8A94A6",
+        "text-tertiary": "#5A6478",
       },
       borderRadius: {
         lg: "var(--radius)",
