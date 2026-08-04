@@ -164,3 +164,51 @@ Building the D1 RE24 matrix (spec §7, first real-numbers task) + the regular-se
   production build (RE24 derivation, ingest hardening, the 4 fixes, wiring into the app)
   was NOT started without confirming scope/sequence — especially with the recruiting PR
   #160 still mid-promotion. (Reinforces `feedback_stop_and_talk_on_real_problems`.)
+
+## 2026-08-04 discoveries (→ defense-and-drs + review-and-parity)
+
+- **The RAW distribution is a diagnostic, not an output — read it before trusting anything.**
+  Engine ranked every SS +25 and every LF −17 (a 42-run positional gap). *Why:* range hit-debits
+  were attributed to the `hit_zone` RETRIEVER, not the responsible fielder — 73% of hits debited an
+  OF, and 28% of those were ground balls that got through the infield (scored "S/7"). *Protects
+  against:* laundering a structural attribution bug into the positional scales/dWAR. Every raw
+  positional mean should be near-zero after centering; a large non-zero mean before centering is a
+  red flag to trace, not a number to subtract.
+- **Attribution can be wrong while magnitude is right.** xOut (how catchable) was correct; the
+  *which-fielder* was wrong (retriever ≠ responsible). Fix = attribute by trajectory+spray:
+  LA<10° → infield lane always (OF never touch a grounder, per UZR/DRS/OAA), air → OF lane;
+  **calibrate spray→lane empirically from OUTS** (where the fielder is known), never guess the sign.
+- **NEVER add a catchability floor to a symmetric credit/debit metric.** A floor (only charge if
+  out-prob > X) lets you earn +0.91 robbing a 10% ball but pay nothing when 10% balls drop → the
+  league stops netting to zero → breaks the telescoping cert, and creates a cliff. The tiny unfair
+  charges were the *attribution* bug, not a missing gate. Debit every attributed ball at xOut scale.
+- **Noise handling = visibility, not exclusion.** Infield line-drive defense is near-random
+  (positioning luck, ~0 year-to-year repeatability), but removing/capping liners breaks symmetry.
+  Instead decompose range into gb/ld/fb sub-buckets on the row and regress the noisy (liner) bucket
+  hardest. Same numbers MLB trusts, luck labeled and visible to coaches.
+- **Coverage bias is STRUCTURED, not random — check clustering, then disclose + filter.** 22% of
+  BIP had no xAVG, bimodally by venue (98 parks ~0% tracked, clustered at resource-limited programs).
+  Regression does NOT fix structured missingness (it's compression toward average, not noise). Fix:
+  disclose per-player (`tracking_coverage` + a "compressed_to_avg" flag + a tracked-only rate as the
+  unbiased projection read), and derive league scales from ≥80%-coverage players + a min-n guard.
+- **Verify numeric claims against the matrix, not intuition — and own it when wrong.** Claimed the
+  pure-full-cost error formulation gives ~0.964 per state; checking the RE24 matrix, it gives
+  0.871/0.578/0.302 by out-state — never 0.964. Retracted immediately. (Same lesson as the parity
+  telescoping: the internal, data-checkable claims are the trustworthy ones.)
+- **dWAR from a single season is legitimate (within-season relative metric).** When no retroactive
+  season exists, derive positional scales / replacement / runs-per-win from the current season
+  itself — circularity is ~1/N per player (negligible); the retroactive season only bought
+  cross-season absolute comparability + projection priors, both moot until a 2nd season.
+
+## Design-system codification (→ new design-and-brand.md)
+
+- **The shipped app's rendered appearance is canonical — codify it, don't redesign.** When asked to
+  document/tokenize a design system, ratify what renders (zero visual change), don't impose the
+  doc's aspiration. *Protects against:* an agent "fixing" the design to match a stale spec.
+- **Verify a font/color is actually LOADED before trusting the doc.** MASTER.md claimed Oswald
+  headings; Oswald was referenced 265× via `font-[Oswald]` but never `@import`ed → it always
+  rendered as Inter. The doc was describing an intent that never shipped. Grep the loads
+  (`@import`, `<link>`), not just the usages.
+- **Screenshot verification is the safety mechanism for "zero visual change" — and this agent can't
+  take browser screenshots.** For pixel-equivalence tasks, do the mechanical code/token/grep/vitest
+  work but hand the visual sign-off back to the user (preview deploy); flag the limitation up front.
