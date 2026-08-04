@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PitcherStuffPlusRow } from "@/savant/hooks/usePitcherStuffPlus";
+import { NAVY_BG, NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const NAVY_BG = "#040810";
-const GOLD = "#D4AF37";
+
 
 const fmt1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
 const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));

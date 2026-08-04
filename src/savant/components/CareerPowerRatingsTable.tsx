@@ -1,8 +1,8 @@
 import type { PlayerCareerRow } from "@/savant/hooks/usePlayerCareer";
+import { NAVY_CARD, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
+
 const NAVY_BORDER = "#162241";
-const GOLD = "#D4AF37";
 
 const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
 

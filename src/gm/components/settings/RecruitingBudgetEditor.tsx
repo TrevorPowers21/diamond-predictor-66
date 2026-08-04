@@ -10,9 +10,10 @@ import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoneyInput, parseMoney } from "@/gm/components/MoneyInput";
+import { GOLD } from "@/savant/lib/theme";
+
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
-const GOLD = "#D4AF37";
 const YEARS = [PROJECTION_SEASON, PROJECTION_SEASON + 1, PROJECTION_SEASON + 2, PROJECTION_SEASON + 3];
 
 /** onSaved lets a popup host close itself after Save Budgets. */
