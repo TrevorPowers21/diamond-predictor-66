@@ -48,6 +48,7 @@ class Acc:
     bip_opps: float = 0.0
     bip_tracked: float = 0.0        # range opps on TRACKED balls (real xAVG) — coverage
     range_runs_tracked: float = 0.0 # range runs from tracked balls only — projection input
+    range_sub: dict = field(default_factory=lambda: {"gb": 0.0, "ld": 0.0, "fb": 0.0, "pu": 0.0})
     dp_opps: float = 0.0        # DP opportunities this fielder fielded
     dp_conv_n: float = 0.0      # DP conversions this fielder turned
     plays_made: int = 0
@@ -211,30 +212,71 @@ class DRSEngine:
             prev = row
 
     # ---------- BIP engine ----------
+    @staticmethod
+    def _la_class(la):
+        """Statcast batted-ball class: GB<10, LD 10-25, FB 25-50, PU>50 (None if no LA)."""
+        if la is None: return None
+        if la < 10: return "gb"
+        if la < 25: return "ld"
+        if la < 50: return "fb"
+        return "pu"
+
+    @staticmethod
+    def _responsible_fielder(la, spray):
+        """The fielder who actually had the play, by trajectory + spray (calibrated from
+        outs). Ground balls -> the INFIELD spray lane (never an OF); air balls -> the OF
+        lane. Retrieval zone is ignored. None if trajectory unknown."""
+        if la is None or spray is None:
+            return None
+        if la < 10:                       # ground ball -> infield lane
+            if spray < -22: return 5      # 3B
+            if spray < 2:   return 6      # SS
+            if spray < 30:  return 4      # 2B
+            return 3                      # 1B
+        if spray < -14: return 7          # LF
+        if spray < 14:  return 8          # CF
+        return 9                          # RF
+
     def _range_credit(self, row, pos, xout, tracked):
         a = self._touch(row, pos)
         if a is None: return
         v = (1.0 - xout) * C.RUNS_PER_PLAY
         a.range_runs += v
+        cls = self._la_class(row["_LA"])
+        if cls: a.range_sub[cls] += v
         a.plays_made += 1
         a.bip_opps += 1.0
         if tracked:                       # real xAVG — counts toward the unbiased read
             a.range_runs_tracked += v
             a.bip_tracked += 1.0
 
-    def _range_debit(self, row, zones, xout, tracked):
-        if not zones:
+    def _range_debit(self, row, ev, xout, tracked):
+        """Debit the fielder who had the play (trajectory+spray), NOT the retriever zone.
+        Ground-ball hits charge the infield lane; air-ball hits charge the OF lane. No
+        catchability floor — every attributed ball debits at xOut scale (preserves the
+        credit/debit zero-sum). Untracked balls (no LA/spray) fall back to the hit_zone."""
+        fielder = self._responsible_fielder(row["_LA"], row["_spray"])
+        if fielder is None:
+            zones = ev.hit_zone           # no trajectory -> retriever fallback (coverage-flagged)
+            if not zones: return
+            share = 1.0 / len(zones)
+            for z in zones:
+                a = self._touch(row, z)
+                if a is None: continue
+                v = share * xout * C.RUNS_PER_PLAY
+                a.range_runs -= v; a.bip_opps += share
+                if tracked: a.range_runs_tracked -= v; a.bip_tracked += share
             return
-        share = 1.0 / len(zones)
-        for z in zones:
-            a = self._touch(row, z)
-            if a is None: continue
-            v = share * xout * C.RUNS_PER_PLAY
-            a.range_runs -= v
-            a.bip_opps += share
-            if tracked:
-                a.range_runs_tracked -= v
-                a.bip_tracked += share
+        a = self._touch(row, fielder)
+        if a is None: return
+        v = xout * C.RUNS_PER_PLAY
+        a.range_runs -= v
+        cls = self._la_class(row["_LA"])
+        if cls: a.range_sub[cls] -= v
+        a.bip_opps += 1.0
+        if tracked:
+            a.range_runs_tracked -= v
+            a.bip_tracked += 1.0
 
     def _credit_chain_tallies(self, row, chain):
         if not chain: return
@@ -394,7 +436,7 @@ class DRSEngine:
                                   outs_made=1)  # out stood, advancement-only debit
 
         elif ev.event_type in ("SINGLE", "DOUBLE", "TRIPLE"):
-            self._range_debit(row, zones_for_debit, xout, tracked)
+            self._range_debit(row, ev, xout, tracked)
             self._arm(row, ev)
 
         elif ev.event_type == "HR":
@@ -490,6 +532,9 @@ class DRSEngine:
                 "half_innings": len(a.half_innings),
                 "bip_opportunities": round(a.bip_opps, 2),
                 "range_runs": round(a.range_runs, 3),
+                "range_gb": round(a.range_sub["gb"], 3),
+                "range_ld": round(a.range_sub["ld"], 3),   # noisy bucket — regress hardest
+                "range_fb": round(a.range_sub["fb"], 3),
                 "error_runs": round(a.error_runs, 3),
                 "dp_runs": round(a.dp_runs, 3),
                 "arm_runs": round(a.arm_runs, 3),

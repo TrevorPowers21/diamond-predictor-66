@@ -41,7 +41,7 @@ PRIOR_BLOCK_PITCHES = 4000.0
 PRIOR_THROW_ATT = 60.0
 PRIOR_BUNT_OPPS = 60.0
 
-ENGINE_VERSION = "drs-engine-0.4.0"
+ENGINE_VERSION = "drs-engine-0.5.0"
 
 POSITION_COLS = {
     2: "catcherAbbrevName",
