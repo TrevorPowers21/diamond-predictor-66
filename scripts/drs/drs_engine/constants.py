@@ -25,9 +25,9 @@ RUNS_PER_STRIKE = 0.225  # called ball-vs-strike run swing (count-based; IBB-cle
 RUNS_PER_PBWP = 0.320    # advance all runners one base, occupied-state weighted. Blocking.
 RUNS_CS = 0.583          # erase runner on 1st + add an out. Catcher throwing (caught stealing).
 RUNS_SB_COST = 0.175     # runner 1st→2nd (steal allowed). Catcher throwing.
-RUNS_OF_KILL = 0.86      # OF assist: out recorded + advancement erased. *** ESTIMATE — NOT yet
-                         # derived from the linear-weight pass (scaled from the RUNS_CS ratio).
-                         # TODO: derive empirically from OF-kill movement events. ***
+RUNS_OF_KILL = 0.86      # FALLBACK ONLY. OF kills are now priced per-event off the RE24 matrix
+                         # (advancement erased + the out, state-sensitive); this flat value is
+                         # used only when the matrix is unavailable.
 
 # ---- regression priors (phantom league-average opportunities) ----
 # floor = raw * n / (n + prior). Priors approximate 120 games of average
@@ -41,7 +41,7 @@ PRIOR_BLOCK_PITCHES = 4000.0
 PRIOR_THROW_ATT = 60.0
 PRIOR_BUNT_OPPS = 60.0
 
-ENGINE_VERSION = "drs-engine-0.3.0"
+ENGINE_VERSION = "drs-engine-0.4.0"
 
 POSITION_COLS = {
     2: "catcherAbbrevName",

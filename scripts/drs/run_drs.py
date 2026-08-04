@@ -9,7 +9,7 @@ Writes: output/player_season_defense.csv, output/exceptions_log.csv,
 """
 import sys, csv, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drs_engine.normalize import load_rows, derive_league_fixtures
+from drs_engine.normalize import load_rows, derive_league_fixtures, load_re24
 from drs_engine.engine import DRSEngine
 
 def main(paths):
@@ -23,7 +23,7 @@ def main(paths):
 
     os.makedirs("output", exist_ok=True)
     fx = derive_league_fixtures(rows, out_path="fixtures/league_fixtures.json")
-    eng = DRSEngine(fx)
+    eng = DRSEngine(fx, load_re24())
     eng.run(rows)
     res = eng.player_season_rows(season=2026)
 

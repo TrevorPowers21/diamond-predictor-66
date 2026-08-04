@@ -11,7 +11,7 @@ import sys, os, glob
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from drs_engine.parser import parse_atbat_desc, ParseError
 from drs_engine.normalize import (load_rows, derive_league_fixtures, is_pa_end,
-                                   framing_class, dp_opportunity_shares)
+                                   framing_class, dp_opportunity_shares, load_re24)
 from drs_engine.engine import DRSEngine
 from drs_engine import constants as C
 
@@ -90,7 +90,8 @@ if not csvs:
 print(f"\nTier 2: frozen fixtures ({len(csvs)} file(s) from {fx_dir})")
 rows = load_rows(csvs)
 fx = derive_league_fixtures(rows)
-eng = DRSEngine(fx)
+re24 = load_re24()
+eng = DRSEngine(fx, re24)
 eng.run(rows)
 res = eng.player_season_rows(2026)
 
@@ -112,7 +113,7 @@ check("eight FC events found", len(fc_events) == 8, f"got {len(fc_events)}")
 fc_ok = True
 for row in fc_events:
     ev = parse_atbat_desc(row["atbatDesc"])
-    solo = DRSEngine(fx)
+    solo = DRSEngine(fx, re24)
     solo._route(row, ev)
     for a in solo.acc.values():
         if a.range_runs < -1e-9:
@@ -122,7 +123,7 @@ check("no FC event ever debits range", fc_ok)
 # 2.4 (redesigned) 463 GDP: opportunity AND conversion land on chain[0]=4 only,
 #     NOT hardcoded 4 & 6. This is the DP attribution fix.
 gdp_row = next(r for r in rows if (r.get("atbatDesc") or "").startswith("463/GDP"))
-solo = DRSEngine(fx)
+solo = DRSEngine(fx, re24)
 solo._dp_accumulate(gdp_row, parse_atbat_desc(gdp_row["atbatDesc"]))
 opp = {k[2]: round(a.dp_opps, 6) for k, a in solo.acc.items() if a.dp_opps > 0}
 conv = {k[2]: round(a.dp_conv_n, 6) for k, a in solo.acc.items() if a.dp_conv_n > 0}
@@ -179,7 +180,7 @@ check("R2: no probSL pitch with UNKNOWN result goes unlogged (real data)",
       len(unlogged) == 0, str(unlogged[:5]))
 
 # R2b: mechanism check — an unknown taken label WITH probSL logs NEW_VOCAB.
-solo = DRSEngine(fx)
+solo = DRSEngine(fx, re24)
 fake = {"catchingTeam": "T", "catcherAbbrevName": "TEST_C", "gameId": "g",
         "gameString": "g", "inn": "1", "uniqPitchId": "fake-1",
         "pitchResult": "Automatic Ball", "_probSL": 0.5, "_pPBWP": None}

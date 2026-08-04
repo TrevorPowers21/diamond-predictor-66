@@ -108,6 +108,16 @@ def load_rows(paths, skipped=None):
     rows.sort(key=lambda r: (r.get("gameId") or "", r["_pnum"]))
     return rows
 
+def load_re24():
+    """Load the committed D1 RE24 matrix (base-out -> RE) from the package fixtures,
+    resolved absolutely so cwd doesn't matter. Returns {} if absent (engine falls
+    back to flat constants for state-specific advancement)."""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "fixtures", "re24_matrix.json")
+    if os.path.exists(p):
+        return (json.load(open(p)) or {}).get("matrix", {})
+    return {}
+
 def bb_type_from_result(pitch_result: str):
     """TruMedia '[outcome] on a [type]' string -> G/F/L/P"""
     s = (pitch_result or "").lower()

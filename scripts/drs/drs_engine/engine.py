@@ -46,6 +46,8 @@ class Acc:
     throwing_runs: float = 0.0
     bunt_runs: float = 0.0
     bip_opps: float = 0.0
+    bip_tracked: float = 0.0        # range opps on TRACKED balls (real xAVG) — coverage
+    range_runs_tracked: float = 0.0 # range runs from tracked balls only — projection input
     dp_opps: float = 0.0        # DP opportunities this fielder fielded
     dp_conv_n: float = 0.0      # DP conversions this fielder turned
     plays_made: int = 0
@@ -62,12 +64,46 @@ class Acc:
     half_innings: set = field(default_factory=set)
 
 class DRSEngine:
-    def __init__(self, fixtures):
+    def __init__(self, fixtures, re24=None):
         self.fx = fixtures
+        self.re24 = re24 or {}            # base-out RE matrix (state-specific advancement)
         self.acc = defaultdict(Acc)      # key: (team, player_name, position)
         self.exceptions = []
         self.expected_pbwp = defaultdict(float)   # catcher key -> sum
         self.actual_pbwp = defaultdict(int)
+
+    # ---------- RE24 base-out lookups (state-specific advancement) ----------
+    def _re(self, o1, o2, o3, outs):
+        """RE of a base-out state, or None if outs>=3 (0) or no matrix (fallback)."""
+        if outs >= 3:
+            return 0.0
+        if not self.re24:
+            return None
+        return self.re24.get(("1" if o1 else "_") + ("2" if o2 else "_")
+                             + ("3" if o3 else "_") + str(outs))
+
+    def _re_single(self, base, outs):
+        """RE of a lone runner at `base` (1/2/3; 4=home scored=1.0); None if no matrix."""
+        if base >= 4:
+            return 1.0
+        return self._re(base == 1, base == 2, base == 3, outs)
+
+    def _base_value(self, std_dest, outs):
+        """Base-out value of ONE extra base beyond std_dest (single-runner). Falls
+        back to flat RUNS_PER_BASE if the matrix is unavailable."""
+        hi = self._re_single(min(std_dest + 1, 4), outs)
+        lo = self._re_single(std_dest, outs)
+        return (hi - lo) if (hi is not None and lo is not None) else C.RUNS_PER_BASE
+
+    def _kill_value(self, dest, outs):
+        """Value of throwing out a runner heading to `dest`: advancement erased +
+        the out recorded, base-out priced. Falls back to RUNS_OF_KILL."""
+        adv = self._re_single(dest, outs)
+        e0 = self._re(False, False, False, outs)
+        e1 = self._re(False, False, False, outs + 1)
+        if adv is None or e0 is None or e1 is None:
+            return C.RUNS_OF_KILL
+        return adv + (e0 - e1)
 
     # ---------- identity ----------
     def _fielder(self, row, pos):
@@ -175,22 +211,30 @@ class DRSEngine:
             prev = row
 
     # ---------- BIP engine ----------
-    def _range_credit(self, row, pos, xout):
+    def _range_credit(self, row, pos, xout, tracked):
         a = self._touch(row, pos)
         if a is None: return
-        a.range_runs += (1.0 - xout) * C.RUNS_PER_PLAY
+        v = (1.0 - xout) * C.RUNS_PER_PLAY
+        a.range_runs += v
         a.plays_made += 1
         a.bip_opps += 1.0
+        if tracked:                       # real xAVG — counts toward the unbiased read
+            a.range_runs_tracked += v
+            a.bip_tracked += 1.0
 
-    def _range_debit(self, row, zones, xout):
+    def _range_debit(self, row, zones, xout, tracked):
         if not zones:
             return
         share = 1.0 / len(zones)
         for z in zones:
             a = self._touch(row, z)
             if a is None: continue
-            a.range_runs -= share * xout * C.RUNS_PER_PLAY
+            v = share * xout * C.RUNS_PER_PLAY
+            a.range_runs -= v
             a.bip_opps += share
+            if tracked:
+                a.range_runs_tracked -= v
+                a.bip_tracked += share
 
     def _credit_chain_tallies(self, row, chain):
         if not chain: return
@@ -204,18 +248,58 @@ class DRSEngine:
         a = self._touch(row, fielder)
         if a is None: return
         a.errors += 1
-        # Charge as "a sure out that became a SINGLE" — RUNS_PER_SINGLE, NOT the S/D/T
-        # blend (RUNS_PER_PLAY), which already bakes in extra-base damage and would
-        # double-count against the explicit advancement penalty below (~0.08 runs/error).
+        # Base: "a sure out that became a SINGLE" (only when no out was recorded).
+        # RUNS_PER_SINGLE, not the S/D/T blend, so the extra-base damage isn't
+        # double-counted against the explicit advancement charge below.
         a.error_runs -= C.RUNS_PER_SINGLE if outs_made == 0 else 0.0
-        # advancement beyond a single (max punishment rule)
-        extra = 0
-        for mv in ev.movements:
-            if mv.out or mv.frm == 0:
-                continue
-            extra += max(0, (mv.to - mv.frm) - 1)
-        a.error_runs -= extra * C.RUNS_PER_BASE
+        a.error_runs -= self._error_extra(row, ev, outs_made)
         a.bip_opps += 1.0
+
+    def _error_extra(self, row, ev, outs_made):
+        """F1 advancement charge: runner movement BEYOND a standard single, priced by
+        the full base-out RE delta (actual state vs a standard-single counterfactual).
+        Only the clean ROE case (no out recorded, matrix present, unambiguous
+        reconstruction) is state-priced; everything else falls back to flat
+        RUNS_PER_BASE per extra base. Never credits an error (clamped >= 0)."""
+        def flat():
+            extra = 0
+            for mv in ev.movements:
+                if mv.out or mv.frm == 0:
+                    continue
+                extra += max(0, (mv.to - mv.frm) - 1)
+            return extra * C.RUNS_PER_BASE
+        if outs_made != 0 or not self.re24:
+            return flat()
+        o = min(2, row["_outs"])
+        b1 = bool((row.get("ManOnFirst") or "").strip())
+        b2 = bool((row.get("ManOnSecond") or "").strip())
+        b3 = bool((row.get("ManOnThird") or "").strip())
+        # counterfactual standard single: batter->1st, each runner +1 base (3rd scores)
+        cf = self._re(True, b1, b2, o)
+        cf_runs = 1 if b3 else 0
+        # actual state after the error, reconstructed from the movement block
+        occ = {1: b1, 2: b2, 3: b3}
+        runs_actual = 0
+        batter_placed = False
+        for mv in ev.movements:
+            if mv.frm == 0:
+                batter_placed = True
+                if mv.out: pass
+                elif mv.to == 4: runs_actual += 1
+                else: occ[mv.to] = True
+            else:
+                occ[mv.frm] = False
+                if mv.out: pass
+                elif mv.to == 4: runs_actual += 1
+                else: occ[mv.to] = True
+        if not batter_placed:
+            if occ[1]:                        # 1st still occupied but batter must reach it
+                return flat()                 # ambiguous forced-runner reconstruction
+            occ[1] = True
+        act = self._re(occ[1], occ[2], occ[3], o)
+        if act is None or cf is None:
+            return flat()
+        return max(0.0, (act + runs_actual) - (cf + cf_runs))
 
     def _dp_accumulate(self, row, ev):
         """Fix #1: per-fielder DP opportunity + conversion accounting. Uses the
@@ -238,22 +322,25 @@ class DRSEngine:
             return
         exp_rate = self.fx["extra_adv_rate"].get(f"{ev.event_type}_{zone}",
                                                  self.fx["extra_adv_default"])
+        o = min(2, row["_outs"])
         a = self._touch(row, zone)
         if a is None: return
         for mv in ev.movements:
             if mv.frm == 0:
                 continue
             if mv.out and mv.chain and mv.chain[0] in (7, 8, 9):
+                # kill: matrix-priced (advancement erased + the out), state-sensitive
                 killer = self._touch(row, mv.chain[0])
                 if killer:
-                    killer.arm_runs += C.RUNS_OF_KILL
+                    killer.arm_runs += self._kill_value(mv.to, o)
                 self._credit_chain_tallies(row, mv.chain)
                 continue
             if mv.out:
                 continue
-            extra = (mv.to - mv.frm) - base_adv
-            actual = 1.0 if extra > 0 else 0.0
-            a.arm_runs += (exp_rate - actual) * C.RUNS_PER_BASE
+            # hold vs advance: value the ONE extra base at its base-out RE delta (A)
+            std_dest = mv.frm + base_adv
+            actual = 1.0 if (mv.to - mv.frm) - base_adv > 0 else 0.0
+            a.arm_runs += (exp_rate - actual) * self._base_value(std_dest, o)
 
     def _bunt(self, row, ev):
         rate = self.fx["bunt_out_rate"]
@@ -273,6 +360,7 @@ class DRSEngine:
     def _route(self, row, ev):
         zones_for_debit = ev.hit_zone
         xout, xout_src = self._xout(row, ev)
+        tracked = (xout_src == "XAVG")   # real xAVG vs league fallback (coverage)
         if xout_src != "XAVG" and ev.event_type in ("OUT", "SINGLE", "DOUBLE",
                                                     "TRIPLE", "ERROR", "FC"):
             self.exceptions.append(Exception_(row.get("uniqPitchId", "?"),
@@ -296,7 +384,7 @@ class DRSEngine:
 
         if ev.event_type == "OUT":
             if ev.putout_chain:
-                self._range_credit(row, ev.putout_chain[0], xout)
+                self._range_credit(row, ev.putout_chain[0], xout, tracked)
                 self._credit_chain_tallies(row, ev.putout_chain)
             for mv in ev.movements:
                 if mv.out and mv.chain:
@@ -306,7 +394,7 @@ class DRSEngine:
                                   outs_made=1)  # out stood, advancement-only debit
 
         elif ev.event_type in ("SINGLE", "DOUBLE", "TRIPLE"):
-            self._range_debit(row, zones_for_debit, xout)
+            self._range_debit(row, zones_for_debit, xout, tracked)
             self._arm(row, ev)
 
         elif ev.event_type == "HR":
@@ -319,7 +407,7 @@ class DRSEngine:
             # LOCKED: credit-only. Fielder converted an out somewhere.
             n_outs = outs_recorded(ev)
             if ev.fc_fielder is not None and n_outs > 0:
-                self._range_credit(row, ev.fc_fielder, xout)
+                self._range_credit(row, ev.fc_fielder, xout, tracked)
                 for mv in ev.movements:
                     if mv.out and mv.chain:
                         self._credit_chain_tallies(row, mv.chain)
@@ -412,6 +500,15 @@ class DRSEngine:
                 "drs_total": round(total, 3),
                 "drs_floor": round(floor, 3),
                 "drs_ceiling": round(total, 3),
+                # coverage disclosure (venue xAVG gaps): the diluted total above is the
+                # honest record; range_runs_tracked / bip_tracked is the unbiased skill
+                # read for projection. range_flag warns when the total is COMPRESSED
+                # toward average (not merely uncertain) by untracked-park balls.
+                "bip_tracked": round(a.bip_tracked, 1),
+                "range_runs_tracked": round(a.range_runs_tracked, 3),
+                "tracking_coverage": round(a.bip_tracked / a.bip_opps, 3) if a.bip_opps else None,
+                "range_flag": ("compressed_to_avg" if a.bip_opps and a.bip_tracked / a.bip_opps < 0.60
+                               else "ok" if a.bip_opps else None),
                 "plays_made": a.plays_made,
                 "errors": a.errors,
                 "assists": a.assists,
