@@ -3,3 +3,4 @@
 !*.expected.csv
 *.zip
 incoming/
+!venue_coverage_2026.csv
