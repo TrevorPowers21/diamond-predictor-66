@@ -119,6 +119,44 @@ locked design decisions the agent should carry:
   position-average prior with a wide floor/ceiling (v1), cohort priors once two seasons exist
   (v2), coach-overridable in the GM workflow.
 
+## RE24 derivation + season boundary (2026-08-04, → defense-and-drs)
+
+Building the D1 RE24 matrix (spec §7, first real-numbers task) + the regular-season boundary.
+
+- **RE24 = for each of 24 base-out states, mean runs scored from that state to the end of
+  the half-inning, over COMPLETE half-innings only.** Data supports it: base state from
+  `ManOnFirst/Second/Third`, outs from `outs` (state entering the PA), half-inning =
+  (`gameId`, `inn`="Top/Bot N"), runs-per-play from the **`Runs`** column (validated: it's
+  runs-scored-on-the-play, handles HR/error/WP without re-deriving). `Runs` beats
+  `currentRuns`/`totalRuns` (those are running/aggregate scores). *Protects against:*
+  hand-deriving HR/WP scoring and getting it wrong.
+- **Completeness filter bug that BIASED the matrix:** `outs_recorded()` doesn't count a
+  strikeout as an out (K has no movement token), so K-heavy innings looked like they never
+  reached 3 outs and got dropped — 67% of half-innings excluded, disproportionately
+  low-scoring ones → RE inflated. Fix: `outs_recorded(ev) + (1 if ev.event_type=="K")`.
+  Skip rate dropped 67% → 6.6% (the real ~1-incomplete-per-game). *Protects against:* a
+  silent selection bias that passes every "looks reasonable" eyeball (the matrix SHAPE was
+  right the whole time; only the levels were inflated).
+- **Sanity-check a derived matrix against a known reference + internal monotonicity.** D1
+  RE24 landed ~1.5× MLB (hotter college run env, spec-predicted), every cell monotonic in
+  runners↑ and outs↓, empty/0-out=0.75 → ~6.7 R/team/game (right D1 range). *Protects
+  against:* shipping a plausible-but-wrong matrix. Also flag sample composition — TruMedia's
+  tracked teams skew toward stronger programs, so it's "the tracked league," slightly above
+  true all-D1.
+- **Season boundary is a shared single-source config, not a hardcoded date.**
+  `scripts/drs/drs_engine/season_config.py` (`is_regular_season(gameString)`) — WAR + DRS
+  both read it so they can never disagree; mirror to a DB `season_config` row for TS/Python
+  parity. **2026 reg season ends 2026-05-18 (Option A — conf tournaments + NCAA are
+  postseason)**; projection is regular-season-only so a clean ~56-game WAR isn't
+  postseason-inflated. See [[project_season_boundaries]]. Excluding postseason barely moved
+  RE24 (it's structurally stable), but it matters a lot on the projection/accumulation side.
+- **Constants (spec §7) derive from RE24 via empirical linear weights:** per PA,
+  RV = RE(after) − RE(before) + runs; average by event type. RUNS_PER_PLAY = mean RV(hit) −
+  mean RV(BIP out); DP/CS/SB/BASE fall out of the same pass; RUNS_PER_STRIKE needs a
+  separate count-based (not base-out) pass. Present all 7 with MLB reference values for
+  sanity-check BEFORE replacing PLACEHOLDER_MLB_v0 in the engine. (Derivation pending
+  Trevor's go as of 2026-08-04.)
+
 ## Process note carried forward
 
 - **Capture-then-confirm on a big multi-phase build.** The user said "remembered" + "we

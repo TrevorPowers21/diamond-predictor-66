@@ -1,4 +1,5 @@
 output/
-fixtures/
+fixtures/*
+!fixtures/re24_matrix.json
 __pycache__/
 *.pyc
