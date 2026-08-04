@@ -204,7 +204,10 @@ class DRSEngine:
         a = self._touch(row, fielder)
         if a is None: return
         a.errors += 1
-        a.error_runs -= 1.0 * C.RUNS_PER_PLAY if outs_made == 0 else 0.0
+        # Charge as "a sure out that became a SINGLE" — RUNS_PER_SINGLE, NOT the S/D/T
+        # blend (RUNS_PER_PLAY), which already bakes in extra-base damage and would
+        # double-count against the explicit advancement penalty below (~0.08 runs/error).
+        a.error_runs -= C.RUNS_PER_SINGLE if outs_made == 0 else 0.0
         # advancement beyond a single (max punishment rule)
         extra = 0
         for mv in ev.movements:

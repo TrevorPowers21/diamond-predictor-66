@@ -1,24 +1,33 @@
 """
 RSTR IQ dRS Engine :: run value constants (Spec Section 7)
 
-STATUS: PLACEHOLDER_MLB_v0
-Every value below is an MLB-derived placeholder. Production values MUST be
-re-derived from the D1 run expectancy matrix (the RE24-based constants
-derivation runs on a full-season export). The engine stamps constants_version
-into every output row so any result computed on placeholders is identifiable
-and reproducible.
+STATUS: D1_2026_v1 — derived from the 2026 D1 regular-season RE24 matrix via
+empirical linear weights (scripts/drs/derive_re24.py + derive_constants.py).
+Run environment: 6.54 R/team/game (~6.76 per-9-innings) vs MLB 4.45 (2025) ≈ 1.5×.
+Internally certified: telescoping run-value sum over 605,727 PAs closes to −0.20%.
+See docs/drs-reference/CONSTANTS_D1_2026.md for the full derivation + validation.
+The engine stamps constants_version into every output row.
 """
 
-CONSTANTS_VERSION = "PLACEHOLDER_MLB_v0"
+CONSTANTS_VERSION = "D1_2026_v1"
 
-RUNS_PER_PLAY = 0.78     # hit vs out run gap on a BIP. D1 expected higher (hotter env)
-RUNS_PER_BASE = 0.25     # marginal base of advancement
-RUNS_PER_DP = 0.40       # marginal DP over single out
-RUNS_PER_STRIKE = 0.12   # marginal called strike vs called ball
-RUNS_PER_PBWP = 0.28     # PB/WP event cost
-RUNS_CS = 0.44           # caught stealing value to defense
-RUNS_SB_COST = 0.20      # cost of a steal allowed
-RUNS_OF_KILL = 0.65      # runner thrown out on the bases: out value + erased advance
+# ---- run-value constants (D1 2026 regular season) ----
+RUNS_PER_PLAY = 1.045    # RV(hit S/D/T blend) − RV(BIP out) = 0.673 − (−0.372). Range/Error scale.
+RUNS_PER_SINGLE = 0.964  # RV(single) − RV(out) = 0.592 − (−0.372). Error-DEBIT base only, so an
+                         # error is charged as "a sure out that became a SINGLE" (+ actual extra
+                         # bases on top) rather than the S/D/T blend, which would double-count the
+                         # extra-base damage by ~0.08 runs/error. Range still uses RUNS_PER_PLAY.
+RUNS_PER_DP = 0.771      # RV(normal out in DP state) − RV(GDP) = −0.379 − (−1.149). Marginal DP.
+RUNS_PER_BASE = 0.184    # frequency-weighted 1B→2B & 2B→3B advance. FALLBACK ONLY: the engine
+                         # prices advancement off the exact base-out RE24 delta where the state is
+                         # known; this flat value is used only when state resolution fails.
+RUNS_PER_STRIKE = 0.225  # called ball-vs-strike run swing (count-based; IBB-clean walk terminal). Framing.
+RUNS_PER_PBWP = 0.320    # advance all runners one base, occupied-state weighted. Blocking.
+RUNS_CS = 0.583          # erase runner on 1st + add an out. Catcher throwing (caught stealing).
+RUNS_SB_COST = 0.175     # runner 1st→2nd (steal allowed). Catcher throwing.
+RUNS_OF_KILL = 0.86      # OF assist: out recorded + advancement erased. *** ESTIMATE — NOT yet
+                         # derived from the linear-weight pass (scaled from the RUNS_CS ratio).
+                         # TODO: derive empirically from OF-kill movement events. ***
 
 # ---- regression priors (phantom league-average opportunities) ----
 # floor = raw * n / (n + prior). Priors approximate 120 games of average
@@ -32,7 +41,7 @@ PRIOR_BLOCK_PITCHES = 4000.0
 PRIOR_THROW_ATT = 60.0
 PRIOR_BUNT_OPPS = 60.0
 
-ENGINE_VERSION = "drs-engine-0.2.0"
+ENGINE_VERSION = "drs-engine-0.3.0"
 
 POSITION_COLS = {
     2: "catcherAbbrevName",

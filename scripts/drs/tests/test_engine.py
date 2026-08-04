@@ -78,8 +78,10 @@ except ParseError:
 
 # ---------------- Tier 2: frozen game fixtures ----------------
 fx_dir = os.environ.get("DRS_FIXTURE_DIR")
-csvs = sorted(glob.glob(os.path.join(fx_dir, "*.csv"))) if fx_dir else []
-csvs = [c for c in csvs if not c.endswith(".expected.csv")]
+# Tier 2 uses ONLY the frozen Standard validation exports (3 CWS games) — NOT any
+# full-season "DRS Pitch Log" files that may share the directory. The assertions
+# below (8 FC events, the two E3 errors, 4 catchers) are specific to those games.
+csvs = sorted(glob.glob(os.path.join(fx_dir, "Standard*.csv"))) if fx_dir else []
 if not csvs:
     print("\nTier 2: SKIPPED (set DRS_FIXTURE_DIR to a folder with the Standard CSVs)")
     print(f"\n{PASS} passed, {FAIL} failed")
@@ -95,8 +97,8 @@ res = eng.player_season_rows(2026)
 # 2.1 both E3 events (ROE dribbler + FC embedded error) charge full play debit
 err_rows = [r for r in res if r["errors"] > 0 and r["position"] == "1B"]
 check("two 1B error rows (ROE + FC-embedded)", len(err_rows) == 2, str(err_rows))
-check("each E3 debit == -RUNS_PER_PLAY exactly (no extra advancement in either)",
-      all(abs(r["error_runs"] + C.RUNS_PER_PLAY) < 1e-9 for r in err_rows),
+check("each E3 debit == -RUNS_PER_SINGLE exactly (error base is a single, no extra advancement)",
+      all(abs(r["error_runs"] + C.RUNS_PER_SINGLE) < 1e-9 for r in err_rows),
       str([r["error_runs"] for r in err_rows]))
 
 # 2.2 the 7-2-6 kill credits an LF with positive arm runs
