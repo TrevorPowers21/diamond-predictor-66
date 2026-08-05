@@ -325,3 +325,84 @@ signal is lossy and finding the authoritative source. The sequence:
   regular-season 56 vs official 66 looked like the postseason boundary — the full-season check
   then showed only 1 postseason steal, so the gap was a counting/coverage issue, not the
   boundary. State the check you actually ran, not the one you hoped you ran.
+
+## WAR calibration audit + composite (2026-08-05)
+
+- **The one place an MLB number can hide is as an INPUT constant — audit for it.** oWAR/pWAR
+  in war.ts hardcoded `runsPerPa=0.13, rPer9=5.5, runsPerWin=10, replacement=25` with zero
+  derivation. Everything else in the system was measured from D1; these were transplanted
+  MLB rules of thumb. Re-derived from the same 2.58M-pitch data (MLB as sanity rail only):
+  runs/win 10→**13.1** (Pythagorean `2R`, R=6.54), runs/PA 0.13→**0.174** (105,473 runs ÷
+  605,727 PA), runs/9 5.5→**6.76** (D1 R/9). If a constant has no provenance comment, treat
+  it as suspect.
+- **"Higher run environment favors pitching" is a real intuition and it's wrong — a run saved
+  = a run created.** Provable via the Pythagorean derivative: `∂W/∂R = 1/(2R)` and
+  `∂W/∂RA = −1/(2R)` at the average point — equal and opposite. The same identity gives
+  `rpw = 2R`. So run-environment changes are a *uniform* rescale, not a hitting/pitching
+  rebalance. The rebalance, if any, comes only from the run-VALUE constants being miscalibrated
+  — which is a checkable bug, not a principle. (I got this wrong twice before deriving it: first
+  claimed the effects "cancel" without proof, then guessed "pitching +15%" by scaling 5.5 by the
+  full run-environment ratio. The correct pitching target is league R/9 (×1.23), which is a
+  *smaller* rise than hitting's (×1.34) — so recalibration nudges hitting *up* vs pitching.)
+- **Test recalibrations at realistic playing time, not textbook.** A college season is ~56 games,
+  so a full-time hitter gets ~250 PA while an ace throws ~90-100 IP. Examples at 600 PA made top
+  hitters look like 5.9 WAR; at 250 PA they land at ~2.6, which matched the user's real top-end
+  (and explained why pitchers legitimately out-WAR hitters — IP volume, not a formula quirk).
+- **Replacement is a fixed WIN level, not fixed runs.** Hardcoding replacement in runs (25) makes
+  the average-player floor sag whenever runs/win changes. Express it as ~2.0 wins per 600 PA
+  (→ `replacement_runs = 2.0 × rpw`) so the floor is stable across run-environment changes; a
+  250-PA starter then lands ~0.83 WAR, a full 600-PA equivalent ~2.0.
+- **The composite's job is to reshape, not just rescale.** ÷13 shrinks everyone ~7-24%; adding
+  dWAR/bsrWAR then *redistributes* — glove/legs players rise, one-dimensional sluggers crater,
+  the o-vs-p gap closes but pitchers stay higher. The rescale only feels fair once the new value
+  axes are in.
+
+## §8 dWAR — the engine already solved "no positional bonus" (2026-08-05)
+
+- **An opportunity-neutral fielding metric puts positional value in the SPREAD, not the mean —
+  so per-position averages come out ~0, and that's correct, not a bug.** The expectation was
+  "SS average DRS ≈ +6.5 because SS get more chances." But the v0.6.0 catch-surface engine prices
+  every ball on its own catch probability and is zero-sum, so an average SS making average SS
+  plays nets ~0 — same as an average 1B. The opportunity didn't disappear; it shows up as a wider
+  *spread* (SS range SD ~5.1 vs 1B ~2.2): a SS can separate himself far more, but the position's
+  average is ~0. This means the FIELDING METRIC needs no per-position baseline — average SS and
+  average 1B both net ~0 DRS, correctly, for free.
+- **CRITICAL DISTINCTION (corrected 2026-08-05 — the first pass got this wrong): "the metric
+  needs no positional baseline" is TRUE; "WAR needs no positional adjustment" is FALSE. Different
+  claims.** MLB's positional adjustment was NEVER a fielding-spread correction — it prices
+  SCARCITY (an average SS does a job almost nobody can fill; average 1B are abundant), and that
+  value is invisible to ANY fielding metric, zero-sum or not, by construction. So the honest
+  architecture is: **dWAR = DRS ÷ rpw with NO internal adjustment** (the opportunity-neutral metric
+  handles the fielding-spread part), **PLUS an explicit, settable positional VALUE term at the WAR
+  combine** (scarcity — eventually derivable from cross-position offensive gaps, which is how MLB
+  derives theirs). Drop that term and roster valuations systematically favor corner sluggers over
+  up-the-middle players — backwards from how any coach values a lineup (a 0.0-dWAR SS hitting .280
+  and a 0.0-dWAR 1B hitting .280 are NOT equal). The trap is sliding from a true statement about
+  the metric to a false one about WAR; keep them separate.
+- **Defensive replacement is small.** Fielders vary in runs far less than hitters (a replacement
+  fielder is only ~1-2 DRS below average), so the defensive share of the whole-player replacement
+  is ~0.1-0.2 WAR; the bulk stays offensive.
+
+## When NOT to build a positioning model — the infield/grounder case (2026-08-05)
+
+- **A consistency upgrade is not automatically a signal upgrade — set an empirical bar before
+  building.** The air-ball catch surface beat xAVG because xAVG was blind to the *decisive*
+  variables — hang time and landing distance, the "right at him vs ranged for it" information.
+  Grounders are different: a spray-conditioned xAVG on ground balls ALREADY is a catch probability
+  under average positioning, because the league-wide spray-lane conversion rates were generated by
+  infielders standing where they normally stand — the rocket in the 5.5 hole prices low, the ball
+  at the SS's normal spot prices high, for exactly that reason. And EV is already in the model as
+  the reaction-time proxy. There is no missing-variable analog. An infield surface built on an
+  *approximated* crossing point (no measured landing coordinate, unknown bounce/deceleration) would
+  be a NOISIER reconstruction of what xAVG already encodes cleanly — on the outfield the surface
+  added signal; on the infield it mostly adds modeling error. Statcast's own history is the
+  external check: outfield catch probability shipped years before infield OAA, and infield OAA
+  waited for *measured* starting positions because reaction-scale plays make the average-positioning
+  assumption proportionally much worse.
+- **The rule: a positioning surface replaces a league-average model ONLY if it beats it on
+  held-out calibration (Brier / log-loss on P(out)), never on philosophical consistency.** Keep
+  grounders on xAVG until an infield surface clears that bar on measured data.
+- **A downstream layer that is a pure function of an upstream one creates no sequencing lock.**
+  "We must finalize DRS before wiring dWAR" was fake pressure: dWAR = DRS ÷ rpw with no adjustment
+  layer, so a later DRS change is just a re-division, and the version stamps carry provenance.
+  Don't let false sequencing pressure rush an upstream decision.
