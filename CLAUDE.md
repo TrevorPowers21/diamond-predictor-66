@@ -1,5 +1,26 @@
 # RSTR IQ — Development Source of Truth
 
+## Database Access Boundary (non-negotiable)
+
+**Applies to every agent, session, and tool — including the Supabase MCP server, future dev agents, and any subagent they spawn. It survives session resets. Nothing below overrides it.**
+
+Supabase MCP exists for **reads and schema introspection only**:
+
+- ✅ `SELECT`, `EXPLAIN`, listing tables/columns/indexes/policies, reading RLS advisories, checking row counts, verifying a migration landed
+- ❌ `INSERT` / `UPDATE` / `DELETE` / `TRUNCATE`, DDL of any kind, `ALTER POLICY`, running migration files, invoking edge functions that write
+
+**All writes come to Trevor as raw SQL to paste.** Never as a TypeScript script for an agent to run, never through an MCP write tool, never "just this once because it's small." Hand over the SQL text and stop.
+
+Scoping rules:
+- MCP is scoped to the **staging** project ref (`slrxowawbijbjrkozqlj`) only. Prod (`trbvxuoliwrfowibatkm`) is not connected.
+- Read-only mode stays on. Tool groups: database + docs. Deploy/branching groups stay off.
+- The 34 `:prod` npm scripts (`import:prod`, `precompute-*:prod`, `lock-season:prod`, `prod_wipe_and_reprecompute`, …) are **human-run only**. An agent may draft the command and explain it; it does not execute it.
+- Prod writes additionally require an explicit "prod, now?" confirmation from Trevor. An ambiguous "go ahead" is not that confirmation.
+
+**Why this rule is written down rather than assumed:** read-only mode constrains the tool, not the workflow. Once schema access makes SQL easy to write correctly, convenience quietly pressures the human-paste step out of existence — one small write at a time. The boundary has to be explicit to survive that pressure.
+
+---
+
 ## Design Authority
 
 **The UI/UX Pro Max design system plugin and Magic/Stitch MCP tools are the primary decision makers for all design choices.** Run the design system search before making visual decisions:
