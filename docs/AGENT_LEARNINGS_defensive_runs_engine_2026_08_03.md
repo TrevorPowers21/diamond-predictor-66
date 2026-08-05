@@ -212,3 +212,48 @@ Building the D1 RE24 matrix (spec §7, first real-numbers task) + the regular-se
 - **Screenshot verification is the safety mechanism for "zero visual change" — and this agent can't
   take browser screenshots.** For pixel-equivalence tasks, do the mechanical code/token/grep/vitest
   work but hand the visual sign-off back to the user (preview deploy); flag the limitation up front.
+
+## Air-ball catch-probability surface (2026-08-04, engine v0.6.0)
+
+- **A ratio-fix for the wrong metric can hide the real fix — replace the metric.** League-average
+  xAVG credits catching a .910 liner at +0.91 even when the ball was hit right at the fielder
+  (positioning luck, not skill). The tempting fixes (down-weight the bucket, regress liners hardest)
+  only dampen a symptom. The real fix is a per-ball CATCH PROBABILITY: `P(out | distance-to-cover,
+  hang)`. A liner AT the fielder is high-P(out) → credit ~0; a gap shot is low-P(out) → real credit.
+  This also dissolves the "no catchability floor" debate: an uncatchable ball is far → P(out)~0 →
+  debit~0 automatically, and a robbery → credit~1, with zero-sum intact.
+- **You don't need per-play positioning to build OAA-style catch prob — average positioning washes
+  out.** Distance-to-cover = ball landing point minus the fielder's REFERENCE position. Any constant
+  offset in the reference just shifts the fitted surface and cancels (the surface is fit on
+  distance-from-reference and scored the same way). So a consistent, handedness-correct reference is
+  enough; exact positioning only sharpens it (true OAA).
+- **Derive the reference positions from the data; the method must match the physics of each position.**
+  Infield refs = median landing point of **sub-1.8s-hang putouts** (short hang = no reaction time = ball
+  ~at the fielder's start) — handedness shading and the 1B hold-shift fall out correctly. That trick is
+  **physically impossible for outfielders** (OF fly balls hang 3–5s; the season had <5 OF putouts under
+  1.8s), so OF uses the **all-putout centroid** instead. Don't force one estimator across regimes that
+  differ physically. MLB numbers are a sanity RAIL (shape check), never an input.
+- **"Priced" is per-model, so the coverage gate is per-model.** Air balls are priced by the surface
+  (needs hang+FBDst+spray, ~93–100%), NOT xAVG; grounders by xAVG (~78%). Gating air on xAVG would
+  wrongly drop ~90% of untracked-park air balls the surface can price anyway. Switching air to the
+  surface SHRINKS the untracked problem on purpose.
+- **Zero-sum survives arbitrary attribution because it's per-cell.** Credit real catchers (actual
+  putout fielder on outs) and nearest-by-reference on hits — different populations — yet within any
+  surface cell Σcredit − Σdebit = outs·(1−p) − hits·p = 0 when p = outs/n. So a fitted-on-itself
+  surface self-calibrates the air half to ~0 (the ground/xAVG half keeps its calibration gap, centered
+  downstream). The zero-sum "guard" is a real regression assert: it went +5148 → −425 after the swap,
+  cleanly split gb(−760)/air(+335).
+- **Guard the measurement traps up front, measure them, document — don't discover later.** FBDst on a
+  CAUGHT ball is the catch point, not the landing point, so outs read ~27ft shorter than hits at equal
+  hang → the surface is mildly conservative on great running catches (measured, documented, livable).
+  Deep flies truncate at the fence (15% of air balls ≥340ft) → flagged; the distance model
+  self-mitigates (far balls get low P(out) → small debit) even without park dims.
+- **Raw range SHOULD center to ~0 within a position — positional value lives elsewhere.** After the
+  fix, every position's mean range ≈ 0 (an average SS making average SS plays nets 0) and the defensive
+  spectrum shows up in the SPREAD (SS σ=5.1 ≫ 1B σ=2.2). Do NOT read near-zero means as "no positional
+  difference" and do NOT force-center; the between-position VALUE is a separate, settable positional
+  baseline in the dWAR layer ("average SS = X runs"). Confusing the two is a real modeling trap.
+- **A module name can shadow a stdlib import silently.** `from . import field` clobbered dataclasses'
+  `field`, breaking `field(default_factory=...)` with a cryptic "'module' object is not callable" at
+  class-definition time. Alias domain modules (`import field as geom`) when the name collides with a
+  common import.

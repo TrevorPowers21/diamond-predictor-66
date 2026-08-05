@@ -41,7 +41,12 @@ PRIOR_BLOCK_PITCHES = 4000.0
 PRIOR_THROW_ATT = 60.0
 PRIOR_BUNT_OPPS = 60.0
 
-ENGINE_VERSION = "drs-engine-0.5.0"
+# 0.6.0: per-model range pricing. Air balls priced by a positioning-aware catch-
+# probability surface (P(out | distance-to-cover, hang), fit per position group off
+# empirically-derived D1 reference positions), replacing league xAVG for air balls;
+# grounders keep xAVG. Range scores only priced balls (untracked stay neutral); coverage
+# = scored/faced. See fixtures/field_positions.json + catch_surface.json.
+ENGINE_VERSION = "drs-engine-0.6.0"
 
 POSITION_COLS = {
     2: "catcherAbbrevName",

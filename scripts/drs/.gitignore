@@ -1,5 +1,7 @@
 output/
 fixtures/*
 !fixtures/re24_matrix.json
+!fixtures/field_positions.json
+!fixtures/catch_surface.json
 __pycache__/
 *.pyc

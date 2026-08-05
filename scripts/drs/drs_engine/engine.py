@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from . import constants as C
+from . import field as geom
 from .parser import parse_atbat_desc, ParseError, outs_recorded
 from .normalize import (bb_type_from_result, is_pa_end, framing_class,
                         dp_opportunity_shares, dp_conversion_shares)
@@ -45,9 +46,10 @@ class Acc:
     blocking_runs: float = 0.0
     throwing_runs: float = 0.0
     bunt_runs: float = 0.0
-    bip_opps: float = 0.0
-    bip_tracked: float = 0.0        # range opps on TRACKED balls (real xAVG) — coverage
-    range_runs_tracked: float = 0.0 # range runs from tracked balls only — projection input
+    bip_opps: float = 0.0           # SCORED range opportunities (priced balls only)
+    bip_faced: float = 0.0          # all batted balls this fielder was responsible for
+    bip_tracked: float = 0.0        # == bip_opps (kept for output compatibility)
+    range_runs_tracked: float = 0.0 # == range_runs now that only priced balls score
     range_sub: dict = field(default_factory=lambda: {"gb": 0.0, "ld": 0.0, "fb": 0.0, "pu": 0.0})
     dp_opps: float = 0.0        # DP opportunities this fielder fielded
     dp_conv_n: float = 0.0      # DP conversions this fielder turned
@@ -65,9 +67,13 @@ class Acc:
     half_innings: set = field(default_factory=set)
 
 class DRSEngine:
-    def __init__(self, fixtures, re24=None):
+    def __init__(self, fixtures, re24=None, refs=None, surface=None):
         self.fx = fixtures
         self.re24 = re24 or {}            # base-out RE matrix (state-specific advancement)
+        # air-ball catch-probability model (positioning-aware): reference positions +
+        # fitted surface. Absent -> air balls fall back to league xOut (fixture ladder).
+        self.refs = refs if refs is not None else geom.load_field_positions()
+        self.surface = surface if surface is not None else geom.load_catch_surface()
         self.acc = defaultdict(Acc)      # key: (team, player_name, position)
         self.exceptions = []
         self.expected_pbwp = defaultdict(float)   # catcher key -> sum
@@ -211,10 +217,19 @@ class DRSEngine:
                             self.actual_pbwp[ck] += 1
             prev = row
 
-    # ---------- BIP engine ----------
+    # ---------- BIP engine (per-model pricing) ----------
+    # Range is priced PER BALL TYPE and scored only on balls a model can price:
+    #   - GROUND balls -> xOut = 1 - xAVG (needs xAVG); attributed to the infield spray
+    #     lane (never an OF).
+    #   - AIR balls -> catch probability from the positioning-aware surface (needs hang +
+    #     FBDst + spray); attributed to the actual putout fielder on outs, nearest fielder
+    #     by reference on hits. This replaces league-average xAVG for air balls and prices
+    #     a liner-at-the-fielder as easy (~0 credit) and a gap shot as hard.
+    # Balls no model can price are left NEUTRAL (untracked stays untracked) but still
+    # counted in bip_faced so tracking_coverage reflects the true sample.
     @staticmethod
     def _la_class(la):
-        """Statcast batted-ball class: GB<10, LD 10-25, FB 25-50, PU>50 (None if no LA)."""
+        """Statcast batted-ball class from LaunchAngle: GB<10, LD 10-25, FB 25-50, PU>50."""
         if la is None: return None
         if la < 10: return "gb"
         if la < 25: return "ld"
@@ -222,61 +237,121 @@ class DRSEngine:
         return "pu"
 
     @staticmethod
-    def _responsible_fielder(la, spray):
-        """The fielder who actually had the play, by trajectory + spray (calibrated from
-        outs). Ground balls -> the INFIELD spray lane (never an OF); air balls -> the OF
-        lane. Retrieval zone is ignored. None if trajectory unknown."""
-        if la is None or spray is None:
-            return None
-        if la < 10:                       # ground ball -> infield lane
-            if spray < -22: return 5      # 3B
-            if spray < 2:   return 6      # SS
-            if spray < 30:  return 4      # 2B
-            return 3                      # 1B
-        if spray < -14: return 7          # LF
-        if spray < 14:  return 8          # CF
-        return 9                          # RF
+    def _bb_class(bb):
+        """Trajectory class from a TruMedia bb_type letter (fallback when no LaunchAngle)."""
+        return {"G": "gb", "L": "ld", "F": "fb", "P": "pu"}.get(bb)
 
-    def _range_credit(self, row, pos, xout, tracked):
+    def _traj_class(self, row, ev):
+        """Trajectory bucket (gb/ld/fb/pu) from LaunchAngle, falling back to the
+        pitchResult/atbatDesc bb_type when LA is missing. None only when neither exists."""
+        c = self._la_class(row["_LA"])
+        if c: return c
+        return self._bb_class(ev.bb_type or bb_type_from_result(row.get("pitchResult")))
+
+    _IF_LANE = (5, 6, 4, 3)   # 3B, SS, 2B, 1B — grounder distribution when spray absent
+
+    def _infield_lane(self, row):
+        """Infield fielder(s) responsible for a ground ball, by SprayAngle (spread across
+        the infield if spray is missing). Grounders NEVER touch an outfielder."""
+        spray = row["_spray"]
+        if spray is None:
+            return list(self._IF_LANE)
+        if spray < -22: return [5]
+        if spray < 2:   return [6]
+        if spray < 30:  return [4]
+        return [3]
+
+    def _hand(self, row): return (row.get("batterHand") or "?").upper()[:1]
+    def _hold(self, row): return bool((row.get("ManOnFirst") or "").strip())
+
+    def _air_priceable(self, row):
+        return (self.surface is not None and row["_spray"] is not None
+                and row["_FBDst"] is not None and row["_hang"] is not None)
+
+    def _air_nearest(self, row):
+        """Fielder whose reference is nearest the air ball's landing point (hits), or None
+        if the geometry (spray+FBDst) is missing."""
+        if row["_spray"] is None or row["_FBDst"] is None:
+            return None
+        bx, by = geom.ball_xy(row["_spray"], row["_FBDst"])
+        pos, _ = geom.nearest_fielder(self.refs, bx, by, self._hand(row), self._hold(row))
+        return pos
+
+    def _air_prob(self, row, pos):
+        """Catch probability (=xOut) for `pos` on this air ball, or None if unpriceable."""
+        if pos not in geom.GROUP or not self._air_priceable(row):
+            return None
+        dcov = geom.cover_distance(self.refs, pos, row["_spray"], row["_FBDst"],
+                                    self._hand(row), self._hold(row))
+        return geom.catch_prob(self.surface, pos, dcov, row["_hang"])
+
+    def _faced(self, row, positions, share):
+        for pos in positions:
+            a = self._touch(row, pos)
+            if a: a.bip_faced += share
+
+    def _range_credit(self, row, pos, xout, cls):
+        """Credit a made play: (1 - xOut) * RUNS_PER_PLAY — bigger when the out was less
+        likely for an average fielder. Only priced balls reach here (tracked by design)."""
         a = self._touch(row, pos)
         if a is None: return
         v = (1.0 - xout) * C.RUNS_PER_PLAY
         a.range_runs += v
-        cls = self._la_class(row["_LA"])
+        a.range_runs_tracked += v
         if cls: a.range_sub[cls] += v
         a.plays_made += 1
         a.bip_opps += 1.0
-        if tracked:                       # real xAVG — counts toward the unbiased read
-            a.range_runs_tracked += v
-            a.bip_tracked += 1.0
+        a.bip_tracked += 1.0
 
-    def _range_debit(self, row, ev, xout, tracked):
-        """Debit the fielder who had the play (trajectory+spray), NOT the retriever zone.
-        Ground-ball hits charge the infield lane; air-ball hits charge the OF lane. No
-        catchability floor — every attributed ball debits at xOut scale (preserves the
-        credit/debit zero-sum). Untracked balls (no LA/spray) fall back to the hit_zone."""
-        fielder = self._responsible_fielder(row["_LA"], row["_spray"])
-        if fielder is None:
-            zones = ev.hit_zone           # no trajectory -> retriever fallback (coverage-flagged)
-            if not zones: return
-            share = 1.0 / len(zones)
-            for z in zones:
-                a = self._touch(row, z)
-                if a is None: continue
-                v = share * xout * C.RUNS_PER_PLAY
-                a.range_runs -= v; a.bip_opps += share
-                if tracked: a.range_runs_tracked -= v; a.bip_tracked += share
-            return
-        a = self._touch(row, fielder)
+    def _range_debit_one(self, row, pos, xout, cls, share):
+        """Debit a missed play: xOut * RUNS_PER_PLAY — bigger when an average fielder
+        would have made it. share splits a spray-less grounder across the infield."""
+        a = self._touch(row, pos)
         if a is None: return
-        v = xout * C.RUNS_PER_PLAY
+        v = share * xout * C.RUNS_PER_PLAY
         a.range_runs -= v
-        cls = self._la_class(row["_LA"])
+        a.range_runs_tracked -= v
         if cls: a.range_sub[cls] -= v
-        a.bip_opps += 1.0
-        if tracked:
-            a.range_runs_tracked -= v
-            a.bip_tracked += 1.0
+        a.bip_opps += share
+        a.bip_tracked += share
+
+    def _bip_out(self, row, ev, fielder=None):
+        """Range CREDIT on a batted-ball out (fielder = actual putout maker, or the
+        FC converter when passed explicitly)."""
+        fielder = fielder if fielder is not None else ev.putout_chain[0]
+        cls = self._traj_class(row, ev)
+        if cls == "gb":
+            self._faced(row, [fielder], 1.0)
+            xa = row["_xAVG"]
+            if xa is not None:
+                self._range_credit(row, fielder, 1.0 - xa, cls)
+        elif cls in ("ld", "fb", "pu"):
+            if fielder not in geom.GROUP:
+                return                                  # catcher pop etc. — no range surface
+            self._faced(row, [fielder], 1.0)
+            xout = self._air_prob(row, fielder)
+            if xout is not None:
+                self._range_credit(row, fielder, xout, cls)
+
+    def _bip_hit(self, row, ev):
+        """Range DEBIT on a batted-ball hit."""
+        cls = self._traj_class(row, ev)
+        if cls == "gb":
+            fielders = self._infield_lane(row)
+            share = 1.0 / len(fielders)
+            self._faced(row, fielders, share)
+            xa = row["_xAVG"]
+            if xa is not None:
+                for f in fielders:
+                    self._range_debit_one(row, f, 1.0 - xa, cls, share)
+        elif cls in ("ld", "fb", "pu"):
+            pos = self._air_nearest(row)
+            if pos is None:
+                return                                  # no geometry -> invisible
+            self._faced(row, [pos], 1.0)
+            p = self._air_prob(row, pos)
+            if p is not None:
+                self._range_debit_one(row, pos, p, cls, 1.0)
 
     def _credit_chain_tallies(self, row, chain):
         if not chain: return
@@ -400,15 +475,8 @@ class DRSEngine:
 
     # ---------- event routing (Spec Section 4) ----------
     def _route(self, row, ev):
-        zones_for_debit = ev.hit_zone
-        xout, xout_src = self._xout(row, ev)
-        tracked = (xout_src == "XAVG")   # real xAVG vs league fallback (coverage)
-        if xout_src != "XAVG" and ev.event_type in ("OUT", "SINGLE", "DOUBLE",
-                                                    "TRIPLE", "ERROR", "FC"):
-            self.exceptions.append(Exception_(row.get("uniqPitchId", "?"),
-                row.get("gameString", "?"), "PARTIAL_TRACKING",
-                f"xOut fallback {xout_src}", ev.raw))
-
+        # Range is priced per ball type inside _bip_out/_bip_hit (grounder xAVG / air
+        # catch-surface); unpriceable balls stay neutral but are counted in bip_faced.
         # type mismatch check (TruMedia label vs modifier)
         bb_tm = bb_type_from_result(row.get("pitchResult"))
         if bb_tm and ev.bb_type and bb_tm != ev.bb_type and not ev.is_dp:
@@ -426,7 +494,7 @@ class DRSEngine:
 
         if ev.event_type == "OUT":
             if ev.putout_chain:
-                self._range_credit(row, ev.putout_chain[0], xout, tracked)
+                self._bip_out(row, ev)
                 self._credit_chain_tallies(row, ev.putout_chain)
             for mv in ev.movements:
                 if mv.out and mv.chain:
@@ -436,7 +504,7 @@ class DRSEngine:
                                   outs_made=1)  # out stood, advancement-only debit
 
         elif ev.event_type in ("SINGLE", "DOUBLE", "TRIPLE"):
-            self._range_debit(row, ev, xout, tracked)
+            self._bip_hit(row, ev)
             self._arm(row, ev)
 
         elif ev.event_type == "HR":
@@ -449,7 +517,7 @@ class DRSEngine:
             # LOCKED: credit-only. Fielder converted an out somewhere.
             n_outs = outs_recorded(ev)
             if ev.fc_fielder is not None and n_outs > 0:
-                self._range_credit(row, ev.fc_fielder, xout, tracked)
+                self._bip_out(row, ev, fielder=ev.fc_fielder)
                 for mv in ev.movements:
                     if mv.out and mv.chain:
                         self._credit_chain_tallies(row, mv.chain)
@@ -545,15 +613,18 @@ class DRSEngine:
                 "drs_total": round(total, 3),
                 "drs_floor": round(floor, 3),
                 "drs_ceiling": round(total, 3),
-                # coverage disclosure (venue xAVG gaps): the diluted total above is the
-                # honest record; range_runs_tracked / bip_tracked is the unbiased skill
-                # read for projection. range_flag warns when the total is COMPRESSED
-                # toward average (not merely uncertain) by untracked-park balls.
+                # coverage disclosure: range_runs scores ONLY balls a model can price
+                # (grounder xAVG / air catch-surface). bip_faced counts every batted ball
+                # the fielder was responsible for; tracking_coverage = scored / faced.
+                # range_flag warns when a low-coverage sample makes the number thin — the
+                # signal is unbiased (untracked balls are excluded, not averaged in), just
+                # smaller, so the flag is about sample size, not compression.
+                "bip_faced": round(a.bip_faced, 1),
                 "bip_tracked": round(a.bip_tracked, 1),
                 "range_runs_tracked": round(a.range_runs_tracked, 3),
-                "tracking_coverage": round(a.bip_tracked / a.bip_opps, 3) if a.bip_opps else None,
-                "range_flag": ("compressed_to_avg" if a.bip_opps and a.bip_tracked / a.bip_opps < 0.60
-                               else "ok" if a.bip_opps else None),
+                "tracking_coverage": round(a.bip_opps / a.bip_faced, 3) if a.bip_faced else None,
+                "range_flag": ("low_coverage" if a.bip_faced and a.bip_opps / a.bip_faced < 0.60
+                               else "ok" if a.bip_faced else None),
                 "plays_made": a.plays_made,
                 "errors": a.errors,
                 "assists": a.assists,
