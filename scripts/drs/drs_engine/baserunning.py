@@ -24,9 +24,19 @@ Deferred (design note): pickoffs (PickAttBase/PO grammar) and full UBR from move
 blocks (1st->3rd, scoring from 2nd, outs on bases) — identical matrix pricing. Steals first.
 """
 from __future__ import annotations
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from . import constants as C
+
+# Pickoff tokens in atbatDesc: standalone "PO1(2)" or K-compound "K/S+PO1(23)".
+# group(1) = the base the runner was picked off (1/2/3).
+_PO_RE = re.compile(r"\bPO(\d)")
+
+def _po_bases(atbat_desc):
+    """Set of bases a runner was picked off on this pitch (usually one, rarely empty)."""
+    return {int(m.group(1)) for m in _PO_RE.finditer(atbat_desc or "")
+            if m.group(1) in ("1", "2", "3")}
 
 @dataclass
 class BRAcc:
@@ -80,6 +90,17 @@ class BaserunningEngine:
             return -C.RUNS_CS                            # flat fallback (cost magnitude)
         return after - before
 
+    def _po_value(self, o1, o2, o3, outs, base):
+        """Runner value of being PICKED OFF `base` (1/2/3): runner erased + an out, priced
+        off the base-out state — same shape as a caught stealing at that base. Negative."""
+        if base == 1:   after = self._re(False, o2, o3, outs + 1)
+        elif base == 2: after = self._re(o1, False, o3, outs + 1)
+        else:           after = self._re(o1, o2, False, outs + 1)
+        before = self._re(o1, o2, o3, outs)
+        if after is None or before is None:
+            return -C.RUNS_CS                            # flat fallback (CS-magnitude)
+        return after - before
+
     def _outcome_value(self, r, o1, o2, o3, outs, target, att_col, succ_col):
         """Realized runner value on ONE opportunity: 0 if no attempt, +SB or CS value if
         attempted. Used for BOTH the league baseline and the runner's actual."""
@@ -96,6 +117,9 @@ class BaserunningEngine:
 
     def derive_fixtures(self, rows):
         vsum = defaultdict(float); vn = defaultdict(int); att = {2: 0, 3: 0}; succ = {2: 0, 3: 0}
+        # pickoff EXPOSURE baseline: every pitch a runner is on a base is a PO exposure;
+        # mean realized PO value per (base, state) nets the actual pickoffs to zero.
+        po_vsum = defaultdict(float); po_vn = defaultdict(int); po_n = 0
         for r in rows:
             o1, o2, o3 = _occ(r.get("ManOnFirst")), _occ(r.get("ManOnSecond")), _occ(r.get("ManOnThird"))
             try: outs = int(r.get("outs") or 0)
@@ -110,7 +134,16 @@ class BaserunningEngine:
                 if kind:
                     att[target] += 1
                     if kind == "SB": succ[target] += 1
+            picked = _po_bases(r.get("atbatDesc"))
+            for base, occ in ((1, o1), (2, o2), (3, o3)):
+                if not occ:
+                    continue
+                pv = self._po_value(o1, o2, o3, outs, base) if base in picked else 0.0
+                pk = (base, o1, o2, o3, outs)
+                po_vsum[pk] += pv; po_vn[pk] += 1
+                if base in picked: po_n += 1
         self.fx = {"mean_value": {k: vsum[k] / vn[k] for k in vn}, "n": dict(vn),
+                   "po_mean": {k: po_vsum[k] / po_vn[k] for k in po_vn}, "po_n": po_n,
                    "att": att, "succ": succ}
         return self.fx
 
@@ -118,6 +151,9 @@ class BaserunningEngine:
         """League baseline = empirical mean realized value per opportunity in this exact
         base-out state (falls back to 0 for an unseen state)."""
         return self.fx["mean_value"].get((target, o1, o2, o3, outs), 0.0)
+
+    def _po_expected(self, o1, o2, o3, outs, base):
+        return self.fx.get("po_mean", {}).get((base, o1, o2, o3, outs), 0.0)
 
     def run(self, rows):
         if not self.fx:
@@ -146,6 +182,23 @@ class BaserunningEngine:
                 a.wsb_runs += val - self._expected(o1, o2, o3, outs, target)
                 if kind == "SB": a.sb += 1
                 elif kind == "CS": a.cs += 1
+
+            # pickoff exposures: every occupied base this pitch. Net the league PO cost;
+            # add the actual runner-erased value if this runner was picked off here.
+            picked = _po_bases(r.get("atbatDesc"))
+            for base, occ, name_col in ((1, o1, "ManOnFirst"), (2, o2, "ManOnSecond"),
+                                        (3, o3, "ManOnThird")):
+                if not occ:
+                    continue
+                runner = (r.get(name_col) or "").strip()
+                if not runner:
+                    continue
+                a = self.acc[(org, runner)]
+                a.games.add(gid)
+                a.wsb_runs -= self._po_expected(o1, o2, o3, outs, base)
+                if base in picked:
+                    a.po += 1
+                    a.wsb_runs += self._po_value(o1, o2, o3, outs, base)
 
     @staticmethod
     def _regress(value, n, prior):
