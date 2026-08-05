@@ -111,6 +111,25 @@ describe("computeOWar", () => {
     const expected = (raa + replacementRuns) / 10;
     expect(computeOWar(160, 550)).toBeCloseTo(expected, 6);
   });
+
+  // ── baserunning (wSB) joins oWAR as runs above average, replacement applied once ──
+  it("league-average baserunner (wsbRuns=0) leaves oWAR unchanged", () => {
+    expect(computeOWar(100, 600, 0)).toBeCloseTo(computeOWar(100, 600) as number, 12);
+    expect(computeOWar(130, 550, 0)).toBeCloseTo(computeOWar(130, 550) as number, 12);
+  });
+
+  it("wSB adds runs-above-average, shares oWAR's runs-per-win (÷10), gets NO extra replacement", () => {
+    // +8 baserunning runs on an average hitter → +0.8 WAR over the wsb=0 baseline,
+    // and the replacement term is identical (baserunning is not replacement-adjusted).
+    const base = computeOWar(100, 600, 0) as number;
+    expect(computeOWar(100, 600, 8)).toBeCloseTo(base + 0.8, 6);
+    // a bad baserunner (-5 runs) subtracts symmetrically
+    expect(computeOWar(100, 600, -5)).toBeCloseTo(base - 0.5, 6);
+  });
+
+  it("wSB defaults to 0 — every existing 2-arg call site is unaffected", () => {
+    expect(computeOWar(115, 480)).toBeCloseTo(computeOWar(115, 480, 0) as number, 12);
+  });
 });
 
 describe("computeOWarFromStats", () => {

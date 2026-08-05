@@ -76,6 +76,30 @@ try:
 except ParseError:
     check("garbage raises ParseError", True)
 
+# ---------------- Baserunning (wSB) synthetic ----------------
+print("\nBaserunning (wSB):")
+from drs_engine.baserunning import BaserunningEngine
+_re24 = load_re24()
+def _br_row(runner, o1="", o2="", o3="", outs="0", sba2="", sb2="", team="X", gid="g1"):
+    return {"ManOnFirst": o1, "ManOnSecond": o2, "ManOnThird": o3, "outs": outs,
+            "SBA2": sba2, "SB2": sb2, "SBA3": "", "SB3": "", "battingTeam": team,
+            "battingTeamId": team, "gameId": gid}
+# two runners in the SAME state: one steals (success), one is caught, one doesn't go.
+br_rows = [
+    _br_row("Speedy", o1="Speedy", sba2="1", sb2="1"),   # SB
+    _br_row("Caught", o1="Caught", sba2="1", sb2=""),    # CS
+    _br_row("Station", o1="Station"),                    # no attempt
+]
+bre = BaserunningEngine(_re24)
+bre.derive_fixtures(br_rows); bre.run(br_rows)
+brr = {r["player"]: r for r in bre.player_season_rows(2026)}
+check("wSB nets to ~zero league-wide", abs(sum(r["wsb_runs"] for r in brr.values())) < 1e-9,
+      str({k: v["wsb_runs"] for k, v in brr.items()}))
+check("successful stealer is the most valuable, caught the least",
+      brr["Speedy"]["wsb_runs"] > brr["Station"]["wsb_runs"] > brr["Caught"]["wsb_runs"])
+check("SB/CS counted to the right runners",
+      brr["Speedy"]["SB"] == 1 and brr["Caught"]["CS"] == 1 and brr["Station"]["opportunities"] == 1)
+
 # ---------------- Tier 2: frozen game fixtures ----------------
 fx_dir = os.environ.get("DRS_FIXTURE_DIR")
 # Tier 2 uses ONLY the frozen Standard validation exports (3 CWS games) — NOT any
