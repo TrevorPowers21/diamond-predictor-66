@@ -275,3 +275,53 @@ Building the D1 RE24 matrix (spec §7, first real-numbers task) + the regular-se
 - **Add a cross-cutting param as optional-with-safe-default to avoid a call-site sweep.** Baserunning
   joins oWAR via `computeOWar(..., wsbRuns = 0)` — added to RAA before the single replacement term, so
   replacement stays applied once and every existing 2-arg call site is byte-unchanged until it opts in.
+
+## wSB rebuild — the data-forensics PROCESS (2026-08-05)
+
+The single most transferable thing from this whole arc is the *process* of discovering a
+signal is lossy and finding the authoritative source. The sequence:
+
+- **Internal consistency does NOT prove correctness — validate counts against an external
+  ground truth early.** The first wSB engine passed every internal check (exact zero-sum,
+  plausible leaders, sensible run-values) and was still wrong: it undercounted the national
+  SB leader by 14% (57 vs the official 66). Zero-sum is invariant to *which* fielder/runner
+  is charged and to a *uniform* undercount, so it can't catch systematic missingness. The
+  moment a real external number existed (NCAA leaderboard), the gap was obvious. Get the
+  external anchor before trusting a derived count.
+- **A single derived flag is usually lossy — enumerate EVERY place the event is written
+  down.** Steals lived in four different signals, none complete: `SBA/SB` flags (routine
+  steals, ~90%), `atbatDesc` tokens (`K/S+SB3`, `CS2(24)` — only steals on a PA-ending
+  pitch), `pitchResult "Pickoff CS"` (pickoff-CS, and only in the runner-centric export),
+  and base-state transitions (everything, incl. steals of home). Assuming the first flag you
+  find is authoritative is the trap.
+- **Ground-truth-by-reconstruction is right but often contaminated — measure the
+  contamination before trusting it.** Base-state transitions (a runner advancing a base
+  mid-at-bat) reproduced the leader's 66 exactly, but league-wide they doubled the count
+  (37k vs 18k) because wild-pitch/passed-ball advances look identical to steals and there is
+  no clean WP/PB flag (the same reason the blocking model is a heuristic). A method that
+  nails one hand-checked case can still be systematically broken at scale.
+- **When the data genuinely can't disambiguate, find how the AUTHORITATIVE source does it —
+  and copy that architecture.** Official stats providers track what the pitches show (~90%)
+  and **override the total from the box score** for the untracked remainder. Proof was in the
+  official file itself: its per-base breakdown (`SB2+SB3+SBH`) is exactly the pitch-tracked
+  number and sits ~10% below its own headline `SB`. We independently arrived at the same
+  two-file design — pitch log for run-*value* states, box score for *counts*.
+- **Separate the COUNT problem from the VALUE problem; they need different sources.** Count
+  is data-completeness (only the authoritative box score has all of it); value is modeling
+  (only the pitch log has the base-out state). Trying to get both from one file is what
+  forced all the failed heuristics.
+- **Derive model parameters from CLEAN inputs even when you score on all inputs.** The
+  per-base run VALUE was dragged down (steal-of-2nd +0.093 vs the true +0.154) by 13% of rows
+  being double-steal front runners whose target base was occupied — a "move to an occupied
+  base" that breaks the RE24 delta. Excluding those from the value *mean* (while still taking
+  the *count* from the box score) fixed it. Filter the derivation set to the cases the math
+  is valid for; don't let malformed states poison a league-average parameter.
+- **The domain expert's instinct out-predicted the model — listen to it.** The user pointing
+  at "steals of 3rd and double steals" located a real bug (the double-steal front runner was
+  being dropped, +1,105 steals league-wide once fixed); the user's "maybe the providers use an
+  override like we're planning" correctly named the final architecture before the data proved
+  it. When someone who knows the data pushes back on a clean-looking result, dig again.
+- **Own premature "validated" calls.** I declared the SB reading validated when the leader's
+  regular-season 56 vs official 66 looked like the postseason boundary — the full-season check
+  then showed only 1 postseason steal, so the gap was a counting/coverage issue, not the
+  boundary. State the check you actually ran, not the one you hoped you ran.

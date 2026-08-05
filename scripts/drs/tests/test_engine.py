@@ -76,44 +76,32 @@ try:
 except ParseError:
     check("garbage raises ParseError", True)
 
-# ---------------- Baserunning (wSB) synthetic ----------------
+# ---------------- Baserunning (wSB) — two-file architecture ----------------
 print("\nBaserunning (wSB):")
-from drs_engine.baserunning import BaserunningEngine
+from drs_engine.baserunning import sb_value, cs_value, compute_wsb
 _re24 = load_re24()
-def _br_row(runner, o1="", o2="", o3="", outs="0", sba2="", sb2="", sba3="", sb3="",
-            atbat="", team="X", gid="g1"):
-    return {"ManOnFirst": o1, "ManOnSecond": o2, "ManOnThird": o3, "outs": outs,
-            "SBA2": sba2, "SB2": sb2, "SBA3": sba3, "SB3": sb3, "atbatDesc": atbat,
-            "battingTeam": team, "battingTeamId": team, "gameId": gid}
-# steal state: three runners on 1st (2nd open) — one steals, one is caught, one holds.
-# pickoff state: two runners on 1st with 2nd OCCUPIED (no steal opp) — one is picked off.
-br_rows = [
-    _br_row("Speedy", o1="Speedy", sba2="1", sb2="1"),          # SB
-    _br_row("Caught", o1="Caught", sba2="1", sb2=""),           # CS
-    _br_row("Station", o1="Station"),                           # no attempt
-    _br_row("PickedOff", o1="PickedOff", o2="X2", outs="1", atbat="PO1(2)"),  # pickoff at 1st
-    _br_row("StayedPut", o1="StayedPut", o2="X3", outs="1"),                  # same state, safe
-]
-bre = BaserunningEngine(_re24)
-bre.derive_fixtures(br_rows); bre.run(br_rows)
-brr = {r["player"]: r for r in bre.player_season_rows(2026)}
-check("wSB nets to ~zero league-wide (steals + pickoffs)",
-      abs(sum(r["wsb_runs"] for r in brr.values())) < 1e-9,
-      str({k: round(v["wsb_runs"], 4) for k, v in brr.items()}))
-check("successful stealer is the most valuable, caught the least",
-      brr["Speedy"]["wsb_runs"] > brr["Station"]["wsb_runs"] > brr["Caught"]["wsb_runs"])
-check("SB/CS counted to the right runners",
-      brr["Speedy"]["SB"] == 1 and brr["Caught"]["CS"] == 1 and brr["Station"]["opportunities"] == 1)
-check("pickoff dings the runner (PO counted, negative vs a safe runner in the same state)",
-      brr["PickedOff"]["PO"] == 1 and brr["PickedOff"]["wsb_runs"] < brr["StayedPut"]["wsb_runs"])
+# RE24 value sanity: a steal is +, a CS is -, and stealing 3rd is worth more than 2nd.
+v_sb2 = sb_value(_re24, True, False, False, 0, 2)
+v_sb3 = sb_value(_re24, False, True, False, 0, 3)
+v_cs2 = cs_value(_re24, True, False, False, 0, 2)
+check("steal of 2nd is +, CS of 2nd is -", v_sb2 > 0 and v_cs2 < 0)
+check("stealing 3rd worth more than 2nd", v_sb3 > v_sb2)
 
-# double steal: runner on 1st steals 2nd WHILE runner on 2nd steals 3rd — BOTH must count
-# (the front runner was previously dropped because 2nd looked "occupied").
-ds_rows = [_br_row("Front", o1="Front", o2="Back", sba2="1", sb2="1", sba3="1", sb3="1")]
-dse = BaserunningEngine(_re24); dse.derive_fixtures(ds_rows); dse.run(ds_rows)
-dsr = {r["player"]: r for r in dse.player_season_rows(2026)}
-check("double steal credits BOTH runners (front on 1st AND back on 2nd)",
-      dsr["Front"]["SB"] == 1 and dsr["Back"]["SB"] == 1)
+# Counts come from the Full Season file; wSB nets to ~zero league-wide by construction.
+vals = {(2, "SB"): 0.15, (2, "CS"): -0.55, (3, "SB"): 0.20, (3, "CS"): -0.75,
+        (4, "SB"): 0.26, (4, "CS"): -0.99}
+def _p(name, pos, sb2, cs2, sb3, cs3):
+    return {"player": name, "pos": pos, "org_id": "X", "org": "X", "games": 50,
+            "SB2": sb2, "CS2": cs2, "SB2Opp": 40, "SB3": sb3, "CS3": cs3, "SB3Opp": 15,
+            "SBH": 0, "CSH": 0, "SB": sb2 + sb3, "CS": cs2 + cs3, "SBOpp": 55}
+season = {"p1": _p("Burner", "CF", 30, 2, 10, 1), "p2": _p("Clogger", "1B", 2, 5, 0, 1)}
+rows = compute_wsb(season, vals)
+byp = {r["player"]: r for r in rows}
+check("wSB nets to ~zero league-wide", abs(sum(r["wsb_runs"] for r in rows)) < 1e-9,
+      str({k: v["wsb_runs"] for k, v in byp.items()}))
+check("efficient burner beats the caught-a-lot runner", byp["Burner"]["wsb_runs"] > byp["Clogger"]["wsb_runs"])
+check("counts come straight from the Full Season file (not the pitch log)",
+      byp["Burner"]["SB"] == 40 and byp["Clogger"]["CS"] == 6)
 
 # ---------------- Tier 2: frozen game fixtures ----------------
 fx_dir = os.environ.get("DRS_FIXTURE_DIR")
