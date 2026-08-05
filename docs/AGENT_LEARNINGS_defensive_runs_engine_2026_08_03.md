@@ -257,3 +257,21 @@ Building the D1 RE24 matrix (spec §7, first real-numbers task) + the regular-se
   `field`, breaking `field(default_factory=...)` with a cryptic "'module' object is not callable" at
   class-definition time. Alias domain modules (`import field as geom`) when the name collides with a
   common import.
+
+## Baserunning wSB (2026-08-05)
+
+- **A zero-sum "above-average" metric must condition its baseline on the same state its actuals
+  live in.** Pricing steal expectation with a GLOBAL attempt/success rate × state-specific play
+  value left a +98-run league residual, because runners pick their spots — attempts correlate with
+  favorable base-out states, so the global rate under/over-counts per state. Making the baseline the
+  EMPIRICAL mean realized value per opportunity, keyed by base-out state, forces exact per-state
+  zero-sum (Σactual − n·mean = 0) → league sum +0.05. General rule: if "expected" is a rate × value
+  and either varies by state while the actuals are state-specific, the covariance leaks; bucket by
+  state and subtract the bucket mean.
+- **Reuse the run-value spine across offense and defense, not the component code.** wSB lives on the
+  offensive side but shares the dRS RE24 matrix + fixtures pattern + parser; steals, kills, and errors
+  are all "RE delta of a base-out transition." One matrix, many components, each zero-sum against its
+  own baseline — standard MLB architecture. Don't fork the pricing.
+- **Add a cross-cutting param as optional-with-safe-default to avoid a call-site sweep.** Baserunning
+  joins oWAR via `computeOWar(..., wsbRuns = 0)` — added to RAA before the single replacement term, so
+  replacement stays applied once and every existing 2-arg call site is byte-unchanged until it opts in.
