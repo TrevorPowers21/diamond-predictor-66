@@ -108,6 +108,24 @@ def load_rows(paths, skipped=None):
     rows.sort(key=lambda r: (r.get("gameId") or "", r["_pnum"]))
     return rows
 
+def build_name_id_map(rows):
+    """(team, abbrevName) -> source_player_id (TruMedia id), built from the batter, catcher, and
+    pitcher rows (which carry both a name AND an id). Fielder alignment columns
+    (FirstBaseman..RightFielder) carry only a name, so this resolves them to a player id —
+    99.985% of fielder slots on the full season. The residual ~10 defensive-only players (never
+    batted/caught/pitched) stay unresolved here and map via the players table downstream."""
+    m = {}
+    for r in rows:
+        for tcol, ncol, icol in (("battingTeam", "batterAbbrevName", "batterId"),
+                                 ("catchingTeam", "catcherAbbrevName", "catcherId"),
+                                 ("pitchingTeam", "pitcherAbbrevName", "pitcherId")):
+            t = (r.get(tcol) or "").strip()
+            n = (r.get(ncol) or "").strip()
+            i = (r.get(icol) or "").strip()
+            if t and n and i and (t, n) not in m:
+                m[(t, n)] = i
+    return m
+
 def load_re24():
     """Load the committed D1 RE24 matrix (base-out -> RE) from the package fixtures,
     resolved absolutely so cwd doesn't matter. Returns {} if absent (engine falls

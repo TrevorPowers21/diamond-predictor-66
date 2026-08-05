@@ -25,7 +25,7 @@ from . import constants as C
 from . import field as geom
 from .parser import parse_atbat_desc, ParseError, outs_recorded
 from .normalize import (bb_type_from_result, is_pa_end, framing_class,
-                        dp_opportunity_shares, dp_conversion_shares)
+                        dp_opportunity_shares, dp_conversion_shares, build_name_id_map)
 
 @dataclass
 class Exception_:
@@ -75,6 +75,7 @@ class DRSEngine:
         self.refs = refs if refs is not None else geom.load_field_positions()
         self.surface = surface if surface is not None else geom.load_catch_surface()
         self.acc = defaultdict(Acc)      # key: (team, player_name, position)
+        self.name_id_map = {}            # (team, name) -> source_player_id (built in run())
         self.exceptions = []
         self.expected_pbwp = defaultdict(float)   # catcher key -> sum
         self.actual_pbwp = defaultdict(int)
@@ -526,6 +527,8 @@ class DRSEngine:
 
     # ---------- main loop ----------
     def run(self, rows):
+        # resolve fielder alignment names -> source_player_id (the fielder cols carry no id)
+        self.name_id_map = build_name_id_map(rows)
         self.detect_pbwp(rows)
         for row in rows:
             self._per_pitch(row)
@@ -594,7 +597,9 @@ class DRSEngine:
                      + self._regress(a.throwing_runs, a.sb_att, C.PRIOR_THROW_ATT)
                      + self._regress(a.bunt_runs, a.bip_opps, C.PRIOR_BUNT_OPPS))
             out.append({
-                "team": team, "player": name, "season": season,
+                "team": team, "player": name,
+                "source_player_id": self.name_id_map.get((team, name)),
+                "season": season,
                 "position": C.POSITION_NAMES.get(pos, pos),
                 "games": len(a.games),
                 "half_innings": len(a.half_innings),
