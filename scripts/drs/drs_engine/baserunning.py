@@ -124,7 +124,11 @@ class BaserunningEngine:
             o1, o2, o3 = _occ(r.get("ManOnFirst")), _occ(r.get("ManOnSecond")), _occ(r.get("ManOnThird"))
             try: outs = int(r.get("outs") or 0)
             except ValueError: outs = 0
-            for target, occ in ((2, o1 and not o2), (3, o2 and not o3)):
+            # 2nd is "open" for a steal if empty OR its occupant is themselves stealing
+            # 3rd (a double steal), so the front runner isn't wrongly dropped.
+            s3a = str(r.get("SBA3", "")).strip() == "1"; s3 = str(r.get("SB3", "")).strip() == "1"
+            open2 = (not o2) or s3a or s3
+            for target, occ in ((2, o1 and open2), (3, o2 and not o3)):
                 if not occ:
                     continue
                 ac, sc = self._COLS[target]
@@ -166,8 +170,10 @@ class BaserunningEngine:
                 outs = 0
             org = r.get("battingTeamId") or r.get("battingTeam") or "?"
             gid = r.get("gameId")
+            s3a = str(r.get("SBA3", "")).strip() == "1"; s3 = str(r.get("SB3", "")).strip() == "1"
+            open2 = (not o2) or s3a or s3        # double-steal: 2nd vacated by its stealer
             for target, occupied, name_col, att_col, succ_col in (
-                (2, o1 and not o2, "ManOnFirst", "SBA2", "SB2"),
+                (2, o1 and open2, "ManOnFirst", "SBA2", "SB2"),
                 (3, o2 and not o3, "ManOnSecond", "SBA3", "SB3")):
                 if not occupied:
                     continue

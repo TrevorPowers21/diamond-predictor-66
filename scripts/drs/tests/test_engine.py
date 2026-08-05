@@ -80,9 +80,10 @@ except ParseError:
 print("\nBaserunning (wSB):")
 from drs_engine.baserunning import BaserunningEngine
 _re24 = load_re24()
-def _br_row(runner, o1="", o2="", o3="", outs="0", sba2="", sb2="", atbat="", team="X", gid="g1"):
+def _br_row(runner, o1="", o2="", o3="", outs="0", sba2="", sb2="", sba3="", sb3="",
+            atbat="", team="X", gid="g1"):
     return {"ManOnFirst": o1, "ManOnSecond": o2, "ManOnThird": o3, "outs": outs,
-            "SBA2": sba2, "SB2": sb2, "SBA3": "", "SB3": "", "atbatDesc": atbat,
+            "SBA2": sba2, "SB2": sb2, "SBA3": sba3, "SB3": sb3, "atbatDesc": atbat,
             "battingTeam": team, "battingTeamId": team, "gameId": gid}
 # steal state: three runners on 1st (2nd open) — one steals, one is caught, one holds.
 # pickoff state: two runners on 1st with 2nd OCCUPIED (no steal opp) — one is picked off.
@@ -105,6 +106,14 @@ check("SB/CS counted to the right runners",
       brr["Speedy"]["SB"] == 1 and brr["Caught"]["CS"] == 1 and brr["Station"]["opportunities"] == 1)
 check("pickoff dings the runner (PO counted, negative vs a safe runner in the same state)",
       brr["PickedOff"]["PO"] == 1 and brr["PickedOff"]["wsb_runs"] < brr["StayedPut"]["wsb_runs"])
+
+# double steal: runner on 1st steals 2nd WHILE runner on 2nd steals 3rd — BOTH must count
+# (the front runner was previously dropped because 2nd looked "occupied").
+ds_rows = [_br_row("Front", o1="Front", o2="Back", sba2="1", sb2="1", sba3="1", sb3="1")]
+dse = BaserunningEngine(_re24); dse.derive_fixtures(ds_rows); dse.run(ds_rows)
+dsr = {r["player"]: r for r in dse.player_season_rows(2026)}
+check("double steal credits BOTH runners (front on 1st AND back on 2nd)",
+      dsr["Front"]["SB"] == 1 and dsr["Back"]["SB"] == 1)
 
 # ---------------- Tier 2: frozen game fixtures ----------------
 fx_dir = os.environ.get("DRS_FIXTURE_DIR")
