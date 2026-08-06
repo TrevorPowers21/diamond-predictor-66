@@ -3,5 +3,7 @@ fixtures/*
 !fixtures/re24_matrix.json
 !fixtures/field_positions.json
 !fixtures/catch_surface.json
+!fixtures/grounder_calibration.json
+!fixtures/reach_shares.json
 __pycache__/
 *.pyc

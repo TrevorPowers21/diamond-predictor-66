@@ -406,3 +406,63 @@ signal is lossy and finding the authoritative source. The sequence:
   "We must finalize DRS before wiring dWAR" was fake pressure: dWAR = DRS ÷ rpw with no adjustment
   layer, so a later DRS change is just a re-division, and the version stamps carry provenance.
   Don't let false sequencing pressure rush an upstream decision.
+
+## Grounder calibration arc — three-function architecture + the discipline that caught SS −1,141 (2026-08-06, → defense-and-drs + review-and-parity)
+
+The infield grounder ledger was net −2,363 runs (every position off zero, IF p90 ≈ 0). Fixing it
+took a chain of diagnostics, and the *method* mattered more than any single fix.
+
+**The process rule that carried the whole arc (→ review-and-parity):**
+- **Pre-register the prediction — expectation + numeric tolerance + the GRAIN it's checked at —
+  before the run exists.** Then the readout is a lookup, not a debate. Every step here had a written
+  prediction first: ROE-test thresholds (within 0.5pp of 1 = confirmed; else FC-leak; else xAVG level),
+  the 3B-boundary prediction (−22→−25 shrinks 3B but leaves it most-negative), per-chance-spread not
+  raw-SD as the difficulty test, ±200/position as the acceptance band.
+- **Choose the grain fine enough to expose redistribution.** After the g(xAVG,spray) calibration the
+  LEAGUE sum went −2,363 → +40 and *zero looked like done* — but the defect had **redistributed onto
+  shortstops (SS −1,141)**, not vanished. It was caught ONLY because acceptance criteria were written at
+  **position grain, not league grain**. A league-grain check ships a −1.4 run/season phantom tax on
+  every SS. Aggregate grain hides redistribution; go to the finest grain the bug can hide in.
+- **Stop on surprise; never trade a named bug for an unnamed one.** A fix that makes the headline
+  metric pass while moving the imbalance somewhere unnamed is not a fix. Every off-prediction number
+  gets read against the record, not rationalized into "close enough."
+- **Distinguish "correct by construction" from "empirical outcome" up front.** Post-fix per-position
+  zero is an *empirical* result (credits individual, debits fractional), so it gets a tolerance band
+  and a stop-and-read rule — not an assumed pass.
+
+**The architecture that fell out — three functions, one question each (→ defense-and-drs):**
+- **`g(xAVG, spray)` — how hard was it (PRICING).** Season-fit isotonic level correction (fixes the
+  ROE convention xAVG carries: BA counts reached-on-error as an out, but our ledger excludes ROE, so
+  xAVG over-predicts outs on the scored subset → −759 league) + 5° spray-region offsets (xAVG's own
+  spray conditioning is thin at the pull extreme). Corrects the BALL's difficulty, never a fielder's.
+- **reach-shares — whose ball was it (BLAME).** Fractional hit debits: a hit at spray s debits
+  infielders by their empirical out-conversion share at s. Overlap zones are real (the 5.5 hole IS
+  shared), so no hard lane boundary is right on both sides — it can only relocate the debt (moving
+  −22→−25 traded a 3B bug for the SS one). Self-consistent: the same out-population that earns the
+  credits defines who owes the debits. Away from seams, share → 100/0, reproducing prior behavior.
+- **putout chains — who took it (CREDIT).** Individual, observed fact, untouched. The asymmetry
+  (credit individual, blame probabilistic) is deliberate and is how UZR does it.
+
+**The meta-lesson:** every bug in the arc was ONE function forced to do TWO jobs — xAVG carrying an
+ROE convention it wasn't built for; one spray cut doing pricing AND responsibility; hard lanes
+pretending overlap zones don't exist. Give each question its own empirically-derived, season-stamped,
+provenance-guarded input and the objections dissolve. That's the "why it's built this way" paragraph
+for any future auditor.
+
+**Also relocated, not deleted:** P/C comebacker/dribbler fielding left the dWAR grounder pool (no hit
+lane routes to P/C, so crediting them skimmed the zero-sum pool — +1,511 P / +60 C drained onto the
+infield). Parked in a `pitcher_fielding` accumulator outside dWAR (raw xAVG·RPP, uncalibrated, so the
+relocation conserves the pre-bake number bit-for-bit — an exact per-position conservation check, not a
+fuzzy sum). May want a home on the pitcher side someday, like MLB DRS carries pitcher fielding.
+
+**Provenance discipline:** `grounder_calibration.json` and `reach_shares.json` are SEASON FIXTURES
+(properties of this year's xAVG against this year's population), stamped with season + constants_version
++ their own version; the engine REFUSES to run on a calibration whose constants_version drifted from the
+engine's — mechanical enforcement that a stale calibration (next season's retrained xAVG) can't be
+silently applied and recreate the ROE bug in reverse. Refit is a required step of season fixture derivation.
+
+**Status at write time:** P/C exclusion + g(xAVG,spray) + −25 pricing boundary + fractional reach-share
+debits are baked (engine v0.8.0, fixtures stamped). Acceptance test (all four IF positions within ±200,
+per-chance 3B still widest, IF p90 positive) is IN PROGRESS — not recorded as confirmed until the run
+lands and is read against the pre-registered band. Then: telescope re-cert (also proves fractional debits
+conserve — shares sum to 1 per spray bin), goldens, staging.

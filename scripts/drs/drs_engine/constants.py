@@ -10,6 +10,7 @@ The engine stamps constants_version into every output row.
 """
 
 CONSTANTS_VERSION = "D1_2026_v1"
+SEASON = 2026   # the season these constants + fixtures + grounder calibration are derived for
 
 # ---- run-value constants (D1 2026 regular season) ----
 RUNS_PER_PLAY = 1.045    # RV(hit S/D/T blend) − RV(BIP out) = 0.673 − (−0.372). Range/Error scale.
@@ -46,7 +47,20 @@ PRIOR_BUNT_OPPS = 60.0
 # empirically-derived D1 reference positions), replacing league xAVG for air balls;
 # grounders keep xAVG. Range scores only priced balls (untracked stay neutral); coverage
 # = scored/faced. See fixtures/field_positions.json + catch_surface.json.
-ENGINE_VERSION = "drs-engine-0.6.0"
+#
+# v0.7.0: grounder range pool restricted to the four infield lanes (P/C comebacker/dribbler
+# fielding relocated to pitcher_fielding, outside dWAR), and grounders priced by a season-fit
+# g(xAVG, spray) recalibration (ROE-level fix + spray-region offsets) with the 3B/SS seam at the
+# derived-position midpoint. The calibration is a SEASON FIXTURE (fixtures/grounder_calibration.json,
+# stamped season + constants_version) and MUST be refit whenever CONSTANTS_VERSION or the upstream
+# xAVG changes — a stale calibration silently applied recreates the ROE bug in reverse.
+#
+# v0.8.0: grounder HIT debits are FRACTIONAL (shared-seam reach-share model,
+# fixtures/reach_shares.json) — a hit debits infielders by their empirical out-conversion share at
+# that spray, so credit (individual, putout chain) and debit (fractional blame) are drawn from the
+# same population. Fixes the credit-to-fielder vs debit-to-lane attribution asymmetry that a hard
+# lane boundary can only relocate, never remove. Also a season fixture; same stale-guard.
+ENGINE_VERSION = "drs-engine-0.8.0"
 
 POSITION_COLS = {
     2: "catcherAbbrevName",

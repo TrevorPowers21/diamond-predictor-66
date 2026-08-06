@@ -85,6 +85,28 @@ def load_catch_surface(path=None):
     with open(p) as fh:
         return json.load(fh)
 
+def load_grounder_calibration(path=None):
+    """g(xAVG, spray) recalibration for the grounder range ledger: global isotonic g(xAVG)
+    (fixes ROE-driven level) + spray-region offsets (fixes xAVG's imperfect spray conditioning
+    at the pull extreme) + the 3B/SS lane boundary. None -> engine prices grounders on raw xAVG."""
+    p = path or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "fixtures", "grounder_calibration.json")
+    if not os.path.exists(p):
+        return None
+    with open(p) as fh:
+        return json.load(fh)
+
+def load_reach_shares(path=None):
+    """Fractional reach-share table for grounder HIT debits (shared-seam model). A hit at spray s
+    debits the infielders in proportion to their empirical out-conversion share at s. None ->
+    engine falls back to the hard-lane single-fielder debit."""
+    p = path or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "fixtures", "reach_shares.json")
+    if not os.path.exists(p):
+        return None
+    with open(p) as fh:
+        return json.load(fh)
+
 def catch_prob(surface, pos, dcover, hang):
     """P(out) for an air ball a fielder at `pos` had to cover `dcover` ft in `hang` s.
     Reads the pre-resolved (fallback-filled) grid for the position's group. Returns

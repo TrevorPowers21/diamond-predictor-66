@@ -53,6 +53,10 @@ class Acc:
     range_sub: dict = field(default_factory=lambda: {"gb": 0.0, "ld": 0.0, "fb": 0.0, "pu": 0.0})
     dp_opps: float = 0.0        # DP opportunities this fielder fielded
     dp_conv_n: float = 0.0      # DP conversions this fielder turned
+    pitcher_fielding: float = 0.0   # relocated P/C comebacker range — OUTSIDE the dWAR pool
+    pitcher_fielding_n: int = 0     # (grounder outs by P/C are not zero-sum: no hit lane routes
+                                    #  to them, so keeping them in range would skim credit. Stored
+                                    #  separately; may want a home on the pitcher side someday.)
     plays_made: int = 0
     errors: int = 0
     assists: int = 0
@@ -74,6 +78,44 @@ class DRSEngine:
         # fitted surface. Absent -> air balls fall back to league xOut (fixture ladder).
         self.refs = refs if refs is not None else geom.load_field_positions()
         self.surface = surface if surface is not None else geom.load_catch_surface()
+        # grounder range recalibration g(xAVG, spray). Absent -> raw xAVG (1 - xAVG) pricing.
+        # It's a SEASON FIXTURE derived against this year's xAVG+population; refuse a stale one
+        # (constants drifted from what it was fit under) so it can never be silently misapplied.
+        self.grounder_cal = geom.load_grounder_calibration()
+        self._gcal_version = None
+        if self.grounder_cal:
+            cv = self.grounder_cal.get("constants_version")
+            if cv != C.CONSTANTS_VERSION:
+                raise ValueError(
+                    f"grounder_calibration.json was fit under constants_version={cv!r} but the "
+                    f"engine is on {C.CONSTANTS_VERSION!r}. Refit it (fit_grounder_calibration.py) "
+                    f"as part of this season's fixture derivation before running.")
+            self._gcal_version = self.grounder_cal.get("calibration_version")
+        self._g_grid = None
+        if self.grounder_cal:
+            breaks = sorted(self.grounder_cal["global_g_hit"])   # [[xcenter, P(hit)], ...]
+            # precompute calibrated global P(out) on a 0..1 xAVG grid (1001 steps) for O(1) lookup
+            self._g_grid = [1.0 - min(breaks, key=lambda t: abs(t[0] - i / 1000.0))[1]
+                            for i in range(1001)]
+        # 3B/SS spray seam: empirical midpoint of the derived reference positions (was -22,
+        # which handed 3B a slice of the 5.5 hole that is SS's). Used only by the spray-absent
+        # fallback lane now that hit debits are fractional (reach-share) — see _infield_reach.
+        self._bnd_3b_ss = self.grounder_cal["boundary_3b_ss"] if self.grounder_cal else -22.0
+        # Fractional reach-share table for grounder hit debits (shared-seam fix): a hit debits the
+        # infielders by their out-conversion share at that spray, so credit (individual) and debit
+        # (fractional) are drawn from the SAME population. Season fixture -> same stale-guard.
+        self.reach_shares = geom.load_reach_shares()
+        self._reach = None
+        if self.reach_shares:
+            rv = self.reach_shares.get("constants_version")
+            if rv != C.CONSTANTS_VERSION:
+                raise ValueError(
+                    f"reach_shares.json was fit under constants_version={rv!r} but the engine is on "
+                    f"{C.CONSTANTS_VERSION!r}. Refit it (derive_reach_shares.py) before running.")
+            self._reach_bw = self.reach_shares["bin_width"]
+            self._reach = {float(k): [(int(f), s) for f, s in v.items()]
+                           for k, v in self.reach_shares["shares"].items()}
+            self._reach_lo = min(self._reach); self._reach_hi = max(self._reach)
         self.acc = defaultdict(Acc)      # key: (team, player_name, position)
         self.name_id_map = {}            # (team, name) -> source_player_id (built in run())
         self.exceptions = []
@@ -257,10 +299,36 @@ class DRSEngine:
         spray = row["_spray"]
         if spray is None:
             return list(self._IF_LANE)
-        if spray < -22: return [5]
+        if spray < self._bnd_3b_ss: return [5]
         if spray < 2:   return [6]
         if spray < 30:  return [4]
         return [3]
+
+    def _g_out_grounder(self, xa, spray):
+        """Calibrated P(out) for a grounder: global g(xAVG) + spray-region offset (a property
+        of the BALL, not the fielder). Falls back to raw (1 - xAVG) if no calibration loaded."""
+        if self._g_grid is None:
+            return 1.0 - xa
+        pout = self._g_grid[max(0, min(1000, int(round(xa * 1000))))]
+        if spray is not None:
+            cal = self.grounder_cal
+            b = int((spray + cal["spray_bin_offset"]) // cal["spray_bin_width"])
+            pout += cal["spray_offsets"].get(str(b), 0.0)
+        return min(1.0, max(0.0, pout))
+
+    def _infield_reach(self, row):
+        """Fractional hit-debit responsibility: [(fielder, share), ...] summing to 1. From the
+        reach-share table by spray (nearest bin, clamped); falls back to the hard single lane
+        (or the 4-way _IF_LANE split when spray is absent) if no table is loaded."""
+        spray = row["_spray"]
+        if self._reach is None:
+            lane = self._infield_lane(row)
+            return [(f, 1.0 / len(lane)) for f in lane]
+        if spray is None:
+            return [(f, 1.0 / len(self._IF_LANE)) for f in self._IF_LANE]
+        b = round(spray / self._reach_bw) * self._reach_bw
+        b = min(self._reach_hi, max(self._reach_lo, b))   # clamp to table range
+        return self._reach.get(b) or self._reach[min(self._reach, key=lambda c: abs(c - b))]
 
     def _hand(self, row): return (row.get("batterHand") or "?").upper()[:1]
     def _hold(self, row): return bool((row.get("ManOnFirst") or "").strip())
@@ -322,10 +390,21 @@ class DRSEngine:
         fielder = fielder if fielder is not None else ev.putout_chain[0]
         cls = self._traj_class(row, ev)
         if cls == "gb":
-            self._faced(row, [fielder], 1.0)
+            # The grounder range pool is EXACTLY the four lanes that also absorb hit debits
+            # (3B/SS/2B/1B). P and C field grounders (comebackers / non-bunt dribblers) but no
+            # hit lane routes to them, so crediting them skims the zero-sum pool. Relocate that
+            # value to pitcher_fielding (outside dWAR); keep their putout/assist tallies via the
+            # chain. Bunts are already handled in BntR, so a catcher grounder here is a dribbler.
             xa = row["_xAVG"]
-            if xa is not None:
-                self._range_credit(row, fielder, 1.0 - xa, cls)
+            if fielder in (3, 4, 5, 6):
+                self._faced(row, [fielder], 1.0)
+                if xa is not None:
+                    self._range_credit(row, fielder, self._g_out_grounder(xa, row["_spray"]), cls)
+            elif fielder in (1, 2) and xa is not None:
+                a = self._touch(row, fielder)
+                if a:
+                    a.pitcher_fielding += xa * C.RUNS_PER_PLAY   # == (1 - (1-xa)) * RPP
+                    a.pitcher_fielding_n += 1
         elif cls in ("ld", "fb", "pu"):
             if fielder not in geom.GROUP:
                 return                                  # catcher pop etc. — no range surface
@@ -338,13 +417,18 @@ class DRSEngine:
         """Range DEBIT on a batted-ball hit."""
         cls = self._traj_class(row, ev)
         if cls == "gb":
-            fielders = self._infield_lane(row)
-            share = 1.0 / len(fielders)
-            self._faced(row, fielders, share)
+            # fractional reach-share responsibility (shared-seam): each infielder owes the debit
+            # in proportion to how often he actually converts outs at this spray. Credits (in
+            # _bip_out) stay individual — only blame is probabilistic.
+            pairs = self._infield_reach(row)
+            for f, share in pairs:
+                a = self._touch(row, f)
+                if a: a.bip_faced += share
             xa = row["_xAVG"]
             if xa is not None:
-                for f in fielders:
-                    self._range_debit_one(row, f, 1.0 - xa, cls, share)
+                pout = self._g_out_grounder(xa, row["_spray"])
+                for f, share in pairs:
+                    self._range_debit_one(row, f, pout, cls, share)
         elif cls in ("ld", "fb", "pu"):
             pos = self._air_nearest(row)
             if pos is None:
@@ -618,6 +702,10 @@ class DRSEngine:
                 "drs_total": round(total, 3),
                 "drs_floor": round(floor, 3),
                 "drs_ceiling": round(total, 3),
+                # P/C comebacker/dribbler fielding, relocated OUT of the dWAR range pool (see
+                # _bip_out). Real value, kept for a possible pitcher-side home; never summed here.
+                "pitcher_fielding": round(a.pitcher_fielding, 3),
+                "pitcher_fielding_n": a.pitcher_fielding_n,
                 # coverage disclosure: range_runs scores ONLY balls a model can price
                 # (grounder xAVG / air catch-surface). bip_faced counts every batted ball
                 # the fielder was responsible for; tracking_coverage = scored / faced.
@@ -638,5 +726,6 @@ class DRSEngine:
                                  if a.pop_times else None,
                 "constants_version": C.CONSTANTS_VERSION,
                 "engine_version": C.ENGINE_VERSION,
+                "grounder_cal_version": self._gcal_version,
             })
         return out
