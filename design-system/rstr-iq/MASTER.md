@@ -9,11 +9,16 @@ established navy/gold dark-mode palette).
 `design-system/rstr-iq/pages/<page>.md`. Page files override MASTER on conflict.
 
 ## Changelog
+- **2026-08-06 — Oswald restored as the heading face.** Reverses the Oswald call in the
+  2026-08-04 entry below. Oswald is now loaded via `index.css` (PR #161) at weights 400–700,
+  and the ~265 existing `font-[Oswald]` references are canonical and stay. The 08-04 reading
+  was right that Oswald was never loaded; it was wrong that Inter headings were the intended
+  look. Anyone without Oswald installed locally had been seeing a fallback.
 - **2026-08-04 — Codified from the shipped app.** Reconciled against the actual rendered
   application (Tailwind config, `index.css`, `src/savant/lib/theme.ts`, real component usage).
   The current rendered appearance is canonical; this doc now describes what ships, not an
   aspiration. Key corrections: **Oswald was never loaded and never rendered** (headings render
-  in Inter today — that IS the intended look); **JetBrains Mono** is the numeric face; the
+  in Inter today — that IS the intended look — **SUPERSEDED 2026-08-06, see entry above**); **JetBrains Mono** is the numeric face; the
   **navy border is #162241** (majority usage) and **card is #0a1428** (variants #1f2d52 and
   #0D1A30 deprecated); the **gray text scale** (#8A94A6 / #5A6478) and the **chart palette** are
   now documented as official.
@@ -52,16 +57,17 @@ text), `#E8C24E → #D4AF37` (gold). The `--primary` / `--accent` / `--ring` HSL
 `gold`, `text-secondary`, `text-tertiary`). Import these — do not redefine locally.
 
 ## Typography
-- **All UI text (headings, labels, body):** **Inter** (loaded via `index.css`). Headings get
-  their distinction from Inter **weight + letter-spacing** (uppercase, tracking-wider to
-  `tracking-[0.22em]`), NOT a separate display face.
+- **Headings / branded labels:** **Oswald** (`font-[Oswald]`, loaded via `index.css` at
+  weights 400–700 variable), uppercase, tracking-wider to `tracking-[0.22em]`.
+- **Body / UI text:** **Inter** (loaded via `index.css`).
 - **Numeric values:** **JetBrains Mono** (loaded via `index.css`) where a monospace numeric is
   used; otherwise Inter with `tabular-nums`.
 - **Numeric cells:** always `tabular-nums` for grid alignment.
-- **Oswald is NOT used.** It was referenced in code (`font-[Oswald]`) but never loaded, so it
-  always rendered as Inter. Those references are dead and are being removed; do not add new
-  `font-[Oswald]` and do not load Oswald — headings must keep rendering in Inter exactly as
-  they do today. (Cormorant Garamond: only the logo "R" — leave untouched if it depends on it.)
+- **Oswald IS used** (2026-08-06 — reverses the 2026-08-04 codification). It was referenced in
+  ~265 places but never loaded, so it rendered only for viewers who happened to have Oswald
+  installed locally; everyone else got a fallback. The `@import` added in PR #161 makes those
+  references live for all users. Keep them, and do not remove the import — it is load-bearing.
+  (Cormorant Garamond: only the logo "R" — leave untouched if it depends on it.)
 
 ## Chart palette (official — ratified as rendered)
 Charts (recharts + d3) use a **slate-on-navy** ramp, and it is correct. Do not restyle.
@@ -99,7 +105,8 @@ Charts (recharts + d3) use a **slate-on-navy** ramp, and it is correct. Do not r
 - **Light mode** — RSTR is dark-only.
 - **Generic dashboard blue** (`#1E40AF`, etc.) — navy + gold only. (Chart slate is the
   sanctioned exception, per the chart-palette section.)
-- **Loading Oswald / adding `font-[Oswald]`** — it never rendered; headings are Inter.
+- **Removing the Oswald `@import` or stripping `font-[Oswald]` references** — Oswald is the
+  heading face as of 2026-08-06; the import in `index.css` is load-bearing.
 - **New off-scale grays or navies** — use the deprecated→canonical map above.
 - **Big whitespace gaps** — coaches scan dense data, pack the page.
 - **Animated transitions longer than 300ms.**
