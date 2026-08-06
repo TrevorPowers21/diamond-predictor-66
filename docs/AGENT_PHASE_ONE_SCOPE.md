@@ -1,6 +1,6 @@
 # RSTR IQ Dev Agent — Phase One Scope
 
-**Status:** Draft for review. Sections 6 and 7 are deliberately stubbed and get layered in on review before this is finalized.
+**Status:** Complete pending task zero (§2.0). Sections 6 and 7 filled in from Trevor's review 2026-08-06; one item left open and flagged at the end of §6.
 **Created:** 2026-08-05
 **Applies to:** the planned RSTR IQ dev agent (see `docs/rstr-agent-plan.md`), and to any Claude Code session operating under agent rules.
 
@@ -131,25 +131,60 @@ Work the agent may fully prepare but must hand off rather than complete:
 
 ---
 
-## 6. Trust progression — STUB
+## 6. Trust progression
 
-*To be layered in on review.* Open questions this section must answer:
+Three tiers. Trust is earned by track record, but **scope is never earned by streak alone.**
 
-- What does the agent start with authority to do on day one, before any clean-task track record?
-- What is N — how many clean tasks (anchor-green, review-clean, no escalation misses) before scope widens, and widens to what specifically?
-- Does trust reset on a miss, decay, or step down one level?
-- Is trust per-category (earned separately for filter splits vs precompute parity) or global? Categories differ sharply in blast radius, which argues for per-category.
-- What is the ceiling — which §4 items can *never* be earned regardless of track record? (Candidate: all of them.)
+### Tier 1 — proposes only (current)
+The agent proposes; a human reviews every diff before merge. No exceptions, no "small enough to skip." This is where the agent starts and where it stays until Tier 2 is met.
 
-## 7. Escalation rules — STUB
+### Tier 2 — merges pattern-following work, reviewed async
+Entry condition: **10 clean tasks** — anchor-green, review-clean, zero anchor failures, zero reverts.
 
-*To be layered in on review.* Open questions this section must answer:
+At Tier 2 the agent may merge §3 pattern-following work gated by CI plus anchors; the human reviews asynchronously rather than pre-merge. Note what this does and does not change: it moves the *timing* of human review, not its existence. The gate is CI + anchors, and it is the same gate either way.
 
-- What exactly triggers a stop — enumerated, so the agent isn't judging "is this important."
-- What an escalation message must contain (what it tried, what it saw, what it believes, what it needs decided).
-- Whether the agent may continue on unrelated in-scope work while an escalation is pending, or halts entirely.
-- How a wrong-but-plausible change gets caught when anchor tests pass — the residual risk the gate doesn't cover.
-- Silent-failure rule: what the agent must volunteer even when nothing failed.
+### Tier 3 — deliberately not defined
+Expanding into a new work category requires **adding a canonical example plus anchor coverage for that category first.** A clean streak is not an argument for new scope — it is evidence the agent is good at the categories it already has examples for, which says nothing about a category with no example to diff against. Tier 3 stays undefined until there is a specific category to define it for.
+
+### Reset rule
+**A failed anchor at any tier resets the counter to zero.** Not decays, not steps down one tier — resets. The counter is a claim that the agent has not shipped a silent output change, and one failure falsifies the claim outright.
+
+### Ceiling
+Nothing in §4 is reachable from any tier. DB writes, `:prod`, RLS/migrations, dRS engine math, collision/park geometry, and modeling decisions are structurally human-only, not provisionally so.
+
+### Open on review
+
+- **Per-category vs. global counting is unresolved.** As written, the 10-task counter reads global. Categories differ sharply in blast radius — 10 clean filter splits is thin evidence for precompute parity work, which touches stored values every surface reads. Options: keep global for simplicity, or require some minimum per category before that category goes async. Left as written pending Trevor's call.
+
+## 7. Escalation rules
+
+### Stop and hand to a human when
+
+- **Any anchor fixture fails.** Report the frozen-vs-actual delta explicitly — which player, which field, expected vs got. Never edit the fixture or the tolerance to make it pass.
+- **Any change touches a §4 human-only path, even incidentally.** "Incidentally" is the operative word: a one-line import change inside `scripts/drs/drs_engine/` is still the dRS engine.
+- **A task has no canonical example to diff against.** This is the §1 test failing. Absence of an example is the signal, not an obstacle to route around.
+- **Grep or test counts differ from expectations.** Expected 14 call sites, found 11 — stop. The gap is information, and proceeding discards it.
+- **The agent is uncertain which of two patterns applies.** Two plausible canonical examples is the same condition as none.
+
+### The rule of thumb, verbatim
+
+> **When in doubt, the cost of asking is seconds and the cost of guessing is a paying program seeing wrong numbers.**
+
+### What an escalation must contain
+
+What it tried, what it saw (actual output, not a summary of it), what it believes is happening, and what specifically it needs decided. An escalation that only says "this seems wrong" hands the whole problem back and wastes the context the agent already has.
+
+### While an escalation is pending
+
+The agent may continue on **unrelated** in-scope work. It may not continue on anything downstream of the escalated question, and it may not pick a provisional answer to keep moving.
+
+### Residual risk this does not cover
+
+Anchor tests catch output changes on the fixture set. They do not catch a wrong-but-plausible change affecting players *outside* the fixtures — which is exactly why §2.1 requires coverage across shapes that break differently (hitter, SP, RP, TWP, JUCO, returner, zero-input), and why fixture coverage gets revisited whenever a new category enters scope. Anchor-green means "no known output moved," never "correct."
+
+### Silent-failure rule
+
+The agent volunteers, unprompted, even when nothing failed: anything it skipped, any scope it narrowed, any assumption it made to keep moving, and any place it was surprised but proceeded. Work reported as done means done and verified. A green run with an unreported shortcut inside it is the failure mode this whole document exists to prevent.
 
 ---
 
