@@ -1,6 +1,6 @@
 # RSTR IQ Dev Agent — Phase One Scope
 
-**Status:** Complete pending task zero (§2.0). Sections 6 and 7 filled in from Trevor's review 2026-08-06; one item left open and flagged at the end of §6.
+**Status:** Complete pending task zero (§2.0). Sections 6 and 7 filled in from Trevor's review 2026-08-06; trust counter confirmed per-category. No open items.
 **Created:** 2026-08-05
 **Applies to:** the planned RSTR IQ dev agent (see `docs/rstr-agent-plan.md`), and to any Claude Code session operating under agent rules.
 
@@ -139,22 +139,24 @@ Three tiers. Trust is earned by track record, but **scope is never earned by str
 The agent proposes; a human reviews every diff before merge. No exceptions, no "small enough to skip." This is where the agent starts and where it stays until Tier 2 is met.
 
 ### Tier 2 — merges pattern-following work, reviewed async
-Entry condition: **10 clean tasks** — anchor-green, review-clean, zero anchor failures, zero reverts.
+Entry condition: **10 clean tasks within a single §3 category** — anchor-green, review-clean, zero anchor failures, zero reverts.
 
-At Tier 2 the agent may merge §3 pattern-following work gated by CI plus anchors; the human reviews asynchronously rather than pre-merge. Note what this does and does not change: it moves the *timing* of human review, not its existence. The gate is CI + anchors, and it is the same gate either way.
+**The counter is per-category, not global.** Tier 2 is earned and held separately for filter splits (§3.1), stat rollups (§3.2), precompute parity extension (§3.3), backfill scripts (§3.4), and mechanical consolidation (§3.5). Ten clean filter splits promote filter splits and nothing else.
+
+The reason is blast radius, and it is not uniform across §3. A filter split that goes wrong shows a coach the wrong subset of a list — visible, local, recoverable. A precompute parity extension that goes wrong writes a bad stored value that every surface then reads as truth, and the surfaces agree with each other, which is exactly what makes it hard to spot. Those two failure modes do not deserve the same evidentiary bar, and a global counter would let the cheap category pay for the expensive one.
+
+At Tier 2 the agent may merge §3 work **in a promoted category** gated by CI plus anchors; the human reviews asynchronously rather than pre-merge. Note what this does and does not change: it moves the *timing* of human review, not its existence. The gate is CI + anchors, and it is the same gate either way.
 
 ### Tier 3 — deliberately not defined
 Expanding into a new work category requires **adding a canonical example plus anchor coverage for that category first.** A clean streak is not an argument for new scope — it is evidence the agent is good at the categories it already has examples for, which says nothing about a category with no example to diff against. Tier 3 stays undefined until there is a specific category to define it for.
 
 ### Reset rule
-**A failed anchor at any tier resets the counter to zero.** Not decays, not steps down one tier — resets. The counter is a claim that the agent has not shipped a silent output change, and one failure falsifies the claim outright.
+**A failed anchor at any tier resets that category's counter to zero and returns the category to Tier 1.** Not decays, not steps down partially — resets. The counter is a claim that the agent has not shipped a silent output change in that category, and one failure falsifies the claim outright.
+
+Other categories keep their counters. A failed anchor is evidence about the category it happened in; extending it further would be the same over-generalization the per-category rule exists to prevent.
 
 ### Ceiling
 Nothing in §4 is reachable from any tier. DB writes, `:prod`, RLS/migrations, dRS engine math, collision/park geometry, and modeling decisions are structurally human-only, not provisionally so.
-
-### Open on review
-
-- **Per-category vs. global counting is unresolved.** As written, the 10-task counter reads global. Categories differ sharply in blast radius — 10 clean filter splits is thin evidence for precompute parity work, which touches stored values every surface reads. Options: keep global for simplicity, or require some minimum per category before that category goes async. Left as written pending Trevor's call.
 
 ## 7. Escalation rules
 
