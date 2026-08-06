@@ -30,7 +30,20 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      # setup-node's `cache: npm` caches the npm download cache (~/.npm), which
+      # still leaves `npm ci` doing the full install work. Caching node_modules
+      # itself, keyed on the lockfile, lets us skip the install entirely on a
+      # hit — the common case, since the lockfile changes far less often than
+      # the source.
+      - name: Cache node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
 
       - name: Run test suite
         run: npm test
@@ -49,7 +62,17 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      # Same cache and key as the `tests` job — they share the entry, so
+      # whichever job runs first populates it for the other.
+      - name: Cache node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
 
       - name: Type-check HEAD
         id: head
