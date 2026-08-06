@@ -7,10 +7,11 @@ Usage: python3 run_drs.py <export_or_dir_or_glob> [more ...]
 Writes: output/player_season_defense.csv, output/exceptions_log.csv,
         fixtures/league_fixtures.json
 """
-import sys, csv, os
+import sys, csv, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from drs_engine.normalize import load_rows, derive_league_fixtures, load_re24
 from drs_engine.engine import DRSEngine
+from drs_engine import constants as C
 
 def main(paths):
     skipped = []
@@ -37,6 +38,15 @@ def main(paths):
         w.writerow(["uniqPitchId", "game", "reason", "detail", "atbatDesc"])
         for x in eng.exceptions:
             w.writerow([x.uniq_pitch_id, x.game, x.reason, x.detail, x.raw])
+
+    # audit: the derived error-centering rates (expected error COST per ENGAGEMENT), stamped.
+    # Derived fresh each run from this season's data (no stale risk); committed for auditability.
+    # Engagement definition: fixtures/ERROR_CENTERING.md.
+    with open("fixtures/error_rates.json", "w") as fh:
+        json.dump({"season": C.SEASON, "constants_version": C.CONSTANTS_VERSION,
+                   "engine_version": C.ENGINE_VERSION,
+                   "unit": "expected error cost (runs) per fielding engagement",
+                   "rates": eng.err_rates}, fh, indent=1)
 
     print(f"pitches: {len(rows)}  |  fixture quality: {fx['fixture_quality']}")
     print(f"player-position rows: {len(res)}  |  exceptions: {len(eng.exceptions)}"

@@ -60,7 +60,25 @@ PRIOR_BUNT_OPPS = 60.0
 # that spray, so credit (individual, putout chain) and debit (fractional blame) are drawn from the
 # same population. Fixes the credit-to-fielder vs debit-to-lane attribution asymmetry that a hard
 # lane boundary can only relocate, never remove. Also a season fixture; same stale-guard.
-ENGINE_VERSION = "drs-engine-0.8.0"
+#
+# v0.9.0: error runs are CENTERED. Errors were the last component measured "vs perfect" (raw charge,
+# no offset) while every other component is "vs average" -- so the league bled ~9,500 phantom runs
+# and every average defender started negative. Now error_runs = expected_cost - actual_cost, where
+# expected = league error-cost-per-ENGAGEMENT * engagements, split (position-group x trajectory).
+# Engagement = out-chain membership OR an E charge (balls the fielder REACHED), so hands is
+# conditioned on reach and orthogonal to range. Punishment per error is UNCHANGED; centering only
+# adds the credit side. Rates derived fresh each run (no stale risk) + emitted to error_rates.json
+# for audit; engagement definition documented in fixtures/ERROR_CENTERING.md.
+#
+# v0.10.0: PER-POSITION centering is now the UNIFORM rule for every component entering dWAR (not
+# just league-wide). Four components in a row (pool skim, seam transfer, engagement blend, DP
+# baseline) proved league-centered-but-not-position-centered is a systematic property of the design,
+# not a series of surprises -- so the CLASS is fixed: dp uses a per-position conversion rate; range
+# (air residual), arm, and bunt are de-meaned per position by fielding exposure; errors already
+# center per position x traj. The positional residue removed is market-layer info (scarcity lives in
+# market valuation). FRAMING is exempt (its +970 is a venue bias with a scheduled source fix).
+# Position-grain component sums are now asserted in the golden suite so the class can't recur silently.
+ENGINE_VERSION = "drs-engine-0.10.0"
 
 POSITION_COLS = {
     2: "catcherAbbrevName",

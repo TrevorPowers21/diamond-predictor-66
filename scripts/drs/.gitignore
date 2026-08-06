@@ -7,3 +7,6 @@ fixtures/*
 !fixtures/reach_shares.json
 __pycache__/
 *.pyc
+!fixtures/error_rates.json
+!fixtures/ERROR_CENTERING.md
+!fixtures/POSITION_CENTERING.md

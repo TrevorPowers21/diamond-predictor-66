@@ -1,0 +1,26 @@
+{
+ "season": 2026,
+ "constants_version": "D1_2026_v1",
+ "engine_version": "drs-engine-0.10.0",
+ "unit": "expected error cost (runs) per fielding engagement",
+ "rates": {
+  "1_gb": 0.022419,
+  "1_air": 0.0,
+  "2_gb": 0.022419,
+  "2_air": 0.0,
+  "3_gb": 0.022419,
+  "3_air": 0.0,
+  "4_gb": 0.022419,
+  "4_air": 0.0,
+  "5_gb": 0.022419,
+  "5_air": 0.0,
+  "6_gb": 0.022419,
+  "6_air": 0.0,
+  "7_gb": 0.022419,
+  "7_air": 0.0,
+  "8_gb": 0.022419,
+  "8_air": 0.0,
+  "9_gb": 0.022419,
+  "9_air": 0.0
+ }
+}

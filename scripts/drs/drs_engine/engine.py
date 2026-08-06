@@ -57,6 +57,13 @@ class Acc:
     pitcher_fielding_n: int = 0     # (grounder outs by P/C are not zero-sum: no hit lane routes
                                     #  to them, so keeping them in range would skim credit. Stored
                                     #  separately; may want a home on the pitcher side someday.)
+    # error CENTERING inputs. Engagement = out-chain membership OR an E charge (balls the fielder
+    # REACHED), split by trajectory. error_runs is finalized in run() as expected_cost - actual_cost
+    # per (position-group x traj) cell, so hands is conditioned on reach and zero-sums by cell.
+    err_eng_gb: float = 0.0         # ground fielding engagements (reached the ball)
+    err_eng_air: float = 0.0        # air fielding engagements
+    err_cost_gb: float = 0.0        # actual ground error cost (abs runs)
+    err_cost_air: float = 0.0       # actual air error cost (abs runs)
     plays_made: int = 0
     errors: int = 0
     assists: int = 0
@@ -121,6 +128,7 @@ class DRSEngine:
         self.exceptions = []
         self.expected_pbwp = defaultdict(float)   # catcher key -> sum
         self.actual_pbwp = defaultdict(int)
+        self.err_rates = {}              # (group_traj) -> expected error cost per engagement (run())
 
     # ---------- RE24 base-out lookups (state-specific advancement) ----------
     def _re(self, o1, o2, o3, outs):
@@ -446,15 +454,46 @@ class DRSEngine:
         a = self._touch(row, chain[-1])
         if a: a.putouts += 1
 
+    def _engage1(self, row, pos, cls):
+        """Record one error-ENGAGEMENT (the fielder reached this ball), by trajectory. cls None
+        or air trajectories bucket to air. Denominator for the centered ErrR; see _finalize_errors."""
+        a = self._touch(row, pos)
+        if a is None: return
+        if cls == "gb": a.err_eng_gb += 1.0
+        else: a.err_eng_air += 1.0
+
+    def _engage_out_chains(self, row, ev):
+        """Engage every distinct fielder in any out-chain on this batted ball — they handled it
+        (putout-chain membership), so they had a chance to err. Deflections/tips are not chain
+        members, so they never enter the denominator. Deduped per ball."""
+        cls = self._traj_class(row, ev)
+        seen = set()
+        chains = ([ev.putout_chain] if ev.putout_chain else []) + \
+                 [mv.chain for mv in ev.movements if mv.out and mv.chain]
+        for ch in chains:
+            for pos in ch:
+                if pos not in seen:
+                    seen.add(pos); self._engage1(row, pos, cls)
+
     def _error_debit(self, row, fielder, ev, outs_made):
         a = self._touch(row, fielder)
         if a is None: return
         a.errors += 1
         # Base: "a sure out that became a SINGLE" (only when no out was recorded).
         # RUNS_PER_SINGLE, not the S/D/T blend, so the extra-base damage isn't
-        # double-counted against the explicit advancement charge below.
-        a.error_runs -= C.RUNS_PER_SINGLE if outs_made == 0 else 0.0
-        a.error_runs -= self._error_extra(row, ev, outs_made)
+        # double-counted against the explicit advancement charge below. Punishment UNCHANGED by
+        # centering — the full charge is accrued as actual cost; the credit is added in run().
+        cost = (C.RUNS_PER_SINGLE if outs_made == 0 else 0.0) + self._error_extra(row, ev, outs_made)
+        cls = self._traj_class(row, ev)
+        if cls == "gb": a.err_cost_gb += cost
+        else: a.err_cost_air += cost
+        # engage the error fielder unless already engaged via an out-chain (avoid double-count):
+        # ROE (no out chain) always engages here; an advancement-error fielder not in the chain
+        # (e.g. an OF bobble after an out elsewhere) also needs its engagement so cost never
+        # lands without a denominator.
+        in_chain = (fielder in (ev.putout_chain or [])) or \
+                   any(mv.out and mv.chain and fielder in mv.chain for mv in ev.movements)
+        if not in_chain: self._engage1(row, fielder, cls)
         a.bip_opps += 1.0
 
     def _error_extra(self, row, ev, outs_made):
@@ -584,6 +623,7 @@ class DRSEngine:
             for mv in ev.movements:
                 if mv.out and mv.chain:
                     self._credit_chain_tallies(row, mv.chain)
+            self._engage_out_chains(row, ev)   # error denominator: who handled the ball
             if ev.error_fielder is not None:
                 self._error_debit(row, ev.error_fielder, ev,
                                   outs_made=1)  # out stood, advancement-only debit
@@ -606,6 +646,7 @@ class DRSEngine:
                 for mv in ev.movements:
                     if mv.out and mv.chain:
                         self._credit_chain_tallies(row, mv.chain)
+                self._engage_out_chains(row, ev)
             if ev.error_fielder is not None and n_outs == 0:
                 self._error_debit(row, ev.error_fielder, ev, outs_made=0)
 
@@ -656,11 +697,73 @@ class DRSEngine:
                 a.throwing_runs = ((a.cs - cs_rate * a.sb_att) * C.RUNS_CS
                                    - (a.sb_allowed - sb_rate * a.sb_att) * C.RUNS_SB_COST)
 
-        # finalize DP (Fix #1): per-fielder net vs league rate. Nets to zero
-        # league-wide by construction; credit and charge land on the same person.
-        dp_rate = self.fx["dp_rate"]
-        for k, a in self.acc.items():
-            a.dp_runs = (a.dp_conv_n - dp_rate * a.dp_opps) * C.RUNS_PER_DP
+        # finalize DP: per-fielder net vs the PER-POSITION conversion rate. A league rate is diluted
+        # by corner infielders who turn few DPs, so it over-credits SS/2B as a class -- but that
+        # excess is mispriced POSITIONAL scarcity (turning two is a middle-IF job), not skill. A
+        # per-position rate routes it OUT of dWAR to the market layer (where scarcity lives) and
+        # leaves only genuine skill: a good DP turner beats the average SS, an average SS nets zero.
+        dppos = defaultdict(lambda: [0.0, 0.0])   # pos -> [Σconv, Σopps]
+        for (t, n, pos), a in self.acc.items():
+            dppos[pos][0] += a.dp_conv_n; dppos[pos][1] += a.dp_opps
+        for (t, n, pos), a in self.acc.items():
+            e = dppos[pos][1]
+            r = dppos[pos][0] / e if e else 0.0
+            a.dp_runs = (a.dp_conv_n - r * a.dp_opps) * C.RUNS_PER_DP
+
+        # finalize ERRORS: center "hands" vs the expected error COST per ENGAGEMENT, split by
+        # (position-group x trajectory). Engagement = out-chain membership OR an E charge, so hands
+        # is conditioned on REACH (orthogonal to range: +6 range / -4 hands stays meaningful).
+        # error_runs = expected_cost - actual_cost -> sure hands read positive; league sums to zero
+        # per cell by construction. Punishment per error is unchanged (full charge is the actual
+        # cost); centering only supplies the credit side that "vs perfect" was missing.
+        # PER-POSITION rates: "IF engagements" mixes two jobs (fielding the ball vs receiving the
+        # throw) and 1B's mix is dominated by the second, so a group rate over-credits it. Split by
+        # position (position proxies the engagement-type mix, stable across players at a position),
+        # fall back position -> group -> traj for sparse cells. If a residual survives per-position
+        # it should live on the DP pivot (4/6 receiving volume); the next split would be chain-role.
+        egrp = lambda pos: "IF" if pos in (3, 4, 5, 6) else "OF" if pos in (7, 8, 9) else "C" if pos == 2 else "P"
+        MIN_ENG = 200.0
+        cost_pos = defaultdict(float); eng_pos = defaultdict(float)   # (pos, traj)
+        cost_grp = defaultdict(float); eng_grp = defaultdict(float)   # (group, traj)
+        cost_tr = defaultdict(float); eng_tr = defaultdict(float)     # traj
+        for (t, n, pos), a in self.acc.items():
+            g = egrp(pos)
+            for tr, cst, eng in (("gb", a.err_cost_gb, a.err_eng_gb), ("air", a.err_cost_air, a.err_eng_air)):
+                cost_pos[(pos, tr)] += cst; eng_pos[(pos, tr)] += eng
+                cost_grp[(g, tr)] += cst; eng_grp[(g, tr)] += eng
+                cost_tr[tr] += cst; eng_tr[tr] += eng
+        def erate(pos, tr):  # expected error cost per engagement; position -> group -> traj fallback
+            g = egrp(pos)
+            if eng_pos[(pos, tr)] >= MIN_ENG: return cost_pos[(pos, tr)] / eng_pos[(pos, tr)]
+            if eng_grp[(g, tr)] >= MIN_ENG: return cost_grp[(g, tr)] / eng_grp[(g, tr)]
+            return cost_tr[tr] / eng_tr[tr] if eng_tr[tr] else 0.0
+        self.err_rates = {f"{pos}_{tr}": round(erate(pos, tr), 6)
+                          for pos in range(1, 10) for tr in ("gb", "air")}
+        for (t, n, pos), a in self.acc.items():
+            a.error_runs = (erate(pos, "gb") * a.err_eng_gb - a.err_cost_gb) + \
+                           (erate(pos, "air") * a.err_eng_air - a.err_cost_air)
+
+        # ---- UNIFORM per-position centering (the class fix) ----
+        # Every component entering dWAR must sum to ~0 PER POSITION, not just league-wide. For four
+        # components in a row the imbalance was league-centered-but-not-position-centered -- a
+        # systematic property of this design, not a series of surprises -- so we fix the CLASS:
+        # subtract each position's opportunity-weighted mean. What leaves is the positional residue
+        # (position-mix effects: seam-sharing geometry on air, runners testing CF vs corners on arm,
+        # DP scarcity), which is market-layer information, per scarcity-lives-in-market-valuation.
+        # range_gb stays calibrated (this only de-means the residual); the per-chance spread is a
+        # constant shift so 3B stays widest. FRAMING is EXEMPT: its +970 is a venue-calibration bias
+        # with its own scheduled source fix, not a position-mix effect (telescope -> framing alone).
+        def _center(attr, expo):
+            tot = defaultdict(lambda: [0.0, 0.0])   # pos -> [Σvalue, Σexposure]
+            for (t, n, pos), a in self.acc.items():
+                tot[pos][0] += getattr(a, attr); tot[pos][1] += getattr(a, expo)
+            for (t, n, pos), a in self.acc.items():
+                s, e = tot[pos]
+                if e > 0:
+                    setattr(a, attr, getattr(a, attr) - (s / e) * getattr(a, expo))
+        _center("range_runs", "bip_opps")
+        _center("arm_runs", "bip_opps")
+        _center("bunt_runs", "bip_opps")
 
     # ---------- rollup (Spec Sections 8, 9) ----------
     @staticmethod
@@ -706,6 +809,9 @@ class DRSEngine:
                 # _bip_out). Real value, kept for a possible pitcher-side home; never summed here.
                 "pitcher_fielding": round(a.pitcher_fielding, 3),
                 "pitcher_fielding_n": a.pitcher_fielding_n,
+                # error-centering denominator: fielding engagements (balls reached), for audit +
+                # the per-engagement ErrR spread check. error_runs above is the CENTERED value.
+                "err_engagements": round(a.err_eng_gb + a.err_eng_air, 1),
                 # coverage disclosure: range_runs scores ONLY balls a model can price
                 # (grounder xAVG / air catch-surface). bip_faced counts every batted ball
                 # the fielder was responsible for; tracking_coverage = scored / faced.
