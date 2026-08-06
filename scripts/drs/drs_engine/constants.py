@@ -78,7 +78,15 @@ PRIOR_BUNT_OPPS = 60.0
 # center per position x traj. The positional residue removed is market-layer info (scarcity lives in
 # market valuation). FRAMING is exempt (its +970 is a venue bias with a scheduled source fix).
 # Position-grain component sums are now asserted in the golden suite so the class can't recur silently.
-ENGINE_VERSION = "drs-engine-0.10.0"
+#
+# v0.11.0: FRAMING is now centered too (was the one exempt component). A 2-way catcher x park
+# decomposition (framing/chance ~ catcher_skill + park_effect, alternating chance-weighted means,
+# anchored avg-catcher-skill=0) removes the +970 league offset AND per-park TrackMan miscalibration
+# via the park term, leaving each catcher only park-free vs-average skill. Elite framers stay (the
+# skill travels, r=0.59 home/road); extreme-park catchers come down to what travels. Park effects
+# emitted to park_effects.json for audit + extreme-park flagging. The defensive ledger is now
+# centered ALL the way down: every component vs its own-season, own-position/own-park baseline.
+ENGINE_VERSION = "drs-engine-0.11.0"
 
 POSITION_COLS = {
     2: "catcherAbbrevName",

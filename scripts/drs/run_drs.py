@@ -48,6 +48,18 @@ def main(paths):
                    "unit": "expected error cost (runs) per fielding engagement",
                    "rates": eng.err_rates}, fh, indent=1)
 
+    # framing park effects (venue de-confounding) + extreme-park flags, for audit
+    pe = eng.park_effects
+    if pe:
+        vals = sorted(pe.values())
+        lo, hi = vals[max(0, len(vals)//40)], vals[min(len(vals)-1, len(vals)-1-len(vals)//40)]
+        with open("fixtures/park_effects.json", "w") as fh:
+            json.dump({"season": C.SEASON, "constants_version": C.CONSTANTS_VERSION,
+                       "engine_version": C.ENGINE_VERSION,
+                       "unit": "framing park effect (runs) per called-pitch chance",
+                       "extreme_flag_abs": round(max(abs(lo), abs(hi)), 5),
+                       "park_effects": pe}, fh, indent=1)
+
     print(f"pitches: {len(rows)}  |  fixture quality: {fx['fixture_quality']}")
     print(f"player-position rows: {len(res)}  |  exceptions: {len(eng.exceptions)}"
           f"  |  files skipped: {len(skipped)}")

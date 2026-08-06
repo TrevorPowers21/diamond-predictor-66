@@ -1,0 +1,10 @@
+{
+ "season": 2026,
+ "constants_version": "D1_2026_v1",
+ "engine_version": "drs-engine-0.11.0",
+ "unit": "framing park effect (runs) per called-pitch chance",
+ "extreme_flag_abs": 0.0,
+ "park_effects": {
+  "777227008": 0.0
+ }
+}

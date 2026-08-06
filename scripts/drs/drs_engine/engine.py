@@ -129,6 +129,9 @@ class DRSEngine:
         self.expected_pbwp = defaultdict(float)   # catcher key -> sum
         self.actual_pbwp = defaultdict(int)
         self.err_rates = {}              # (group_traj) -> expected error cost per engagement (run())
+        self.frame_cv = defaultdict(lambda: [0.0, 0])   # (catcher_key, venue) -> [Σ framing val, n]
+        self.park_effects = {}           # venue -> framing park effect per chance (audit, run())
+        self._frame_ss = 0.0; self._frame_n = 0   # Σ val², n — per-chance noise σ² for EB shrink
 
     # ---------- RE24 base-out lookups (state-specific advancement) ----------
     def _re(self, o1, o2, o3, outs):
@@ -214,13 +217,18 @@ class DRSEngine:
         p = row["_probSL"]
         cls = framing_class(pr)
         if p is not None:
+            val = None
             if cls == "STRIKE":
-                a.framing_runs += (1.0 - p) * C.RUNS_PER_STRIKE
-                a.taken_pitches += 1
+                val = (1.0 - p) * C.RUNS_PER_STRIKE
             elif cls == "BALL":
-                a.framing_runs -= p * C.RUNS_PER_STRIKE
+                val = -p * C.RUNS_PER_STRIKE
+            if val is not None:
+                a.framing_runs += val
                 a.taken_pitches += 1
-            elif cls == "UNKNOWN":
+                cv = self.frame_cv[(ck, row.get("gameVenueId"))]   # for venue de-confounding
+                cv[0] += val; cv[1] += 1
+                self._frame_ss += val * val; self._frame_n += 1
+            if cls == "UNKNOWN":
                 # Fix #3: never silently drop a pitch the framing model doesn't
                 # recognize — surface it for the weekly vocab review.
                 self.exceptions.append(Exception_(row.get("uniqPitchId", "?"),
@@ -688,6 +696,63 @@ class DRSEngine:
             a = self.acc[ck]
             raw_gap = exp - self.actual_pbwp.get(ck, 0)
             a.blocking_runs = (raw_gap - league_gap * a.pitches_caught) * C.RUNS_PER_PBWP
+
+        # finalize FRAMING — venue de-confounding via a 2-way (catcher x park) decomposition.
+        # framing_val/chance ~ catcher_skill + park_effect. Solve by alternating chance-weighted
+        # means (visiting catchers pin each park, de-confounding the home catcher whose skill and
+        # park are otherwise collinear), then anchor avg catcher skill = 0. Both the +970 league
+        # offset AND the park variation leave via the park term; each catcher keeps only park-free,
+        # vs-average skill (elite framers stay -- r=0.59 says skill travels; extreme-park catchers
+        # come down to what travels). Naive "residual vs own baseline" is zero-sum per catcher and
+        # cannot do this. Park effects stored for audit + extreme-park flagging.
+        if self.frame_cv:
+            park = defaultdict(float); catcher = defaultdict(float)
+            for _ in range(15):   # alternating means; converges geometrically on a connected design
+                cn = defaultdict(lambda: [0.0, 0.0])
+                for (ck, ven), (s, nn) in self.frame_cv.items():
+                    cn[ck][0] += s - park[ven] * nn; cn[ck][1] += nn      # Σ(val - park)
+                catcher = {ck: (num / den if den else 0.0) for ck, (num, den) in cn.items()}
+                vn = defaultdict(lambda: [0.0, 0.0])
+                for (ck, ven), (s, nn) in self.frame_cv.items():
+                    vn[ven][0] += s - catcher[ck] * nn; vn[ven][1] += nn  # Σ(val - skill)
+                park = {ven: (num / den if den else 0.0) for ven, (num, den) in vn.items()}
+            # EMPIRICAL-BAYES shrinkage of park effects by VISITOR sample. A park is identified by
+            # catchers who play elsewhere too (visitors); the home catcher is collinear with his park.
+            # An unshrunk effect applies the noisiest estimate at full strength on the least-identified
+            # catchers -- so shrink each park toward 0 by how thinly its visitors pin it. Every other
+            # estimator in the engine shrinks by sample; this one must too. shrunk = raw * n_v/(n_v+K),
+            # K = σ²/τ² (per-chance noise over between-park signal variance).
+            vtot = defaultdict(float); vhome = defaultdict(float)
+            for (ck, ven), (s, nn) in self.frame_cv.items():
+                vtot[ven] += nn
+                if nn > vhome[ven]: vhome[ven] = nn   # home catcher = largest-sample catcher at venue
+            visitor_n = {ven: max(0.0, vtot[ven] - vhome[ven]) for ven in vtot}
+            sigma2 = self._frame_ss / self._frame_n if self._frame_n else 0.0    # per-chance noise
+            N = sum(vtot.values()) or 1.0
+            pmean = sum(park[v] * vtot[v] for v in park) / N
+            obs_var = sum(vtot[v] * (park[v] - pmean) ** 2 for v in park) / N
+            samp = sum(vtot[v] * (sigma2 / visitor_n[v]) for v in park if visitor_n[v] > 0) / N
+            tau2 = max(obs_var - samp, obs_var * 0.05)   # true between-park variance (floor to avoid /0)
+            K = sigma2 / tau2 if tau2 > 0 else 1e9
+            park = {v: park[v] * (visitor_n[v] / (visitor_n[v] + K) if visitor_n[v] > 0 else 0.0)
+                    for v in park}
+            # re-solve catcher skill against the SHRUNK parks (the home catcher reabsorbs what a
+            # thinly-pinned park no longer claims), then anchor avg catcher skill -> 0.
+            cn = defaultdict(lambda: [0.0, 0.0])
+            for (ck, ven), (s, nn) in self.frame_cv.items():
+                cn[ck][0] += s - park[ven] * nn; cn[ck][1] += nn
+            catcher = {ck: (num / den if den else 0.0) for ck, (num, den) in cn.items()}
+            ctaken = defaultdict(float)
+            for (ck, ven), (s, nn) in self.frame_cv.items():
+                ctaken[ck] += nn
+            tot = sum(catcher[ck] * ctaken[ck] for ck in catcher)
+            den = sum(ctaken.values())
+            cmean = tot / den if den else 0.0
+            for ck in catcher:
+                a = self.acc.get(ck)
+                if a is not None:
+                    a.framing_runs = (catcher[ck] - cmean) * a.taken_pitches
+            self.park_effects = {ven: round(v, 6) for ven, v in park.items()}
 
         # finalize throwing
         cs_rate = self.fx["cs_rate"]
