@@ -685,3 +685,56 @@ probe: a missing table returns `error.code = PGRST205`, NOT a null count with no
 don't infer existence from a head-count. (d) Destination-invariance shows up as an un-deduped
 `total_hitter_war` leaderboard stacking ONE player's transfer-destination rows (d/bsr identical, only
 o_war varies) — correct stored data, needs per-player dedupe for display.
+
+## PUSH 1 SHIPPED TO PROD — execution + provenance (2026-08-07, → defense-and-drs + process)
+
+Push 1 (dRS/wSB + composite at ÷10 additive) is LIVE + verified on prod, and the code is on `main`
+(`feature/defensive-runs-engine` → `staging` #169 → `main` #170). Durable lessons from the prod push:
+
+- **Aggregates are CALCULATED into each env, never COPIED — staging and prod player UUIDs DIFFER.**
+  `player_season_defense`/`baserunning` are keyed on `players.id` (uuid), and the same `source_player_id`
+  maps to a DIFFERENT uuid on staging vs prod (verified: fec2e47f≠9786e452). So a staging→prod table copy
+  would inject uuids that don't exist in prod's `players` → broken FKs / wrong players. The right path is
+  `load-drs-wsb-prod.ts` (a prod-pointed clone of the staging loader): read the engine-output CSVs (keyed on
+  `source_player_id`), resolve to PROD's own uuids, upsert. Trevor caught this when I first proposed a copy —
+  "are we sure it's a copy or are we uploading the same way?" *Protects against:* cross-env uuid corruption,
+  and the subtler "prod just mirrors staging" anti-pattern. dRS→dWAR and wSB→bsrWAR ARE computed on prod
+  (`refresh_composite_war`); only the pitch_log→DRS-components step is still offline (Push 3 rewires it).
+- **"Calculated, not copied" is Trevor's hard requirement — prod must be able to take in the pitch log and
+  produce accurate defensive metrics, not depend on staging.** So Push 1 also loads the COMPLETE DRS pitch
+  log into the prod `pitch_log` table (the widen), making it the source the aggregates rest on; Push 3 makes
+  the engine read that table so prod is fully self-sufficient (no offline CSV run). Same widen process as
+  staging: ALTER add attribution cols → temp table → `.env.production.local` loader → batched
+  `backfill_pitch_log_attr_batch` driver (25k/call, ~105 calls) → dedup + UNIQUE. Prod matched staging
+  EXACTLY (with_atbat 685,942 / with_shortstop 2,575,699 / with_hangtime 325,017 / with_runs 2,576,146).
+- **Prod ownership gotcha: `ALTER TABLE` inside a service-role rpc fails `must be owner of table`.** `pl_finish`
+  ran fine on staging (service role had rights) but on prod the service-role-invoked function can't ALTER
+  `pitch_log` — run the dedup + `ADD CONSTRAINT UNIQUE` directly in the SQL editor (owner), or make the
+  function `SECURITY DEFINER`. The function is atomic, so the failed call changed nothing. *Protects against:*
+  assuming staging grants == prod grants.
+- **Cross-env VERIFICATION is a per-player checksum, not a vibe.** Confirmed prod ≡ staging by matching
+  `d_war`/`bsr_war` per `source_player_id`: 5,093 defense + 10,406 baserunning IDENTICAL, 0 differ; Σdrs_floor
+  721.819 vs 721.814 (the 0.005 = 11 unresolved defensive-only residuals). Say "matches" only with the diff.
+- **Additive-first sequencing let the composite ship + preview-test WITHOUT any display risk.** Push 1 adds
+  `d_war`/`bsr_war`/`total_hitter_war` and populates them, but `oWAR`/`pWAR`/`market_value` and every DISPLAY
+  are untouched — the `o_war→total_hitter_war` swap is Push 2. So merging the code is a "no rendered change"
+  event, verified by inspecting the actual frontend diff (war.ts = constant-extraction refactor with UNCHANGED
+  values; savant components = same hex colors moved to shared imports; new tailwind tokens used by 0
+  components). The Vercel PREVIEW points at PROD Supabase, so the composite is testable pre-merge.
+- **Git flow is feature → staging → main, NEVER feature → main (corrected mid-push).** I opened the PR straight
+  to main; Trevor: "we need to push this branch from feature to staging." Re-targeted the PR base to `staging`
+  (feature→staging), merged, then a `staging→main` PR for the promotion (Trevor drives the final merge). Also:
+  `staging` reads "N behind main" purely from staging→main MERGE COMMITS that live only on main — cosmetic, no
+  missing code; it self-heals when the next feature branch (which merged main in) lands on staging.
+- **Edge-fn deploy is separate from the git merge and must follow the schema.** Deployed with an explicit
+  `--project-ref trbvxuoliwrfowibatkm`, target verified in the output. Deployed AFTER the prod migrations so
+  the composite function/columns exist (the fn's `refresh_composite_war()` call is non-fatal either way). Did
+  NOT trigger precomputes on prod — Trevor: "don't run all of it, just what's necessary to add; we run the
+  precomputes on our next branch." So the recurring composite refresh activates when Push 2 re-precomputes.
+
+**Push 2 is planned + documented** (`docs/PUSH2_RECALIBRATION_PLAN.md`): centralize the 7 copy-pasted oWAR
+formulas (+ reconcile the edge-fn vs war.ts pWAR-constant divergence — 7.11/1.5 vs 5.5/2.5 → one D1 set) →
+flip `RUNS_PER_WIN 10→13.1` etc. + `refresh_composite_war` `/10→/13.1` → `o_war→total_hitter_war` display
+swap (`pickHitterWar`/`pickPitcherWar`) → re-precompute → reseed `team_war_snapshots` → repoint market value
+at total WAR. Push 3 = engine computes aggregates FROM the pitch_log table (self-sufficiency). Deferred:
+Playwright e2e harness (Supabase auth fixture + smoke spec).
