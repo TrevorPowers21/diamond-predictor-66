@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import AreaToggle from "@/components/AreaToggle";
+import { useBuildVersionCheck } from "@/hooks/useBuildVersionCheck";
 import { LogOut, Menu, LayoutDashboard, Users, BarChart3, ClipboardList, FlaskConical, Target, Wallet, FileText, ChevronRight, Settings } from "lucide-react";
 
 const NAV = [
@@ -30,6 +31,11 @@ export default function GMLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Front office renders GMLayout rather than DashboardLayout, so it needs the
+  // stale-build check wired separately — these are the routes that surfaced the
+  // problem in the first place.
+  useBuildVersionCheck();
 
   useEffect(() => {
     setSidebarOpen(false);
