@@ -1,12 +1,11 @@
 import { useState } from "react";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
+
 import {
   runBreakingBallReclassification,
   type ReclassificationReport,
 } from "@/savant/lib/breakingBallReclassification";
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
 
 function StatBox({ label, value }: { label: string; value: string | number }) {
   return (

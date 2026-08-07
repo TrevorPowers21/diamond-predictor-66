@@ -8,11 +8,10 @@ import VeloDiffRunner from "@/savant/components/VeloDiffRunner";
 import StuffPlusRunner from "@/savant/components/StuffPlusRunner";
 import ConferenceStuffPlusRunner from "@/savant/components/ConferenceStuffPlusRunner";
 import ConferenceStuffPlusV2Runner from "@/savant/components/ConferenceStuffPlusV2Runner";
+import { NAVY_BG, NAVY_CARD, GOLD } from "@/savant/lib/theme";
 
-const NAVY_BG = "#040810";
-const NAVY_CARD = "#0a1428";
+
 const NAVY_BORDER = "#162241";
-const GOLD = "#D4AF37";
 
 const fmtPct = (v: number) => `${v.toFixed(1)}%`;
 const fmt1 = (v: number) => v.toFixed(1);

@@ -1569,6 +1569,26 @@ function pitcherDepthFromIp(ip: number | null, role: "SP" | "RP"): string {
   return "low_impact_reliever";
 }
 
+// Serialize build-player meta into the production_notes JSON blob — matches the app's
+// serializeBuildPlayerMeta / `__team_builder_metrics_v1` format (src/pages/team-builder/helpers.ts).
+// The default build was WRONGLY writing rosterStatus/depthRole/classTransition/devAggressiveness
+// (+ the *_overridden flags) as top-level COLUMNS on team_build_players — those columns don't exist
+// (in staging OR prod); this state belongs INSIDE this blob, read back via parseBuildPlayerMeta.
+function buildPlayerMetaJson(rosterStatus: string, depthRole: string | null): string {
+  return JSON.stringify({
+    __team_builder_metrics_v1: true,
+    notes: null, metrics: null, power: null,
+    rosterStatus,
+    depthRole: depthRole ?? null,
+    classTransition: "same",
+    devAggressiveness: 0,
+    classTransitionOverridden: false,
+    devAggressivenessOverridden: false,
+    transferSnapshot: null, localPlayer: null,
+    projectionTier: null, nilValueOverridden: false,
+  });
+}
+
 async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string): Promise<{ buildId: string; rows: number } | null> {
   const academicYear = PROJECTION_SEASON_FOR_DEFAULT;
 
@@ -1580,23 +1600,34 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
     .maybeSingle();
   if (!ct) return null;
 
-  // Resolve abbreviation from Teams Table for player matching
+  // Resolve abbreviation (display) + source_id (roster match) from Teams Table.
   let schoolName = ct.name;
+  let toSourceId: string | null = null;
   if ((ct as any).school_team_id) {
     const { data: ttRow } = await supabase
       .from("Teams Table")
-      .select("abbreviation, full_name")
+      .select("abbreviation, full_name, source_id")
       .eq("id", (ct as any).school_team_id)
       .maybeSingle();
-    if (ttRow) schoolName = (ttRow as any).abbreviation || (ttRow as any).full_name || ct.name;
+    if (ttRow) {
+      schoolName = (ttRow as any).abbreviation || (ttRow as any).full_name || ct.name;
+      toSourceId = (ttRow as any).source_id != null ? String((ttRow as any).source_id) : null;
+    }
   }
 
-  // Load returner players (not in portal)
-  const { data: returners } = await supabase
+  // Load returner players (not in portal). Match by source_team_id — the canonical
+  // linkage the precompute uses. The `team` TEXT column can hold the full name while
+  // schoolName is the abbreviation, so an ILIKE on `team` matched 0 returners and
+  // silently returned null (no default build) — e.g. UCSB: team="UC Santa Barbara"
+  // vs schoolName="UCSB". Fall back to the name match only if source_id is missing.
+  let returnerQuery = supabase
     .from("players")
     .select("id, first_name, last_name, position, is_twp, class_year, pa, ip, team, conference")
-    .ilike("team", schoolName)
     .eq("transfer_portal", false);
+  returnerQuery = toSourceId
+    ? returnerQuery.eq("source_team_id", toSourceId)
+    : returnerQuery.ilike("team", schoolName);
+  const { data: returners } = await returnerQuery;
   if (!returners || returners.length === 0) return null;
 
   const playerIds: string[] = returners.map((p: any) => p.id);
@@ -1663,19 +1694,15 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: customName,
         position_slot: p.position && !isPitcherPos(p.position) ? p.position : null,
-        depth_order: 1, nil_value: 0, production_notes: null, roster_status: "returner",
-        class_transition: "same", dev_aggressiveness: 0,
-        class_transition_overridden: false, dev_aggressiveness_overridden: false,
-        depth_role: hDepth,
+        depth_order: 1, nil_value: 0,
+        production_notes: buildPlayerMetaJson("returner", hDepth),
         player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: customName,
         position_slot: pRole,
-        depth_order: 1, nil_value: 0, production_notes: null, roster_status: "returner",
-        class_transition: "same", dev_aggressiveness: 0,
-        class_transition_overridden: false, dev_aggressiveness_overridden: false,
-        depth_role: pDepth,
+        depth_order: 1, nil_value: 0,
+        production_notes: buildPlayerMetaJson("returner", pDepth),
         player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, market_value: pPred.twp_pitcher_market_value ?? pPred.market_value } : null,
       });
     } else if (isPitcher) {
@@ -1683,20 +1710,16 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
       const pDepth = validPitcherDepths.includes(pPred?.pitcher_depth_role) ? pPred.pitcher_depth_role : pitcherDepthFromIp(p.ip ?? null, pRole);
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: `${p.first_name || ""} ${p.last_name || ""}`.trim() || null,
-        position_slot: pRole, depth_order: 1, nil_value: 0, production_notes: null, roster_status: "returner",
-        class_transition: "same", dev_aggressiveness: 0,
-        class_transition_overridden: false, dev_aggressiveness_overridden: false,
-        depth_role: pDepth,
+        position_slot: pRole, depth_order: 1, nil_value: 0,
+        production_notes: buildPlayerMetaJson("returner", pDepth),
         player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, pitcher_depth_role: pPred.pitcher_depth_role, market_value: pPred.market_value } : null,
       });
     } else {
       const hDepth = validHitterDepths.includes(hPred?.hitter_depth_role) ? hPred.hitter_depth_role : hitterDepthFromPa(p.pa ?? null);
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: `${p.first_name || ""} ${p.last_name || ""}`.trim() || null,
-        position_slot: p.position ?? null, depth_order: 1, nil_value: 0, production_notes: null, roster_status: "returner",
-        class_transition: "same", dev_aggressiveness: 0,
-        class_transition_overridden: false, dev_aggressiveness_overridden: false,
-        depth_role: hDepth,
+        position_slot: p.position ?? null, depth_order: 1, nil_value: 0,
+        production_notes: buildPlayerMetaJson("returner", hDepth),
         player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
     }
@@ -1828,6 +1851,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const result = await runPrecomputeForTeam(supabase, job.customer_team_id, job.scope, sourcePlayerIds);
+
+    // Composite WAR (dWAR + bsrWAR → total_hitter_war) is CENTRALIZED: one D1 bulk join over
+    // player_predictions, so it tracks the fresh o_war without touching the legacy master path.
+    // d/bsr are destination-invariant (player-level). Runs before the default-build refresh below
+    // (which reads predictions). Non-fatal if it fails — o_war is still written.
+    try {
+      const { error: cwErr } = await supabase.rpc("refresh_composite_war");
+      if (cwErr) console.error("refresh_composite_war failed (non-fatal):", cwErr.message);
+    } catch (cwErr: any) {
+      console.error("refresh_composite_war threw (non-fatal):", cwErr);
+    }
 
     await supabase
       .from("precompute_jobs")

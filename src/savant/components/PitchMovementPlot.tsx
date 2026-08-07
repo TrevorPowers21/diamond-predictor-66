@@ -18,9 +18,9 @@
 import { useMemo, useState } from "react";
 import type { PitchLocationRow } from "@/savant/hooks/usePitchLogPitchLocation";
 import { NCAA_MOVEMENT_AVERAGES, PITCH_TYPE_COLOR } from "@/savant/lib/pitchLocationHelpers";
+import { NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const GOLD = "#D4AF37";
-const NAVY_BORDER = "#1f2d52";
+
 
 interface PitchMovementPlotProps {
   pitches: PitchLocationRow[];

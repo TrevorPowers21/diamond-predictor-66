@@ -16,6 +16,8 @@
  */
 import { useMemo, useState } from "react";
 import type { PitchLocationRow } from "@/savant/hooks/usePitchLogPitchLocation";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
+
 import {
   PITCH_TYPE_COLOR,
   VIEW_PXNORM_MAX,
@@ -29,9 +31,6 @@ import {
 } from "@/savant/lib/pitchLocationHelpers";
 
 // Design tokens — see design-system/rstr-iq/MASTER.md
-const GOLD = "#D4AF37";
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
 
 interface StrikeZonePlotProps {
   /** Per-pitch rows. Plot ignores rows where px_norm or pz_norm is null. */

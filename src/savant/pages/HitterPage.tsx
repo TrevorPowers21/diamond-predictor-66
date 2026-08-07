@@ -19,6 +19,8 @@ import { assessHitterRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardSavant } from "@/components/RiskAssessmentCard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
+import { NAVY_BG, NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
+
 
 const fmt3 = (v: number) => v.toFixed(3);
 const fmt1 = (v: number) => v.toFixed(1);
@@ -35,10 +37,6 @@ const wrcPlusOf = (r: {
   ISO: number | null;
 }): number | null => computeWrcPlus(r.AVG, r.OBP, r.SLG, r.ISO);
 
-const GOLD = "#D4AF37";
-const NAVY_BG = "#040810";
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
 
 interface BarConfig {
   label: string;

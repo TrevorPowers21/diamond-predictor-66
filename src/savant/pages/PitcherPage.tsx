@@ -17,16 +17,14 @@ import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardSavant } from "@/components/RiskAssessmentCard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
+import { NAVY_BG, NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
+
 
 const fmt2 = (v: number) => v.toFixed(2);
 const fmt1 = (v: number) => v.toFixed(1);
 const fmtPct = (v: number) => `${v.toFixed(1)}%`;
 const fmtInt = (v: number) => `${Math.round(v)}`;
 
-const NAVY_BG = "#040810";
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
 
 interface BarConfig {
   label: string;

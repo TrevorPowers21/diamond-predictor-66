@@ -1,8 +1,7 @@
 import type { SavantHitterRow } from "@/savant/hooks/useSavantHitters";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
+
 
 const fmtInt = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v)}`);
 

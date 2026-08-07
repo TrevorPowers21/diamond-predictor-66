@@ -15,9 +15,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { Plus, Trash2, ChevronUp, ChevronDown, RotateCcw, Save } from "lucide-react";
+import { GOLD } from "@/savant/lib/theme";
+
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
-const GOLD = "#D4AF37";
 const TYPES = [{ key: "hitter", label: "Hitters" }, { key: "pitcher", label: "Pitchers" }, { key: "twp", label: "Two-Way" }] as const;
 const FIELD_TYPES: { value: ScoutFieldType; label: string }[] = [
   { value: "grade", label: "Grade" }, { value: "text", label: "Free Text" }, { value: "velo", label: "Velocity" },
