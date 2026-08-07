@@ -9,7 +9,11 @@ Supabase MCP exists for **reads and schema introspection only**:
 - ✅ `SELECT`, `EXPLAIN`, listing tables/columns/indexes/policies, reading RLS advisories, checking row counts, verifying a migration landed
 - ❌ `INSERT` / `UPDATE` / `DELETE` / `TRUNCATE`, DDL of any kind, `ALTER POLICY`, running migration files, invoking edge functions that write
 
-**All writes come to Trevor as raw SQL to paste.** Never as a TypeScript script for an agent to run, never through an MCP write tool, never "just this once because it's small." Hand over the SQL text and stop.
+**The gate on a write is that it was talked through first — not who runs it.** After that, execution is assigned per task: Trevor pastes some, the agent runs others. Bigger multi-statement work tends to go to the agent, because hand-pasting a long migration is the more error-prone path, not the safer one. This applies to staging and prod alike.
+
+**When the agent executes a write, it goes through the repo's scripted migration path, never through MCP.** That is where the ritual lives — dry-run, apply, verify the objects exist via the catalog, brief the operator. An MCP write returns a bare success with no catalog verification, which is exactly the `exec_sql OK` trap that lost `gm_contract` on prod. Keeping MCP read-only isn't caution for its own sake; it routes writes through the path that has the verification.
+
+**What never changes:** no write happens without being talked through first. Not "just this once because it's small."
 
 **Both databases are connected, read-only, as two separately named servers:**
 
@@ -25,9 +29,9 @@ Both carry `read_only=true` and `features=database,docs`, each pinned to its own
 **Naming is the safety mechanism.** Every tool call carries its database in the server name, so `verify-target-db` is satisfied by the call itself rather than by anyone remembering which one is live. State the target out loud anyway.
 
 Other scoping rules:
-- The 34 `:prod` npm scripts (`import:prod`, `precompute-*:prod`, `lock-season:prod`, `prod_wipe_and_reprecompute`, …) are **human-run only**. An agent may draft the command and explain it; it does not execute it.
-- Prod writes additionally require an explicit "prod, now?" confirmation from Trevor. An ambiguous "go ahead" is not that confirmation.
-- Deploy and branching tool groups stay off on both.
+- The 34 `:prod` npm scripts (`import:prod`, `precompute-*:prod`, `lock-season:prod`, `prod_wipe_and_reprecompute`, …) still get talked through before anyone runs them, in either direction. `prod_wipe_and_reprecompute` in particular does what its name says.
+- Deploy and branching tool groups stay off on both MCP servers.
+- **This document is point-in-time.** Where it and a recent conversation disagree, the conversation wins — update this and note what it supersedes. Two claims here were already wrong once: that prod wasn't connected, and that every write always comes to Trevor as paste-SQL. Both were agent inferences that never matched the actual process.
 
 **Why this rule is written down rather than assumed:** read-only mode constrains the tool, not the workflow. Once schema access makes SQL easy to write correctly, convenience quietly pressures the human-paste step out of existence — one small write at a time. The boundary has to be explicit to survive that pressure.
 

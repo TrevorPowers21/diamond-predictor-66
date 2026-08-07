@@ -1,6 +1,16 @@
 # Knowledge — DB Safety & Process
 
-> Bootstrap draft, 2026-07-20. Drafted by the agent from session memory + the GM launch. **Trevor: react/correct — every record is `draft` until you confirm.**
+> Originally a bootstrap draft, 2026-07-20, drafted by the agent from session memory and the GM
+> launch. Records marked `confirmed` have been through the react-and-correct loop with Trevor.
+
+> **The most recent conversation is the truth.** These records are point-in-time. Processes change,
+> and a record can be correctly confirmed and later superseded — or can have captured a
+> misinterpretation that only surfaced when it was applied. When a record and a recent conversation
+> disagree, the conversation wins; update the record and note what it supersedes rather than leaving
+> both standing. `confirmed` means "confirmed when written," not "still true."
+>
+> *(Principle added 2026-08-07, after two records were found stale: the merge rule had been
+> broadened and a prod-connection claim was an agent inference that never matched Trevor's process.)*
 
 ---
 
@@ -46,10 +56,19 @@
 
 ### trevor-clicks-merges: Trevor clicks the final merge on every PR
 - **Rule:** The agent preps every PR up to mergeable/green (conflicts resolved, checks passing) and hands it off — **Trevor clicks merge.** Applies to ALL merges, feature→staging and staging→main alike, not just prod. Don't merge a PR unless Trevor explicitly says merge it now.
-- **Why / protecting against:** Trevor keeps the final call on what actually lands, at every step. The agent does the prep; the human pulls every trigger.
-- **Scope:** All PR merges.
+- **Why / protecting against:** **Not a permission lock — a verification step.** The Vercel PR preview runs on the PROD database, so clicking merge is the moment Trevor has actually loaded the pages and confirmed they work against real user data before anything reaches prod and breaks something. The click is where that check happens; treating it as an approval gate misses the point of it.
+- **Scope:** All PR merges. The agent preps and hands off; it does not enforce this against Trevor or narrate it as a blocker.
 - **Supersedes:** the prod-only "trevor-drives-prod-merge" version.
-- **Origin:** 2026-07-17 (agent merged #153) + broadened by Trevor 2026-07-20 ("I prefer to make the click on everything").
+- **Origin:** 2026-07-17 (agent merged #153) + broadened by Trevor 2026-07-20 ("I prefer to make the click on everything") + reason clarified 2026-08-07.
+- **Status:** confirmed
+
+### write-execution-is-per-task: Talked through first; either party can run it
+- **Rule:** The gate on a DB write is that it was **talked through first** — not who executes it. After that, execution is assigned per task: Trevor pastes some, the agent runs others. Bigger multi-statement work tends to go to the agent, since hand-pasting a long migration is the more error-prone path. Applies to staging and prod alike.
+- **Why / protecting against:** An earlier version of this rule said every write, always, comes to Trevor as raw SQL to paste, with prod additionally requiring a specific confirmation phrase. That was stricter than the actual process and got the risk backwards — it pushed the largest, most failure-prone migrations into the least reliable execution path.
+- **Scope:** All DB writes, both databases.
+- **How it interacts with MCP:** MCP stays `read_only=true` on both servers. When the agent executes a write it goes through the repo's scripted migration path, not MCP — because `migration-ritual` and `catalog-not-postgrest` live there. An MCP write would return a bare success with no catalog verification, which is the `exec_sql OK` trap that lost `gm_contract` on prod.
+- **Supersedes:** the absolute "all writes come to Trevor as raw SQL to paste" phrasing, and the "prod writes require the literal phrase *prod, now?*" phrasing.
+- **Origin:** 2026-08-07 (Trevor: "sometimes I run them, sometimes for bigger stuff you run it — we have done both").
 - **Status:** confirmed
 
 ### migration-ritual: Dry-run → apply → verify-after → brief the operator
