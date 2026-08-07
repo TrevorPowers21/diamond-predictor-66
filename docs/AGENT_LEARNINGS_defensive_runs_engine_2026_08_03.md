@@ -466,3 +466,222 @@ debits are baked (engine v0.8.0, fixtures stamped). Acceptance test (all four IF
 per-chance 3B still widest, IF p90 positive) is IN PROGRESS — not recorded as confirmed until the run
 lands and is read against the pre-registered band. Then: telescope re-cert (also proves fractional debits
 conserve — shares sum to 1 per spray bin), goldens, staging.
+
+## dRS SETTLED STATE — v0.11.0, ledger fully centered + composite staged (2026-08-06, → defense-and-drs)
+
+The whole arc landed. What we settled on, after a LOT of energy proving each piece:
+
+**The three-function grounder architecture (v0.8.0):** g(xAVG,spray) prices the ball (how hard),
+reach-shares assign the blame (whose ball — fractional, RUN-weighted out-conversion share so credit
+and debit distribute by the same measure), putout chains assign the credit (who took it, individual).
+P/C comebacker fielding relocated OUT of the dWAR pool to `pitcher_fielding` (no hit lane routes to
+them). Grounder xAVG recalibrated for the ROE convention (BA counts reached-on-error as an out; our
+ledger excludes ROE) + spray-region offsets. Fixtures: grounder_calibration.json, reach_shares.json.
+
+**Per-position centering as the UNIFORM rule (v0.10.0):** the deepest lesson. Four components in a
+row (grounder pool skim, seam transfer, engagement blend, DP baseline) were all the SAME disease —
+**league-centered but not position-centered.** The league sum was zero the entire time each
+per-position bias existed, so the tripwire was at the wrong grain for four bugs. Fix the CLASS: every
+component entering dWAR centers per position (dp per-position rate; range-air/arm/bunt de-meaned per
+position by exposure; errors per position×trajectory with engagement = out-chain membership OR an E
+charge, hands conditioned on REACH). Positional residue removed = market-layer info (scarcity, exiled
+to market valuation on purpose). `check_position_grain.py` asserts per-position sums IN THE SUITE so
+the class can't recur silently — that's the "finished ledger" in the strongest sense.
+
+**Framing centered (v0.11.0), the last component:** 2-way catcher×park decomposition
+(framing/chance ≈ catcher_skill + park_effect, alternating chance-weighted means, avg-catcher-skill=0)
+removes the +970 model offset AND per-park TrackMan miscalibration; each catcher keeps park-free
+vs-average skill. Elite framers stay (r=0.59 home/road says the skill travels). Park effects EMPIRICAL-
+BAYES SHRUNK by visitor sample (K=σ²/τ²) — the unshrunk 2-way applies its noisiest estimates at full
+strength on the least-identified (home/park-collinear) catchers; every other estimator shrinks by
+sample, so this one must too. Naive "residual vs own baseline" is zero-sum per catcher and can't
+remove the offset — that trap cost a cycle to avoid. Fixture: park_effects.json.
+
+**Result:** telescope closes ALL the way down (drs_total → +8 blocking residual only) for the first
+time. Positional hierarchy EMERGED unprogrammed and correct: C(framing) +3.3 > SS +1.3 > 2B/CF +0.7-1.1
+> 3B +0.7-0.9 > RF/LF +0.4 > 1B +0.3 > P ~0. The regressed drs_floor mean tilts slightly + at
+high-variance positions (SS +0.23) — CORRECT shrinkage (good SS play more, shrink less), NOT de-meaned:
+the raw ledger is where zero-sum lives, the floor is where per-player honesty lives, and a population
+of individually-honest estimates need not average to zero.
+
+**Composite (hitter-side, TWP-safe):** d_war and bsr_war are HITTER-context (mirror twpMarketValue's
+pickHitter/pickPitcher). Position player = o+d+bsr; pitcher = p (untouched); TWP = two slots. total_war
+= o+p+d+bsr (aggregate, the sumTwp analog). d_war = Σ NON-P drs_floor / rpw. Currently on the INTERIM
+÷10 scale (D1 ÷13.1 is a later push). Staged + verified on staging player_predictions.
+
+**Process discipline that carried it (the transferable part):** pre-register predictions+tolerances
++GRAIN before every run; stop on surprise; never trade a named bug for an unnamed one; show the board
+read-only before writing. "Zero looks like done" — league-grain acceptance would have shipped SS
+−1,141 and four position biases. See [[feedback_predictions_on_record_at_right_grain]].
+
+Commits: d8c7e03 (grounder), 7d0e2c3 (per-position class fix), e12699e (framing + EB). Versions stamped
++ constants_version stale-guarded on grounder_calibration/reach_shares fixtures.
+
+## Composite WAR + the pitch-log migration (2026-08-06, → defense-and-drs + process)
+
+The dRS/wSB output feeds a COMPOSITE WAR. Durable decisions (full plan: docs/HANDOFF-WAR-PITCHLOG-MIGRATION.md):
+
+- **Columns:** `o_war` (bat), `d_war` (Σ NON-P drs_floor / rpw), `bsr_war` (wSB / rpw), `p_war` (pitch,
+  UNCHANGED). **`total_hitter_war = o+d+bsr`** — renamed from a blended `total_war`. Side-specific NAME
+  is the whole trick: a TWP fills it with its HITTER side, no blend, no NULL guard; pitcher side stays
+  `p_war`. A blended `o+p+d+bsr` was rejected — it breaks the TWP 2-profiles/2-lines/2-market-values.
+  No separate "TWP oWAR" exists: a TWP's hitter WAR is just `o_war`. Display swap: `o_war →
+  total_hitter_war` where oWAR is the HEADLINE (keep raw `o_war` where it's the batting COMPONENT of a
+  breakdown). Helpers `pickHitterWar`/`pickPitcherWar` mirror `pickHitter/PitcherMarketValue`.
+- **dWAR/bsrWAR are DESTINATION-INVARIANT** (defense/legs don't translate program-to-program like
+  oWAR does): same value on every prediction row for a player; only `o_war` varies. So a CENTRALIZED
+  `refresh_composite_war()` (D1 bulk join, one ÷scale knob) populates the composite on ALL D1 rows —
+  chosen over inline-per-generator to avoid the 7-copies sprawl.
+- **Toggle reaction (defers to a later build-layer pass):** `bsr` scales with PA/opportunities (all
+  tiers); `d` scales with defensive INNINGS which are FLAT across full-time tiers (everyday_starter ==
+  cornerstone for D), stepping down only for part-time roles; `dev aggressiveness` touches neither.
+  Position change → dWAR is position-specific (per-position rows exist in player_season_defense; a
+  never-played position needs a positional projection). Default (prev role/position, dev=0) = last
+  year's numbers unchanged, so the precompute is a no-op on the composite.
+- **Write-path reality:** google-sheets-sync DEAD; createPredictionsFromMaster LEGACY (Master
+  SUPERSEDED by the pitch log, kept as fallback/cross-check); JUCO precompute SEPARATE + master-based
+  (D1 changes do NOT touch it). One D1 pitch-log precompute (`process-precompute-jobs`) is the path.
+- **Push order (separate prod pushes, verify each):** 1) dRS/wSB + composite at ÷10 additive (oWAR/pWAR
+  unchanged) + edge fn recurring; 2) ONLY 10→13.1 + the oWAR→total_hitter_war display swap; 3)
+  big-export→pitch-log calc migration (powerRatings + edge fn); 4) TRANSFER-projection fallbacks
+  (returners already have them); 5) finalize 2027 → improved market values (+ positional scarcity,
+  exiled from dWAR, wired in the market layer). Pitch_log has 3,425 dupes by uniq_pitch_id to dedup on
+  staging before prod (dRS unaffected — normalize.py dedupes).
+
+## Push 1 staging execution + the pitch-log architecture correction (2026-08-06, → defense-and-drs + process)
+
+Building + verifying Push 1 on staging surfaced one infrastructure bug and one architecture correction
+that reshaped the whole pitch-log plan. Both are the durable kind.
+
+**refresh_composite_war() timed out on the API path but not in the SQL editor — the classic split.**
+The first draft rewrote all ~184k `player_predictions` rows every call. `select refresh_composite_war();`
+SUCCEEDED in the dashboard SQL editor (long/no statement_timeout) but the identical call via
+`supabase.rpc()` / the edge function FAILED with `57014 canceling statement due to statement timeout`
+(PostgREST's short per-request timeout). The edge function caught it as non-fatal and logged it, so the
+recurring composite silently never fired — looked deployed, did nothing. *Fix (two parts):* (1)
+`SET statement_timeout = '180000'` on the function so a bulk maintenance UPDATE gets room; (2)
+`WHERE ... IS DISTINCT FROM <computed>` so after the one-time populate a post-precompute run only
+rewrites the rows whose `o_war` actually moved (one team ≈ hundreds), not a full-table rewrite —
+dropped the rpc from timeout to ~710ms. *Protects against:* shipping a maintenance function that passes
+every editor test and dies on the API path; and full-table churn on a metric that only changes per-team.
+*General rule:* any DB function you'll call from an edge function / PostgREST must be tested THROUGH that
+path (statement_timeout differs), and a whole-table UPDATE wants a change-guard so re-runs are cheap.
+
+**The self-healing test is the way to prove a recurring wiring actually fires.** To confirm the edge
+function's refresh call runs (not just that data already looks right), CORRUPT a detectable delta then
+trigger the real path: null `total_hitter_war` on 12 rows across teams (NOT in the run's player scope) →
+fire a one-player precompute through the deployed function → confirm the GLOBAL refresh healed all 12.
+Because the refresh is global, healing rows outside the precompute's scope proves the refresh fired
+independent of what the precompute computed. Restore staging integrity afterward (heal any leftover
+nulls). *Protects against:* an idempotent re-run that can't distinguish "the function ran" from "nothing
+needed changing." Verify-in-DB, and make the test detect the mechanism, not the end-state.
+
+**PITCH-LOG ARCHITECTURE CORRECTION — the "DRS Pitch Log" export is ONE combined file, not two
+complementary halves.** The earlier model (from the 3-game reconciliation: "Standard carries atbatDesc
++ alignment; Pitch Log carries the tracking block; they're complementary") was SUPERSEDED by the
+full-season reality. The `docs/drs-reference/*.DRS Pitch Log.csv` files (30 files, full season, ~1.8GB)
+are a SINGLE export with BOTH halves — attribution (`atbatDesc`, full fielder alignment
+`FirstBaseman..RightFielder`, `ManOnFirst/Second/Third`, `SBA2/SBA3/SB2/SB3`, `pPBWP%`, `PopTime`,
+catcher-throw `CTimeToBase/CThrowBase/CExchTime/DelivTime`, `Runs`) AND tracking (`HangTime`, `xAVG`,
+`SprayAng`, `FBDst`, `ExitVel`, `LaunchAng`, `IVB`, `HB`, `Spin`, `pCallStrk%`). **This is THE pitch log**
+and it is what the engine ran off (v0.11.0, full season) — so the current staging
+`player_season_defense`/`baserunning` aggregates are built from the COMPLETE data and are FINAL, not
+provisional. *Protects against:* carrying a small-fixture data-model assumption into the production plan
+(the "two exports" belief nearly split Push 1 into a wrong sequence).
+
+**Trevor's architecture (the intent behind the plan): ONE `pitch_log` table = the single source of
+truth; ALL derived data (dRS/dWAR, bsrWAR, oWAR, power ratings) computes FROM it.** The CSV→Python path
+is an interim mechanism — "the end result is all the same" because the numbers are identical whether the
+engine reads a CSV or the table. Confirmed: the DB has exactly ONE pitch-log table (`pitch_log`,
+2,579,655 rows) — no separate DRS table to consolidate. But the table currently stores only the TRACKING
+half (`spray_ang`, `distance`, `x_avg`, `x_slg`, `x_woba`, `stuff_plus`, `exit_velocity`, `launch_angle`,
+`ivb`, `spin`, `extension`, `rel_height/side`, `pitch_zone`, `cs_prob`); it is MISSING the attribution
+half the engine consumes. So **Push 1's pitch-log component = widen, not reload** (Trevor: "add the
+necessary columns to what is already there"): `ALTER TABLE pitch_log ADD COLUMN` the missing attribution
+fields (`atbat_desc`, the 7 non-catcher fielder names, `man_on_first/second/third`, `sba2/sb2/sba3/sb3`,
+`p_pbwp_pct`, `prob_sl`, `p_call_strk_pct`, `pop_time`, catcher-throw, `hang_time`, `fb_dst`, `runs`),
+backfill from the drs-reference CSVs by `uniq_pitch_id`, then dedup to ONE row per `uniq_pitch_id` (the
+3,425 dupes are overlapping date-window files, e.g. `5.13-5.15` ∩ `5.15-5.21` share 5/15 — "the pitch
+still persists once, just not double-counted"). Rewiring the engine/edge-fn to READ the table directly
+is Push 3, since numbers are identical either way — Push 1 only requires the complete data be IN the
+table. *Protects against:* treating a column-widen as a risky reload, and re-deriving dWAR before the
+single source actually holds what dWAR needs.
+
+**TWO complementary pitch-log EXPORTS, not one — and the table was built from the other (danger).** Deeper
+than the "one combined file" correction above: there are two DIFFERENT TruMedia exports, each with extra
+columns the other lacks. (1) The "SprayAng+Distance re-export" (2026-06-24) loaded the `pitch_log` TABLE and
+carries the pitch-SHAPE metrics `Extension`/`RelHeight`/`RelSide`/`PZNorm`/`PXNorm`/`xSLG`/`xWOBA` — but NO
+attribution. (2) The "DRS Pitch Log" (drs-reference) carries attribution + `HangTime` + catcher-throw +
+`pCallStrk%` — but NOT those 7 shape columns. So `ingest_pitch_log.ts` (which upserts the FULL `PitchLogRow`
+on `uniq_pitch_id`) MUST NOT be re-run on the DRS export — it would NULL the shape columns the DRS file
+lacks. The widen backfill is therefore ADDITIVE (update only the new attribution columns by `uniq_pitch_id`),
+never a re-upsert. The permanent fix is a SINGLE combined export = DRS layout + the 7 shape columns; the full
+canonical column→db map is `docs/PITCH_LOG_COMBINED_EXPORT_SPEC.md` (request it once, never merge two files
+again). *Protects against:* a full-row upsert silently wiping columns absent from the file you're loading.
+
+**Two column-mapping traps found by cross-checking the importer + a live row:** (a) db `distance` == `FBDst`
+(verified value-for-value against the CSV), NOT the dead `dist` col — do not add a `fb_dst` duplicate. (b) db
+`cs_prob` actually holds `probSL` (importer line 325 maps `probSL → cs_prob` — a mislabel; it's the framing
+strike prob, already present) — do not add a `prob_sl` duplicate. Always diff proposed new columns against
+BOTH the importer's field map AND a real row before ALTER.
+
+**Dedup + UNIQUE(uniq_pitch_id) is the durable dupe fix (Trevor: "another safety check, perfect").** The
+importer's `onConflict: "uniq_pitch_id"` REQUIRES a unique index. Backfill executes via path (a): batch-load
+attribution into a temp table (`.env.local`), then a server-side `UPDATE pitch_log ... FROM tmp ... WHERE
+uniq_pitch_id` (CLI is prod-linked, so writes go through the staging SQL editor or a driven rpc).
+
+**UNIQUE(uniq_pitch_id) does NOT catch the real dupes — they're duplicate PHYSICAL pitches under DISTINCT
+ids (2026-08-07, self-corrected).** I first concluded "3,425 dupes was a misdiagnosis, zero dups" because
+`ADD CONSTRAINT UNIQUE(uniq_pitch_id)` SUCCEEDED (0 removed). WRONG — that only proves the *ids* are unique,
+which was never the question. The 2026-08-04 analysis (`project_pitch_log_dedup_cleanup`) already said the
+over-count is duplicate PHYSICAL pitches under *different* `uniq_pitch_id`s (overlapping window+residual
+imports) + internal junk. Verified: game 260318618 has 658 rows in the table but only 269 in the clean DRS
+export (~389 over-count), with malformed ids (`260318618-1-370` = at-bat 1 pitch 370, all-null data). So the
+over-count is REAL and a UNIQUE-on-id constraint is orthogonal to it. *Lesson:* "can a UNIQUE constraint be
+built?" answers "are the KEYS distinct?", NOT "are there duplicate real entities?" — don't let a passing
+constraint talk you out of a correct prior analysis. Reconcile a surprising result against existing careful
+findings BEFORE broadcasting a reversal (I over-claimed, then had to walk it back one message later).
+
+**Silver lining — the attribution backfill is itself a clean dedup selector.** Backfilling additively from
+the clean DRS export (one row per real pitch) sets `runs` (and the rest) on exactly the real pitches; the
+~3,509 rows left with `runs IS NULL` are the un-attributed set. UNIQUE(uniq_pitch_id) is a separate safety
+layer, not the over-count fix.
+
+**The "over-count" is mostly a COVERAGE gap, not duplication — and it's an INHERENT tracking limit
+(2026-08-07).** Drilling into the ~3,509 un-attributed rows: only ~829 are all-null junk/internal-dup (game
+260318618-style, malformed ids, pitchers already captured elsewhere). The other ~2,680 are REAL pitches from
+**79 pitchers on team-halves the DRS export never covered** (game 444179791: DRS has the Wisc-side 189, the
+Iowa-side 265 real pitches are absent). Content-matched 0/265 against attributed rows (NOT duplicates), and
+the 79 pitchers appear NOWHERE in the DRS export. **Test that settled it:** Trevor re-pulled the 4 affected
+dates (Feb 17/24, Mar 3/4) in full DRS format → **0 of the 79 captured.** They exist only in the basic Pitch
+Log layout (no fielder alignment), so they're UNTRACKED and dRS structurally cannot include them. *Lessons:*
+(1) a row-count "over-count" can be a coverage DIFFERENCE between two exports, not duplication — content-match
+before calling it dupes; (2) "certified 13454/13454" proves the aggregates match THE EXPORT, not that the
+export is COMPLETE — keep those claims separate; (3) when the domain has structural coverage limits (college
+≠ MLB TrackMan), quantify the gap, test whether it's recoverable, and if not, accept it explicitly rather
+than chasing it. Here it was 0.14% of pitches, unrecoverable → accepted, not a Push-1 blocker.
+
+**A >60s single SQL statement does NOT survive the Supabase editor's disconnect — batch it (2026-08-07).**
+The monolithic 2.5M-row `UPDATE ... FROM` failed TWICE in the SQL editor: "Failed to fetch" at the ~60s
+gateway timeout, then the whole atomic transaction rolled back — even with `set statement_timeout = 0`
+(so it wasn't statement_timeout; the editor cancels the query when the browser connection drops). Discriminated
+running-vs-dead via `pg_stat_activity` (no rows = dead) and a known-row probe (its value never flipped =
+nothing committed). THE ROBUST PATTERN: a server-side batch function `fn(_after text, _lim int)` with
+`set statement_timeout = 0` that updates a bounded `uniq_pitch_id` range and returns `(processed, last_id)`,
+driven in a loop from a `.env.local` script (cursor = last_id until it stops advancing). 25k/call × ~105 calls,
+each commits under the gateway timeout, fully observable (probe committed chunks mid-run). Same shape as the
+`refresh_composite_war` statement_timeout fix, but here the killer was disconnect-cancel, not the timeout GUC —
+so lifting the timeout alone is NOT enough; the work must be chunked into sub-60s committed units. *Protects
+against:* silent multi-minute "is it running or dead?" mysteries and non-durable all-or-nothing bulk writes.
+
+**Process notes worth keeping:** (a) When challenged ("we need the pitch log to accurately do player
+season defense, correct?") I INVESTIGATED the data flow (read normalize.py's input contract, probed the
+table columns) instead of defending the "A is independent" framing — the domain expert's push located a
+real gap in my model. (b) The engine now runs on this machine's Python 3.9.6 AS-IS (core files carry
+`from __future__ import annotations`; no shim dance) — full-season re-run is `find docs/drs-reference
+-name "*DRS Pitch Log.csv" -print0 | xargs -0 python3 scripts/drs/run_drs.py`, gated to only the DRS
+Pitch Log files so the Standard fixtures + SBA files don't contaminate it. (c) PostgREST table-existence
+probe: a missing table returns `error.code = PGRST205`, NOT a null count with no error — check the code,
+don't infer existence from a head-count. (d) Destination-invariance shows up as an un-deduped
+`total_hitter_war` leaderboard stacking ONE player's transfer-destination rows (d/bsr identical, only
+o_war varies) — correct stored data, needs per-player dedupe for display.
