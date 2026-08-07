@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import AreaToggle, { useHasFrontOfficeAccess } from "@/components/AreaToggle";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
+import { useBuildVersionCheck } from "@/hooks/useBuildVersionCheck";
 import {
   Activity,
   BarChart3,
@@ -53,6 +54,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Reload onto the current deploy when this session is running a stale build —
+  // on mount (covers login) and on returning to a tab idle 30+ minutes.
+  useBuildVersionCheck();
 
   const hasFrontOffice = useHasFrontOfficeAccess();
 
