@@ -11,11 +11,23 @@ Supabase MCP exists for **reads and schema introspection only**:
 
 **All writes come to Trevor as raw SQL to paste.** Never as a TypeScript script for an agent to run, never through an MCP write tool, never "just this once because it's small." Hand over the SQL text and stop.
 
-Scoping rules:
-- MCP is scoped to the **staging** project ref (`slrxowawbijbjrkozqlj`) only. Prod (`trbvxuoliwrfowibatkm`) is not connected.
-- Read-only mode stays on. Tool groups: database + docs. Deploy/branching groups stay off.
+**Both databases are connected, read-only, as two separately named servers:**
+
+| Server | Project ref | Purpose |
+|---|---|---|
+| `supabase-staging` | `slrxowawbijbjrkozqlj` | The testing database. Buttoning the process up here comes first, always. |
+| `supabase-prod` | `trbvxuoliwrfowibatkm` | The live database. Serves main **and the Vercel PR previews**. |
+
+Both carry `read_only=true` and `features=database,docs`, each pinned to its own `project_ref` — which also disables the account-level tools that could switch projects. Read-only is enforced by Postgres as a read-only role, not by convention, so neither connection can write even if an agent gets confused.
+
+**Why prod is connected rather than walled off:** staging↔prod drift checks are a cross-database question by definition. One connection structurally cannot answer "do these agree," and the answer matters — staging is a stale copy for some tables (see `players.team_id`). Verifying data accuracy across the two is a normal part of the work, and doing it by hand is what the agent is meant to replace.
+
+**Naming is the safety mechanism.** Every tool call carries its database in the server name, so `verify-target-db` is satisfied by the call itself rather than by anyone remembering which one is live. State the target out loud anyway.
+
+Other scoping rules:
 - The 34 `:prod` npm scripts (`import:prod`, `precompute-*:prod`, `lock-season:prod`, `prod_wipe_and_reprecompute`, …) are **human-run only**. An agent may draft the command and explain it; it does not execute it.
 - Prod writes additionally require an explicit "prod, now?" confirmation from Trevor. An ambiguous "go ahead" is not that confirmation.
+- Deploy and branching tool groups stay off on both.
 
 **Why this rule is written down rather than assumed:** read-only mode constrains the tool, not the workflow. Once schema access makes SQL easy to write correctly, convenience quietly pressures the human-paste step out of existence — one small write at a time. The boundary has to be explicit to survive that pressure.
 
