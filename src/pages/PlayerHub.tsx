@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { lazyWithReload } from "@/lib/lazyWithReload";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -55,10 +56,10 @@ const ROLE_COLOR: Record<string, string> = {
 };
 
 // Reuse the existing scouting pages verbatim as tab content (embedded = no chrome).
-const PlayerProfile = lazy(() => import("@/pages/PlayerProfile"));
-const PitcherProfile = lazy(() => import("@/pages/PitcherProfile"));
-const PlayerStatsPage = lazy(() => import("@/pages/PlayerStatsPage"));
-const PitcherStatsPage = lazy(() => import("@/pages/PitcherStatsPage"));
+const PlayerProfile = lazyWithReload(() => import("@/pages/PlayerProfile"));
+const PitcherProfile = lazyWithReload(() => import("@/pages/PitcherProfile"));
+const PlayerStatsPage = lazyWithReload(() => import("@/pages/PlayerStatsPage"));
+const PitcherStatsPage = lazyWithReload(() => import("@/pages/PitcherStatsPage"));
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
