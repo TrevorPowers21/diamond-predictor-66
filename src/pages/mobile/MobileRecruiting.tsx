@@ -33,9 +33,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, ClipboardList, MessageSquarePlus, ChevronRight, X } from "lucide-react";
+import { GOLD } from "@/savant/lib/theme";
+
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
-const GOLD = "#D4AF37";
 const SIDEBAR = "#070e1f";
 
 // Board toggle — the 3-way grouping (unchanged from the original main design).

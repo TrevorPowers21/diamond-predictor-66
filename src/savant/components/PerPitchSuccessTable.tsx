@@ -13,10 +13,9 @@ import { useMemo } from "react";
 import { derivePitchTypeBreakdowns, type PitchTypeBreakdown } from "@/savant/lib/pitchLogRates";
 import type { PitchLogByPitchTypeRow } from "@/savant/hooks/usePitchLogByPitchType";
 import { percentileColor, percentileRank } from "@/savant/lib/percentile";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
+
 const TABLE_HEADER_BORDER = "rgba(212,175,55,0.30)";
 const ROW_BORDER = "rgba(255,255,255,0.05)";
 

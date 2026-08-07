@@ -10,9 +10,10 @@ import { useGmRoster } from "@/gm/hooks/useGmRoster";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Button } from "@/components/ui/button";
 import { SeasonBudgetFields, seedValues, valuesToCaps, type SeasonBudgetValues } from "@/gm/components/settings/SeasonBudgetFields";
+import { GOLD } from "@/savant/lib/theme";
+
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
-const GOLD = "#D4AF37";
 
 export function RosterBudgetSettings() {
   const gm = useGmRoster(PROJECTION_SEASON);

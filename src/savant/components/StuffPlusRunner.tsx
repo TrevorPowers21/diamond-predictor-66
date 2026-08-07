@@ -2,10 +2,9 @@ import { useState } from "react";
 import { runStuffPlusPipeline, type StuffPlusReport } from "@/savant/lib/stuffPlusEngine";
 import { calculateConferenceStuffPlusV2 } from "@/savant/lib/conferenceStuffPlusV2";
 import { supabase } from "@/integrations/supabase/client";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
+
 
 function StatBox({ label, value }: { label: string; value: string | number }) {
   return (

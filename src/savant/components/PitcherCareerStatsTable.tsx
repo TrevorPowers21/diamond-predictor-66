@@ -1,9 +1,8 @@
 import type { PitcherCareerRow } from "@/savant/hooks/usePitcherCareer";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
+
 
 const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 const fmt1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));

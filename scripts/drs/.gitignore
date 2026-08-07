@@ -1,0 +1,13 @@
+output/
+fixtures/*
+!fixtures/re24_matrix.json
+!fixtures/field_positions.json
+!fixtures/catch_surface.json
+!fixtures/grounder_calibration.json
+!fixtures/reach_shares.json
+__pycache__/
+*.pyc
+!fixtures/error_rates.json
+!fixtures/ERROR_CENTERING.md
+!fixtures/POSITION_CENTERING.md
+!fixtures/park_effects.json

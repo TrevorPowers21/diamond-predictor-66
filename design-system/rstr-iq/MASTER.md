@@ -1,121 +1,124 @@
 # RSTR IQ — Design System Master
 
 **Status:** Authoritative. Overrides any auto-generated plugin output.
-The brand is locked — do not regenerate this file via the
-`ui-ux-pro-max` plugin (its output recommends generic blue/amber light-mode
-defaults that conflict with the established navy/gold dark-mode palette).
+The brand is locked — do not regenerate this file via the `ui-ux-pro-max` plugin
+(its output recommends generic blue/amber light-mode defaults that conflict with the
+established navy/gold dark-mode palette).
 
 **Hierarchy:** Global. Page-specific deviations live in
 `design-system/rstr-iq/pages/<page>.md`. Page files override MASTER on conflict.
 
+## Changelog
+- **2026-08-06 — Oswald restored as the heading face.** Reverses the Oswald call in the
+  2026-08-04 entry below. Oswald is now loaded via `index.css` (PR #161) at weights 400–700,
+  and the ~265 existing `font-[Oswald]` references are canonical and stay. The 08-04 reading
+  was right that Oswald was never loaded; it was wrong that Inter headings were the intended
+  look. Anyone without Oswald installed locally had been seeing a fallback.
+- **2026-08-04 — Codified from the shipped app.** Reconciled against the actual rendered
+  application (Tailwind config, `index.css`, `src/savant/lib/theme.ts`, real component usage).
+  The current rendered appearance is canonical; this doc now describes what ships, not an
+  aspiration. Key corrections: **Oswald was never loaded and never rendered** (headings render
+  in Inter today — that IS the intended look — **SUPERSEDED 2026-08-06, see entry above**); **JetBrains Mono** is the numeric face; the
+  **navy border is #162241** (majority usage) and **card is #0a1428** (variants #1f2d52 and
+  #0D1A30 deprecated); the **gray text scale** (#8A94A6 / #5A6478) and the **chart palette** are
+  now documented as official.
+
 ---
 
 ## Brand identity
-
 - **Product:** College baseball roster intelligence (RSTR IQ)
-- **Aesthetic:** Premium sports analytics. Confident, dense, data-rich.
-  Closer to Baseball Savant / MLB.com in feel than a generic SaaS dashboard.
-- **Audience:** College baseball coaches doing player evaluation under
-  time pressure. **Density > whitespace.**
+- **Aesthetic:** Premium sports analytics. Confident, dense, data-rich. Closer to Baseball
+  Savant / MLB.com than a generic SaaS dashboard. **Density > whitespace.**
+- **Mode:** dark-only (forced `class="dark"` on `<html>`).
 
-## Color tokens (LOCKED)
+## Color tokens (LOCKED — ratify current rendering)
 
-These are immutable. Do not propose alternates.
+| Role | Hex | Notes |
+|---|---|---|
+| Gold accent | `#D4AF37` | Active states, emphasis, top-tier percentile bars, highlighted values, brand chrome. The only gold. |
+| Gold darker | `#A08820` | Pressed/hover for gold buttons (rare) |
+| Page navy bg | `#040810` | Main page background |
+| Card navy | `#0a1428` | Section card / panel background |
+| Card border | `#162241` | Borders, dividers, subtle structure |
+| Text primary | `#FFFFFF` | Main values, headers |
+| Text secondary | `#8A94A6` | Body, supporting text |
+| Text tertiary | `#5A6478` | Hints, metadata, deemphasized |
+| Portal: In Portal | `emerald-500/15 + emerald-300` | Portal entry badges |
+| Portal: Committed | `bg-blue-500/10 + text-blue-600` | Commitment badges |
+| Portal: Watching | `bg-[#D4AF37]/10 + text-[#D4AF37]` | Watchlist badges |
 
-| Role | Token | Hex | Use |
-|---|---|---|---|
-| Gold accent | `GOLD` | `#D4AF37` | Active states, emphasis, top-tier percentile bars, highlighted values, brand chrome |
-| Gold darker | — | `#A08820` | Pressed/hover for gold buttons (rare) |
-| Sidebar navy | — | `#070e1f` | App shell / sidebar background |
-| Page navy bg | `NAVY_BG` | `#040810` | Main page background |
-| Card navy | `NAVY_CARD` | `#0a1428` | Section card / panel background |
-| Card border | `NAVY_BORDER` | `#1f2d52` | Borders, dividers, subtle structure |
-| Text primary | — | `#FFFFFF` | Main values, headers |
-| Text secondary | — | `white/60` | Body, supporting text |
-| Text tertiary | — | `white/40` | Hints, metadata, deemphasized |
-| Portal: In Portal | — | `emerald-500/15 + emerald-300` | Portal entry badges |
-| Portal: Committed | — | `bg-blue-500/10 + text-blue-600` | Commitment badges |
-| Portal: Watching | — | `bg-[#D4AF37]/10 + text-[#D4AF37]` | Watchlist badges |
+**Deprecated hexes (consolidate on sight — near-identical by eye):**
+`#0D1A30 → #0a1428` (card), `#1f2d52 → #162241` (border), `#94A3B8 → #8A94A6` (secondary
+text), `#E8C24E → #D4AF37` (gold). The `--primary` / `--accent` / `--ring` HSL tokens in
+`index.css` should equal exactly `#D4AF37`.
+
+**Canonical source in code:** `src/savant/lib/theme.ts` (`NAVY_BG`, `NAVY_CARD`,
+`NAVY_BORDER`, `GOLD`) and the Tailwind named tokens (`navy-bg`, `navy-card`, `navy-border`,
+`gold`, `text-secondary`, `text-tertiary`). Import these — do not redefine locally.
 
 ## Typography
+- **Headings / branded labels:** **Oswald** (`font-[Oswald]`, loaded via `index.css` at
+  weights 400–700 variable), uppercase, tracking-wider to `tracking-[0.22em]`.
+- **Body / UI text:** **Inter** (loaded via `index.css`).
+- **Numeric values:** **JetBrains Mono** (loaded via `index.css`) where a monospace numeric is
+  used; otherwise Inter with `tabular-nums`.
+- **Numeric cells:** always `tabular-nums` for grid alignment.
+- **Oswald IS used** (2026-08-06 — reverses the 2026-08-04 codification). It was referenced in
+  ~265 places but never loaded, so it rendered only for viewers who happened to have Oswald
+  installed locally; everyone else got a fallback. The `@import` added in PR #161 makes those
+  references live for all users. Keep them, and do not remove the import — it is load-bearing.
+  (Cormorant Garamond: only the logo "R" — leave untouched if it depends on it.)
 
-- **Headings / branded labels:** **Oswald** (`font-[Oswald]`), uppercase,
-  tracking-wider to `tracking-[0.22em]`.
-- **Body / numeric values:** Default sans (Inter from project base).
-- **Numeric cells:** Always `tabular-nums` for grid alignment.
+## Chart palette (official — ratified as rendered)
+Charts (recharts + d3) use a **slate-on-navy** ramp, and it is correct. Do not restyle.
+- Slate ramp actually in use: `#0F172A`, `#475569`, `#94A3B8`, `#4b5563`, `#6b7280`, `#525252`.
+- **Gold `#D4AF37` is reserved for the highlighted / primary data point** (matches current
+  usage) — not for general series.
+- `PercentileBar.tsx` uses `#0D1B3E` (a marketing-navy) — documented as a **known usage under
+  review**; leave as-is for now.
+- Future charts should import the ratified ramp from `CHART_THEME` in `src/savant/lib/theme.ts`.
 
 ## Established component patterns
+- **Section panel:** bordered box, `backgroundColor: #0a1428`, `borderColor: #162241`, with an
+  Inter uppercase label `text-[12px] font-bold tracking-[0.22em] text-[#D4AF37]`.
+- **Inline filter dropdown:** bordered button + gold dot prefix + click-outside-to-close.
+  Reference: `DimensionPicker` in `src/savant/components/PitchLogSection.tsx`.
+- **Stat chip:** min-w 96px, bordered, padded. Label 12px Inter uppercase (`#8A94A6`); value
+  2xl bold `tabular-nums`, gold if emphasized.
+- **Percentile bar:** `src/savant/components/PercentileBar.tsx` — Red (≥75) → blue (≤25) scale.
+- **Page tab strip:** border-bottom navy; active tab gold + underline
+  (`src/components/PlayerPageTabs.tsx`).
+- **Data tables:** headers 11px Inter uppercase tracking-wider (`#8A94A6`); cells 14px
+  `tabular-nums`; row borders `rgba(255,255,255,0.05)`; numeric centered, label left.
+- **Portal status badge:** always the canonical `<PortalStatusBadge>` from
+  `src/components/PortalStatus.tsx`.
 
-### Section panel
-```tsx
-<section className="border px-4 py-4"
-  style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
-  <div className="mb-3 font-[Oswald] text-[12px] font-bold uppercase tracking-[0.22em] text-[#D4AF37]">
-    {title}
-  </div>
-  {children}
-</section>
-```
-
-### Inline filter dropdown
-Bordered button + gold dot prefix + click-outside-to-close.
-Reference: `DimensionPicker` in `src/savant/components/PitchLogSection.tsx`.
-
-### Stat chip (top-of-page key metrics)
-min-w 96px, bordered, padded. Label: 12px Oswald uppercase white/55.
-Value: 2xl Oswald bold tabular-nums; gold if emphasized.
-
-### Percentile bar
-Reference: `src/savant/components/PercentileBar.tsx`. Red (≥75) → blue (≤25) color scale.
-
-### Page tab strip (Overview ↔ Season Stats)
-Border-bottom navy; active tab gold + underline.
-Reference: `src/components/PlayerPageTabs.tsx`.
-
-### Data tables
-Headers: 11px Oswald uppercase tracking-wider white/55.
-Cell text: 14px (`text-sm`), tabular-nums.
-Borders: `rgba(255,255,255,0.05)` between rows.
-Centered numeric columns; left-aligned label column.
-
-### Portal status badge
-Always use the canonical `<PortalStatusBadge>` from `src/components/PortalStatus.tsx`.
-For surfaces that must show "Not In Portal" explicitly (the Overview component
-returns null for that state), render a muted fallback Badge labeled "Not In Portal".
-
-## Guardrails (from CLAUDE.md, restated)
-
-- **No loading spinners, sliding cursors, skeleton loaders, animated
-  placeholders.** (Exception: Peyton's PlayerProfile progressive-load skeleton.)
+## Guardrails
+- **No loading spinners, sliding cursors, skeleton loaders, animated placeholders.**
+  (Exception: Peyton's `PlayerProfile` progressive-load skeleton.)
 - **No emojis as icons.** SVG only (Lucide / Heroicons).
-- **All interactive elements:** `cursor-pointer` + 150-300ms color transition.
+- **All interactive elements:** `cursor-pointer` + 150–300ms color transition.
 - **Respect** `prefers-reduced-motion`.
 - **Responsive:** test at 375px / 768px / 1024px / 1440px.
 
-## Anti-patterns (don't do these)
-
+## Anti-patterns
 - **Light mode** — RSTR is dark-only.
-- **Generic dashboard blue** (`#1E40AF`, etc.) — stick to navy + gold.
-- **Fira Code / Source Code Pro** etc. — Oswald headers, Inter body only.
+- **Generic dashboard blue** (`#1E40AF`, etc.) — navy + gold only. (Chart slate is the
+  sanctioned exception, per the chart-palette section.)
+- **Removing the Oswald `@import` or stripping `font-[Oswald]` references** — Oswald is the
+  heading face as of 2026-08-06; the import in `index.css` is load-bearing.
+- **New off-scale grays or navies** — use the deprecated→canonical map above.
 - **Big whitespace gaps** — coaches scan dense data, pack the page.
 - **Animated transitions longer than 300ms.**
-- **Icon-only buttons without proper aria-label.**
-- **Hover effects that shift layout** (no scale transforms on cards).
+- **Icon-only buttons without aria-label; hover effects that shift layout.**
 
 ## Canonical visual reference
-
-When unsure, mirror the Savant page patterns at:
-- `src/savant/pages/PitcherPage.tsx`
-- `src/savant/pages/HitterPage.tsx`
-- `src/savant/components/*`
-
-The Stats pages (`src/pages/PlayerStatsPage.tsx` / `PitcherStatsPage.tsx`)
-follow the same patterns and inherit the same tokens.
+When unsure, mirror the Savant page patterns: `src/savant/pages/PitcherPage.tsx`,
+`src/savant/pages/HitterPage.tsx`, `src/savant/components/*`. The Stats pages
+(`src/pages/PlayerStatsPage.tsx` / `PitcherStatsPage.tsx`) inherit the same tokens.
 
 ## Plugin usage note
-
-`python3 ~/.claude/skills/ui-ux-pro-max/scripts/search.py ... --design-system --persist`
-will OVERWRITE this file with generic recommendations. **Do not run with `--persist`
-without immediately re-overwriting this file.** Useful as a non-persist reference
-(`--design-system` only) for surfacing pre-delivery checklist items (cursor,
-transitions, focus states, responsive breakpoints).
+`ui-ux-pro-max --design-system --persist` will OVERWRITE this file with generic
+recommendations. Do NOT run with `--persist` without immediately re-overwriting this file.
+Useful as a non-persist reference (`--design-system` only) for pre-delivery checklist items
+(cursor, contrast, aria).
