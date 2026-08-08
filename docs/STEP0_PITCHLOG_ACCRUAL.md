@@ -5,22 +5,35 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
-- **Status:** CHUNK 2 VALIDATED — `scripts/drs/accrue_pitcher_stats.py` tallies the season pitcher line from
-  the DRS Pitch Log (679k PAs, 5,375 pitchers, ~1% parse-fails). Diffed vs `Pitching Master` (2,835 pitchers
-  IP>20): **IP mean|Δ| 0.96 (98% within 3 IP), FIP 0.064, WHIP 0.035, K9 0.166, BB9 0.128, HR9 0.000** — clean
-  stats MATCH. **Two bugs found+fixed via the Master diff:** (1) `outs_recorded` excludes strikeouts (it's a
-  DEFENSE fn) → added `+1 out per K` for IP; (2) the HR batter run isn't a movement (solo HR `HR/8(RBI)` has 0
-  movements) → add +1 earned per HR unless a `B-H` token is present. ERA after fixes: mean Δ **−0.05**
-  (unbiased), mean|Δ| 0.88.
-- **KNOWN ERA REFINEMENT (next):** the residual ERA spread is INHERITED-RUNNER attribution — I charge earned
-  runs to the pitcher on the mound at the scoring PA; the Master charges whoever let the runner REACH base.
-  Build: track each baserunner's responsible pitcher through the half-inning (the runner on base when a new
-  pitcher enters is "inherited"; if they score, charge the pitcher who put them on). Mean nets to ~0 so it's a
-  per-pitcher redistribution, not a total. FIP already matches tightly (defense/sequencing-independent).
-- **Next action:** (a) build inherited-runner ER attribution to tighten per-pitcher ERA, OR (b) proceed to
-  CHUNK 3 (hitter accrual: AVG/OBP/SLG/ISO + sub-metrics, diff vs Hitter Master) and return to ERA. Both fine.
-- **Artifacts:** `scripts/drs/accrue_pitcher_stats.py`, `scripts/drs/output/pitcher_accrued.csv` (gitignored —
-  large), parser changes (chunk 1). Validation = diff vs `Pitching Master` on `source_player_id`, Season 2026.
+- **CHUNK 1 (parser) + CHUNK 2 (pitcher accrual) + CHUNK 3 (hitter accrual) DONE + committed.** Parser
+  parse-fails cut **1.01% -> 0.11%** (chunk-3 extensions: multi-RBI `(2RBI)` parens, `TH` throw-error mod,
+  `+WP/+SB/+PB` compound events on W/K, `CI` catcher-interference, `CS/PO/pickoff` -> `is_pa=False` so they're
+  excluded from PA cleanly, `BATINT/FDP` mods). Hitter accrual `scripts/drs/accrue_hitter_stats.py` +
+  pitcher `accrue_pitcher_stats.py`; both skip `not ev.is_pa`.
+- **HITTER accrual VALIDATED (all-games):** vs `Hitter Master` (n=3647 ab>=50) AVG mean|Δ| **0.001**, OBP 0.002,
+  SLG 0.003 (93-96% within .010); PA gap -1.0, AB gap -0.8. Piasecki EXACT: PA343/AB283/.336/.446/.523 both sides.
+- **MAJOR ARCHITECTURE DISCOVERY (2026-08-08):**
+  1. **Hitter Master is ALREADY pitch-log-derived** (Trevor's "we overrode hitters w/ pitch log" = CONFIRMED —
+     my re-accrual reproduces it exactly). So the hitter Master match is a CONSISTENCY check, not independent.
+     Independent hitter rail = official box-score totals (SB-count pattern), not the Master.
+  2. **`pitch_log_hitter_totals` (50,418 rows) + `pitch_log_pitcher_totals` (37,306 rows) ALREADY EXIST** —
+     the prior pitch-log aggregation, per (pitcher/batter_id, season, dimension_key: all/vs_rhp/vs_lhp/...).
+     HITTER totals carry the FULL line (PA/AB/1B/2B/3B/HR/K/BB/HBP/SAC + all sub-metrics + x-stats). PITCHER
+     totals carry BF/PA/K/BB/HBP/hits-allowed/stuff+/tracking/x-stats — **but NO outs/IP and NO runs/ER.**
+  3. Builder = **`scripts/aggregate_pitch_log_dimensions.ts`** — SQL `INSERT...SELECT COUNT(*) FILTER` off the
+     per-pitch `pitch_result_category` column. It CANNOT compute outs/IP or ER (those need atbat_desc parsing).
+  4. So the pitcher "whole 'nother run" = **add IP (outs) + ER to the pitcher totals from atbat_desc** — exactly
+     what chunk-2 accrual computes. Extension, not rebuild. Prior `scripts/calibrate_xera.ts` = expected-ERA work.
+- **POSTSEASON (open question flagged to Trevor):** pitch log spans 2026-02-13 -> **06-22** incl. conf tourneys +
+  NCAA (postseason = 33,801 PA, 4.9%). All-games accrual matches Master AB -0.81; **reg-season-only (<=5/18,
+  Option A) is -8.47** -> the current Master appears to INCLUDE postseason (or double-counts, Trevor unsure).
+  DECISION PENDING for the overwrite: store reg-season-only (true to Option A WAR) vs all-games (matches today's
+  Master). Mid-major negative gaps (ALCN -10.5) = separate inherent untracked-game coverage, already accepted.
+- **ERA (chunk 2):** unbiased mean Δ -0.05, per-pitcher mean|Δ| 0.88 = inherited-runner attribution (mound
+  simplification). FIP/WHIP/K9/BB9/HR9/IP match tightly (independent, since Pitching Master = reimported TruMedia).
+- **NEXT:** decide reg-vs-all boundary w/ Trevor; then chunk 6 = extend the pitcher totals/loader with IP+ER
+  from atbat_desc + derive ERA/FIP/WHIP -> overwrite Pitching Master (staging first). Inherited-runner ERA
+  refinement optional (FIP is the projection-preferred rate anyway).
 
 
 ## Goal (locked decisions)

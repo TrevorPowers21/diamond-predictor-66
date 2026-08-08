@@ -40,6 +40,7 @@ for f in FILES:
                 ev = parse_atbat_desc(desc)
             except ParseError:
                 n_bad += 1; continue
+            if not ev.is_pa: continue   # CS/PO/pickoff = baserunning out, not a batter faced
             n_pa += 1
             p = pit.get(pid)
             if p is None:

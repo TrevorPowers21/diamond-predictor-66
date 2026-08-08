@@ -38,6 +38,9 @@ class ParsedEvent:
     is_walk: bool = False           # W/IW (event_type stays OTHER; for BB/OBP accrual)
     is_ibb: bool = False            # IW (intentional walk)
     is_hbp: bool = False            # HP/HBP
+    is_ci: bool = False             # CI catcher's interference (reaches base, NOT an AB)
+    is_pa: bool = True              # False for baserunning-only rows (CS/PO/pickoff) — not a plate appearance
+    concurrent: list = field(default_factory=list)  # +WP/+PB/+SB#/+CS# events sharing the pitch
     hit_zone: list = field(default_factory=list)   # fielder zone digits on hits
     error_fielder: int | None = None
     fc_fielder: int | None = None
@@ -60,9 +63,10 @@ def _parse_movement(tok: str) -> Movement:
             err = int(em.group(1))
         elif re.match(r"^\d+$", paren):
             chain = [int(c) for c in paren]
-        elif paren in ("UR", "TUR", "NR", "RBI"):
+        elif re.match(r"^\d*(UR|TUR|NR|RBI)$", paren):
             # scoring annotations, no defensive content. UR/TUR = unearned run (for ERA).
-            unearned = paren in ("UR", "TUR")
+            # allow a leading count: (2RBI), (3RBI) multi-run scoring on the same movement.
+            unearned = ("UR" in paren)
         else:
             # mixed content like 64E3 (future vocab) -> pull digits+error
             em2 = re.search(r"E(\d)", paren)
@@ -100,6 +104,15 @@ def parse_atbat_desc(desc: str) -> ParsedEvent:
     main = _strip_parens(toks[0]).strip()
     mods = [t.strip() for t in toks[1:]]
 
+    # ---- compound events joined by '+': base event + concurrent baserunner events ----
+    # e.g. W+WP (walk + wild pitch), W+SB2, K+WP, K+PB. The BASE carries the batter result;
+    # the tail (WP/PB/SB#/CS#/DI/OA) is a same-pitch baserunner event with no batter effect.
+    # (Errors like E4/TH keep their '+'-free main; the '+' split only applies to letter events.)
+    if "+" in main and not re.match(r"^E\d", main):
+        parts = main.split("+")
+        main = parts[0]
+        ev.concurrent = parts[1:]
+
     # ---- main event ----
     if re.match(r"^\d+$", main):                       # out chain: 8, 63, 463
         ev.event_type = "OUT"
@@ -124,6 +137,12 @@ def parse_atbat_desc(desc: str) -> ParsedEvent:
             ev.is_ibb = (main == "IW")
         else:
             ev.is_hbp = True
+    elif main in ("CI", "CINT"):                        # catcher's interference: reaches 1B, NOT an AB
+        ev.event_type = "OTHER"
+        ev.is_ci = True
+    elif re.match(r"^(CS|PO|POCS)[H123]?$", main):      # caught stealing / pickoff = baserunning out,
+        ev.event_type = "OUT"                           # NOT a batter plate appearance
+        ev.is_pa = False
     else:
         raise ParseError(f"unknown main event token: {main!r}")
 
@@ -133,7 +152,7 @@ def parse_atbat_desc(desc: str) -> ParsedEvent:
         # compound S+SB2, S+CS2(26). Chains in parens are extra putout tallies.
         if ev.event_type == "K":
             for part in mod_raw.split("+"):
-                pm = re.match(r"^(S|C|SB\d|CS\d)(?:\((\d+)\))?$", part.strip())
+                pm = re.match(r"^(S|C|SB\d|CS\d|WP|PB|DI|OA|TH)(?:\((\d+)\))?$", part.strip())
                 if not pm:
                     raise ParseError(f"unknown K modifier: {mod_raw!r}")
                 if pm.group(2):
@@ -144,6 +163,14 @@ def parse_atbat_desc(desc: str) -> ParsedEvent:
             continue
         if mod == "PF":                                # foul pop out
             ev.bb_type = "P"
+            continue
+        if mod == "TH":                                # throwing-error indicator (E5/TH) — no BIP content
+            continue
+        if mod in ("BATINT", "CINT", "RINT"):          # interference outs — batter is already out
+            continue
+        if mod == "FDP":                               # foul(-ball) double play
+            ev.is_dp = True
+            ev.dp_kind = ev.dp_kind or "GDP"
             continue
         bm = re.match(r"^B(\d+)$", mod)               # bunt + zone: S/B1
         if bm:
