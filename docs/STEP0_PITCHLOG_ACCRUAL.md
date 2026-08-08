@@ -31,9 +31,20 @@ resume point for the Step 0 build — update the "RESUME POINT" block below as w
   Master). Mid-major negative gaps (ALCN -10.5) = separate inherent untracked-game coverage, already accepted.
 - **ERA (chunk 2):** unbiased mean Δ -0.05, per-pitcher mean|Δ| 0.88 = inherited-runner attribution (mound
   simplification). FIP/WHIP/K9/BB9/HR9/IP match tightly (independent, since Pitching Master = reimported TruMedia).
-- **NEXT:** decide reg-vs-all boundary w/ Trevor; then chunk 6 = extend the pitcher totals/loader with IP+ER
-  from atbat_desc + derive ERA/FIP/WHIP -> overwrite Pitching Master (staging first). Inherited-runner ERA
-  refinement optional (FIP is the projection-preferred rate anyway).
+- **INDEPENDENT VALIDATION DONE (2026-08-08):** Trevor pulled the 4 real TruMedia exports (Regular/Full x
+  Hitting/Pitching Master Stats.csv, in docs/drs-reference/, playerId key, reg=<=5/18 full=all). Archived into
+  the sources-of-truth tarball (217MB) + manifest. My pitcher accrual (all-games) vs **Full Pitching Master**
+  (n=2835 IP>=20): IP mean|Δ| 0.71 (100% w/in 3), K 0.08, BB 0.06, HR 0.002, H 0.05, BF 0.32, FIP 0.06, WHIP
+  0.035 — ALL match the INDEPENDENT source. **Only ER/ERA off: ER mean|Δ| 3.67, ERA 0.87 (mean Δ +0.02).**
+  Biggest misses have matching IP but ER swinging both ways (30v18, 26v40) = 100% CONFIRMED inherited-runner
+  attribution (mound simplification), a redistribution (mean nets ~0), not a tally bug.
+- **DECISION PENDING w/ Trevor — ERA path:** (A) build inherited-runner ER attribution (pitch-log-native inning
+  state machine; base-state is in pitch_log) vs (B) take ER/ERA from the Master export (now a validated
+  independent source) + pitch-log everything else. FIP matches either way + is projection-preferred. My lean: A.
+- **BOUNDARY (still to verify):** my reg-season accrual should match Regular Master; full should match Full
+  Master — confirms 5/18 = TruMedia's regular season. Quick check, not yet run.
+- **THEN chunk 6:** extend pitcher totals/loader with IP+ER (+ chosen ERA path) -> derive ERA/FIP/WHIP ->
+  overwrite Pitching Master (staging first), full + regular splits per the locked policy.
 
 
 ## Goal (locked decisions)
