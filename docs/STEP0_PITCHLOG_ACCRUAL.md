@@ -5,6 +5,17 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
+- **ERA REFINEMENT PASS (2026-08-08, Trevor "investigate then fix"):** (1) FOUND+FIXED a real bug — a runner
+  thrown OUT at home (`3XH`) was counted as an earned run (checked `m.to==4` before `m.out`); removed 2,282
+  spurious ER, coverage 102.2%->100.0%, ERA mean|Δ| 0.295->0.242 (88% within 0.5). (2) Switched name-tracking
+  -> BASE-SLOT (courtesy/pinch runners keep the slot's pitcher; occupancy-anchored) — marginal, but correct model.
+  (3) REMAINING gap PRECISELY DIAGNOSED: systematic -3.2% ER UNDER-count (Master 98,210 vs mine 95,046), negative
+  in EVERY IP band. Cause = TEAM-unearned vs PITCHER-earned: 11,324 `(UR)` tags but Master treats only ~8,000 as
+  unearned; the ~3,200 diff = runs unearned to the TEAM but EARNED to a reliever who inherited a post-error
+  situation (4,948 UR are in multi-pitcher innings; 9,515 in innings w/ an error). Full fix = per-pitcher
+  earned-run RECONSTRUCTION (rebuild each half-inning w/o errors, benefit-of-doubt per pitcher from when he
+  entered) — hardest scoring rule, buildable (have E tokens + pitching changes + occupancy). DECISION PENDING
+  w/ Trevor: build it vs accept 0.242/88% (FIP exact; ERA slightly low & consistent). `accrue_pitcher_er.py`.
 - **INHERITED-RUNNER ERA — BUILT + VALIDATED (2026-08-08, Trevor chose path A).** `scripts/drs/accrue_pitcher_er.py`.
   KEY (Trevor's pointer): the pitch log records `ManOnFirst/Second/Third` (runner NAME on each base at PA start)
   + `Runs` (runs scored on the play). So NO base-state reconstruction (that drifted to 13% orphans) — read
