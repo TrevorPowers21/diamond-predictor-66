@@ -781,3 +781,12 @@ impact report without three prod pushes. Durable decisions + corrections:
 **Before/after snapshot for the whole jump:** `docs/snapshots/prod_player_predictions_baseline_2026-08-07_pre-push2.csv`
 (31,367 baseline rows) + full-table `player_predictions_snap_2026_08_07` on prod/staging. Diff after the one
 big re-precompute → the complete before/after.
+
+## ERA-from-pitch-log feasibility — CONFIRMED, earned/unearned is pre-encoded (2026-08-08)
+Probed a full game's pitch_log: all 18 half-innings present, `inn`/`outs`/`runs`/`pitcher_id` at 350/350
+coverage. KEY: TruMedia already tags **unearned runs `(UR)`** inside `atbat_desc` movement tokens (e.g.
+`S/7(RBI).3-H(UR);1-2` = a run that scored unearned) and **errors as `E<pos>`** (e.g. `E6.1-3`). The dRS
+parser already tokenizes these strings. So ERA does NOT need a from-scratch inning replay + earned/unearned
+rules engine — it's: earned runs = scored movements to `H` WITHOUT `(UR)`, attributed to the pitcher on the
+mound, ÷ IP×9. The one part Trevor flagged as hard (earned/unearned) is essentially pre-solved by the
+notation; the build is tallying tokens the parser already reads. Still validate the totals vs Pitching Master.

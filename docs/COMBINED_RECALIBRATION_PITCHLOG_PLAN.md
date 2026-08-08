@@ -47,7 +47,7 @@ Pitch log = source of truth for ALL data (season stats AND power-rating sub-metr
      only scored because of a charged error — reconstruct the inning as if the error hadn't happened), (c) use
      the SCORE data to know exactly when a run scored + how much. The pitch_log has the run columns
      (`current_runs`/`total_runs`/`opponent_runs` + the per-play `runs` we backfilled) + the dRS error
-     attribution, so it's buildable. This is FEASIBILITY-FIRST: prove the inning-boundary + earned/unearned
+     attribution, so it's buildable. **FEASIBILITY CONFIRMED 2026-08-08: earned/unearned is PRE-ENCODED** — TruMedia tags unearned runs `(UR)` directly in `atbat_desc` movement tokens (e.g. `S/7(RBI).3-H(UR)`), and errors as `E<pos>` (e.g. `E6.1-3`). The dRS parser already tokenizes these, so ERA = runs scored WITHOUT `(UR)`, attributed to `pitcher_id`, ÷ IP×9 — no from-scratch inning replay needed. Verified on a full game (18/18 half-innings, inn/outs/runs/pitcher_id 350/350). This is FEASIBILITY-FIRST: prove the inning-boundary + earned/unearned
      logic on a sample before committing; fallback = keep ERA from `Pitching Master` if the reconstruction is
      noisy. Diff vs `Pitching Master` to validate (Trevor cross-checks).
    - **OPPORTUNITY (Trevor 2026-08-08): the inning/score reconstruction is the same machinery that unlocks
