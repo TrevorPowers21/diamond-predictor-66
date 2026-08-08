@@ -5,29 +5,25 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
-- **PITCHER ERA — SCORE-DRIVEN + Trevor's rules, DONE (2026-08-08).** `scripts/drs/accrue_pitcher_er.py`.
-  Final vs INDEPENDENT Full Pitching Master (n=2835 IP>=20): **ERA mean|Δ| 0.232, 89% within 0.5 ERA (66%
-  within 0.25), ER 98% within 3, aggregate -0.7%.** Progression: mound-simplification 0.87 -> occupancy+out-at-home
-  0.242 -> +score-driven capture & rules 2+3 = 0.232.
-- **Method (Trevor's architecture, all validated):**
-  1. SCORE-DRIVEN run capture — walk every pitch, batting-team score on the NEXT pitch minus this = runs on this
-     pitch (delta handles 2+ runs/pitch; catches WP/PB/steal-home/balk + the ~900 the `Runs` col drops). Total
-     111,704 vs Master R 111,659 = **99.96%**. (currentRuns/opponentCurrentRuns is the score COMING IN — lag one pitch.)
-  2. INHERITED-RUNNER attribution — base-slot occupancy (ManOnFirst/Second/Third), name-agnostic so courtesy
-     runners keep the slot's pitcher; charged to whoever put the runner on, across pitching changes.
-  3. EARNED/UNEARNED — rule 2 (reached-on-error = unearned) + rule 3 (once an error should've been the 3rd out,
-     recon_outs>=3, every later run unearned) OR'd with the `(UR)` tag. Out-at-home (`3XH`) is an out, not a run.
-- **RESIDUAL (irreducible from the pitch log, ~11% >0.5 ERA, MIXED direction = not bias):** WP vs PB is NOT
-  labeled in the pitch log (I mark all non-PA scoring earned; passed balls should be unearned) + earned/unearned
-  judgment edge cases. Cannot be resolved from pitch-log data alone.
-- **CONSISTENCY DECISION (pending Trevor):** he requires the DISPLAYED ERA match official exactly (trust). Options:
-  (A) store ER/ERA/R from the Master export (exact, both splits; earned/unearned is an official-scorer ruling
-  anyway) + everything else pitch-log-native; the pitch-log ERA engine (0.232) stays as cross-check/future engine.
-  (B) ship the pitch-log ERA (0.232/89%). Recommend A for exact consistency.
-- **All else pitch-log-native + EXACT vs Master:** IP/K/BB/HBP/H/HR/BF/FIP/WHIP/K9/BB9/HR9 (+ stuff+/tracking/ratings).
-- **Exports + policy:** 4 TruMedia masters archived (217MB tarball + manifest). Full/regular split policy LOCKED.
-- **NEXT — chunk 6:** consolidate the pitcher line (IP+ER+rates), full+regular splits, overwrite Pitching Master
-  (staging first) — with the A/B ERA decision. Then reconcile dWAR/bsrWAR to full-season for the player store.
+- **CHUNK 6 IN PROGRESS — consolidated pitcher line BUILT + VALIDATED.** `scripts/drs/accrue_pitcher_line.py`
+  = one pass producing the full pitcher line (IP/BF/K/BB/HBP/H/HR/ER -> ERA/FIP/WHIP/K9/BB9/HR9/K%/BB%) for
+  FULL (all games) + REGULAR (<=5/18) splits. Validated: FULL vs Full Master + REGULAR vs Regular Master both
+  ERA mean|Δ| 0.232 (89% within 0.5), FIP 0.063, WHIP 0.027, IP 0.52; reg_IP<=full_IP for all. Output
+  `scripts/drs/output/pitcher_line.csv` (full_* + reg_* cols).
+- **ERA = pitch-log-native (Trevor's decision, like SB): store the calc, cross-check Master routinely**
+  (`scripts/drs/validate_vs_master.py`). Residual ~11% >0.5 ERA = WP-vs-PB unlabeled in the pitch log
+  (CONFIRMED irreducible: my error detection already beats the pitchResult flags 0-missed; no column recovers WP/PB).
+- **SEQUENCE COLUMNS IMPORTED TO STAGING** (pitch_num_in_game/ab_num_in_game/pitch_num_in_ab, 2,576,230 rows;
+  cleanup done). Prod replay pending (scripts/sql/pitch_log_sequence_backfill_steps.sql; PROD_MIGRATIONS_TODO).
+  CLI is linked to PROD (trbvxuoliwrfowibatkm) — staging DDL must be pasted in the staging editor.
+- **OVERWRITE TARGET = `Pitching Master`:** main stat cols (IP/ERA/FIP/WHIP/K9/BB9/HR9/bb_pct/k_pct/bf) hold the
+  FULL-season line; only `regular_season_ip` exists for the regular split (NO reg_era/fip/... columns).
+- **DECISION PENDING (Trevor) before the overwrite loader:** store the full regular split per-pitcher (ADD
+  reg_* columns to Pitching Master) vs just full-season line + regular_season_ip (regular aggregates live at the
+  team level in team_war_snapshots). And confirm we REPLACE the Master's ERA with the pitch-log ERA (0.232).
+- **NEXT:** (a) resolve the split-storage decision; (b) build the overwrite loader (staging first, paste-SQL/
+  script writing to Pitching Master keyed source_player_id+Season); (c) optional DB-parity check (calc from the
+  DB pitch_log matches the CSV result) for production readiness. Then reconcile dWAR/bsrWAR to full-season.
 
 
 ## Goal (locked decisions)
