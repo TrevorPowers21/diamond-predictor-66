@@ -39,51 +39,79 @@ def process_half_inning(pas, er):
     Base-slot occupancy tracking (name-agnostic; courtesy runners keep the slot's pitcher). Returns
     (charged, unearned, runs_seen)."""
     resp = {1: None, 2: None, 3: None}
+    taint = {1: False, 2: False, 3: False}       # runner reached/advanced via an error (rule 2 → unearned)
+    recon_outs = 0                               # reconstructed outs (actual + error phantom); ≥3 → rule 3
     charged = unearned = runs_seen = 0
+
+    def score_run(b, rp, forced_unearned):
+        """Charge one run from base slot b to responsible pitcher rp; earned unless tainted / inning dead / tag."""
+        nonlocal charged, unearned, runs_seen
+        runs_seen += 1
+        if forced_unearned or taint.get(b, False) or recon_outs >= 3:
+            unearned += 1
+        else:
+            pid = rp if rp is not None else cur
+            er[pid] = er.get(pid, 0) + 1; charged += 1
+
     for cur, ev, occ, N in pas:
         pres = {b: bool(occ.get(b)) for b in (1, 2, 3)}
-        # reconcile slots to RECORDED occupancy (corrects drift; recovers silent advances)
+        # reconcile slots to RECORDED occupancy (carry resp + taint; recover silent advances)
         arrived = [b for b in (1, 2, 3) if pres[b] and resp[b] is None]
         departed = [b for b in (1, 2, 3) if not pres[b] and resp[b] is not None]
         for a in sorted(arrived):
             lower = [d for d in departed if d < a]
             if lower:
-                src = max(lower); resp[a] = resp[src]; resp[src] = None; departed.remove(src)
+                src = max(lower)
+                resp[a], taint[a] = resp[src], taint[src]
+                resp[src], taint[src] = None, False; departed.remove(src)
         for d in departed:
-            resp[d] = None
+            resp[d], taint[d] = None, False
         if ev is None:                                   # NON-PA scoring pitch (WP / PB / steal home / balk)
-            k = charge_lead(N, resp, pres, er, cur); charged += k; runs_seen += k
+            n = N
+            for b in (3, 2, 1):
+                if n <= 0: break
+                if resp[b] is not None or pres[b]:
+                    score_run(b, resp[b], False); resp[b], taint[b] = None, False; n -= 1
+            while n > 0:
+                score_run(0, cur, False); n -= 1
             continue
-        # PA pitch: movements update base state + give the (UR) earned/unearned split
-        old = dict(resp); mv_runs = 0
+        # PA pitch: a reached-on-error gives the pitcher a phantom (benefit-of-doubt) reconstructed out
+        if ev.event_type == "ERROR":
+            recon_outs += 1
+        old, oldt = dict(resp), dict(taint); mv_runs = 0
         for m in ev.movements:
-            rp = cur if m.frm == 0 else old.get(m.frm)
+            if m.frm == 0:
+                rp, rt = cur, (ev.event_type == "ERROR") or (m.error_fielder is not None)
+            else:
+                rp = old.get(m.frm); rt = oldt.get(m.frm, False) or (m.error_fielder is not None)
             if m.out:                                    # OUT (incl. thrown out at home `3XH`) — not a run
-                if m.frm != 0: resp[m.frm] = None
+                if m.frm != 0: resp[m.frm], taint[m.frm] = None, False
             elif m.to == 4:                              # scored
-                mv_runs += 1; runs_seen += 1
-                if m.unearned:
-                    unearned += 1
-                else:
-                    pid = rp if rp is not None else cur
-                    er[pid] = er.get(pid, 0) + 1; charged += 1
-                if m.frm != 0: resp[m.frm] = None
+                mv_runs += 1
+                score_run(m.frm, rp, m.unearned)
+                if m.frm != 0: resp[m.frm], taint[m.frm] = None, False
             else:                                        # advanced to a base
-                if m.frm != 0: resp[m.frm] = None
-                resp[m.to] = rp
+                if m.frm != 0: resp[m.frm], taint[m.frm] = None, False
+                resp[m.to], taint[m.to] = rp, rt
         if not any(m.frm == 0 for m in ev.movements):
             if ev.event_type == "HR":
-                er[cur] = er.get(cur, 0) + 1; charged += 1; runs_seen += 1; mv_runs += 1
+                score_run(0, cur, False); mv_runs += 1   # HR batter is always earned (taint/recon don't apply)
             else:
                 dest = IMPLICIT_DEST.get(ev.event_type)
+                bt = (ev.event_type == "ERROR")
                 if dest is None and (ev.is_walk or ev.is_hbp or ev.is_ci or ev.event_type in ("ERROR", "FC")):
                     dest = 1
-                if dest is not None: resp[dest] = cur
-        # SCORE-DELTA reconciliation: charge any runs the score saw that the movements missed (earned)
-        hidden = N - mv_runs
-        if hidden > 0:
-            pres_now = {b: (resp[b] is not None) for b in (1, 2, 3)}
-            k = charge_lead(hidden, resp, pres_now, er, cur); charged += k; runs_seen += k
+                if dest is not None:
+                    resp[dest], taint[dest] = cur, bt
+        # SCORE-DELTA reconciliation: charge runs the score saw that the movements missed
+        n = N - mv_runs
+        for b in (3, 2, 1):
+            if n <= 0: break
+            if resp[b] is not None:
+                score_run(b, resp[b], False); resp[b], taint[b] = None, False; n -= 1
+        while n > 0:
+            score_run(0, cur, False); n -= 1
+        recon_outs += outs_recorded(ev) + (1 if ev.event_type == "K" else 0)
     return charged, unearned, runs_seen
 
 def main():
