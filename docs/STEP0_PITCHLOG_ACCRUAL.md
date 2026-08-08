@@ -5,10 +5,15 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
-- **Status:** SETUP — resume doc created; parser inspected; build not started.
-- **Next action:** build the pitcher-stat accrual prototype on a SAMPLE (one team's pitchers), validate vs
-  `Pitching Master`, before scaling.
-- **Artifacts so far:** none yet (this doc). Scripts will land in `scripts/drs/`.
+- **Status:** CHUNK 1 DONE — parser extended (`scripts/drs/drs_engine/parser.py`): `Movement.unearned` (from
+  `(UR)`/`(TUR)`), `ParsedEvent.is_walk`/`is_ibb`/`is_hbp`. Additive, non-breaking; dRS tests 19/19 pass.
+  Verified: `3-H(UR)`→unearned, `3-H`→earned, `W`/`IW`→walk, `HP`→hbp, `SF`→is_sf.
+- **Next action (CHUNK 2):** build the pitcher-stat accrual PROTOTYPE — new script reads the DRS Pitch Log
+  CSVs, uses `parse_atbat_desc`, tallies per pitcher (IP=outs/3 via `outs_recorded`; K=event_type K; BB from
+  `is_walk`; H=SINGLE/DOUBLE/TRIPLE/HR; HR; ER=movements to H (to==4, not out) WITHOUT `unearned`, charged to
+  the pitcher on the mound) → ERA/FIP/WHIP/K9/BB9/HR9. Run on ONE sample team, diff vs `Pitching Master`
+  (staging read-only, join on source_player_id) until it matches to tolerance.
+- **Artifacts:** `docs/STEP0_PITCHLOG_ACCRUAL.md` (this), parser changes. Prototype script → `scripts/drs/accrue_pitcher_stats.py`.
 
 ## Goal (locked decisions)
 Accrue the **hitter + pitcher season line AND the power-rating sub-metrics from the pitch log** (source of

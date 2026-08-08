@@ -21,6 +21,7 @@ class Movement:
     out: bool             # X = out on the bases
     chain: list = field(default_factory=list)   # putout chain in parens
     error_fielder: int | None = None            # E{n} inside parens
+    unearned: bool = False                       # (UR)/(TUR) → this run is UNEARNED (for ERA)
 
 @dataclass
 class ParsedEvent:
@@ -34,6 +35,9 @@ class ParsedEvent:
     dp_kind: str | None = None      # GDP | LDP
     is_sf: bool = False
     is_sh: bool = False
+    is_walk: bool = False           # W/IW (event_type stays OTHER; for BB/OBP accrual)
+    is_ibb: bool = False            # IW (intentional walk)
+    is_hbp: bool = False            # HP/HBP
     hit_zone: list = field(default_factory=list)   # fielder zone digits on hits
     error_fielder: int | None = None
     fc_fielder: int | None = None
@@ -49,7 +53,7 @@ def _parse_movement(tok: str) -> Movement:
     if not m:
         raise ParseError(f"bad movement token: {tok!r}")
     frm, sep, to, paren = m.groups()
-    chain, err = [], None
+    chain, err, unearned = [], None, False
     if paren:
         em = re.match(r"^E(\d)$", paren)
         if em:
@@ -57,7 +61,8 @@ def _parse_movement(tok: str) -> Movement:
         elif re.match(r"^\d+$", paren):
             chain = [int(c) for c in paren]
         elif paren in ("UR", "TUR", "NR", "RBI"):
-            pass  # scoring annotations (unearned run etc.), no defensive content
+            # scoring annotations, no defensive content. UR/TUR = unearned run (for ERA).
+            unearned = paren in ("UR", "TUR")
         else:
             # mixed content like 64E3 (future vocab) -> pull digits+error
             em2 = re.search(r"E(\d)", paren)
@@ -67,7 +72,7 @@ def _parse_movement(tok: str) -> Movement:
             else:
                 raise ParseError(f"bad movement paren: {paren!r} in {tok!r}")
     return Movement(frm=BASE_MAP[frm], to=BASE_MAP[to], out=(sep == "X"),
-                    chain=chain, error_fielder=err)
+                    chain=chain, error_fielder=err, unearned=unearned)
 
 def _strip_parens(tok: str) -> str:
     """Remove (RBI), (2RBI) style annotations from an event token."""
@@ -114,6 +119,11 @@ def parse_atbat_desc(desc: str) -> ParsedEvent:
         ev.event_type = "K"                            # strikeout; mods may carry chains
     elif main in ("W", "IW", "HP", "HBP"):
         ev.event_type = "OTHER"                        # handled upstream of BIP engine
+        if main in ("W", "IW"):
+            ev.is_walk = True
+            ev.is_ibb = (main == "IW")
+        else:
+            ev.is_hbp = True
     else:
         raise ParseError(f"unknown main event token: {main!r}")
 
