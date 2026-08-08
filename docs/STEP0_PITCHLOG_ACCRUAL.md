@@ -5,27 +5,26 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
-- **MAJOR DECISION (Trevor 2026-08-08) — MASTER IS AUTHORITATIVE; pitch log = ENGINE + cross-check.**
-  SUPERSEDES the old "overwrite the Masters with pitch-log values" premise. Where the pitch-log calc differs
-  from the Master, USE THE MASTER, not the pitch log. Evidence: Mark Rogers (Canisius) — ours 6.52/38.7IP,
-  Master 8.55/40IP = **Baseball Reference exactly**, school-official 8.10. So (1) the Master IS Baseball
-  Reference, (2) TruMedia computes ERA from the pitch log the SAME WAY WE DO (our method = industry standard),
-  (3) our diffs = OUR EXPORT's coverage gaps on low-TrackMan teams (e.g. MAAC), NOT a method error — TruMedia's
-  same method on complete data gives the right number, (4) an official/public source (school) can further
-  override the computed value. So: STORED stat = Master (Baseball-Reference-consistent, complete-coverage,
-  official-overridable); our pitch-log accrual is the validated ENGINE (matches Master where coverage complete:
-  Govel 2.88 vs 2.87) + the cross-check (`validate_vs_master.py`) + the base for a future "public override" model.
-- **DO NOT overwrite the pitcher/hitter Master with our pitch-log values** — it would replace complete-coverage
-  Baseball-Reference numbers with our lower-coverage ones (Rogers 8.55 -> 6.52 = worse). Keep the Master.
-- **What the pitch-log work DELIVERED:** validated that our method == TruMedia's (industry standard); a runnable
-  ERA/line engine (score-driven, 0.232 vs Master, exact where coverage complete); FIP/WHIP/K9/etc + hitter rates
-  all exact; the sequence-column import (staging) so the engine can run from the DB.
-- **CHUNK 6 (revised) = fill `team_war_snapshots` from the REGULAR-season Master** (authoritative regular-season
-  stats) so program analytics/benchmarks are right. Storage decision (a): full-season line + regular_season_ip in
-  the Masters; regular split lives at the team level in team_war_snapshots. Confirm whether the Master TABLES need
-  refreshing from Trevor's fresh Full/Regular exports (finalized end-of-season) or are already current.
-- **NEXT after that:** reconcile dWAR/bsrWAR to full-season for the player store (composite currently o=full,
-  d/bsr=regular); then recalibration + display swap -> one staging re-precompute -> reseed + market repoint -> ONE prod push.
+- **✅ STEP 0 COMPLETE (2026-08-08).** The pitch-log accrual prerequisite is done + validated. Summary:
+  1. **Master is AUTHORITATIVE** (= Baseball Reference; TruMedia uses our same method on complete data). Where
+     pitch log != Master → use the Master. DO NOT overwrite the Masters with pitch-log values (would swap
+     BBRef numbers for our lower-coverage ones on low-TrackMan teams). Our diffs = OUR export's coverage gaps.
+  2. **Master TABLES already current + FULL-season (postseason included) — VERIFIED on CWS pitchers** (UNC/UGA:
+     table matches the FULL export not the Regular — DeCaro 97.333=97⅓ IP, Scott 59.667, Volchko 95.333). Built
+     from the post-CWS pitch log (spans to 6/22). Player stat store = full-season = BBRef. NO RELOAD needed.
+  3. **Pitch-log ENGINE built + validated:** score-driven ERA (`accrue_pitcher_er.py` / `accrue_pitcher_line.py`)
+     0.232 mean|Δ| vs Master, exact where coverage complete (Govel 2.88 vs 2.87); FIP/WHIP/K9/BB9/HR9 + hitter
+     rates all exact. = validated method + cross-check (`validate_vs_master.py`) + base for a "public override" model.
+  4. **Sequence columns imported to STAGING** (pitch_num_in_game/ab_num_in_game/pitch_num_in_ab, 2,576,230 rows)
+     so the engine can run from the DB. Prod replay pending (`scripts/sql/pitch_log_sequence_backfill_steps.sql`).
+- **team_war_snapshots**: a single date-filtered run (regular season ≤5/18); FOLDS INTO the recalibration push
+  (depends on the recalibrated WAR — reseeding now would be redone). Not standalone.
+- **NEXT MAJOR EFFORT = the RECALIBRATION (Step 1+, docs/PUSH2_RECALIBRATION_PLAN.md + COMBINED plan):**
+  centralize the 7 oWAR copies + flip oWAR D1 constants (RUNS_PER_PA 0.174, REPLACEMENT 2.0/600, RPW 13.1) +
+  pWAR to research D1 + refresh_composite_war /10→/13.1; reconcile dWAR/bsrWAR to FULL-season for the player
+  store (composite currently o=full, d/bsr=regular); display swap (o_war→total_hitter_war via pickHitterWar/
+  pickPitcherWar); ONE staging re-precompute (snapshot between); reseed team_war_snapshots; repoint market value
+  → ONE prod push with changelog. Prod also needs the sequence-column replay + the Push-1-style prod steps.
 
 
 ## Goal (locked decisions)
