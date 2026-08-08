@@ -62,9 +62,10 @@ Pitch log = source of truth for ALL data (season stats AND power-rating sub-metr
    in deep historical seasons — current-season accrual + the fallback seasons the projection uses.)
 
 ## STEP 1 — recalibration (10 → 13.1) — `docs/PUSH2_RECALIBRATION_PLAN.md`
-Centralize the 7 copy-pasted oWAR formulas (+ reconcile the edge-fn vs war.ts pWAR divergence 7.11/1.5 vs
-5.5/2.5 → ONE D1 set: `RUNS_PER_9 6.76`, pitcher repl ≈2.48, `rpw 13.1`), flip the constants +
-`refresh_composite_war` `/10→/13.1`.
+Centralize the 7 copy-pasted oWAR formulas + flip the **oWAR** D1 constants (`RUNS_PER_PA 0.174`,
+`REPLACEMENT 2.0 wins/600PA`, `RUNS_PER_WIN 13.1`) + `refresh_composite_war` `/10→/13.1`. **pWAR: ONLY
+`RUNS_PER_WIN` 10→13.1** — do NOT touch `pwar_r_per_9`/`pwar_replacement_runs_per_9` (the earlier "reconcile the
+pWAR divergence" idea is DROPPED per the locked decision).
 
 ## STEP 2 — display swap
 `o_war → total_hitter_war` where it's the HEADLINE (keep raw `o_war` in bat/glove/legs breakdowns), via
