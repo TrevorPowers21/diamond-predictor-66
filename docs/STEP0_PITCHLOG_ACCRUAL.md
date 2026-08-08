@@ -5,25 +5,27 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
-- **CHUNK 6 IN PROGRESS — consolidated pitcher line BUILT + VALIDATED.** `scripts/drs/accrue_pitcher_line.py`
-  = one pass producing the full pitcher line (IP/BF/K/BB/HBP/H/HR/ER -> ERA/FIP/WHIP/K9/BB9/HR9/K%/BB%) for
-  FULL (all games) + REGULAR (<=5/18) splits. Validated: FULL vs Full Master + REGULAR vs Regular Master both
-  ERA mean|Δ| 0.232 (89% within 0.5), FIP 0.063, WHIP 0.027, IP 0.52; reg_IP<=full_IP for all. Output
-  `scripts/drs/output/pitcher_line.csv` (full_* + reg_* cols).
-- **ERA = pitch-log-native (Trevor's decision, like SB): store the calc, cross-check Master routinely**
-  (`scripts/drs/validate_vs_master.py`). Residual ~11% >0.5 ERA = WP-vs-PB unlabeled in the pitch log
-  (CONFIRMED irreducible: my error detection already beats the pitchResult flags 0-missed; no column recovers WP/PB).
-- **SEQUENCE COLUMNS IMPORTED TO STAGING** (pitch_num_in_game/ab_num_in_game/pitch_num_in_ab, 2,576,230 rows;
-  cleanup done). Prod replay pending (scripts/sql/pitch_log_sequence_backfill_steps.sql; PROD_MIGRATIONS_TODO).
-  CLI is linked to PROD (trbvxuoliwrfowibatkm) — staging DDL must be pasted in the staging editor.
-- **OVERWRITE TARGET = `Pitching Master`:** main stat cols (IP/ERA/FIP/WHIP/K9/BB9/HR9/bb_pct/k_pct/bf) hold the
-  FULL-season line; only `regular_season_ip` exists for the regular split (NO reg_era/fip/... columns).
-- **DECISION PENDING (Trevor) before the overwrite loader:** store the full regular split per-pitcher (ADD
-  reg_* columns to Pitching Master) vs just full-season line + regular_season_ip (regular aggregates live at the
-  team level in team_war_snapshots). And confirm we REPLACE the Master's ERA with the pitch-log ERA (0.232).
-- **NEXT:** (a) resolve the split-storage decision; (b) build the overwrite loader (staging first, paste-SQL/
-  script writing to Pitching Master keyed source_player_id+Season); (c) optional DB-parity check (calc from the
-  DB pitch_log matches the CSV result) for production readiness. Then reconcile dWAR/bsrWAR to full-season.
+- **MAJOR DECISION (Trevor 2026-08-08) — MASTER IS AUTHORITATIVE; pitch log = ENGINE + cross-check.**
+  SUPERSEDES the old "overwrite the Masters with pitch-log values" premise. Where the pitch-log calc differs
+  from the Master, USE THE MASTER, not the pitch log. Evidence: Mark Rogers (Canisius) — ours 6.52/38.7IP,
+  Master 8.55/40IP = **Baseball Reference exactly**, school-official 8.10. So (1) the Master IS Baseball
+  Reference, (2) TruMedia computes ERA from the pitch log the SAME WAY WE DO (our method = industry standard),
+  (3) our diffs = OUR EXPORT's coverage gaps on low-TrackMan teams (e.g. MAAC), NOT a method error — TruMedia's
+  same method on complete data gives the right number, (4) an official/public source (school) can further
+  override the computed value. So: STORED stat = Master (Baseball-Reference-consistent, complete-coverage,
+  official-overridable); our pitch-log accrual is the validated ENGINE (matches Master where coverage complete:
+  Govel 2.88 vs 2.87) + the cross-check (`validate_vs_master.py`) + the base for a future "public override" model.
+- **DO NOT overwrite the pitcher/hitter Master with our pitch-log values** — it would replace complete-coverage
+  Baseball-Reference numbers with our lower-coverage ones (Rogers 8.55 -> 6.52 = worse). Keep the Master.
+- **What the pitch-log work DELIVERED:** validated that our method == TruMedia's (industry standard); a runnable
+  ERA/line engine (score-driven, 0.232 vs Master, exact where coverage complete); FIP/WHIP/K9/etc + hitter rates
+  all exact; the sequence-column import (staging) so the engine can run from the DB.
+- **CHUNK 6 (revised) = fill `team_war_snapshots` from the REGULAR-season Master** (authoritative regular-season
+  stats) so program analytics/benchmarks are right. Storage decision (a): full-season line + regular_season_ip in
+  the Masters; regular split lives at the team level in team_war_snapshots. Confirm whether the Master TABLES need
+  refreshing from Trevor's fresh Full/Regular exports (finalized end-of-season) or are already current.
+- **NEXT after that:** reconcile dWAR/bsrWAR to full-season for the player store (composite currently o=full,
+  d/bsr=regular); then recalibration + display swap -> one staging re-precompute -> reseed + market repoint -> ONE prod push.
 
 
 ## Goal (locked decisions)
