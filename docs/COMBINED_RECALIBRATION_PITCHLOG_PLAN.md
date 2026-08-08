@@ -25,10 +25,14 @@ captures the full jump.
   pitch-log-derived vs the current Master values, validate, then overwrite. Projection keeps reading the
   Masters (now pitch-log-sourced). The TruMedia Master export remains the *conceptual* cross-check rail (like
   SB counts: pitch log for value, official/Master to confirm), but we don't persist a parallel table.
-- **pWAR: ONLY change is `RUNS_PER_WIN` 10 → 13.1.** Do NOT touch `pwar_r_per_9` (7.11), `pwar_replacement_runs_per_9`
-  (1.5), or any other pWAR constant. So the earlier "reconcile the edge-fn vs war.ts pWAR divergence to a D1
-  set" is DROPPED — the edge fn's pWAR constants stay; only rpw flips. (Same for oWAR: the recalibration is
-  the full oWAR set, but pWAR is rpw-only.)
+- **pWAR: recalibrate to the RESEARCH-derived D1 constants (Trevor clarified 2026-08-08 — I first misread this
+  as rpw-only).** Change the pWAR values the calibration audit says to change (`docs/drs-reference/CONSTANTS_D1_2026.md`
+  + AGENT_LEARNINGS "WAR calibration audit": r/9 → ~6.76, pitcher replacement → ~2.48/9IP, rpw → 13.1), and
+  RECONCILE the edge-fn (`pwar_r_per_9 7.11`, `pwar_replacement_runs_per_9 1.5`, rpw 10) vs war.ts
+  (`RUNS_PER_9 5.5`, `2.5`, rpw 10) divergence onto that single D1 set. **"Nothing else" is ARCHITECTURAL, not
+  numeric:** pitchers get NO dWAR component (pitcher fielding stays out of pitcher WAR), and pWAR is NOT folded
+  into a blended total WAR — pitchers stay `p_war`, hitters stay `total_hitter_war` (the side-specific design;
+  the old "o+p+d+bsr blended total" idea stays REJECTED).
 - **FUTURE data cleanup (not now, noted so it's not lost):** consolidate toward **ONE players table + ONE
   player_predictions table** — fold the Hitter/Pitching Master stat columns into the unified model rather than
   separate Master tables. Deferred; flagged as a cleanup pass.
@@ -63,9 +67,10 @@ Pitch log = source of truth for ALL data (season stats AND power-rating sub-metr
 
 ## STEP 1 — recalibration (10 → 13.1) — `docs/PUSH2_RECALIBRATION_PLAN.md`
 Centralize the 7 copy-pasted oWAR formulas + flip the **oWAR** D1 constants (`RUNS_PER_PA 0.174`,
-`REPLACEMENT 2.0 wins/600PA`, `RUNS_PER_WIN 13.1`) + `refresh_composite_war` `/10→/13.1`. **pWAR: ONLY
-`RUNS_PER_WIN` 10→13.1** — do NOT touch `pwar_r_per_9`/`pwar_replacement_runs_per_9` (the earlier "reconcile the
-pWAR divergence" idea is DROPPED per the locked decision).
+`REPLACEMENT 2.0 wins/600PA`, `RUNS_PER_WIN 13.1`) + `refresh_composite_war` `/10→/13.1`. **pWAR: recalibrate
+to the research D1 constants** (r/9 ~6.76, pitcher replacement ~2.48, rpw 13.1) and reconcile the edge-fn vs
+war.ts divergence onto that one set. Architectural guardrails: NO dWAR for pitchers, NO blended total WAR
+(pitchers = `p_war`, side-specific).
 
 ## STEP 2 — display swap
 `o_war → total_hitter_war` where it's the HEADLINE (keep raw `o_war` in bat/glove/legs breakdowns), via
@@ -88,7 +93,8 @@ acknowledges: added dWAR + bsrWAR, recalibrated to D1 (10→13.1), stats/power r
 
 ## Decisions — status
 - ✅ **Store: OVERWRITE the Masters** (A), no new table, cross-check during the run.
-- ✅ **pWAR: only `RUNS_PER_WIN` 10→13.1**, no other pWAR constant changes.
+- ✅ **pWAR: recalibrate to the research D1 constants** (r/9 ~6.76, repl ~2.48, rpw 13.1 — reconcile edge-fn
+  vs war.ts onto that set). Architectural: NO dWAR for pitchers, NO blended total WAR (side-specific `p_war`).
 - 🔎 **ERA reconstruction feasibility** — prove inning-boundary + earned/unearned + score logic on a sample
   before committing (hybrid fallback = Master ERA). FIRST feasibility task.
 - 🔎 **Hitter final-standard** — diff pitch-log-derived vs `Hitter Master`.

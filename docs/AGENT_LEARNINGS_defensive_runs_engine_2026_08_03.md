@@ -759,9 +759,14 @@ impact report without three prod pushes. Durable decisions + corrections:
   Master), validate, overwrite. Pitch log = source of truth for ALL data — season stats AND power-rating
   sub-metrics; the Master export stays the conceptual cross-check rail (SB-count pattern) but isn't persisted
   in parallel.
-- **pWAR: ONLY `RUNS_PER_WIN` 10→13.1 (Trevor).** Do NOT change `pwar_r_per_9` (7.11), `pwar_replacement_runs_per_9`
-  (1.5), or anything else on the pitcher side — the earlier "reconcile the edge-fn vs war.ts pWAR divergence"
-  is DROPPED. oWAR gets the full D1 recalibration; pWAR is rpw-only.
+- **pWAR: recalibrate to the RESEARCH D1 constants — NOT rpw-only (Trevor clarified; I first misread).**
+  "No changes to pWAR except 13.1" meant the ARCHITECTURE stays put, not the numbers: change the pWAR values
+  the research says to change (r/9 → ~6.76, pitcher replacement → ~2.48/9IP, rpw → 13.1 per the calibration
+  audit / CONSTANTS_D1_2026), reconciling the edge-fn (7.11/1.5) vs war.ts (5.5/2.5) divergence onto that one
+  D1 set. The "nothing else" = ARCHITECTURAL: pitchers get NO dWAR component, and pWAR is NOT folded into a
+  blended total WAR (pitchers stay `p_war`, hitters `total_hitter_war`; the "o+p+d+bsr blended total" stays
+  rejected). *Lesson: "only change X" from the user can mean "only the numbers research dictates" OR "only this
+  one constant" — I collapsed it to the narrow reading; confirm which when a recalibration is at stake.*
 - **ERA from the pitch log needs REAL inning/run reconstruction, not an outs total (Trevor).** Recognize
   inning start/end, apply earned/unearned RULES (a run is unearned iff it only scored because of a charged
   error — replay the inning without the error), and use the SCORE data (`current_runs`/`total_runs`/
