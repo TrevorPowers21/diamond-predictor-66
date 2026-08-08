@@ -37,6 +37,25 @@ captures the full jump.
   player_predictions table** — fold the Hitter/Pitching Master stat columns into the unified model rather than
   separate Master tables. Deferred; flagged as a cleanup pass.
 
+## LOCKED — full-season vs regular-season SPLIT (Trevor 2026-08-08)
+The pitch log includes postseason (2/13→6/22; conf tourneys + NCAA). Accrue BOTH lines; consumer decides:
+- **Player stat store + player TOTAL WAR + POWER RATINGS → FULL season (incl. postseason).** Small college
+  samples: postseason ABs vs high-quality opponents solidify power ratings. Past seasons: full. Total WAR incl. post.
+- **Program analytics (team_war_snapshots, YoY/championship benchmarks) → REGULAR season only** (≤5/18) — matches
+  the clean ~56-game season / official records. Old "Option A" holds HERE only.
+- **Projections → TARGET regular-season WAR** (depth roles = regular-season PA totals); **INPUT = full-season power
+  ratings** ("we project regular-season wins, but if we have more data, use it").
+- **Storage:** emit a full-season line + a regular-season split per player (mirrors the existing `regular_season_pa`
+  column — extend to a full regular-season set). Player/WAR/ratings read full; program analytics reads the reg split.
+- **⚠ IMPLICATION (flagged, resolve at composite-wire time):** dWAR/bsrWAR (dRS engine) currently filter to regular
+  season; if player TOTAL WAR is full-season, defense/baserunning components should be accrued FULL-season for the
+  player store (reg split retained for team analytics). oWAR (Hitter Master) is ALREADY full-season, so today's
+  shipped composite is INCONSISTENT (o=full, d/bsr=regular) — reconcile when we re-run.
+- **Independent validation rail (Trevor pulling):** fresh TruMedia Master exports — one regular-season-only + one
+  full-season, hitters AND pitchers. The reg-vs-full diff confirms the 5/18 boundary; the pitcher export is the
+  independent ERA/count check (today's Master is pitch-log-derived → circular). Archive: sources of truth are now
+  saved (`docs/drs-reference/SOURCES_OF_TRUTH_MANIFEST.md` + `~/rstr-data-archive/2026_drs_sources_of_truth.tar.gz`).
+
 ## STEP 0 — finalized data + the pitch-log accrual (the prerequisite; the "whole 'nother run")
 Pitch log = source of truth for ALL data (season stats AND power-rating sub-metrics), Masters = cross-check.
 1. **Confirm the pitch log is complete/final** (currently through ~6/24; verify no gaps vs the season).
