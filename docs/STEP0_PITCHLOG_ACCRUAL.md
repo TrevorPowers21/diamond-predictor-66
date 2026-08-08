@@ -5,15 +5,23 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
-- **Status:** CHUNK 1 DONE — parser extended (`scripts/drs/drs_engine/parser.py`): `Movement.unearned` (from
-  `(UR)`/`(TUR)`), `ParsedEvent.is_walk`/`is_ibb`/`is_hbp`. Additive, non-breaking; dRS tests 19/19 pass.
-  Verified: `3-H(UR)`→unearned, `3-H`→earned, `W`/`IW`→walk, `HP`→hbp, `SF`→is_sf.
-- **Next action (CHUNK 2):** build the pitcher-stat accrual PROTOTYPE — new script reads the DRS Pitch Log
-  CSVs, uses `parse_atbat_desc`, tallies per pitcher (IP=outs/3 via `outs_recorded`; K=event_type K; BB from
-  `is_walk`; H=SINGLE/DOUBLE/TRIPLE/HR; HR; ER=movements to H (to==4, not out) WITHOUT `unearned`, charged to
-  the pitcher on the mound) → ERA/FIP/WHIP/K9/BB9/HR9. Run on ONE sample team, diff vs `Pitching Master`
-  (staging read-only, join on source_player_id) until it matches to tolerance.
-- **Artifacts:** `docs/STEP0_PITCHLOG_ACCRUAL.md` (this), parser changes. Prototype script → `scripts/drs/accrue_pitcher_stats.py`.
+- **Status:** CHUNK 2 VALIDATED — `scripts/drs/accrue_pitcher_stats.py` tallies the season pitcher line from
+  the DRS Pitch Log (679k PAs, 5,375 pitchers, ~1% parse-fails). Diffed vs `Pitching Master` (2,835 pitchers
+  IP>20): **IP mean|Δ| 0.96 (98% within 3 IP), FIP 0.064, WHIP 0.035, K9 0.166, BB9 0.128, HR9 0.000** — clean
+  stats MATCH. **Two bugs found+fixed via the Master diff:** (1) `outs_recorded` excludes strikeouts (it's a
+  DEFENSE fn) → added `+1 out per K` for IP; (2) the HR batter run isn't a movement (solo HR `HR/8(RBI)` has 0
+  movements) → add +1 earned per HR unless a `B-H` token is present. ERA after fixes: mean Δ **−0.05**
+  (unbiased), mean|Δ| 0.88.
+- **KNOWN ERA REFINEMENT (next):** the residual ERA spread is INHERITED-RUNNER attribution — I charge earned
+  runs to the pitcher on the mound at the scoring PA; the Master charges whoever let the runner REACH base.
+  Build: track each baserunner's responsible pitcher through the half-inning (the runner on base when a new
+  pitcher enters is "inherited"; if they score, charge the pitcher who put them on). Mean nets to ~0 so it's a
+  per-pitcher redistribution, not a total. FIP already matches tightly (defense/sequencing-independent).
+- **Next action:** (a) build inherited-runner ER attribution to tighten per-pitcher ERA, OR (b) proceed to
+  CHUNK 3 (hitter accrual: AVG/OBP/SLG/ISO + sub-metrics, diff vs Hitter Master) and return to ERA. Both fine.
+- **Artifacts:** `scripts/drs/accrue_pitcher_stats.py`, `scripts/drs/output/pitcher_accrued.csv` (gitignored —
+  large), parser changes (chunk 1). Validation = diff vs `Pitching Master` on `source_player_id`, Season 2026.
+
 
 ## Goal (locked decisions)
 Accrue the **hitter + pitcher season line AND the power-rating sub-metrics from the pitch log** (source of
