@@ -19,36 +19,54 @@ FILES = sorted(glob.glob("docs/drs-reference/*DRS Pitch Log.csv"))
 
 def v(r, k): return (r.get(k) or "").strip()
 
+IMPLICIT_DEST = {"SINGLE": 1, "DOUBLE": 2, "TRIPLE": 3}
+
 def process_half_inning(pas, er):
-    """pas = [(pitcherId, ev, occ_names{1,2,3}, runs_on_play)] in batting order. Returns (charged, unearned, runs_seen)."""
-    responsible = {}   # runner name -> pitcher who allowed them to reach
-    prev_pitcher = None
+    """pas = [(pitcherId, ev, occ_names{1,2,3}, runs)] in order. BASE-SLOT model (name-agnostic): resp[base] =
+    pitcher responsible for whoever is on that base; a courtesy/pinch runner keeps the slot's pitcher. Recorded
+    occupancy (ManOnBase presence) anchors the slots each PA and recovers silent WP/SB advances by matching a
+    vacated base to a newly-filled higher base. Returns (charged, unearned, runs_seen)."""
+    resp = {1: None, 2: None, 3: None}   # base -> responsible pitcher
     charged = unearned = runs_seen = 0
     for cur, ev, occ, runs in pas:
-        # register any runner on base we haven't seen — allowed by the PRIOR PA's pitcher
-        for b in (1, 2, 3):
-            name = occ.get(b)
-            if name and name not in responsible:
-                responsible[name] = prev_pitcher or cur
+        pres = {b: bool(occ.get(b)) for b in (1, 2, 3)}
+        # --- reconcile my slots to the RECORDED occupancy at PA start (corrects prior-PA drift) ---
+        arrived = [b for b in (1, 2, 3) if pres[b] and resp[b] is None]
+        departed = [b for b in (1, 2, 3) if not pres[b] and resp[b] is not None]
+        for a in sorted(arrived):                       # silent advance: carry a vacated lower base up
+            lower = [d for d in departed if d < a]
+            if lower:
+                src = max(lower)
+                resp[a] = resp[src]; resp[src] = None; departed.remove(src)
+        for d in departed:                              # runner left untracked (scored/out elsewhere)
+            resp[d] = None
+        # --- process this PA's movements against a snapshot ---
+        old = dict(resp)
         for m in ev.movements:
-            if m.to != 4:
-                continue
-            runs_seen += 1
-            if m.unearned:
-                unearned += 1
-                continue
-            if m.frm == 0:                       # batter scored (explicit B-H, e.g. inside-park)
-                er[cur] = er.get(cur, 0) + 1
+            rp = cur if m.frm == 0 else old.get(m.frm)
+            if m.out:                                    # runner OUT (incl. thrown out at home `3XH`) — not a run
+                if m.frm != 0: resp[m.frm] = None
+            elif m.to == 4:                              # scored
+                runs_seen += 1
+                if m.unearned:
+                    unearned += 1
+                else:
+                    pid = rp if rp is not None else cur
+                    er[pid] = er.get(pid, 0) + 1
+                    charged += 1
+                if m.frm != 0: resp[m.frm] = None
+            else:                                        # advanced to a base
+                if m.frm != 0: resp[m.frm] = None
+                resp[m.to] = rp
+        # implicit batter destination / HR (no explicit B-move)
+        if not any(m.frm == 0 for m in ev.movements):
+            if ev.event_type == "HR":
+                er[cur] = er.get(cur, 0) + 1; charged += 1; runs_seen += 1
             else:
-                name = occ.get(m.frm)
-                pid = responsible.get(name, cur) if name else cur
-                er[pid] = er.get(pid, 0) + 1
-            charged += 1
-        # implicit HR batter run (solo/partial HR has no B-H movement)
-        if ev.event_type == "HR" and not any(m.frm == 0 for m in ev.movements):
-            er[cur] = er.get(cur, 0) + 1
-            charged += 1; runs_seen += 1
-        prev_pitcher = cur
+                dest = IMPLICIT_DEST.get(ev.event_type)
+                if dest is None and (ev.is_walk or ev.is_hbp or ev.is_ci or ev.event_type in ("ERROR", "FC")):
+                    dest = 1
+                if dest is not None: resp[dest] = cur
     return charged, unearned, runs_seen
 
 def main():
