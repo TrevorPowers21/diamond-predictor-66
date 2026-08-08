@@ -19,14 +19,19 @@ captures the full jump.
 - **Projection engine reads:** `Pitching Master` (pitchers), the `players`/Master hitter path (hitters),
   Conference Stats, Park Factors, model_config, equation overrides → writes `player_predictions`.
 
-## THE key design fork (Trevor's call before building)
-The pitch-log accrual produces pitch-log-derived season stats + power-rating inputs. Where do they land?
-- **(A) Overwrite the Masters** — Masters become pitch-log-sourced; simplest for the projection (reads Masters
-  unchanged) but you LOSE the independent cross-check (the TruMedia export values are gone unless backed up).
-- **(B) New `player_season_stats` table (pitch-log-derived, keyed by player+season)** — projection reads THIS;
-  the Masters stay untouched as the pure cross-check rail (Trevor's "Masters = cross-check", like SB counts).
-  More wiring (repoint the projection reads), cleaner separation. **Recommended.**
-Decide A vs B first — it shapes steps 0 and 3.
+## LOCKED DECISIONS (Trevor 2026-08-08)
+- **STORE = (A) OVERWRITE the Masters with pitch-log-derived values.** No new `player_season_stats` table
+  ("overwrite and cross check, not new data, unnecessary"). The cross-check happens DURING the run — compare
+  pitch-log-derived vs the current Master values, validate, then overwrite. Projection keeps reading the
+  Masters (now pitch-log-sourced). The TruMedia Master export remains the *conceptual* cross-check rail (like
+  SB counts: pitch log for value, official/Master to confirm), but we don't persist a parallel table.
+- **pWAR: ONLY change is `RUNS_PER_WIN` 10 → 13.1.** Do NOT touch `pwar_r_per_9` (7.11), `pwar_replacement_runs_per_9`
+  (1.5), or any other pWAR constant. So the earlier "reconcile the edge-fn vs war.ts pWAR divergence to a D1
+  set" is DROPPED — the edge fn's pWAR constants stay; only rpw flips. (Same for oWAR: the recalibration is
+  the full oWAR set, but pWAR is rpw-only.)
+- **FUTURE data cleanup (not now, noted so it's not lost):** consolidate toward **ONE players table + ONE
+  player_predictions table** — fold the Hitter/Pitching Master stat columns into the unified model rather than
+  separate Master tables. Deferred; flagged as a cleanup pass.
 
 ## STEP 0 — finalized data + the pitch-log accrual (the prerequisite; the "whole 'nother run")
 Pitch log = source of truth for ALL data (season stats AND power-rating sub-metrics), Masters = cross-check.
@@ -37,10 +42,20 @@ Pitch log = source of truth for ALL data (season stats AND power-rating sub-metr
 3. **Accrue the PITCHER line from the pitch log** (the new run):
    - Clean tallies (events + IP, dRS parser already extracts): IP (outs/3), WHIP, FIP, K9, BB9, HR9, K%, BB%,
      stuff+ (already pitch-log-native).
-   - **ERA** via the dRS **error attribution** — earned = runs that scored without depending on a charged
-     error; the engine already parses errors + run-scoring, so earned/unearned reconstruction is now buildable
-     (was the one hard part). Test reliability; fallback = keep ERA from `Pitching Master` (cross-check) if noisy.
-   - Diff vs `Pitching Master` on a sample to validate (Trevor cross-checks the Master).
+   - **ERA — needs a real inning/run reconstruction, deeper than an outs total (Trevor 2026-08-08).** Must:
+     (a) recognize when an inning STARTS and ENDS, (b) apply the earned/unearned RULES (a run is unearned if it
+     only scored because of a charged error — reconstruct the inning as if the error hadn't happened), (c) use
+     the SCORE data to know exactly when a run scored + how much. The pitch_log has the run columns
+     (`current_runs`/`total_runs`/`opponent_runs` + the per-play `runs` we backfilled) + the dRS error
+     attribution, so it's buildable. This is FEASIBILITY-FIRST: prove the inning-boundary + earned/unearned
+     logic on a sample before committing; fallback = keep ERA from `Pitching Master` if the reconstruction is
+     noisy. Diff vs `Pitching Master` to validate (Trevor cross-checks).
+   - **OPPORTUNITY (Trevor 2026-08-08): the inning/score reconstruction is the same machinery that unlocks
+     TEAM-level metrics — capture them in the SAME pass while we're parsing innings + scores:** team offense
+     from W/L, home/road record + splits, conference-vs-conference games, and PARK-specific stats (esp. valuable
+     since the park-factor build is internal here). "Could be very important in the future." Not required for
+     ERA itself, but cheap to accrue alongside since we're already reconstructing game state. Scope it into the
+     reconstruction design. (Trevor: ask if the conf-vs-conf rationale is needed — NOT needed now.)
 4. **Power ratings from the accrued sub-metrics** — `computeHitterPowerRatings` / `computePitchingPowerRatings`
    (`src/lib/powerRatings.ts`) fed by the pitch-log sub-metrics instead of the Master export.
 5. Store per **(A) Masters** or **(B) new `player_season_stats`** per the fork. (Season col; don't over-invest
@@ -70,11 +85,15 @@ Deploy edge fn + run the SQL `/13.1` + repoint reads + ONE prod re-precompute + 
 acknowledges: added dWAR + bsrWAR, recalibrated to D1 (10→13.1), stats/power ratings now pitch-log-sourced,
 2027 projections finalized. Diff `player_predictions_snap_2026_08_07` (÷10) vs live → the full before/after.
 
-## Open decisions to lock before building
-1. **A vs B** (overwrite Masters vs new pitch-log stats table). Recommended: B.
-2. **pWAR constant set** (one D1 set; derive, don't split the difference).
-3. **ERA reconstruction** reliability from the pitch log (clean sweep vs ERA-hybrid).
-4. **Hitter final-standard confirmation** (pitch-log vs Hitter Master diff).
+## Decisions — status
+- ✅ **Store: OVERWRITE the Masters** (A), no new table, cross-check during the run.
+- ✅ **pWAR: only `RUNS_PER_WIN` 10→13.1**, no other pWAR constant changes.
+- 🔎 **ERA reconstruction feasibility** — prove inning-boundary + earned/unearned + score logic on a sample
+  before committing (hybrid fallback = Master ERA). FIRST feasibility task.
+- 🔎 **Hitter final-standard** — diff pitch-log-derived vs `Hitter Master`.
+- 🔎 **Team-metrics scope** — decide how much (W/L offense, home/road splits, conf-vs-conf, park stats) to
+  accrue in the reconstruction pass. Cheap alongside ERA; "could be very important in the future."
+- 🗂️ **FUTURE cleanup** — consolidate to 1 players table + 1 player_predictions table (fold Masters in).
 
 ## Not in this effort
 Transfer-projection fallbacks (was Push 4 — returners already have them; source/trigger TBD). Playwright e2e

@@ -738,3 +738,46 @@ flip `RUNS_PER_WIN 10→13.1` etc. + `refresh_composite_war` `/10→/13.1` → `
 swap (`pickHitterWar`/`pickPitcherWar`) → re-precompute → reseed `team_war_snapshots` → repoint market value
 at total WAR. Push 3 = engine computes aggregates FROM the pitch_log table (self-sufficiency). Deferred:
 Playwright e2e harness (Supabase auth fixture + smoke spec).
+
+## Combined recalibration + pitch-log accrual plan — LOCKED decisions (2026-08-08, → process + defense-and-drs)
+
+Full plan: `docs/COMBINED_RECALIBRATION_PITCHLOG_PLAN.md`. After Push 1 shipped, Trevor chose to fold Push
+2/3/5 into ONE staging-buttoned effort → ONE prod push (players move once), because usage is low now and the
+dWAR/bsrWAR addition gives narrative cover for WAR moving. Snapshot BETWEEN staging stages for a per-change
+impact report without three prod pushes. Durable decisions + corrections:
+
+- **DATA MODEL CORRECTION (audited, do NOT trust "players holds stats"):** `players` = identity/roster +
+  playing-time counts (`pa/ab/ip/g/gs`) + portal — NO rate stats, NO season col, NO power ratings. The season
+  STAT LINE + power ratings live in **`Hitter Master`** (AVG/OBP/SLG/ISO + sub-metrics + `*_power_rating` +
+  blended, has `Season`) and **`Pitching Master`** (IP/ERA/FIP/WHIP/K9/BB9/HR9 + `*_pr_plus` + `stuff_plus` +
+  blended, has `Season`). `player_predictions.from_*` = the projection base (loaded from the Masters);
+  `player_prediction_internals` = per-prediction power ratings. The projection engine reads `Pitching Master`
+  for pitchers + the players/Master hitter path — it was NEVER re-run through pitch-log data (Trevor held it to
+  avoid shifting numbers mid-portal-season).
+- **STORE = OVERWRITE the Masters with pitch-log-derived values (Trevor).** No new `player_season_stats` table
+  ("overwrite and cross check, not new data, unnecessary"). Cross-check DURING the run (pitch-log vs current
+  Master), validate, overwrite. Pitch log = source of truth for ALL data — season stats AND power-rating
+  sub-metrics; the Master export stays the conceptual cross-check rail (SB-count pattern) but isn't persisted
+  in parallel.
+- **pWAR: ONLY `RUNS_PER_WIN` 10→13.1 (Trevor).** Do NOT change `pwar_r_per_9` (7.11), `pwar_replacement_runs_per_9`
+  (1.5), or anything else on the pitcher side — the earlier "reconcile the edge-fn vs war.ts pWAR divergence"
+  is DROPPED. oWAR gets the full D1 recalibration; pWAR is rpw-only.
+- **ERA from the pitch log needs REAL inning/run reconstruction, not an outs total (Trevor).** Recognize
+  inning start/end, apply earned/unearned RULES (a run is unearned iff it only scored because of a charged
+  error — replay the inning without the error), and use the SCORE data (`current_runs`/`total_runs`/
+  `opponent_runs` + the per-play `runs` backfilled) to know exactly when + how much scored. The dRS error
+  attribution makes this buildable now (was the hard part). FEASIBILITY-FIRST — prove it on a sample; hybrid
+  fallback = Master ERA if noisy.
+- **The inning/score reconstruction is a MULTIPLIER — capture TEAM metrics in the same pass (Trevor):** team
+  offense from W/L, home/road record + splits, conference-vs-conference games, and PARK-specific stats (esp.
+  valuable — park-factor build is internal here). Not required for ERA but cheap alongside it; scope into the
+  reconstruction design. (Conf-vs-conf rationale: not needed now.)
+- **FUTURE data cleanup (noted, deferred):** consolidate toward ONE players table + ONE player_predictions
+  table — fold the Hitter/Pitching Master stat columns into the unified model instead of separate Master tables.
+- **PROCESS:** Trevor: "continue to save all this into md documents so when we compact, none of it is lost,
+  and save it all into the agent information." → this doc + `COMBINED_RECALIBRATION_PITCHLOG_PLAN.md` are the
+  durable record; keep appending decisions as they're made.
+
+**Before/after snapshot for the whole jump:** `docs/snapshots/prod_player_predictions_baseline_2026-08-07_pre-push2.csv`
+(31,367 baseline rows) + full-table `player_predictions_snap_2026_08_07` on prod/staging. Diff after the one
+big re-precompute → the complete before/after.
