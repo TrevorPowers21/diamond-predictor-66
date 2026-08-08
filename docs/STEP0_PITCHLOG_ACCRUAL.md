@@ -5,38 +5,30 @@
 resume point for the Step 0 build — update the "RESUME POINT" block below as work progresses.
 
 ## RESUME POINT (update this every chunk)
-- **ERA REFINEMENT PASS (2026-08-08, Trevor "investigate then fix"):** (1) FOUND+FIXED a real bug — a runner
-  thrown OUT at home (`3XH`) was counted as an earned run (checked `m.to==4` before `m.out`); removed 2,282
-  spurious ER, coverage 102.2%->100.0%, ERA mean|Δ| 0.295->0.242 (88% within 0.5). (2) Switched name-tracking
-  -> BASE-SLOT (courtesy/pinch runners keep the slot's pitcher; occupancy-anchored) — marginal, but correct model.
-  (3) REMAINING gap PRECISELY DIAGNOSED: systematic -3.2% ER UNDER-count (Master 98,210 vs mine 95,046), negative
-  in EVERY IP band. Cause = TEAM-unearned vs PITCHER-earned: 11,324 `(UR)` tags but Master treats only ~8,000 as
-  unearned; the ~3,200 diff = runs unearned to the TEAM but EARNED to a reliever who inherited a post-error
-  situation (4,948 UR are in multi-pitcher innings; 9,515 in innings w/ an error). Full fix = per-pitcher
-  earned-run RECONSTRUCTION (rebuild each half-inning w/o errors, benefit-of-doubt per pitcher from when he
-  entered). BUILT + TESTED (2026-08-08, Trevor "build it"): TWO reconstructions — an err-pitcher rule and a
-  phantom-out (reconstructed-out) rule that reclassify team-unearned runs to earned for a "clean" reliever.
-  RESULT: both FIXED the aggregate (-3.2% -> -0.8%/+0.5%) but made PER-PITCHER ERA WORSE (mean|Δ| 0.242 ->
-  0.285 -> 0.325). Attributing a team-unearned run to the correct INDIVIDUAL pitcher is a benefit-of-doubt
-  judgment (scorers differ); wrong-pitcher cost > uniform-bias gain. DECISION: TRUST the `(UR)` team tag =
-  most accurate per pitcher (ERA mean|Δ| 0.242, 88% within 0.5, aggregate -3.2% consistent low). Reconstruction
-  code preserved in git history (reverted in `accrue_pitcher_er.py`). Master ER archived as authoritative fallback.
-- **INHERITED-RUNNER ERA — BUILT + VALIDATED (2026-08-08, Trevor chose path A).** `scripts/drs/accrue_pitcher_er.py`.
-  KEY (Trevor's pointer): the pitch log records `ManOnFirst/Second/Third` (runner NAME on each base at PA start)
-  + `Runs` (runs scored on the play). So NO base-state reconstruction (that drifted to 13% orphans) — read
-  recorded occupancy, track `runner_name -> responsible pitcher` (the pitcher the PA BEFORE that runner first
-  appears on base), charge each earned run (scoring movement to H w/o `(UR)`) to the responsible pitcher for
-  `ManOn{frm}`; unknown runners fall back to current pitcher (no orphans). CS/pickoff outs now count toward IP.
-- **VALIDATION vs Full Pitching Master (independent TruMedia, n=2835 IP>=20):** ER mean −0.07, mean|Δ| 1.14,
-  97% within 3; **ERA mean +0.06, mean|Δ| 0.295, 83% within 0.5** — up from the mound simplification (ERA
-  mean|Δ| 0.87 / 41%). Everything else already matched (IP/K/BB/HR/H/BF/FIP/WHIP ~100%). ERA is now pitch-log-native.
-- **Residual (~17% beyond 0.5 ERA):** attribution edge cases (522 misses: 222 ER-driven >2 vs 109 IP-driven >1),
-  mixed direction so NOT bias — pinch runners / mid-inning subs (a new NAME at a base should inherit the replaced
-  runner's pitcher; I assign prev-PA pitcher). Optional refinement; FIP (projection driver) is already exact.
-- **All 4 TruMedia exports received + archived** (217MB tarball + manifest). Full/regular split policy LOCKED.
-- **NEXT — chunk 6:** integrate this ER + the IP/K/BB/HR/H tallies into ONE pitcher accrual producing the full
-  line (ERA/FIP/WHIP/K9/BB9/HR9), emit FULL + REGULAR (<=5/18) splits, overwrite Pitching Master (staging first).
-  Then reconcile dWAR/bsrWAR to full-season for the player store (shipped composite is o=full, d/bsr=regular).
+- **PITCHER ERA — SCORE-DRIVEN + Trevor's rules, DONE (2026-08-08).** `scripts/drs/accrue_pitcher_er.py`.
+  Final vs INDEPENDENT Full Pitching Master (n=2835 IP>=20): **ERA mean|Δ| 0.232, 89% within 0.5 ERA (66%
+  within 0.25), ER 98% within 3, aggregate -0.7%.** Progression: mound-simplification 0.87 -> occupancy+out-at-home
+  0.242 -> +score-driven capture & rules 2+3 = 0.232.
+- **Method (Trevor's architecture, all validated):**
+  1. SCORE-DRIVEN run capture — walk every pitch, batting-team score on the NEXT pitch minus this = runs on this
+     pitch (delta handles 2+ runs/pitch; catches WP/PB/steal-home/balk + the ~900 the `Runs` col drops). Total
+     111,704 vs Master R 111,659 = **99.96%**. (currentRuns/opponentCurrentRuns is the score COMING IN — lag one pitch.)
+  2. INHERITED-RUNNER attribution — base-slot occupancy (ManOnFirst/Second/Third), name-agnostic so courtesy
+     runners keep the slot's pitcher; charged to whoever put the runner on, across pitching changes.
+  3. EARNED/UNEARNED — rule 2 (reached-on-error = unearned) + rule 3 (once an error should've been the 3rd out,
+     recon_outs>=3, every later run unearned) OR'd with the `(UR)` tag. Out-at-home (`3XH`) is an out, not a run.
+- **RESIDUAL (irreducible from the pitch log, ~11% >0.5 ERA, MIXED direction = not bias):** WP vs PB is NOT
+  labeled in the pitch log (I mark all non-PA scoring earned; passed balls should be unearned) + earned/unearned
+  judgment edge cases. Cannot be resolved from pitch-log data alone.
+- **CONSISTENCY DECISION (pending Trevor):** he requires the DISPLAYED ERA match official exactly (trust). Options:
+  (A) store ER/ERA/R from the Master export (exact, both splits; earned/unearned is an official-scorer ruling
+  anyway) + everything else pitch-log-native; the pitch-log ERA engine (0.232) stays as cross-check/future engine.
+  (B) ship the pitch-log ERA (0.232/89%). Recommend A for exact consistency.
+- **All else pitch-log-native + EXACT vs Master:** IP/K/BB/HBP/H/HR/BF/FIP/WHIP/K9/BB9/HR9 (+ stuff+/tracking/ratings).
+- **Exports + policy:** 4 TruMedia masters archived (217MB tarball + manifest). Full/regular split policy LOCKED.
+- **NEXT — chunk 6:** consolidate the pitcher line (IP+ER+rates), full+regular splits, overwrite Pitching Master
+  (staging first) — with the A/B ERA decision. Then reconcile dWAR/bsrWAR to full-season for the player store.
+
 
 ## Goal (locked decisions)
 Accrue the **hitter + pitcher season line AND the power-rating sub-metrics from the pitch log** (source of
