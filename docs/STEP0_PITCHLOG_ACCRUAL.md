@@ -14,8 +14,13 @@ resume point for the Step 0 build — update the "RESUME POINT" block below as w
   unearned; the ~3,200 diff = runs unearned to the TEAM but EARNED to a reliever who inherited a post-error
   situation (4,948 UR are in multi-pitcher innings; 9,515 in innings w/ an error). Full fix = per-pitcher
   earned-run RECONSTRUCTION (rebuild each half-inning w/o errors, benefit-of-doubt per pitcher from when he
-  entered) — hardest scoring rule, buildable (have E tokens + pitching changes + occupancy). DECISION PENDING
-  w/ Trevor: build it vs accept 0.242/88% (FIP exact; ERA slightly low & consistent). `accrue_pitcher_er.py`.
+  entered). BUILT + TESTED (2026-08-08, Trevor "build it"): TWO reconstructions — an err-pitcher rule and a
+  phantom-out (reconstructed-out) rule that reclassify team-unearned runs to earned for a "clean" reliever.
+  RESULT: both FIXED the aggregate (-3.2% -> -0.8%/+0.5%) but made PER-PITCHER ERA WORSE (mean|Δ| 0.242 ->
+  0.285 -> 0.325). Attributing a team-unearned run to the correct INDIVIDUAL pitcher is a benefit-of-doubt
+  judgment (scorers differ); wrong-pitcher cost > uniform-bias gain. DECISION: TRUST the `(UR)` team tag =
+  most accurate per pitcher (ERA mean|Δ| 0.242, 88% within 0.5, aggregate -3.2% consistent low). Reconstruction
+  code preserved in git history (reverted in `accrue_pitcher_er.py`). Master ER archived as authoritative fallback.
 - **INHERITED-RUNNER ERA — BUILT + VALIDATED (2026-08-08, Trevor chose path A).** `scripts/drs/accrue_pitcher_er.py`.
   KEY (Trevor's pointer): the pitch log records `ManOnFirst/Second/Third` (runner NAME on each base at PA start)
   + `Runs` (runs scored on the play). So NO base-state reconstruction (that drifted to 13% orphans) — read

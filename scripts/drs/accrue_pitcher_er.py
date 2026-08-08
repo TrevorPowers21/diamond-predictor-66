@@ -23,28 +23,34 @@ IMPLICIT_DEST = {"SINGLE": 1, "DOUBLE": 2, "TRIPLE": 3}
 
 def process_half_inning(pas, er):
     """pas = [(pitcherId, ev, occ_names{1,2,3}, runs)] in order. BASE-SLOT model (name-agnostic): resp[base] =
-    pitcher responsible for whoever is on that base; a courtesy/pinch runner keeps the slot's pitcher. Recorded
-    occupancy (ManOnBase presence) anchors the slots each PA and recovers silent WP/SB advances by matching a
-    vacated base to a newly-filled higher base. Returns (charged, unearned, runs_seen)."""
-    resp = {1: None, 2: None, 3: None}   # base -> responsible pitcher
+    pitcher responsible for whoever is on that base (courtesy/pinch runners keep the slot's pitcher). Recorded
+    occupancy anchors the slots each PA + recovers silent advances.
+
+    EARNED/UNEARNED: trust the `(UR)` team-unearned tag directly (a run marked `(UR)` is not charged to anyone).
+    NOTE (2026-08-08): I built + tested two per-pitcher earned-run reconstructions (reclassify team-unearned runs
+    to earned for a "clean" reliever) — an err-pitcher rule and a phantom-out rule. BOTH improved the aggregate
+    (removed the ~3.2% low bias) but made PER-PITCHER ERA WORSE (mean|Δ| 0.242 -> 0.285 / 0.325), because
+    attributing a team-unearned run to the correct individual pitcher is a benefit-of-the-doubt judgment call and
+    the wrong-pitcher cost exceeds the uniform-bias gain. Trusting the team tag is the most accurate per pitcher.
+    Returns (charged, unearned, runs_seen)."""
+    resp = {1: None, 2: None, 3: None}          # base -> responsible pitcher
     charged = unearned = runs_seen = 0
     for cur, ev, occ, runs in pas:
         pres = {b: bool(occ.get(b)) for b in (1, 2, 3)}
-        # --- reconcile my slots to the RECORDED occupancy at PA start (corrects prior-PA drift) ---
+        # --- reconcile slots to RECORDED occupancy (corrects prior-PA drift) ---
         arrived = [b for b in (1, 2, 3) if pres[b] and resp[b] is None]
         departed = [b for b in (1, 2, 3) if not pres[b] and resp[b] is not None]
-        for a in sorted(arrived):                       # silent advance: carry a vacated lower base up
+        for a in sorted(arrived):
             lower = [d for d in departed if d < a]
             if lower:
                 src = max(lower)
                 resp[a] = resp[src]; resp[src] = None; departed.remove(src)
-        for d in departed:                              # runner left untracked (scored/out elsewhere)
+        for d in departed:
             resp[d] = None
-        # --- process this PA's movements against a snapshot ---
         old = dict(resp)
         for m in ev.movements:
             rp = cur if m.frm == 0 else old.get(m.frm)
-            if m.out:                                    # runner OUT (incl. thrown out at home `3XH`) — not a run
+            if m.out:                                    # OUT (incl. thrown out at home `3XH`) — not a run
                 if m.frm != 0: resp[m.frm] = None
             elif m.to == 4:                              # scored
                 runs_seen += 1
@@ -52,13 +58,11 @@ def process_half_inning(pas, er):
                     unearned += 1
                 else:
                     pid = rp if rp is not None else cur
-                    er[pid] = er.get(pid, 0) + 1
-                    charged += 1
+                    er[pid] = er.get(pid, 0) + 1; charged += 1
                 if m.frm != 0: resp[m.frm] = None
             else:                                        # advanced to a base
                 if m.frm != 0: resp[m.frm] = None
                 resp[m.to] = rp
-        # implicit batter destination / HR (no explicit B-move)
         if not any(m.frm == 0 for m in ev.movements):
             if ev.event_type == "HR":
                 er[cur] = er.get(cur, 0) + 1; charged += 1; runs_seen += 1
