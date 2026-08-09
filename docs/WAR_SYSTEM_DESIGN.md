@@ -166,19 +166,40 @@ Every one of these is currently a PLACEHOLDER; none ship until DERIVED from D1 d
 
 ---
 
-## 4. The per-pitcher dRS-behind fixture (genuinely novel — no public college system can do this)
-B-R subtracts *team-level* defense prorated across all a team's pitchers. We can do better: dRS attributes each
-play to a **named fielder on an identified pitch**, so we compute the fielding runs saved **behind THIS pitcher's
-specific innings** — Urbanczyk got 1.7 runs of Rice's +13.3, not a flat proration, because most of Rice's glove
-work happened behind *other* arms. Prorating would have wrongly docked him.
+## 4. The team-dRS fixture — full-season team defense prorated by IP (the Baseball-Reference method)
+**DECISION (2026-08-09): team defense prorated by IP, NOT per-pitcher-specific plays.** B-R adjusts each
+pitcher's runs using the TEAM's full-season defensive quality applied to his innings — they do not compute which
+nine fielders stood behind him on a Tuesday. Reason (Trevor): a team's season-long defense is a **stable,
+believable** number; any single pitcher's ~80-IP slice of defensive events is **noise**. So:
+```
+dRS_behind(pitcher) = centered_team_dRS × pitcher_IP / team_IP
+```
+Built + validated (`scripts/drs/derive_team_drs.mjs` → `output/team_drs.csv`): 308 D1 teams, Arkansas +41.1 →
+Delaware State −27.8, Urbanczyk = Rice(+10.8) × 66.7/510 = **1.41**.
 
-**Fixture spec:** for each (pitcher, season): `dRS_behind = Σ over the pitcher's innings of the fielding
-run-value of plays made behind him` (from the dRS per-play ledger, matched by pitch → pitcher_id). Stamp it like
-every other fixture (version, season, provenance).
+**Team measure = RE-CENTERED `drs_floor` (innings-weighted, per division).** DOCTRINE, one line: **raw where
+books must balance, regressed where estimates must predict, CENTERED where a regressed estimate enters a
+balancing ledger.** The dRS-behind fixture is a *prediction input* (best estimate of defense behind his innings)
+→ so it's the **floor** (regressed; raw carries the same small-sample luck a player's raw does, and subtracting
+unregressed luck from RA9 injects noise into the number the blend exists to stabilize). But it enters a *balancing
+ledger* (must net to zero league-wide) → so it's **centered**: `centered = team_floor − (league_floor_sum /
+league_def_innings) × team_def_innings`. Innings-weighted (NOT a flat per-team mean) so college cancellations /
+unequal game counts don't leak bias through the proration. The +721 raw-floor league sum is the documented
+selection effect (good defenders play more, shrink less) — fine at player-display grain, a systematic gift to
+pitchers if left in a balancing ledger, so it's centered out.
 
-**Conservation check (its telescope):** `Σ_pitchers dRS_behind(p) == team dRS` for every team — the per-pitcher
-attribution must sum back to the team total. This is the same zero-sum discipline as the dRS ledger itself; if it
-doesn't telescope, the pitch→pitcher matching is leaking. Assert it per team, per season.
+**Conservation telescope (final form):** `Σ dRS_behind across ALL pitchers == 0 exactly`, by construction (Σ of
+per-team IP shares = 1, and Σ centered_team_dRS = 0 per division). Assert in the golden suite alongside the
+position-grain checks.
+
+**KNOWN LIMITATION (logged, not a build item):** IP-proration assumes every pitcher gets team-AVERAGE defense,
+but weekend starters pitch behind the A lineup while midweek arms get the bench. Our per-pitch alignment data
+*supports* an actual-defenders-behind-innings version someday — but weekend-vs-midweek is a second-order effect
+not worth its complexity until the first-order (team-level) system is live. Team-level now; per-pitch only when
+it earns its complexity.
+
+**Storage:** `centered_team_dRS` → a `team_drs` column on `team_war_snapshots` (keyed source_team_id + season);
+`dRS_behind` is derived per-pitcher in the descriptive WAR calc (team_drs × IP share).
 
 ---
 
