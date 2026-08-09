@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "script": "scripts/drs/derive_descriptive_constants.mjs",
+    "season": 2026,
+    "derived_at": "2026-08-09",
+    "source": "Pitching Master (ERA/IP authoritative) + Full Season export (R/ER for E2T)",
+    "doctrine": "lgERA from Master, IP-weighted \u03a3ER/\u03a3IP; single replacement level (no SP/RP split); replacement = win%-anchor .380 (no IP floor / empirical cutoff)"
+  },
+  "RPW": 13.1,
+  "lgERA": 6.08,
+  "E2T": 1.1373,
+  "lgRA9": 6.915,
+  "replacement_RA9": 8.83,
+  "replacement_method": {
+    "type": "winpct_anchor",
+    "winpct": 0.38
+  },
+  "reliability_curve_w": 0.5,
+  "reliability_detail": {
+    "splithalf_r": {
+      "RA9": 0.268,
+      "FIP": 0.264
+    },
+    "full_reliability": {
+      "RA9": 0.423,
+      "FIP": 0.417
+    },
+    "qualified_pitchers": 2333
+  }
+}

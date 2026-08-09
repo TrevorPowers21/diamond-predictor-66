@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "script": "scripts/drs/derive_reliability_weight.py",
+    "season": 2026,
+    "derived_at": "2026-08-09",
+    "method": "within-season split-half reliability, RA9 vs FIP on the SAME per-pitcher game split; weight \u221d reliability",
+    "pool": "DRS-log teams (high-TrackMan D1); ratio robust, absolute levels range-restricted"
+  },
+  "qualified_pitchers": 2333,
+  "splithalf_r": {
+    "RA9": 0.268,
+    "FIP": 0.264
+  },
+  "full_reliability_spearman_brown": {
+    "RA9": 0.423,
+    "FIP": 0.417
+  },
+  "w_RA9_flat": 0.5
+}
