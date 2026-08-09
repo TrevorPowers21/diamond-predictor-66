@@ -18,6 +18,17 @@ Every player carries **two WAR numbers that answer different questions**:
 - **Projection WAR** — *what to expect next season*, built from component skills (not outcomes), regressed by
   reliability, aged/class-adjusted. What you pay for.
 
+**BOTH SIDES ARE TWO-NUMBER — symmetric by design:**
+
+| | Descriptive (last season = TRUE RUNS) | Projection (next season = COMPONENT INDEX) |
+|---|---|---|
+| **Hitters** | true **wRAA / wOBA** (real linear weights — the change Trevor liked; wider, honest spread) | **wRC+** on projected component rates (regressed, aged) |
+| **Pitchers** | **RA9 − per-pitcher dRS-behind**, reliability-blended with FIP | **pRV+** on projected component rates (regressed, aged) — *see §5, needs a bug-hunt* |
+
+The rule: **descriptive = true runs (what happened); projection = the component index (what to pay for).** The
+index (wRC+/pRV+) is the projection reassembly tool ONLY — it is NOT the descriptive number. Do not display the
+projection index as "last season's WAR."
+
 ### The disagreement rule (this is a feature, label it)
 The two numbers are **allowed to disagree, and the gap is the product.** The explicit rule:
 - **|descriptive − projection| small** → sustainable performance. Both numbers agree (Volantis: desc 4.16, proj
