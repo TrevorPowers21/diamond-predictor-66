@@ -191,18 +191,24 @@ about the same arm, for reasons we can't name, is how trust dies in the first de
 + 0.05·HR9⁺`. K/BB are already inside FIP⁺ (0.30) AND WHIP⁺ (0.15, walks) AND their own K9⁺/BB9⁺ terms (0.25).
 So a 4.86-BB/9 arm is penalized 3×, dragging pRV+ 62 far below his FIP⁺ (~91).
 
-**Deliverable of Step 0 (RE-SCOPED 2026-08-09): DOCUMENT the gap, don't rebuild the index now.** Name how much of
-Urbanczyk's 2.7-WAR gap is legit descriptive-vs-projection regression vs pRV+ over-penalization (the K/BB
-triple-count) — with his K%/BB% league percentiles — so we ship the two numbers *knowing the why*, not blind.
-Projection keeps the existing pRV+ (the triple-count is a documented, accepted limitation for now). The proper
-fix — rebuild pRV+/wRC+ as linear-weighted events (price K/BB/HBP/HR/contact ONCE from D1 RE24 weights) — is the
-DEFERRED item in §2 (it ripples through conference/normalized-stat consumers), revisited on its own. The
-descriptive number is the honest last-season record; the gap is the scouting signal either way.
+**RESOLVED (2026-08-09, Trevor) — the gap is INTENDED, and we know exactly why; no reconciliation or rebuild
+needed to ship.** The two labels dissolve the reviewer's "opposite stories" worry: they aren't opposite, they're
+*last season* vs *next season*. Urbanczyk is the canonical correct case, not a bug:
+- **Descriptive ("how did he perform") = +1.81** — he ran a 2.8 ERA, he genuinely prevented runs → positive WAR. Right.
+- **Projection ("how good is this pitcher going forward", pRV+) = −0.62** — 4.86 BB/9, 5.19 FIP, horrible
+  peripherals → should NOT project positive at all. Right. pRV+ being below replacement here is the projection
+  doing its one job, not the triple-count breaking it.
+So Step 0 is CLOSED: we ship the two numbers with clear labels and a known, correct why. The pRV+ triple-count
+rebuild (price events once from D1 RE24 weights) stays the DEFERRED §2 item — a future precision nicety, NOT a
+blocker, because it wouldn't flip Urbanczyk's sign anyway (a bad-peripheral arm projects negative either way).
+The descriptive number is the honest last-season record; the projection is what to pay for; the gap is the signal.
 
 ---
 
 ## 6. Build sequence
-0. **Reconcile the pRV+ gap** (§5) — the riskiest unknown, goes first. No wiring until the gap is named.
+0. **pRV+ gap — CLOSED (§5).** Resolved by design: the descriptive-vs-projection split IS the answer (Urbanczyk
+   correct — +1.81 last season, −0.62 going forward). No rebuild; the triple-count fix is the deferred §2 nicety
+   and wouldn't flip signs. **Build STARTS at Step 1.**
 1. **Build the per-pitcher dRS-behind fixture** (§4) + its conservation telescope.
 2. **Derive all constants + the reliability curve** (§3) from D1 data, each a stamped fixture with its own check.
    **GATE (pre-registered):** the derived reliability curve `w` must BEAT both pure RA9 AND pure FIP at predicting
