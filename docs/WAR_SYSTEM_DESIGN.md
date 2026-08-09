@@ -135,6 +135,12 @@ The old composite-slider versions are retired to **read-only display with a fixt
 double/triple-counting (§5) at the source while keeping the projectable component-index shape. Hitters have no
 Step-0 pathology → they can move first; pRV+'s rebuild IS Step 0 (§5).
 
+**League baseline = NCAA/D1 average (unchanged).** Today the `+`-components are already NCAA-relative
+(OBP⁺ = player OBP / NCAA-avg OBP, etc.) — the flaw is that FOUR correlated components get normalized separately
+and THEN re-blended, which double-counts. The rebuild keeps the SAME NCAA anchor (wRC+ 100 = NCAA average) but
+normalizes ONCE: price raw events by the D1 RE24 weights → wOBA → normalize a single time vs lg(NCAA) wOBA. Same
+baseline, one normalization instead of four. Identical logic on the pitcher side (pRV+ vs NCAA-avg run env).
+
 ---
 
 ## 3. Constants to DERIVE (the rough list IS the ballgame)
