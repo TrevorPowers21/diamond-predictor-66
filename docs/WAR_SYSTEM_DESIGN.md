@@ -61,15 +61,20 @@ Urbanczyk that we can't fully explain is not allowed to ship — see §5.
   market valuations only.
 - **Everything else stands:** two-number system (descriptive = true runs: wRAA hitters, RA9−dRS-behind FIP-blended
   pitchers; projection = component index: wRC+, pRV+), index NEVER displayed as last-season WAR.
-- **Build sequence unchanged; Step 0 deliverable UPGRADED (§5):** rebuild pRV+ as **linear-weighted pitching events**
-  (K/BB/HBP/HR/contact priced ONCE from derived D1 weights — kills the FIP⁺/WHIP⁺/K9⁺/BB9⁺ triple-count). Show
-  Urbanczyk before/after with his K%/BB% league percentiles. Then Step 1 dRS-behind + telescope; Step 2 derive all
-  constants (league RA9, E2T, depth-tier pitcher replacement w/ weekend/midweek/bullpen role check, reliability
-  curve from split-half D1 stability) — **Step 2 GATE, pre-registered: the derived reliability curve must BEAT both
-  pure RA9 AND pure FIP at predicting next-season RA9−defense out of sample, else use the folklore constant WITH
-  disclosure.** Then Step 3 wire.
-- **Hitters can move first** (no Step-0-equivalent pathology): true wRAA descriptive + **wRC+ REBUILT on derived
-  D1 linear weights** (the composite OBP/SLG/AVG/ISO sliders retired to READ-ONLY display with a fixture stamp).
+- **⭐ SCOPE (2026-08-09, Trevor) — MAIN FOCUS = the DESCRIPTIVE restructure + projection; NOT rebuilding the
+  indices now.** Restructure last-season WAR to true-runs ("how did the player actually perform": **wRAA** hitters,
+  **RA9−dRS-behind+FIP** pitchers), and keep the PROJECTION on the **EXISTING wRC+/pRV+ indices unchanged.**
+  **Rebuilding the NCAA-normalized indices (wRC+/pRV+) on D1 linear weights is DEFERRED** — they feed conference
+  translations, projections, and many normalized stats; too much ripple to shift right now. The pRV+ triple-count
+  becomes a KNOWN, documented projection limitation to refine later, not a blocker.
+- **Build sequence (re-scoped): Step 0 = DOCUMENT the pRV+ gap composition** (name the why for Urbanczyk: how much
+  is legit descriptive-vs-projection regression vs pRV+ over-penalization) so we ship with eyes open — do NOT
+  rebuild the index now. Then Step 1 dRS-behind fixture + telescope; Step 2 derive the DESCRIPTIVE constants
+  (league RA9, E2T, depth-tier pitcher replacement w/ weekend/midweek/bullpen role check, reliability curve from
+  split-half D1 stability) — **Step 2 GATE, pre-registered: the reliability curve must BEAT both pure RA9 AND pure
+  FIP at predicting next-season RA9−defense out of sample, else folklore constant WITH disclosure.** Then Step 3 wire.
+- **Hitters can move first** (no Step-0 pathology): add true-wRAA descriptive; **projection keeps the existing
+  wRC+ unchanged.** The linear-weights index rebuild is the deferred item above, revisited on its own.
 
 ---
 
@@ -129,17 +134,19 @@ Validated architecture (this is how ZiPS/Steamer/Marcel all work; nobody project
 5. **Reassemble**: projected rates → wOBA/wRC+ (hitters) or the pRV+ blend (pitchers) → same RAA formula →
    projected playing time (depth role) → WAR.
 
-wRC+/pRV+ stay as the **projection reassembly index**, but **REBUILT on derived D1 linear weights** — each event
-priced ONCE (not the fabricated composite-slider blends: wRC+'s `0.45·OBP+0.30·SLG+…`, pRV+'s `0.30·FIP⁺+0.25·ERA⁺+…`).
-The old composite-slider versions are retired to **read-only display with a fixture stamp**. This kills the
-double/triple-counting (§5) at the source while keeping the projectable component-index shape. Hitters have no
-Step-0 pathology → they can move first; pRV+'s rebuild IS Step 0 (§5).
+**Projection keeps the EXISTING wRC+/pRV+ indices unchanged (2026-08-09 scope).** They already work as the
+projection reassembly index and they feed conference translations + many normalized stats — rebuilding them now is
+too much ripple for the gain. So projection stays as-is; the DESCRIPTIVE side (true wRAA / RA9-blend) is where the
+restructure happens. The pRV+ double/triple-count (§5) becomes a KNOWN, documented projection limitation, not a
+blocker; Step 0 names it rather than fixing it now.
 
-**League baseline = NCAA/D1 average (unchanged).** Today the `+`-components are already NCAA-relative
-(OBP⁺ = player OBP / NCAA-avg OBP, etc.) — the flaw is that FOUR correlated components get normalized separately
-and THEN re-blended, which double-counts. The rebuild keeps the SAME NCAA anchor (wRC+ 100 = NCAA average) but
-normalizes ONCE: price raw events by the D1 RE24 weights → wOBA → normalize a single time vs lg(NCAA) wOBA. Same
-baseline, one normalization instead of four. Identical logic on the pitcher side (pRV+ vs NCAA-avg run env).
+**DEFERRED (considered, worthwhile, not now) — rebuild the indices on D1 linear weights.** The clean fix is:
+today the `+`-components are already NCAA-relative (OBP⁺ = player OBP / NCAA-avg OBP, etc.), and the flaw is that
+FOUR correlated components get normalized separately and THEN re-blended (double-count). A rebuild would keep the
+SAME NCAA anchor (wRC+ 100 = NCAA average) but normalize ONCE: raw events → D1 RE24 weights → wOBA → single
+normalization vs lg(NCAA) wOBA (same on the pitcher side). Same baseline, one normalization instead of four —
+kills the double-count at the source. DEFERRED because it ripples through conference/normalized-stat consumers;
+revisit as its own effort.
 
 ---
 
@@ -184,11 +191,13 @@ about the same arm, for reasons we can't name, is how trust dies in the first de
 + 0.05·HR9⁺`. K/BB are already inside FIP⁺ (0.30) AND WHIP⁺ (0.15, walks) AND their own K9⁺/BB9⁺ terms (0.25).
 So a 4.86-BB/9 arm is penalized 3×, dragging pRV+ 62 far below his FIP⁺ (~91).
 
-**Deliverable of Step 0 (UPGRADED 2026-08-09): REBUILD pRV+ as linear-weighted pitching events** — price K, BB,
-HBP, HR, and contact ONCE each from derived D1 run-value weights (same RE24-linear-weights method as wOBA and the
-dRS constants), instead of blending six correlated `+`-stats that re-count K/BB in FIP⁺/WHIP⁺/K9⁺/BB9⁺. This kills
-the triple-count at the source. **Show Urbanczyk before/after** with his K%/BB% league percentiles, and name how
-much of the original 2.7-WAR gap was legit descriptive-vs-projection vs pRV+ over-penalization. Only then wire.
+**Deliverable of Step 0 (RE-SCOPED 2026-08-09): DOCUMENT the gap, don't rebuild the index now.** Name how much of
+Urbanczyk's 2.7-WAR gap is legit descriptive-vs-projection regression vs pRV+ over-penalization (the K/BB
+triple-count) — with his K%/BB% league percentiles — so we ship the two numbers *knowing the why*, not blind.
+Projection keeps the existing pRV+ (the triple-count is a documented, accepted limitation for now). The proper
+fix — rebuild pRV+/wRC+ as linear-weighted events (price K/BB/HBP/HR/contact ONCE from D1 RE24 weights) — is the
+DEFERRED item in §2 (it ripples through conference/normalized-stat consumers), revisited on its own. The
+descriptive number is the honest last-season record; the gap is the scouting signal either way.
 
 ---
 
