@@ -16,6 +16,7 @@ import {
 } from "@/lib/transferWeightDefaults";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { batsHandToHandedness } from "@/lib/parkFactors";
+import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
 import type { TransferProjectionInputs, TransferProjectionOutput } from "@/lib/transferProjection";
 
 // ---------- helpers (kept local so the precompute script doesn't need to
@@ -391,10 +392,10 @@ export function applyTransferPostprocess(
   const pWrcPlus = ncaaAvgWrc === 0 ? null : Math.round((pWrc / ncaaAvgWrc) * 100);
   const offValue = pWrcPlus == null ? null : (pWrcPlus - 100) / 100;
   const pa = opts?.plateAppearances ?? 260;
-  const runsPerPa = opts?.runsPerPa ?? 0.13;
-  const replacementRuns = (pa / 600) * 25;
+  const runsPerPa = opts?.runsPerPa ?? RUNS_PER_PA;
+  const replacementRuns = (pa / 600) * REPLACEMENT_RUNS_PER_600PA;
   const raa = offValue == null ? null : offValue * pa * runsPerPa;
   const rar = raa == null ? null : raa + replacementRuns;
-  const owar = rar == null ? null : rar / 10;
+  const owar = rar == null ? null : rar / RUNS_PER_WIN;
   return { pAvg, pObp, pSlg, pOps, pIso, pWrc, pWrcPlus, owar };
 }

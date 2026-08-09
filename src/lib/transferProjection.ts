@@ -1,3 +1,5 @@
+import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
+
 export type TransferProjectionInputs = {
   lastAvg: number;
   lastObp: number;
@@ -119,11 +121,11 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
 
   const offValue = pWrcPlus == null ? null : (pWrcPlus - 100) / 100;
   const pa = input.actualPa ?? 260;
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
+  const runsPerPa = RUNS_PER_PA;
+  const replacementRuns = (pa / 600) * REPLACEMENT_RUNS_PER_600PA;
   const raa = offValue == null ? null : offValue * pa * runsPerPa;
   const rar = raa == null ? null : raa + replacementRuns;
-  const owar = rar == null ? null : rar / 10;
+  const owar = rar == null ? null : rar / RUNS_PER_WIN;
 
   return {
     pAvg: round3(pAvgRaw),

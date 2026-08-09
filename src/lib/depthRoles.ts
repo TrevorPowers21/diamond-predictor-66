@@ -9,6 +9,7 @@
 // Pitcher depth role → expected IP fed into the pWAR formula.
 
 import type { PitchingEquationWeights } from "@/lib/pitchingEquations";
+import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -292,12 +293,12 @@ export function computeHitterOWar(
   const pa = depthRole != null
     ? paForHitterDepthRole(depthRole)
     : (projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 215);
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
+  const runsPerPa = RUNS_PER_PA;
+  const replacementRuns = (pa / 600) * REPLACEMENT_RUNS_PER_600PA;
   const offValue = (wrcPlus - 100) / 100;
   const raa = offValue * pa * runsPerPa;
   const rar = raa + replacementRuns;
-  return rar / 10;
+  return rar / RUNS_PER_WIN;
 }
 
 // ── Hitter market value — single canonical formula ───────────────────────────

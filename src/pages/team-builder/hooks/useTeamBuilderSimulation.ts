@@ -1111,13 +1111,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const pSlgAdj = pAvgAdj + pIsoAdj;
     const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
     const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
-    const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
-    const pa = 260;
-    const runsPerPa = 0.13;
-    const replacementRuns = (pa / 600) * 25;
-    const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
-    const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
-    const owarAdj = rarAdj == null ? null : rarAdj / 10;
+    const owarAdj = computeOWarFromWrcPlus(pWrcPlusAdj, 260); // centralized (war.ts constants)
     const basePerOwar = eqNum("nil_base_per_owar", 25000);
     const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(livePlayer.position ?? p.player?.position ?? null);
