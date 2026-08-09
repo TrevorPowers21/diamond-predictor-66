@@ -44,6 +44,35 @@ Urbanczyk that we can't fully explain is not allowed to ship — see §5.
 
 ---
 
+## FINAL DECISIONS (2026-08-09, Trevor) — authoritative; overrides anything below that conflicts
+
+- **Offensive positional replacement: DEFERRED.** Keep FLAT replacement runs (single league-wide level, 2.0
+  wins/600 PA equivalent, derived). Do NOT build per-position offensive replacement. Rationale: positional value
+  lives in **market valuations only**; position-indexing replacement would force offensive-WAR recomputation on
+  every team-builder position change and duplicate the position-switch complexity already deferred defensively.
+  Considered-and-deferred; revisits TOGETHER with the deferred defensive position-switch recompute when team-builder
+  work begins.
+- **Positional adjustment: NO ladder; defense stays position-aware.** The MLB-style flat runs-by-position ladder
+  is STRUCK from the descriptive hitter spec (§1b). No player receives constant runs for his position label —
+  either side of the ball, descriptive or projected. This does NOT touch dWAR's position machinery (per-position
+  empirical scales, per-position centering, position-indexed defensive replacement, deferred position-switch
+  recompute — all stand exactly as built). **Position affects WAR EXCLUSIVELY through measured defensive
+  performance vs the player's OWN position's baseline — never a static bonus.** Scarcity/positional premium =
+  market valuations only.
+- **Everything else stands:** two-number system (descriptive = true runs: wRAA hitters, RA9−dRS-behind FIP-blended
+  pitchers; projection = component index: wRC+, pRV+), index NEVER displayed as last-season WAR.
+- **Build sequence unchanged; Step 0 deliverable UPGRADED (§5):** rebuild pRV+ as **linear-weighted pitching events**
+  (K/BB/HBP/HR/contact priced ONCE from derived D1 weights — kills the FIP⁺/WHIP⁺/K9⁺/BB9⁺ triple-count). Show
+  Urbanczyk before/after with his K%/BB% league percentiles. Then Step 1 dRS-behind + telescope; Step 2 derive all
+  constants (league RA9, E2T, depth-tier pitcher replacement w/ weekend/midweek/bullpen role check, reliability
+  curve from split-half D1 stability) — **Step 2 GATE, pre-registered: the derived reliability curve must BEAT both
+  pure RA9 AND pure FIP at predicting next-season RA9−defense out of sample, else use the folklore constant WITH
+  disclosure.** Then Step 3 wire.
+- **Hitters can move first** (no Step-0-equivalent pathology): true wRAA descriptive + **wRC+ REBUILT on derived
+  D1 linear weights** (the composite OBP/SLG/AVG/ISO sliders retired to READ-ONLY display with a fixture stamp).
+
+---
+
 ## 1. Descriptive pitcher WAR — the RA9 / dRS / FIP blend
 
 Old-school truth: run prevention is the name of the game — credit it. But remove the fielders (not the
@@ -75,8 +104,12 @@ wRAA = ((wOBA − lgwOBA) / wOBAscale) · PA         wOBA from real event run va
 oWAR = (wRAA + PositionalAdj + Replacement) / RPW
 ```
 Effect (D1, measured): mean |Δ| **0.20 WAR** vs the index — stars up, weak hitters below zero (real linear
-weights have wider tails than the compressed index). Add the **positional adjustment ladder** (C down to DH,
-DERIVE the D1 spacing) — currently absent; without it, up-the-middle players are undervalued.
+weights have wider tails than the compressed index). **NO positional-adjustment ladder** (struck 2026-08-09):
+no player gets constant runs for his position label, either side, descriptive or projected. Position affects WAR
+EXCLUSIVELY through measured defensive performance vs the player's OWN position's baseline (dWAR's per-position
+empirical scales / centering / position-indexed replacement — all stand). Scarcity/positional premium lives in
+**market valuations only**. Offensive replacement stays FLAT (single league-wide level); per-position offensive
+replacement is considered-and-DEFERRED (revisits with the defensive position-switch recompute at team-builder time).
 
 ---
 
@@ -96,7 +129,11 @@ Validated architecture (this is how ZiPS/Steamer/Marcel all work; nobody project
 5. **Reassemble**: projected rates → wOBA/wRC+ (hitters) or the pRV+ blend (pitchers) → same RAA formula →
    projected playing time (depth role) → WAR.
 
-We keep pRV+/wRC+ as the **projection reassembly index** — but see §5, pRV+ needs a bug-hunt first.
+wRC+/pRV+ stay as the **projection reassembly index**, but **REBUILT on derived D1 linear weights** — each event
+priced ONCE (not the fabricated composite-slider blends: wRC+'s `0.45·OBP+0.30·SLG+…`, pRV+'s `0.30·FIP⁺+0.25·ERA⁺+…`).
+The old composite-slider versions are retired to **read-only display with a fixture stamp**. This kills the
+double/triple-counting (§5) at the source while keeping the projectable component-index shape. Hitters have no
+Step-0 pathology → they can move first; pRV+'s rebuild IS Step 0 (§5).
 
 ---
 
@@ -139,10 +176,13 @@ about the same arm, for reasons we can't name, is how trust dies in the first de
 
 **Prime suspect — pRV+ double-counts K/BB.** `pRV+ = 0.30·FIP⁺ + 0.25·ERA⁺ + 0.15·WHIP⁺ + 0.15·K9⁺ + 0.10·BB9⁺
 + 0.05·HR9⁺`. K/BB are already inside FIP⁺ (0.30) AND WHIP⁺ (0.15, walks) AND their own K9⁺/BB9⁺ terms (0.25).
-So a 4.86-BB/9 arm is penalized 3×, dragging pRV+ 62 far below his FIP⁺ (~91). If confirmed, the fix is
-de-correlating the blend (drop/shrink the standalone K9⁺/BB9⁺ since FIP⁺ already carries them, or orthogonalize).
-**Deliverable of Step 0:** a named, measured explanation of the full 2.7 WAR gap (how much is legit
-descriptive-vs-projection, how much is pRV+ over-penalization), and a corrected pRV+ if it's a bug. Only then wire.
+So a 4.86-BB/9 arm is penalized 3×, dragging pRV+ 62 far below his FIP⁺ (~91).
+
+**Deliverable of Step 0 (UPGRADED 2026-08-09): REBUILD pRV+ as linear-weighted pitching events** — price K, BB,
+HBP, HR, and contact ONCE each from derived D1 run-value weights (same RE24-linear-weights method as wOBA and the
+dRS constants), instead of blending six correlated `+`-stats that re-count K/BB in FIP⁺/WHIP⁺/K9⁺/BB9⁺. This kills
+the triple-count at the source. **Show Urbanczyk before/after** with his K%/BB% league percentiles, and name how
+much of the original 2.7-WAR gap was legit descriptive-vs-projection vs pRV+ over-penalization. Only then wire.
 
 ---
 
@@ -150,6 +190,9 @@ descriptive-vs-projection, how much is pRV+ over-penalization), and a corrected 
 0. **Reconcile the pRV+ gap** (§5) — the riskiest unknown, goes first. No wiring until the gap is named.
 1. **Build the per-pitcher dRS-behind fixture** (§4) + its conservation telescope.
 2. **Derive all constants + the reliability curve** (§3) from D1 data, each a stamped fixture with its own check.
+   **GATE (pre-registered):** the derived reliability curve `w` must BEAT both pure RA9 AND pure FIP at predicting
+   next-season `RA9−defense` OUT OF SAMPLE. If it fails, fall back to the folklore constant WITH disclosure — do
+   not ship a blend that's worse than either endpoint.
 3. **Wire** the two-number system: descriptive (wRAA / RA9-dRS-FIP blend) + projection (components), both clearly
    labeled, both paths (stored + live), display shows both + the gap.
 
