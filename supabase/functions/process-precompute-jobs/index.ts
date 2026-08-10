@@ -516,7 +516,7 @@ const PITCHING_EQ_DEFAULTS = {
   bb9_plus_ncaa_avg: 4.82, bb9_plus_ncaa_sd: 1.340745984, bb9_pr_sd: 42.89490618, bb9_plus_scale: 20,
   hr9_plus_ncaa_avg: 1.12, hr9_plus_ncaa_sd: 0.4677282102, hr9_pr_sd: 34.13833398, hr9_plus_scale: 20,
   pwar_ip_sp: 85, pwar_ip_rp: 35, pwar_ip_sm: 50,
-  pwar_r_per_9: 7.11, pwar_replacement_runs_per_9: 1.5, pwar_runs_per_win: 10,
+  pwar_r_per_9: 6.915, pwar_replacement_runs_per_9: 1.92, pwar_runs_per_win: 13.1,  // D1 (mirror pitchingEquations, 2026-08-10)
   sp_to_rp_reg_era_pct: 6, sp_to_rp_reg_fip_pct: 8, sp_to_rp_reg_whip_pct: 5,
   sp_to_rp_reg_k9_pct: -8, sp_to_rp_reg_bb9_pct: 4, sp_to_rp_reg_hr9_pct: 8,
   rp_to_sp_low_better_tier1_max: 2.1, rp_to_sp_low_better_tier2_max: 2.6, rp_to_sp_low_better_tier3_max: 3.25,
@@ -867,6 +867,7 @@ function defaultPitcherDepthRoleFromIp(ip: number | null | undefined, role: "SP"
   if (r === "SP") {
     if (ipNum >= 65) return "weekend_starter";
     if (ipNum >= 35) return "weekday_starter";
+    if (ipNum < 10) return "specialist_reliever";  // thin-sample guard — mirror depthRoles.ts (was missing: precompute≠live)
     return "swing_starter";
   }
   if (ipNum >= 40) return "workhorse_reliever";
@@ -896,9 +897,11 @@ function ipForPitcherDepthRole(
 function computeHitterOWar(wrcPlus: number | null | undefined, depthRole: HitterDepthRoleAuto): number | null {
   if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
   const pa = paForHitterDepthRole(depthRole);
-  const replacementRuns = (pa / 600) * 25;
-  const raa = ((wrcPlus - 100) / 100) * pa * 0.13;
-  return (raa + replacementRuns) / 10;
+  // D1 scale (mirror src/savant/lib/war.ts, locked 2026-08-10): fixed-wins replacement 26.2,
+  // runs/PA 0.163, RPW 13.1. Keep in lockstep with war.ts or stored ≠ live.
+  const replacementRuns = (pa / 600) * 26.2;
+  const raa = ((wrcPlus - 100) / 100) * pa * 0.163;
+  return (raa + replacementRuns) / 13.1;
 }
 function computeHitterMarketValue(oWar: number | null, conference: string | null | undefined, position: string | null | undefined): number | null {
   if (oWar == null || !Number.isFinite(oWar)) return null;
