@@ -198,6 +198,38 @@ samples don't inflate spread). The fixture carries a per-value "why"; the load-b
   estimate, not a z-index**, so its SD does NOT govern WAR. **Do not z-normalize or SD-stretch the FIP metric** —
   that was the old pRV+'s fatal move (z-averaging compressed it to 3.1 SD and buried aces). Run-mapping calibrates it.
 
+## Where the constants are wired (research 2026-08-10) — READ before Step 1
+
+THREE layers: (1) **derivation fixtures** `output/{ncaa_league_averages_2026,woba_weights,descriptive_constants}.json`
+= where values are DERIVED; (2) **runtime config DB** — `model_config` (config_key/config_value/model_type/season,
+admin-editable, synced from Google Sheets via `google-sheets-sync`) + `"Equation Weights"` table (newer PRIMARY for
+pitching, predictionEngine.ts:274 prefers it, falls back to model_config) + `customer_team_equation_overrides`
+(per-team overlay); (3) **hardcoded TS defaults** (fallback when DB empty).
+
+**oWAR conversion `RUNS_PER_PA` (0.163 → 0.3994) — 2 real sites + 1 orphan:**
+- `src/savant/lib/war.ts:14` (hardcoded) — imported by depthRoles.ts:296, transferProjection.ts:124,
+  buildTransferProjectionInputs.ts:395, playerCalcs.ts:26. The app-side source.
+- `supabase/functions/process-precompute-jobs/index.ts:903` (inline `0.163`) — the stored-precompute copy.
+- ⚠ `AdminDashboard.tsx:818` `owar_run_value_per_pa` → model_config = **ORPHANED**: no reader anywhere; editing
+  it does NOTHING. (Same for owar_runs_per_win / owar_replacement_runs_per_600 / owar_plate_appearances / owar_wrc_plus_baseline.)
+  → This constant is LEAGUE PHYSICS (derived from D1 RE24), not a program preference; arguably should be derived-only, not editable.
+
+**wRC+ formula (old 0.45/0.30/0.15/0.10 ÷ 0.364 → new 0.691·OBP + 0.235·SLG ÷ 0.3782) — LIVE via config:**
+- model_config keys `r_w_obp/slg/avg/iso`, `r_ncaa_avg_wrc` (+ `t_` transfer variants) READ by predictionEngine.ts:294/704,
+  edge fn:421, TeamBuilder, TransferPortal. Plus `"Equation Weights"` table (primary).
+- Hardcoded copies to update too: `savant/lib/wrcPlus.ts:19` (SAVANT_NCAA_WRC 0.364, DEFAULT_WRC_WEIGHTS),
+  `components/HistoricalPlayerTable.tsx:42` (local computeWrcPlus).
+- ⚠ new formula DROPS AVG/ISO → `r_w_avg`/`r_w_iso` go to 0 (or restructure the weight schema).
+
+**Market value:** `nil_base_per_owar` (25000) — WIRED, read via `eqNum("nil_base_per_owar", …)` in TeamBuilder.tsx:2672,
+CompareTab.tsx:231, useTeamBuilderSimulation.ts:1115/1572.
+
+**Pitcher pWAR:** `pitchingEquations.ts:239-241` defaults + `"Equation Weights"` table (usePitchingEquationWeights) + edge fn:519.
+
+STEP-1 DECISION (oWAR conversion mechanism): (A) update the 2 hardcoded sites + set the orphaned admin field to 0.3994
+(or lock it read-only since it's physics); (B) wire owar_* to actually read from model_config (like the wRC+ weights +
+nil already do) — makes admin edits real, single live source, but adds read plumbing. Physics-not-preference argues for (A)+lock.
+
 ## Data provenance + discipline
 
 - Staging-first; verify every stage in the DB (Trevor can't open the UI); DDL pasted in the staging
