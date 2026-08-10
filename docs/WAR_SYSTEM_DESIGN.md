@@ -243,3 +243,48 @@ Stamped fixtures (version + season + derivation script), version guards, positio
 they apply (the dRS-behind conservation check is one; the wOBA telescoping-zero-sum is another). No placeholder
 constant reaches a demo unlabeled. Cross-check the finished descriptive numbers against Baseball-Reference-style
 external WAR where a public equivalent exists (it mostly doesn't for D1 — which is the point).
+
+## 8. Pitcher projection rebuild — the pRV+ CHAIN (settled 2026-08-10)
+"Swap the assembler, not the projector." The projection engine (validated per-rate projections of K9/BB9/HR9)
+is fine; the ASSEMBLY is broken. Current pRV+ = 0.30·FIP⁺+0.25·ERA⁺+0.15·WHIP⁺+0.15·K9⁺+0.10·BB9⁺+0.05·HR9⁺,
+each X⁺ = 100+z·20. Two structural faults: (a) FIP already contains K/BB/HR, so K9⁺/BB9⁺/HR9⁺ DOUBLE-COUNT the
+three true outcomes; (b) averaging six separately-normalized z-scores COMPRESSES the tail — the best pitcher
+reaches only 3.1 SD above the mean vs the best hitter's 4.7 (wRC+ normalizes ONCE, so its tail survives).
+Empirically pRV+ fails the same-season test: mean|proj−desc| = 0.59 WAR (wRC+ = 0.20), biased low for aces —
+a weak-contact ace (Magdaleno 2.36 ERA/2.48 FIP) buried at pRV+ 131 → 3.3 WAR vs his 5.05 descriptive.
+
+REJECTED: (1) SD-stretch to match wRC+ → Volantis 7.2 / Flora 7.4, egregious, AND doesn't fix Magdaleno.
+(2) Pure run-anchor on ACTUAL RA9 → collapses identical-run pitchers to one number, erasing the projection's value.
+
+THE CHAIN (industry-standard: Steamer/ZiPS/THE BAT never blend overlapping stats — skills in, one run number out):
+  1. Inputs = existing validated projected K/BB/HBP/HR rates. Nothing new; the projector is untouched.
+  2. Assemble projected component RA9 via a D1 FIP ANALOG — price events with our RE24-derived run values
+     (output/woba_weights.json, NOT MLB's 13/3/2) + league contact baseline → total-run scale via E2T = 1.137.
+  3. + w_luck × prior-season (ERA − FIP) gap.  w_luck ≈ 0.1–0.2, FIT 2025→2026 OUT OF SAMPLE (same gate as the
+     reliability curve). Weak-contact keeps a sliver of edge; the .230-BABIP guy gives most of it back.
+  4. Index ONCE, linear (display only):  pRV+ = 100 + 100·(lgRA9 − projRA9)/lgRA9.  (The ratio form
+     100·lgRA9/projRA9 blows up in a 6.9-run environment → 290+, unusable — do NOT use it.)
+  5. Projected pWAR = (replRA9 − projRA9) · projected IP/9 ÷ RPW.  projIP from role/usage (same layer as hitters).
+DELETES: all six blend weights, per-component z-scores, the z·20 scaler, any back-solved calibration.
+Prototype (placeholder weights) hit the acceptance sentence: Volantis 5.26, Magdaleno 4.89 (gap 0.37 from their
+FIP difference — single-counted, not a K double-penalty), Flora correctly SHORT (luck it shouldn't reproduce),
+mean|Δ| 0.22. Repeatability (Volantis > Magdaleno) is carried by the per-component REGRESSION CONSTANTS, not by
+any K term — K% persists, contact luck regresses.
+
+PIVOTAL EMPIRICAL CHECK (decides a branch): do our existing rate projections regress per-component or uniformly?
+Correlate projected-vs-actual (or actual year-over-year) BY STAT — IP ≥ 40 in BOTH seasons, read CORRELATIONS not
+raw errors (K9 and BABIP live on different scales), floor the sample so thin-arm noise doesn't fake uniformity.
+K9 meaningfully tighter than the contact-dependent stats → differential persistence already lives in the
+projections and the chain inherits the engine for free. Everything clustered → build a per-component regression
+schedule (each constant fit to predict next-season actuals OUT OF SAMPLE, same as w_luck).
+
+REPLACEMENT / hitter-pitcher SPLIT = IMPOSED, not derived. MLB fixed total league WAR and CHOSE 57/43 position/
+pitcher, then back-solved replacement levels. Our current 57/43-PITCHER-heavy split is thus neither validated nor
+refuted by the 8.83 derivation. Decide it AFTER the hitter wRAA rebuild un-suppresses the hitter side — then
+either accept the college-native emergent split with documentation, or impose a chosen split and back-solve.
+
+SEQUENCE (locked): hitter wRAA rebuild → re-check the 57/43 split → pitcher chain rebuild → replacement/split
+decision LAST. The same-season test is a CALIBRATION CHECK, not the goal: it must PASS on the ERA≈FIP subset and
+FAIL on purpose for luck profiles (Urbanczyk/Flora must NOT reproduce their descriptive — that divergence is the
+product). HAVE: RE24 run values, E2T 1.137, validated rate projections, descriptive side shipped. BUILD: the D1
+FIP analog, the w_luck fit, and the per-component regression check.
