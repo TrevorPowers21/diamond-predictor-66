@@ -1,0 +1,52 @@
+{
+  "_meta": {
+    "purpose": "AUTHORITATIVE NCAA D1 league averages + standard deviations + WAR constants for 2026, recomputed on the CORRECTED (post-CSV-fix) Master data. Each value carries a 'why it matters'.",
+    "season": 2026,
+    "division": "D1",
+    "derived_at": "2026-08-10",
+    "source": "docs/drs-reference/Full Season {Hitting,Pitching} Master Stats.csv (quote-aware) filtered to Hitter/Pitching Master division=D1",
+    "scripts": ["scripts/drs/_audit_league_averages.mjs (means)", "scripts/drs/_audit_sd.mjs (SD + tail)"],
+    "weighting": "MEANS = aggregate Σnum/Σden over ALL D1 (PA/IP-weighted). SDs = per-player POPULATION SD on the QUALIFIED subset (PA>=100 n=3019 / IP>=30 n=1988) so tiny-sample noise doesn't inflate spread. NOTE the qualified-subset mean differs slightly from the all-D1 aggregate (qualified players are better): use the aggregate mean to CENTER value, the qualified SD to measure SPREAD/z-scores — and keep the normalization population consistent wherever a '+'-stat is built."
+  },
+
+  "hitting": {
+    "lgwOBA":    { "mean": 0.3782, "sd": 0.0526, "why": "THE hitter anchor. Centers wRAA (value=0 at league avg) AND is the wRC+ denom. Every hitter WAR rides on it. SD 0.0526 = the spread of hitter quality on the wOBA scale." },
+    "wOBAscale": { "value": 0.947, "why": "Converts wOBA points -> runs (wRAA=(wOBA-lgwOBA)/wOBAscale*PA). Sets oWAR RUNS_PER_PA. wRAA is scale-independent so descriptive is unaffected by small changes; kept from woba_weights.json (self-consistent pair)." },
+    "lgOBP":     { "mean": 0.3824, "sd": 0.049,  "why": "On-base component. Dominant wRC+ term (coef 0.691) — captures the walk, the single most under-priced skill vs MLB. Reference for OBP+ / conference scaling." },
+    "lgSLG":     { "mean": 0.4368, "sd": 0.106,  "why": "Slugging component (wRC+ coef 0.235). Carries ALL power (ISO redundant once SLG is in). SD 0.106 = widest slash spread -> power is where hitters most differentiate." },
+    "lgAVG":     { "mean": 0.2779, "sd": 0.046,  "why": "Batting average. Display + small-sample blend; NOT in wRC+ (redundant vs OBP/SLG)." },
+    "lgISO":     { "mean": 0.1589, "sd": 0.080,  "why": "Isolated power (SLG-AVG). Display + power ratings; redundant for wRC+ (power already in SLG)." }
+  },
+
+  "pitching": {
+    "lgERA":  { "mean": 6.080, "sd": null,  "why": "Earned-run environment. Anchors ERA+ and, with lgRA9, defines E2T. IP-weighted." },
+    "lgRA9":  { "mean": 6.913, "sd": null,  "why": "TOTAL-run environment (the WAR currency). Anchors RPW and replacement level. Everything pitcher-WAR is measured against this, not ERA." },
+    "E2T":    { "value": 1.1370, "why": "Earned->Total bridge (=lgRA9/lgERA=ΣR/ΣER). FIP is on an EARNED scale; WAR needs TOTAL runs, so projFIP*E2T -> projRA9. Without it pitcher WAR is ~14% too generous." },
+    "lgK9":   { "mean": 8.279, "sd": 2.144, "why": "Strikeout rate. FIP input (coef -0.231) + the most PERSISTENT skill (r=0.578) -> carries repeatability. SD 2.144 is the K9+ denominator." },
+    "lgBB9":  { "mean": 4.725, "sd": 1.571, "why": "Walk rate. FIP input (coef 0.509 w/ HBP). The D1 walk is repriced FAR above MLB — the signature derive-don't-borrow finding. SD 1.571 = BB9+ denom; long right tail (wildness, maxZ 5.7)." },
+    "lgHR9":  { "mean": 1.102, "sd": 0.538, "why": "Home-run rate. FIP input (coef 1.486, the heaviest). Sits in the LUCK bucket -> the GB%-informed HR9 refinement (Step 4) reclaims groundballer skill here." },
+    "lgHBP9": { "mean": 1.467, "sd": 0.732, "why": "Hit-by-pitch rate. Folded INTO the walk term (BB9+HBP9), matching FIP's 3*(BB+HBP). Not a free predictor (over-fits)." }
+  },
+
+  "war_constants": {
+    "RPW":              { "value": 13.1,  "why": "Runs-per-win: the denominator that turns runs into WAR. Derived from lgRA9 6.915 (Pythagorean 2R), locked. BOTH sides share it or the desc-vs-proj gap is a fake scale artifact." },
+    "replacement_RA9":  { "value": 8.83,  "why": "Pitcher ZERO point of WAR (win%-anchor .380, DERIVED not a mean). A pitcher AT 8.83 RA9 = 0 WAR; the gap (8.83 - his RA9) x IP is his value." },
+    "hitter_replacement_wins_per_600pa": { "value": 2.0, "why": "Hitter zero point (BORROWED convention). A league-avg 600-PA hitter = 2.0 oWAR, replacement = 0. RE-DERIVE both sides on one tier principle at Step 5; the hitter/pitcher SPLIT is the output." },
+    "oWAR_RUNS_PER_PA": { "value": 0.3994, "why": "=lgwOBA/wOBAscale. Converts a wRC+ deviation -> runs so projection oWAR reproduces descriptive wRAA (mean|Δ| 0.042). REPLACES the wrong 0.163 (=ΣR/ΣPA, absolute run rate, a DIFFERENT quantity that compressed elite bats ~2x). Sites: war.ts:14, edge index.ts:903, TB re-inlines." }
+  },
+
+  "quality_metrics": {
+    "hitter_wRCplus": {
+      "formula": "(0.011 + 0.691*OBP + 0.235*SLG) / 0.3782 * 100",
+      "spread": { "mean": 100.6, "sd": 13.9, "maxZ": 4.71 },
+      "why": "Display index of hitter offense; anchored on lgwOBA 0.3782 (NOT 0.3667, the intercept-less proxy mean). SD ~14 ≈ MLB's ~15 (sane). Feeds oWAR via RUNS_PER_PA. Validated: OLS wOBA~OBP+SLG corr 0.9958 on corrected data.",
+      "denom_note": "0.3667 was the WRONG denom (mean of the intercept-LESS proxy). Anchor on the real average lgwOBA 0.3782 using est_wOBA WITH its 0.011 intercept -> one real number drives metric+conversion+baseline."
+    },
+    "pitcher_D1FIP": {
+      "formula": "3.10 - 0.231*K9 + 0.509*(BB9+HBP9) + 1.486*HR9,  then *E2T(1.137) -> projRA9",
+      "spread": { "mean": 5.514, "sd": 1.377, "best_minZ": 2.54 },
+      "why": "Pitcher quality on a RUN scale (mean 5.514 ≈ lgERA). Validated: same-season |proj_pwar-desc_pwar| 0.297≈0.30 (vs old pRV+ blend 0.59).",
+      "tail_note": "CRITICAL: D1-FIP's top tail is SHORT (best pitcher only 2.54 SD below mean) but desc_pWAR's tail is LONG (maxZ 4.86) — the IP-leverage in (repl-FIP*E2T)*IP/9/RPW restores the value tail. FIP is a RUN estimate, NOT a z-index, so its SD does NOT govern WAR. Do NOT z-normalize or SD-stretch it — that is exactly the mistake the old pRV+ made (z-averaging compressed its tail to 3.1 SD and buried aces). The run-mapping, not the spread, is the calibration."
+    }
+  }
+}

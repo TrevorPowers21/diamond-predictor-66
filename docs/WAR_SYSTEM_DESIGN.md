@@ -250,14 +250,18 @@ framings. Architecture stays MLB-correct: quality = Σ(projected event rate × D
 100 (=league avg), × projected REGULAR-season opportunities. Only the quality-metric CONSTRUCTION changed;
 the per-rate projection machinery (regression/aging) is untouched.
 
-  HITTER wRC+  = 0.695·OBP + 0.235·SLG,  ÷ real league denom 0.3715   (OLS of D1 wOBA on slash, n=3019)
-                 wOBA corr 0.957 → 0.984.  ISO/AVG redundant (ISO=SLG−AVG; power via SLG). OBP 0.45→0.695
-                 IS the walk fix. Residual 1.6% = 2B/3B/HR split + OBP-per-PA/SLG-per-AB denom mismatch (deferred).
-  PITCHER FIP  = 3.73 − 0.254·K9 + 0.570·BB9 + 1.446·HR9,  ×E2T(1.137) → total RA9   (OLS of D1 ERA on TTO, n=1988)
-                 same-season mean|Δ| 0.59 → 0.32; Magdaleno −1.76→−0.69, aces stable (Volantis −0.12).
-                 ⭐ D1 BB9 coef 0.570 vs MLB FIP 0.33 (+73%) — the D1 environment reprices the walk; HR9 (1.446≈1.44)
-                 and K9 (−0.254≈−0.22) ≈ MLB. Single best "derive-don't-borrow" exhibit: MLB FIP would bury
-                 elite-control pitchers. (Regression sidesteps the hand-built-FIP BIP-baseline bug → Magdaleno 9.16 RA9.)
+  HITTER wRC+  = 0.691·OBP + 0.235·SLG,  ÷ real league denom 0.3667   (OLS of D1 wOBA on slash, n=3019, PA≥100)
+                 wOBA corr 0.996 (re-derived on CORRECTED data 2026-08-10 — EXACT match: 0.691/0.235). ISO/AVG
+                 redundant (ISO −0.004, AVG −0.046). OBP 0.45→0.691 IS the walk fix. Denom 0.3667 = all-D1
+                 PA-weighted (supersedes 0.3715). Residual = 2B/3B/HR split + per-PA/per-AB denom mismatch (deferred).
+  PITCHER FIP  = 3.10 − 0.231·K9 + 0.509·(BB9+HBP9) + 1.486·HR9,  ×E2T(1.137) → total RA9   (OLS of D1 ERA, n=1988, IP≥30)
+                 HBP folded into the walk term (matches FIP's 3·(BB+HBP)). Same-season test (WAR units): mean
+                 |proj_pwar − desc_pwar| = 0.297 ≈ 0.30 (vs pRV+ blend 0.59). Volantis Δ −0.16 (ace stable),
+                 Magdaleno −0.57 (contact-mgr gap → GB%-HR9 closes), Flora/Urbanczyk diverge on purpose (luck).
+                 ⭐ D1 walk coef repriced far above MLB FIP's 0.33 — the D1 environment reprices the walk; HR9/K9 ≈ MLB.
+                 Single best "derive-don't-borrow" exhibit. (Regression sidesteps the hand-built-FIP BIP-baseline bug.)
+                 RE-DERIVED on CORRECTED data 2026-08-10: coefficients reproduce (locked set = ~IP≥30, each coef
+                 between the IP≥20 and IP≥40 fits); CSV corruption (~1.3% rows) did NOT move either metric.
   Both projected WAR = (replRA9 − projRA9)·IP/9 / RPW  and  (wRAA + repl)/RPW ; same run currency → 160 ≡ 160 cross-position.
 
 DECISIONS (cross-check flags resolved):

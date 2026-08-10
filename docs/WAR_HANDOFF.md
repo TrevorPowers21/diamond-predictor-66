@@ -10,17 +10,22 @@ Single source of current state for the two-number WAR rebuild. Companion: `WAR_S
 - **Descriptive WAR**: built + shipped to staging (on the Masters). ✅
 - **Scale reconcile** (D1 constants across code + edge fn + composite SQL): committed. ✅
 - **Projection quality metrics** (hitter wRC+, pitcher FIP): derived, validated, locked. ✅
-- **⚠ TWO OPEN ISSUES found on final re-check (must fix before wiring the projection):**
-  1. **Hitter oWAR conversion is wrong** — `RUNS_PER_PA` heuristic compresses elite bats ~2×; must
-     compute projection oWAR from wOBA via the **wRAA scale** (like descriptive does).
-  2. **wOBA baseline is pool-biased / stale** — `lgwOBA` fixture 0.3774 was derived on the ~33
-     DRS-log teams, not all D1 (0.3874); descriptive wRAA is centered ~0.01 wOBA too low →
-     every hitter inflated ~0.23 WAR. Recompute baselines on **all D1** and re-populate descriptive.
+- **ONE OPEN ISSUE (re-checked with data 2026-08-10, `scripts/drs/_verify_baseline_owar.mjs`):**
+  1. **Hitter oWAR conversion is wrong — CONFIRMED.** `computeOWar` (war.ts) converts wRC+→runs at
+     `RUNS_PER_PA` 0.163, but wRC+ is a wOBA-ratio so the correct per-point value is
+     `lgwOBA/wOBAscale = 0.3994` (**2.45× miss**) → elite bats halved (Hairston desc 5.26 → heuristic
+     2.82 → wRAA-scale 5.50; mean |proj−desc| 0.281 → 0.042). Fix at WIRE (Step 1): convert oWAR off the
+     wOBA/wRAA scale (RUNS_PER_PA ≈ 0.40, or build oWAR directly from projected wOBA). Descriptive is
+     already on the wRAA scale (correct) — only the projection path is broken.
+  - **RETRACTED (was issue 2): wOBA baseline pool-bias.** Measured all-D1 PA-weighted lgwOBA = **0.3782**
+    vs fixture 0.3774 (Δ +0.0008); re-centering moves desc_owar ~**0.01 WAR/hitter**, inside rounding.
+    The earlier "all-D1 0.3874 / ~0.23 WAR inflation" was wrong — pool ≈ all-D1. **No baseline recompute,
+    no descriptive re-population.** Small wire-time calibration only: stamp wRC+ denom **0.3667** (not 0.3715).
 - **Not yet started**: the 8-step build (wire → scope → B.5 → GB%-HR9 → replacement → re-precompute →
   market/display → prod).
 
-**Immediate next action**: recompute the all-D1 wOBA baseline (`lgwOBA`/`wOBAscale`/`lgOBP`), re-populate
-`desc_owar`, then wire projection oWAR via the wRAA scale. Trevor to confirm before re-populating.
+**Immediate next action**: Step 1 wire — fix the oWAR conversion (RUNS_PER_PA → wOBA scale) and stamp the
+wRC+ denom 0.3667. Descriptive layer stands as shipped.
 
 ---
 
@@ -89,22 +94,22 @@ Same method both sides: regress the run-value target on the metrics we already p
 
 ---
 
-## ⚠ OPEN ISSUES (found on final data-check, fix before wiring)
+## OPEN ISSUE (re-checked with data, `scripts/drs/_verify_baseline_owar.mjs`)
 
-### A. Hitter oWAR conversion (RUNS_PER_PA is wrong)
-The `(wRC+−100)/100 × PA × RUNS_PER_PA` heuristic treats wRC+ as a run-ratio, but it's a wOBA-ratio →
-compresses elite bats ~2× (Hairston desc 5.28 → 2.79). **Fix: compute projection oWAR from projected
-wOBA via the wRAA scale** (`(wOBA−lgwOBA)/wOBAscale · PA / RPW + repl`), same as descriptive → |Δ| 0.39→0.17,
-elite bats recover (Hairston → 5.13). If keeping heuristic form, correct RUNS_PER_PA = `lgwOBA/wOBAscale ≈ 0.41`
-(not 0.163) — but the wRAA scale is the clean answer.
+### A. Hitter oWAR conversion (RUNS_PER_PA is wrong) — CONFIRMED
+`computeOWar` (war.ts:25) does `raa = ((wrcPlus−100)/100) · PA · RUNS_PER_PA(0.163)`. wRC+ is a wOBA-ratio,
+so the correct per-point run value is `lgwOBA/wOBAscale = 0.3994` — 0.163 is a **2.45× miss**, halving elite
+bats. Measured over 5,343 D1 hitters: mean |proj−desc| oWAR **0.281** (heuristic) vs **0.042** (wRAA-scale);
+Hairston (291 PA, .561 wOBA) desc **5.26** / heuristic **2.82** / wRAA-scale **5.50**. **Fix at Step 1: convert
+oWAR off the wOBA/wRAA scale** (RUNS_PER_PA ≈ 0.40 = lgwOBA/wOBAscale, or build oWAR directly from projected
+wOBA). Descriptive `desc_owar` already uses the wRAA scale — correct; only the projection path is broken.
 
-### B. wOBA baseline pool-biased / stale
-`lgwOBA` fixture **0.3774** was derived on the DRS-log pool (~33 high-TrackMan teams), not all D1 (**0.3874**).
-RE24 run *values* are fine (physics); the *population baseline* is ~0.01 wOBA too low → descriptive wRAA is
-centered on too-generous a bar, **inflating every hitter ~0.23 WAR**. Same for `wOBAscale` and `lgOBP` (refined
-denom is 0.3761, I'd been quoting 0.3715). **Fix: recompute lgwOBA/wOBAscale/lgOBP on all D1, keep RE24 values,
-re-populate `desc_owar`.** Re-centering moves every hitter (and the split, and market values) — confirm magnitude
-with Trevor before re-populating.
+### B. wOBA baseline pool-bias — RETRACTED (data refutes it)
+Claimed the fixture lgwOBA 0.3774 (DRS pool) understated all-D1 (0.3874), inflating hitters ~0.23 WAR.
+**Measured: all-D1 PA-weighted lgwOBA = 0.3782** (Δ +0.0008 from fixture); re-centering shifts desc_owar
+**mean −0.008 WAR** (max −0.022). The pool's offensive level ≈ all-D1. **No recompute, no re-population.**
+Real wire-time calibration only: refined-wRC+ denom, all-D1 PA-weighted = **0.3667** (stamp this, not 0.3715);
+lgOBP fixture 0.3774 vs all-D1 0.3823 affects only wOBAscale, and wRAA is scale-independent → descriptive stands.
 
 ---
 
@@ -158,6 +163,34 @@ with Trevor before re-populating.
 
 ---
 
+## NCAA D1 averages + SDs — why each matters (`output/ncaa_league_averages_2026.json`)
+
+Recomputed on corrected data (means = all-D1 aggregate; SDs = qualified subset PA≥100 / IP≥30 so tiny
+samples don't inflate spread). The fixture carries a per-value "why"; the load-bearing ones:
+
+| value | mean | SD | why it's important |
+|---|---|---|---|
+| **lgwOBA** | 0.3782 | 0.0526 | hitter anchor — centers wRAA (0 at avg) AND is the wRC+ denom. All hitter WAR rides on it. |
+| **wOBAscale** | 0.947 | — | wOBA→runs; sets oWAR RUNS_PER_PA. |
+| lgOBP / lgSLG | 0.3824 / 0.4368 | 0.049 / 0.106 | wRC+ terms (0.691 / 0.235). SLG has the widest spread → power differentiates hitters most. |
+| **lgRA9** | 6.913 | — | TOTAL-run environment = the WAR currency; anchors RPW + replacement. Pitcher value measured vs this, not ERA. |
+| **lgERA** | 6.080 | — | earned-run env; with lgRA9 defines **E2T 1.137** (earned→total; without it pitcher WAR ~14% too high). |
+| **lgK9** | 8.279 | 2.144 | FIP input + most persistent skill (r 0.578); SD is the K9⁺ denominator. |
+| **lgBB9** | 4.725 | 1.571 | FIP input; D1 walk repriced far above MLB (the signature finding). SD = BB9⁺ denom. |
+| **lgHR9** | 1.102 | 0.538 | heaviest FIP coef (1.486); luck-bucket → GB%-HR9 (Step 4) reclaims groundballer skill here. |
+| **RPW** | 13.1 | — | runs-per-win; turns runs into WAR. Shared both sides or the desc−proj gap is fake. |
+| **replacement RA9 / 2.0-wins-600** | 8.83 / 2.0 | — | the WAR zero point each side (re-derive both, Step 5). |
+| **oWAR RUNS_PER_PA** | 0.3994 | — | =lgwOBA/wOBAscale; the conversion that makes proj oWAR reproduce descriptive (replaces wrong 0.163). |
+
+**Spread/tail findings (the SDs, not just the means):**
+- Hitter wRC+ SD **13.9** (≈ MLB ~15, sane); best bat **4.71 SD** above mean.
+- Pitcher rate SDs (K9 2.14 / BB9 1.57 / HR9 0.54 / HBP9 0.73) are the **denominators of every `+`-stat and Stuff+**
+  z-score — normalize on a consistent population when B.5 wires power ratings.
+- **Tail asymmetry is expected, not a bug:** D1-FIP's top tail is short (best pitcher only **2.54 SD** below mean)
+  but desc_pWAR's tail is long (maxZ **4.86**) — the IP-leverage in the WAR formula restores it. FIP is a **run
+  estimate, not a z-index**, so its SD does NOT govern WAR. **Do not z-normalize or SD-stretch the FIP metric** —
+  that was the old pRV+'s fatal move (z-averaging compressed it to 3.1 SD and buried aces). Run-mapping calibrates it.
+
 ## Data provenance + discipline
 
 - Staging-first; verify every stage in the DB (Trevor can't open the UI); DDL pasted in the staging
@@ -169,7 +202,9 @@ with Trevor before re-populating.
 
 ## Key numbers reference
 
-RPW 13.1 · lgRA9 6.915 · lgERA 6.08 · E2T 1.137 · replacement RA9 8.83 (pitcher, re-derive) ·
-hitter replacement 2.0 wins/600 (borrowed, re-derive) · lgwOBA all-D1 **0.3874** (fixture 0.3774 = pool,
-STALE) · wOBAscale 0.947 (pool, recompute) · lgOBP 0.3898 · lgSLG 0.4543 · RUNS_PER_PA 0.163 (WRONG for
-oWAR; wRAA scale or 0.41).
+**Authoritative NCAA D1 averages → `output/ncaa_league_averages_2026.json`** (recomputed on corrected data
+2026-08-10). RPW 13.1 · lgRA9 6.913 · lgERA 6.080 · E2T 1.137 · replacement RA9 8.83 (pitcher, re-derive) ·
+hitter replacement 2.0 wins/600 (borrowed, re-derive) · lgwOBA **0.3782** · wOBAscale 0.947 · lgOBP 0.3824 ·
+lgSLG 0.4368 · lgAVG 0.2779 · lgISO 0.1589 · lgK9 8.279 · lgBB9 4.725 · lgHR9 1.102 · lgHBP9 1.467.
+**wRC+ anchor = lgwOBA 0.3782** (est_wOBA WITH 0.011 intercept), NOT 0.3667 (intercept-less proxy mean).
+**oWAR RUNS_PER_PA = lgwOBA/wOBAscale = 0.3994** — replaces the wrong 0.163 (=ΣR/ΣPA, different quantity).
