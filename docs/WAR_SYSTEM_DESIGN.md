@@ -250,27 +250,46 @@ framings. Architecture stays MLB-correct: quality = Σ(projected event rate × D
 100 (=league avg), × projected REGULAR-season opportunities. Only the quality-metric CONSTRUCTION changed;
 the per-rate projection machinery (regression/aging) is untouched.
 
-  HITTER wRC+  = 0.691·OBP + 0.235·SLG,  ÷ real league denom 0.3667   (OLS of D1 wOBA on slash, n=3019, PA≥100)
-                 wOBA corr 0.996 (re-derived on CORRECTED data 2026-08-10 — EXACT match: 0.691/0.235). ISO/AVG
-                 redundant (ISO −0.004, AVG −0.046). OBP 0.45→0.691 IS the walk fix. Denom 0.3667 = all-D1
-                 PA-weighted (supersedes 0.3715). Residual = 2B/3B/HR split + per-PA/per-AB denom mismatch (deferred).
-  PITCHER FIP  = 3.10 − 0.231·K9 + 0.509·(BB9+HBP9) + 1.486·HR9,  ×E2T(1.137) → total RA9   (OLS of D1 ERA, n=1988, IP≥30)
-                 HBP folded into the walk term (matches FIP's 3·(BB+HBP)). Same-season test (WAR units): mean
-                 |proj_pwar − desc_pwar| = 0.297 ≈ 0.30 (vs pRV+ blend 0.59). Volantis Δ −0.16 (ace stable),
+  ⚠ ALL NUMERIC CONSTANTS (coeffs, denom, league averages, SDs) LIVE ONLY IN output/ncaa_league_averages_2026.json.
+    The prose below names them for reading; the FIXTURE is the single source (the denom has drifted through four
+    values — 0.364 stale / 0.3715 / 0.3667 proxy-mean / 0.3782 lgwOBA — precisely because numbers lived in prose).
+
+  HITTER wRC+  = (0.011 + 0.691·OBP + 0.235·SLG) / lgwOBA·100   (OLS of D1 wOBA on slash; corr 0.996; re-derived
+                 EXACT on corrected data). Uses est_wOBA WITH the intercept, anchored on lgwOBA (the REAL D1 avg
+                 wOBA), NOT the intercept-less proxy mean 0.3667. ISO/AVG redundant (ISO=SLG−AVG; power via SLG).
+                 OBP 0.45→0.691 IS the walk fix. Residual = 2B/3B/HR split + per-PA/per-AB denom mismatch (deferred).
+  PITCHER FIP  = 3.10 − 0.231·K9 + 0.509·(BB9+HBP9) + 1.486·HR9,  ×E2T → total RA9   (OLS of D1 ERA, n=1988, IP≥30)
+                 HBP folded into the walk term. JUSTIFIED BY OUR OWN RE24 VALUES: BB and HBP have near-identical
+                 D1 run cost (0.458 vs 0.478), so one coefficient is correct — this is a D1 derivation, NOT a copy
+                 of MLB FIP (which prices 3·(BB+HBP) at a different absolute ratio). Same-season test (WAR units):
+                 mean |proj_pwar − desc_pwar| = 0.297 ≈ 0.30 (vs pRV+ blend 0.59). Volantis Δ −0.16 (ace stable),
                  Magdaleno −0.57 (contact-mgr gap → GB%-HR9 closes), Flora/Urbanczyk diverge on purpose (luck).
-                 ⭐ D1 walk coef repriced far above MLB FIP's 0.33 — the D1 environment reprices the walk; HR9/K9 ≈ MLB.
-                 Single best "derive-don't-borrow" exhibit. (Regression sidesteps the hand-built-FIP BIP-baseline bug.)
-                 RE-DERIVED on CORRECTED data 2026-08-10: coefficients reproduce (locked set = ~IP≥30, each coef
-                 between the IP≥20 and IP≥40 fits); CSV corruption (~1.3% rows) did NOT move either metric.
-  Both projected WAR = (replRA9 − projRA9)·IP/9 / RPW  and  (wRAA + repl)/RPW ; same run currency → 160 ≡ 160 cross-position.
+                 ⭐ D1 walk coef repriced far above MLB FIP's 0.33. Single best "derive-don't-borrow" exhibit.
+  Projected WAR: hitter (wRAA + repl)/RPW ; pitcher (replRA9 − projRA9)·IP/9/RPW. Both = quality-RATE × OPPORTUNITY,
+                 and neither rate's SPREAD governs its value spread — the value tail comes from rate × PA (hitter,
+                 4.7 SD) or rate × IP (pitcher, desc_pWAR 4.86 SD despite FIP's short 2.54-SD rate tail). Do NOT
+                 z-normalize / SD-stretch either metric (that was the pRV+ postmortem's rejected fix).
 
 DECISIONS (cross-check flags resolved):
+  - ⚠ THE TWO INDICES ARE DIFFERENT CONSTRUCTIONS: wRC+ is a wOBA-RATIO index, D1-FIP is a RUN-ESTIMATE. So the
+    old "a 160 hitter ≡ a 160 pitcher" equivalence is NO LONGER strictly true and must NOT appear in display copy.
+    They meet only after conversion to WAR (both /RPW on the same run scale) — compare WAR, not the indices.
+  - ANCHOR POPULATION = all-D1 (lgwOBA 0.3782, every PA>0), NOT qualified regulars (0.3874, PA≥100). Forced by
+    consistency with descriptive wRAA, which centers all-D1; anchoring on 0.3874 would drop every hitter ~0.19 WAR
+    (a fake sell-high on everyone). The 0.3782-vs-0.3874 gap was a POPULATION mismatch, not an error.
+  - CENTERING: fit the wRC+ regression PA-weighted on the anchor population so est_wOBA's PA-weighted mean == lgwOBA
+    and the index centers at exactly 100 (unweighted fit is off 0.06 wRC+ — sub-point but pinned via a golden).
+  - oWAR run conversion RUNS_PER_PA_WOBA = lgwOBA/wOBAscale (≈0.3994) JOINS the stamped-fixture chain with a runtime
+    stale-guard — it must NOT live inline anywhere (this is the 2nd constant-drift bug after the 0.364 denom).
   - w_luck = NO flat luck term. Regression FIP projects skill; luck is the residual (FIP's purpose). Magdaleno's
     contact suppression is credited through the SKILL channel (ground% r=0.601), not a flat w_luck×(ERA−FIP) fraction.
   - REFINEMENT #1 (post-wire): GB%-informed HR9 — project HR9 partly from projected ground% (persists 0.601) instead
     of flat regression, so groundball HR-suppression is credited durably (completes Magdaleno's recovery).
   - Out-of-sample coefficients NOT required: regression-to-mean lives in the RATE projections (already there); FIP
-    coefficients are run-value physics (same-season). OOS-fitting them would double-count regression.
+    coefficients are cross-sectional run pricing (same-season physics). OOS-fitting them would double-count regression.
+    Load-bearing on the Step-3 check that rate projections regress PER-COMPONENT — if fallbacks blend uniformly, reopen.
+    Honest footnote: same-season OLS coeffs absorb whatever luck correlates cross-sectionally with the rates — fine
+    for pricing physics, and it's WHY the residual is where BABIP luck lives by construction.
   - Scope: gap = regular-vs-regular via existing regular_season_pa/_ip columns; descriptive headline full-season.
   - Magnitude on record: composite-wRC+ elite compression measured 1.5–2.0 WAR (Hairston −2.03), not ±0.3–0.5.
 
