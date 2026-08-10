@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { computeWrcRaw, computeWrcPlus, SAVANT_WRC_WEIGHTS, SAVANT_NCAA_WRC } from "./wrcPlus";
 import {
-  computeOWar, computeOWarFromStats, computePWar,
+  computeOWar, computeOWarFromStats,
   computeDWar, computeBsrWar, computeTotalWar, computePositionalValue,
-  RUNS_PER_WIN, RUNS_PER_PA, RUNS_PER_9, REPLACEMENT_RUNS_PER_600PA, PITCHER_REPLACEMENT_PER_9IP,
+  RUNS_PER_WIN, RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA,
 } from "./war";
 
 // ── wRC+ ─────────────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ describe("computeOWar", () => {
   });
 
   it("league-average wRC+ (100) at 600 PA → replacement baseline", () => {
-    // offValue = 0 → raa = 0; WAR = replacement / rpw (2.5 at the current scale)
+    // offValue = 0 → raa = 0; WAR = replacement / rpw (= 2.0 wins/600 at D1 scale)
     expect(computeOWar(100, 600)).toBeCloseTo(REPLACEMENT_RUNS_PER_600PA / RUNS_PER_WIN, 6);
   });
 
@@ -147,8 +147,8 @@ describe("WAR buckets (composite)", () => {
 
   it("two-way player sums both offensive and pitching sides", () => {
     const oWar = computeOWar(130, 150);
-    const pWar = computePWar(135, 60);
-    expect(computeTotalWar({ oWar, pWar })).toBeCloseTo((oWar as number) + (pWar as number), 9);
+    const pWar = 1.5; // pitcher WAR comes from the pwar_* path (pitchingEquations), not war.ts
+    expect(computeTotalWar({ oWar, pWar })).toBeCloseTo((oWar as number) + pWar, 9);
   });
 });
 
@@ -166,51 +166,6 @@ describe("computeOWarFromStats", () => {
   });
 });
 
-// ── pWAR ─────────────────────────────────────────────────────────────────────
-
-describe("computePWar", () => {
-  it("returns null for null prvPlus", () => {
-    expect(computePWar(null, 100)).toBeNull();
-  });
-
-  it("returns null for null ip", () => {
-    expect(computePWar(110, null)).toBeNull();
-  });
-
-  it("returns null for ip = 0 (avoid divide-by-zero edge)", () => {
-    expect(computePWar(110, 0)).toBeNull();
-  });
-
-  it("league-average pitcher (100 pRV+, 90 IP) → replacement baseline", () => {
-    // pitcherValue=0; rpa=0; WAR = (ip/9)*pitcherRepl / rpw
-    expect(computePWar(100, 90)).toBeCloseTo((90 / 9) * PITCHER_REPLACEMENT_PER_9IP / RUNS_PER_WIN, 6);
-  });
-
-  it("above-average pitcher (120 pRV+, 90 IP) matches the formula", () => {
-    const rpa = 0.20 * (90 / 9) * RUNS_PER_9;
-    const replacementRuns = (90 / 9) * PITCHER_REPLACEMENT_PER_9IP;
-    expect(computePWar(120, 90)).toBeCloseTo((rpa + replacementRuns) / RUNS_PER_WIN, 6);
-  });
-
-  it("elite starter (140 pRV+, 120 IP) matches the formula", () => {
-    const rpa = 0.40 * (120 / 9) * RUNS_PER_9;
-    const replacementRuns = (120 / 9) * PITCHER_REPLACEMENT_PER_9IP;
-    expect(computePWar(140, 120)).toBeCloseTo((rpa + replacementRuns) / RUNS_PER_WIN, 6);
-  });
-
-  it("below-replacement pitcher (70 pRV+, 60 IP)", () => {
-    const rpa = -0.30 * (60 / 9) * RUNS_PER_9;
-    const replacementRuns = (60 / 9) * PITCHER_REPLACEMENT_PER_9IP;
-    expect(computePWar(70, 60)).toBeCloseTo((rpa + replacementRuns) / RUNS_PER_WIN, 6);
-  });
-
-  it("accepts custom rPer9, replacementRunsPer9, runsPerWin", () => {
-    // With rPer9=4.5, replacementRunsPer9=2.0, runsPerWin=9
-    const pitcherValue = 0.20;
-    const ip = 90;
-    const rpa = pitcherValue * (ip / 9) * 4.5;
-    const replacementRuns = (ip / 9) * 2.0;
-    const expected = (rpa + replacementRuns) / 9;
-    expect(computePWar(120, ip, 4.5, 2.0, 9)).toBeCloseTo(expected, 6);
-  });
-});
+// computePWar formula pins live in pitcherProjection.test.ts ("pWAR formula pins"). The
+// main-app projection pitcher WAR runs on the pwar_* equation weights (src/lib/pitchingEquations.ts,
+// D1: 13.1 / 6.915 / 1.92), kept in lockstep with war.ts computePWar (used by TeamProfilePage).

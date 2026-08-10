@@ -236,9 +236,9 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   pwar_ip_sp: 85,
   pwar_ip_rp: 35,
   pwar_ip_sm: 50,
-  pwar_r_per_9: 7.11,
-  pwar_replacement_runs_per_9: 1.5,
-  pwar_runs_per_win: 10,
+  pwar_r_per_9: 6.915,              // D1 lgRA9 (locked 2026-08-10; was 7.11) — matches war.ts run env
+  pwar_replacement_runs_per_9: 1.92, // replRA9 8.83 − lgRA9 6.915 (was 1.5)
+  pwar_runs_per_win: 13.1,          // shared RPW with hitters (was 10)
   sp_to_rp_reg_era_pct: 6,
   sp_to_rp_reg_fip_pct: 8,
   sp_to_rp_reg_whip_pct: 5,

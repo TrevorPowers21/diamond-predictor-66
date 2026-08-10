@@ -1,40 +1,20 @@
 import { computeWrcPlus } from "./wrcPlus";
 
-// ── WAR scale constants ──────────────────────────────────────────────────────
-// CURRENT (pre-recalibration) values — deliberately kept at the existing MLB-ish numbers
-// so oWAR/pWAR values and every STORED precompute DO NOT MOVE while we add the dWAR/bsrWAR
-// buckets. The dWAR/bsrWAR buckets share RUNS_PER_WIN so they rescale in the SAME pass when
-// the D1 recalibration lands. The recalibration is a separate coordinated rollout — see
-// WAR_RECALIBRATION_TODO below.
-export const RUNS_PER_WIN = 10;
-export const RUNS_PER_PA = 0.13;
-export const RUNS_PER_9 = 5.5;
-export const REPLACEMENT_RUNS_PER_600PA = 25;
-export const PITCHER_REPLACEMENT_PER_9IP = 2.5;
-
-/*
- * ⚠️ WAR_RECALIBRATION_TODO — D1 calibration audit (2026-08-05). Do on a DEDICATED branch,
- * AFTER dWAR/bsrWAR are confirmed working on staging. The constants above are transplanted
- * MLB rules of thumb with no D1 provenance. Derived D1 values (from the 2.58M-pitch season;
- * docs/drs-reference/CONSTANTS_D1_2026.md + AGENT_LEARNINGS + memory project_composite_war):
- *   RUNS_PER_WIN            10   → 13.1    (Pythagorean 2R, R = 6.54 R/team/game)
- *   RUNS_PER_PA             0.13 → 0.174   (105,473 runs ÷ 605,727 PA)
- *   RUNS_PER_9             5.5   → 6.76    (D1 R/9)
- *   REPLACEMENT_RUNS_600PA  25   → 2.0 WINS/600 PA (= 2.0*RUNS_PER_WIN → 26.2; fixed-WIN so it
- *                                          scales with rpw). PITCHER repl ≈ 2.48/9IP.
- * Net: every WAR shrinks ~23%; hitting ~flat vs pitching (pitching shrinks a bit more, the
- * o-vs-p gap closes but pitchers stay higher). COORDINATED rollout, NOT a one-file change:
- *   1. CENTRALIZE — the oWAR formula is copy-pasted in 7 places; make them all import the
- *      constants above instead of re-inlining 0.13/25/10. Copies: src/lib/{playerCalcs,
- *      transferProjection, buildTransferProjectionInputs, depthRoles}.ts, src/pages/
- *      TeamBuilder.tsx, src/pages/team-builder/hooks/useTeamBuilderSimulation.ts, AND
- *      supabase/functions/process-precompute-jobs/index.ts. (pWAR: pitchingEquations.ts,
- *      pitchLogRates.ts.) The parity tests (playerCalcs.test / storedVsLive.test) enforce sync.
- *   2. Update + redeploy the precompute EDGE FUNCTION (staging first).
- *   3. RE-PRECOMPUTE all stored oWAR/pWAR (human-run) — combine with the dWAR/bsrWAR add.
- *   4. Reseed team_war_snapshots on the new totals.
- *   5. Repoint market value + projected budget at TOTAL WAR; load TeamBuilder/simulation pages.
- */
+// ── WAR scale constants — D1-derived, LOCKED 2026-08-10 ───────────────────────
+// Shared run environment for the two-number WAR system. Descriptive WAR (on the Masters)
+// and the projection BOTH divide by RUNS_PER_WIN so the desc−proj gap is a real
+// disagreement, not a scale artifact. Derived from D1 (fixtures: output/descriptive_constants.json
+// + output/woba_weights.json): lgRA9 6.915, ΣR/ΣPA, replacement 2.0 wins/600.
+// NOTE: the MAIN-APP pitcher-WAR path runs on the pwar_* equation weights in
+// src/lib/pitchingEquations.ts. The war.ts computePWar below is the SAME formula and is kept
+// in lockstep with those pwar_* values (13.1 / 6.915 / 1.92); it is used by the Savant
+// TeamProfilePage for live per-pitcher pWAR. Eventually TeamProfilePage should read the stored
+// desc_pwar (display pass 2) and this helper can retire.
+export const RUNS_PER_WIN = 13.1;               // Pythagorean 2R (lgRA9 6.915)
+export const RUNS_PER_PA = 0.163;               // ΣR / ΣPA (D1 full season)
+export const REPLACEMENT_RUNS_PER_600PA = 26.2; // 2.0 wins/600 × RPW — fixed-WINS (scales with rpw)
+export const PITCHER_R_PER_9 = 6.915;            // D1 lgRA9 — mirrors pitchingEquations pwar_r_per_9
+export const PITCHER_REPLACEMENT_PER_9IP = 1.92; // replRA9 8.83 − lgRA9 — mirrors pwar_replacement_runs_per_9
 
 /**
  * oWAR from wRC+ + PA — OFFENSE ONLY. Baserunning and defense are their own buckets now
@@ -62,11 +42,15 @@ export function computeOWarFromStats(
   return computeOWar(computeWrcPlus(avg, obp, slg, iso), pa);
 }
 
-/** pWAR from pitcher power rating + innings. */
+/**
+ * pWAR from pitcher power rating (pRV+) + innings. Same formula as the pwar_* equation-weight
+ * path; defaults are the D1 constants (kept in lockstep with pitchingEquations pwar_*). Used by
+ * the Savant TeamProfilePage. The MAIN-APP projection pitcher WAR flows through pitchingEquations.
+ */
 export function computePWar(
   prvPlus: number | null,
   ip: number | null,
-  rPer9: number = RUNS_PER_9,
+  rPer9: number = PITCHER_R_PER_9,
   replacementRunsPer9: number = PITCHER_REPLACEMENT_PER_9IP,
   runsPerWin: number = RUNS_PER_WIN,
 ): number | null {
