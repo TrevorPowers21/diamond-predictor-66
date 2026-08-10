@@ -6,6 +6,7 @@
     "derived_at": "2026-08-10",
     "source": "docs/drs-reference/Full Season {Hitting,Pitching} Master Stats.csv (quote-aware) filtered to Hitter/Pitching Master division=D1",
     "scripts": ["scripts/drs/_audit_league_averages.mjs (means)", "scripts/drs/_audit_sd.mjs (SD + tail)"],
+    "centering_population": "all-D1",
     "weighting": "MEANS = aggregate Σnum/Σden over ALL D1 (PA/IP-weighted). SDs = per-player POPULATION SD on the QUALIFIED subset (PA>=100 n=3019 / IP>=30 n=1988) so tiny-sample noise doesn't inflate spread. NOTE the qualified-subset mean differs slightly from the all-D1 aggregate (qualified players are better): use the aggregate mean to CENTER value, the qualified SD to measure SPREAD/z-scores — and keep the normalization population consistent wherever a '+'-stat is built."
   },
 

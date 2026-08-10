@@ -5,7 +5,9 @@
     "derived_at": "2026-08-09",
     "method": "RE24 linear weights from the pitch log; wOBA scaled to lgOBP; wRAA is scale-independent",
     "pool": "DRS-log teams (high-TrackMan D1)",
-    "RPW": 13.1
+    "RPW": 13.1,
+    "physics_source": "DRS-log-pool (RE24 run VALUES — event physics)",
+    "centering_population": "all-D1"
   },
   "_seam_fix_2026_08_10": "linear_weights_above_avg were RE-CENTERED on all-D1 (out-weight -0.4154 -> -0.3994) to close the derivation seam: derive_woba_weights.py line 152 computed lg_raw with RE24-bucket counts in the numerator but pa_total in the denominator, baking TWO baselines into one fixture (out-weight implied 0.4154, wOBAscale implied 0.3985). The ONE correct all-D1 baseline is lg_raw = 0.3994 (Σ raw-runs / Σ PA over all D1). Physics (woba_weights_above_out_scaled) unchanged. lgwOBA/lgOBP moved pool 0.3774 -> all-D1 0.3782 (on-base-per-PA scale; NOT the standard OBP 0.3824 in ncaa_league_averages_2026.json). After this, pure-RE24 == wOBA-method == wRC+xRPP (see scripts/drs/_recenter_check.mjs). desc_owar on staging is still on 0.3774 pending the Step-6 re-populate to 0.3782 (uniform ~0.016 WAR).",
   "pa": 682734,

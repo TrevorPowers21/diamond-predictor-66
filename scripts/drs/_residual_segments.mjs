@@ -9,7 +9,10 @@ import { readFileSync } from "fs";
 const env = Object.fromEntries(readFileSync(".env.local", "utf8").split("\n").filter(l => l.includes("=")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
 const sb = createClient(env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 const L = JSON.parse(readFileSync("output/ncaa_league_averages_2026.json", "utf8"));
+const Wt = JSON.parse(readFileSync("output/woba_weights.json", "utf8")).woba_weights_above_out_scaled;
 const lgwOBA=0.3782, WSCALE=L.hitting.wOBAscale.value, RPW=L.war_constants.RPW.value, RPP=lgwOBA/WSCALE;
+// (a) on CORRECTED weights: recompute descriptive wRAA on the all-D1 baseline (0.3782), NOT the stored
+// desc_owar (still on pool 0.3774) — so the gate reflects the SEALED state, isolating the wRC+ proxy error.
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
 function parseLine(line){const out=[];let cur="",q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(q){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}else{if(ch==='"')q=true;else if(ch===','){out.push(cur);cur="";}else cur+=ch;}}out.push(cur);return out;}
 function sheet(path){const t=readFileSync(path,"utf8").split("\n");const H=parseLine(t[0]);const gi=k=>H.indexOf(k);const m={};for(let i=1;i<t.length;i++){if(!t[i])continue;const c=parseLine(t[i]);const id=(c[gi("playerId")]||"").trim();if(id)m[id]=c;}return{rows:m,gi};}
@@ -19,10 +22,13 @@ const hs=sheet("docs/drs-reference/Full Season Hitting Master Stats.csv"),hg=hs.
 const HM=(await all("Hitter Master","source_player_id,division,pa,desc_owar")).filter(r=>r.division==="D1"&&r.desc_owar!=null&&(r.pa||0)>=50);
 const rows=[];
 for(const h of HM){const row=hs.rows[String(h.source_player_id)];if(!row)continue;const g=k=>num(row[hg(k)]);const PA=g("PA");
+  const HR=g("HR"),T3=g("3B"),T2=g("2B"),Hh=g("H"),BB=g("BB"),HBP=g("HBP");const B1=Math.max(0,Hh-T2-T3-HR);
+  const woba=(Wt.BB*BB+Wt.HBP*HBP+Wt["1B"]*B1+Wt["2B"]*T2+Wt["3B"]*T3+Wt.HR*HR)/PA;
+  const descOW=(((woba-lgwOBA)/WSCALE)*PA + (PA/600)*2.0*RPW)/RPW;   // descriptive on all-D1 0.3782
   const wrc=(0.011+0.691*g("OBP")+0.235*g("SLG"))/lgwOBA*100;
   const proj=((wrc/100-1)*PA*RPP + (PA/600)*2.0*RPW)/RPW;
   const bbpct = g("BB")/PA;
-  rows.push({PA,wrc,resid:proj-h.desc_owar,bbpct});}
+  rows.push({PA,wrc,resid:proj-descOW,bbpct});}
 
 function seg(label, keyOf, bins){
   console.log(`\n  by ${label}:`);

@@ -316,10 +316,27 @@ WHY THE JUMP LOOKS BACKWARDS BUT ISN'T — two environment effects on two differ
 derive_woba_weights.py line 152 computed lg_raw with RE24-bucket counts over pa_total, baking two baselines into
 one fixture (out-weight ⇒ 0.4154, wOBAscale ⇒ 0.3985). The ONE correct all-D1 baseline is lg_raw = 0.3994
 (Σ raw-runs ÷ Σ PA, all D1). Fixed: linear_weights_above_avg re-centered (out −0.4154 → −0.3994), lgwOBA
-pool 0.3774 → all-D1 0.3782; physics unchanged; three constructions now collapse. Residual audit (all D1,
-_residual_segments.mjs): grand |err| 0.054, flat across wRC+/PA/BB% except (1) top-19 bats +0.09 (irreducible
-slash-proxy split) and (2) a −0.016→−0.029 signed systematic = descriptive still stored on POOL 0.3774; that
-last baseline closes when the Step-6 re-populate uses all-D1 0.3782 (uniform ~0.016 WAR down).
+pool 0.3774 → all-D1 0.3782; physics unchanged; three constructions now collapse.
+Structural close: every derived fixture now carries `_meta.centering_population`, and code that combines
+fixtures calls `assertCentering()` (scripts/drs/_fixture_guard.mjs) — this seam-class can't ship silently again.
+
+STEP-1 CALIBRATION BASELINE — segmented residual, projection oWAR vs descriptive, BOTH on all-D1 0.3782
+(_residual_segments.mjs; grand |err| 0.050, signed −0.005). Flat = pass; a flat grand mean hiding a tail = fail.
+
+  segment            |err|    signed        segment          |err|   signed
+  wRC+ <80           0.036   +0.006         PA 50-120        0.034  −0.004
+  wRC+ 80-95         0.047   −0.007         PA 120-200       0.052  −0.002
+  wRC+ 95-105        0.056   −0.005         PA 200-260       0.060  −0.007
+  wRC+ 105-120       0.055   −0.012         PA >=260         0.065  −0.011
+  wRC+ 120-140       0.048   +0.006         BB% Q1 (<8%)     0.046  +0.008
+  wRC+ >=140 (n=19)  0.109   +0.105  <--    BB% Q4 (>14%)    0.057  −0.019
+
+FLAT everywhere except the top-19 bats (+0.105) — that is the IRREDUCIBLE wRC+ slash-proxy error (the
+2B/3B/HR split the OBP+SLG proxy can't see). It is the measured cost of the slash-proxy bridge: ~0.09 WAR on
+19 players, which is exactly the number that would justify event-level projection IF anyone ever asks "what
+would we gain" — and the argument for not building it now. The old pool-vs-all-D1 signed systematic
+(−0.016→−0.029) is GONE once both sides are on 0.3782; the shipped desc_owar (still on pool 0.3774) closes
+that uniform ~0.016 WAR at the Step-6 re-populate.
 
 --- (superseded design notes below; kept for the diagnosis + rejected-approaches record) ---
 

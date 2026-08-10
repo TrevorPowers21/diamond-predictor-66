@@ -16,6 +16,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "fs";
+import { assertCentering } from "./_fixture_guard.mjs";
 
 const COMMIT = process.argv.includes("--commit");
 const SEASON = 2026;
@@ -24,6 +25,8 @@ const sb = createClient(env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
 const C = JSON.parse(readFileSync("output/descriptive_constants.json", "utf8"));
 const W = JSON.parse(readFileSync("output/woba_weights.json", "utf8"));
+// tripwire: the two fixtures that combine into descriptive WAR must be centered on the SAME population
+assertCentering("all-D1", { name: "descriptive_constants", meta: C._meta }, { name: "woba_weights", meta: W._meta });
 const RPW = C.RPW, E2T = C.E2T, REPL_RA9 = C.replacement_RA9;
 const WT = W.woba_weights_above_out_scaled, LGWOBA = W.lgwOBA, WSCALE = W.wOBAscale, OREPL = W.offense_replacement_wins_per_600pa;
 console.log(`constants: RPW ${RPW} E2T ${E2T} replRA9 ${REPL_RA9} | wOBA lg ${LGWOBA} scale ${WSCALE} repl ${OREPL}/600`);

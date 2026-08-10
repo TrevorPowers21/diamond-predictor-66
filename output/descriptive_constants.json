@@ -4,7 +4,8 @@
     "season": 2026,
     "derived_at": "2026-08-09",
     "source": "Pitching Master (ERA/IP authoritative) + Full Season export (R/ER for E2T)",
-    "doctrine": "lgERA from Master, IP-weighted \u03a3ER/\u03a3IP; single replacement level (no SP/RP split); replacement = win%-anchor .380 (no IP floor / empirical cutoff)"
+    "doctrine": "lgERA from Master, IP-weighted \u03a3ER/\u03a3IP; single replacement level (no SP/RP split); replacement = win%-anchor .380 (no IP floor / empirical cutoff)",
+    "centering_population": "all-D1"
   },
   "RPW": 13.1,
   "lgERA": 6.08,
