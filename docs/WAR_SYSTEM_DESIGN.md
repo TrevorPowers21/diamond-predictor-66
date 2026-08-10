@@ -244,7 +244,35 @@ they apply (the dRS-behind conservation check is one; the wOBA telescoping-zero-
 constant reaches a demo unlabeled. Cross-check the finished descriptive numbers against Baseball-Reference-style
 external WAR where a public equivalent exists (it mostly doesn't for D1 — which is the point).
 
-## 8. Pitcher projection rebuild — the pRV+ CHAIN (settled 2026-08-10)
+## 8. Projection quality-metric rebuild — VALIDATED (2026-08-10)
+BOTH quality metrics derived by REGRESSION on D1 data (same method), replacing the earlier chain/blend
+framings. Architecture stays MLB-correct: quality = Σ(projected event rate × D1 run value), normalize to
+100 (=league avg), × projected REGULAR-season opportunities. Only the quality-metric CONSTRUCTION changed;
+the per-rate projection machinery (regression/aging) is untouched.
+
+  HITTER wRC+  = 0.695·OBP + 0.235·SLG,  ÷ real league denom 0.3715   (OLS of D1 wOBA on slash, n=3019)
+                 wOBA corr 0.957 → 0.984.  ISO/AVG redundant (ISO=SLG−AVG; power via SLG). OBP 0.45→0.695
+                 IS the walk fix. Residual 1.6% = 2B/3B/HR split + OBP-per-PA/SLG-per-AB denom mismatch (deferred).
+  PITCHER FIP  = 3.73 − 0.254·K9 + 0.570·BB9 + 1.446·HR9,  ×E2T(1.137) → total RA9   (OLS of D1 ERA on TTO, n=1988)
+                 same-season mean|Δ| 0.59 → 0.32; Magdaleno −1.76→−0.69, aces stable (Volantis −0.12).
+                 ⭐ D1 BB9 coef 0.570 vs MLB FIP 0.33 (+73%) — the D1 environment reprices the walk; HR9 (1.446≈1.44)
+                 and K9 (−0.254≈−0.22) ≈ MLB. Single best "derive-don't-borrow" exhibit: MLB FIP would bury
+                 elite-control pitchers. (Regression sidesteps the hand-built-FIP BIP-baseline bug → Magdaleno 9.16 RA9.)
+  Both projected WAR = (replRA9 − projRA9)·IP/9 / RPW  and  (wRAA + repl)/RPW ; same run currency → 160 ≡ 160 cross-position.
+
+DECISIONS (cross-check flags resolved):
+  - w_luck = NO flat luck term. Regression FIP projects skill; luck is the residual (FIP's purpose). Magdaleno's
+    contact suppression is credited through the SKILL channel (ground% r=0.601), not a flat w_luck×(ERA−FIP) fraction.
+  - REFINEMENT #1 (post-wire): GB%-informed HR9 — project HR9 partly from projected ground% (persists 0.601) instead
+    of flat regression, so groundball HR-suppression is credited durably (completes Magdaleno's recovery).
+  - Out-of-sample coefficients NOT required: regression-to-mean lives in the RATE projections (already there); FIP
+    coefficients are run-value physics (same-season). OOS-fitting them would double-count regression.
+  - Scope: gap = regular-vs-regular via existing regular_season_pa/_ip columns; descriptive headline full-season.
+  - Magnitude on record: composite-wRC+ elite compression measured 1.5–2.0 WAR (Hairston −2.03), not ±0.3–0.5.
+
+--- (superseded design notes below; kept for the diagnosis + rejected-approaches record) ---
+
+## 8b. (original) Pitcher projection rebuild — the pRV+ CHAIN
 "Swap the assembler, not the projector." The projection engine (validated per-rate projections of K9/BB9/HR9)
 is fine; the ASSEMBLY is broken. Current pRV+ = 0.30·FIP⁺+0.25·ERA⁺+0.15·WHIP⁺+0.15·K9⁺+0.10·BB9⁺+0.05·HR9⁺,
 each X⁺ = 100+z·20. Two structural faults: (a) FIP already contains K/BB/HR, so K9⁺/BB9⁺/HR9⁺ DOUBLE-COUNT the
