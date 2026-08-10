@@ -293,6 +293,34 @@ DECISIONS (cross-check flags resolved):
   - Scope: gap = regular-vs-regular via existing regular_season_pa/_ip columns; descriptive headline full-season.
   - Magnitude on record: composite-wRC+ elite compression measured 1.5–2.0 WAR (Hairston −2.03), not ±0.3–0.5.
 
+### 8a — oWAR run conversion + the run-environment decomposition (answers "why 0.13 → 0.40")
+The oWAR conversion RUNS_PER_PA = lgwOBA/wOBAscale = **0.3994** (fixture). The old 0.163 was ΣR/ΣPA (the
+league's absolute scoring rate) plugged into the wrong slot — a wOBA-ratio deviation needs the run-value of a
+wOBA point, not the average run rate. Confirmed three ways (pure-RE24 = wOBA-method = wRC+×RPP; _recenter_check.mjs).
+
+WHY THE JUMP LOOKS BACKWARDS BUT ISN'T — two environment effects on two different steps, pushing opposite ways:
+  1. EVENTS → RUNS (this is the 0.40). In a hot offensive league each hit drives in more traffic and each out
+     wastes more, so an event is worth MORE runs. The D1 RE24 weights literally show it (BB 0.458 vs MLB ~0.29,
+     out −0.415 vs ~−0.26). This step goes UP in college: 0.40 > MLB's ~0.31.
+  2. RUNS → WINS (this is RPW = 13.1 vs MLB ~10). More runs scored means each run matters LESS for a win, so
+     value is DAMPENED. This is the "friendly environment tightens the gap" intuition — applied at this step.
+  They mostly cancel: a wRC+ point is worth ~0.18 WAR/600 PA in D1 vs ~0.15 in MLB. The scary-looking 0.40 gets
+  divided right back down by the (correctly larger) RPW. The 0.13→0.40 change fixes a wrong plug; it is not inflation.
+
+  ⚠ The proof of 0.40 is that pure-RE24 = wOBA-method (independent constructions agreeing), NOT that hitter WAR SD
+  (~0.95) happens to match pitcher WAR SD (~0.94). The raw hitter/pitcher distributions genuinely differ (ERA spans
+  2→10 vs a compressed hitting distribution — which is exactly why we index to 100). SD-symmetry is discarded as
+  evidence; construction-agreement is the standard.
+
+### 8b — the offensive baseline seam (closed 2026-08-10)
+derive_woba_weights.py line 152 computed lg_raw with RE24-bucket counts over pa_total, baking two baselines into
+one fixture (out-weight ⇒ 0.4154, wOBAscale ⇒ 0.3985). The ONE correct all-D1 baseline is lg_raw = 0.3994
+(Σ raw-runs ÷ Σ PA, all D1). Fixed: linear_weights_above_avg re-centered (out −0.4154 → −0.3994), lgwOBA
+pool 0.3774 → all-D1 0.3782; physics unchanged; three constructions now collapse. Residual audit (all D1,
+_residual_segments.mjs): grand |err| 0.054, flat across wRC+/PA/BB% except (1) top-19 bats +0.09 (irreducible
+slash-proxy split) and (2) a −0.016→−0.029 signed systematic = descriptive still stored on POOL 0.3774; that
+last baseline closes when the Step-6 re-populate uses all-D1 0.3782 (uniform ~0.016 WAR down).
+
 --- (superseded design notes below; kept for the diagnosis + rejected-approaches record) ---
 
 ## 8b. (original) Pitcher projection rebuild — the pRV+ CHAIN

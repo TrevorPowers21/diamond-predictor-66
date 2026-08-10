@@ -149,6 +149,12 @@ def main():
     woba_runs = {e: lw[e] - lw_out for e in events if e in lw}   # runs above OUT (out = 0)
 
     # league raw wOBA (above-out, per PA) and scale to lgOBP
+    # ⚠ SEAM (2026-08-10): numerator uses lw_n (RE24-bucket counts) but denominator is pa_total, so this
+    # lg_raw (~0.3985) disagrees with the linear-weights out-weight centering (−lw_out ~0.4154) — two
+    # baselines in one fixture, a systematic ~0.017 runs/PA level error. The AUTHORITATIVE all-D1 centering
+    # (lg_raw = Σ raw-runs / Σ PA over ALL D1 = 0.3994) is applied downstream in output/woba_weights.json's
+    # linear_weights_above_avg + output/ncaa_league_averages_2026.json. Physics (woba_runs) are unaffected.
+    # If you re-run this on the pool, RE-CENTER via scripts/drs/_recenter_check.mjs before trusting the weights.
     lg_raw = sum(woba_runs[e] * lw_n[e] for e in woba_runs) / pa_total
     lgOBP = reached / pa_total                            # (H+BB+HBP)/PA from the log itself
     wOBAscale = lgOBP / lg_raw
