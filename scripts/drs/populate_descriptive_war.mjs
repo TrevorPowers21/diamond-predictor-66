@@ -29,10 +29,19 @@ const WT = W.woba_weights_above_out_scaled, LGWOBA = W.lgwOBA, WSCALE = W.wOBAsc
 console.log(`constants: RPW ${RPW} E2T ${E2T} replRA9 ${REPL_RA9} | wOBA lg ${LGWOBA} scale ${WSCALE} repl ${OREPL}/600`);
 
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+// quote-aware CSV line parser — the TruMedia export quotes team names with embedded commas
+// (e.g. "University of Hawai'i, Manoa"); a naive split(",") shifts every later column on those rows.
+function parseLine(line) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < line.length; i++) { const ch = line[i];
+    if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else { if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ""; } else cur += ch; } }
+  out.push(cur); return out;
+}
 function sheet(path, key = "playerId") {
-  const t = readFileSync(path, "utf8").split("\n"); const H = t[0].split(","); const gi = k => H.indexOf(k);
+  const t = readFileSync(path, "utf8").split("\n"); const H = parseLine(t[0]); const gi = k => H.indexOf(k);
   const m = {};
-  for (let i = 1; i < t.length; i++) { if (!t[i]) continue; const c = t[i].split(","); const id = (c[gi(key)] || "").trim(); if (id) m[id] = c.map(x => x); m[id] && (m[id]._gi = gi); }
+  for (let i = 1; i < t.length; i++) { if (!t[i]) continue; const c = parseLine(t[i]); const id = (c[gi(key)] || "").trim(); if (id) m[id] = c; }
   return { rows: m, gi };
 }
 async function all(t, cols, season = true) { let a = []; for (let f = 0; ; f += 1000) { let q = sb.from(t).select(cols).range(f, f + 999); if (season) q = q.eq("Season", SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
