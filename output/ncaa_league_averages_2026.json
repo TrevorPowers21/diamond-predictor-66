@@ -11,7 +11,7 @@
 
   "hitting": {
     "lgwOBA":    { "mean": 0.3782, "sd": 0.0526, "population": "all-D1 (every PA>0, n=5343), PA-weighted", "why": "THE hitter anchor. Centers wRAA (value=0 at league avg) AND is the wRC+ denom. Every hitter WAR rides on it. SD 0.0526 = spread of hitter quality on the wOBA scale. POPULATION MATTERS: qualified regulars (PA>=100) average 0.3874 — do NOT anchor there, it would drop every hitter ~0.19 WAR vs descriptive (which centers all-D1). The 0.3782-vs-0.3874 difference is a population choice, not an error." },
-    "wOBAscale": { "value": 0.947, "why": "Converts wOBA points -> runs (wRAA=(wOBA-lgwOBA)/wOBAscale*PA). Sets oWAR RUNS_PER_PA. wRAA is scale-independent so descriptive is unaffected by small changes; kept from woba_weights.json (self-consistent pair)." },
+    "wOBAscale": { "value": 0.947, "derivation": "= lgOBP / lg_raw (league raw wOBA above-out per PA), from scripts/drs/derive_woba_weights.py. <1 (vs MLB's 1.15-1.25) because D1's higher run environment makes one wOBA point worth MORE runs: 1/0.947 = 1.06 runs/PA per wOBA unit vs MLB ~0.80. Validated by RESULT: RUNS_PER_PA = lgwOBA/wOBAscale = 0.3994 reproduces descriptive wRAA at 0.04 WAR error.", "why": "Converts wOBA points -> runs (wRAA=(wOBA-lgwOBA)/wOBAscale*PA). Sets oWAR RUNS_PER_PA. wRAA is scale-independent so descriptive is unaffected by small changes; self-consistent pair with lgwOBA." },
     "lgOBP":     { "mean": 0.3824, "sd": 0.049,  "why": "On-base component. Dominant wRC+ term (coef 0.691) — captures the walk, the single most under-priced skill vs MLB. Reference for OBP+ / conference scaling." },
     "lgSLG":     { "mean": 0.4368, "sd": 0.106,  "why": "Slugging component (wRC+ coef 0.235). Carries ALL power (ISO redundant once SLG is in). SD 0.106 = widest slash spread -> power is where hitters most differentiate." },
     "lgAVG":     { "mean": 0.2779, "sd": 0.046,  "why": "Batting average. Display + small-sample blend; NOT in wRC+ (redundant vs OBP/SLG)." },
@@ -40,9 +40,8 @@
       "formula": "(0.011 + 0.691*OBP + 0.235*SLG) / lgwOBA(0.3782) * 100",
       "spread": { "mean": 100.6, "sd": 13.9, "maxZ": 4.71 },
       "why": "Display index of hitter offense; anchored on lgwOBA 0.3782 (NOT 0.3667, the intercept-less proxy mean). SD ~14 ≈ MLB's ~15 (sane). Feeds oWAR via RUNS_PER_PA. Validated: OLS wOBA~OBP+SLG corr 0.9958 on corrected data.",
-      "denom_note": "0.3667 was the WRONG denom (mean of the intercept-LESS proxy). Anchor on the real average lgwOBA 0.3782 using est_wOBA WITH its 0.011 intercept -> one real number drives metric+conversion+baseline.",
-      "centering_PENDING_TREVOR": "Unweighted fit (0.011/0.691/0.235) centers the index at 99.94 on all-D1 (0.06 wRC+ off, because the fit was unweighted but the anchor is PA-weighted). Clean-by-construction option: refit PA-WEIGHTED on all-D1 -> coeffs 0.702/0.227, est_wOBA PA-mean == lgwOBA exactly, index centers at 100 (corr unchanged). DECISION NEEDED: (A) adopt 0.702/0.227 PA-weighted [one anchor, zero drift]; or (B) keep validated 0.691/0.235 + assert an index-mean==100 golden and re-center the 0.06. Sub-point either way; pin one.",
-      "index_is_a_ratio_not_a_run_currency": "wRC+ is a wOBA-RATIO; D1-FIP is a RUN-ESTIMATE. They are NOT the same construction, so 'a 160 hitter == a 160 pitcher' is false and must not reach display copy. Compare WAR, not indices."
+      "denom_note": "Anchor = the true NCAA average wOBA over all D1 (0.3782). Coeffs 0.691/0.235 (validated, corr 0.996). That's it — 0.3667 (intercept-less proxy) and 0.3874 (qualified-regulars subset) are NOT the league average.",
+      "index_is_a_ratio_not_a_run_currency": "wRC+ is a wOBA-RATIO; D1-FIP is a RUN-ESTIMATE. Different constructions, so 'a 160 hitter == a 160 pitcher' is false — compare WAR, not indices."
     },
     "pitcher_D1FIP": {
       "formula": "3.10 - 0.231*K9 + 0.509*(BB9+HBP9) + 1.486*HR9,  then *E2T(1.137) -> projRA9",
