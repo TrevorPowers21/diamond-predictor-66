@@ -28,9 +28,17 @@ Single source of current state for the two-number WAR rebuild. Companion: `WAR_S
 - **Not yet started**: the 8-step build (wire → scope → B.5 → GB%-HR9 → replacement → re-precompute →
   market/display → prod).
 
-**STEP 1 WIRING — DONE (2026-08-11).** wRC+ rebuilt to C1 and CONSOLIDATED into one source; oWAR conversion
-0.163→0.3994; staging config DB synced. Details in "Step 1 — C1 wRC+ consolidation (SHIPPED)" below.
-**Immediate next action**: Step 6 re-precompute (staging) — see the build sequence.
+**STEP 1 WIRING — DONE (2026-08-11), BOTH SIDES.** Hitter wRC+ (C1) + pitcher pRV+ (D1-FIP) both rebuilt and
+CONSOLIDATED to one canonical source each (`src/lib/wrc.ts`, `src/lib/pitcherQuality.ts`); oWAR conversion
+0.163→0.3994; staging config synced (hitter live values, pitcher reference). tsc 195=baseline, 247/247 tests.
+
+**⚠ NEXT = Step 2, then the Step 3→4→5 GATE — NOT Step 6.** The build order is deliberate and load-bearing:
+a re-precompute (Step 6) writes the projection numbers to staging, so it must run only AFTER the projection
+INPUTS are verified correct. Skipping ahead bakes unverified numbers in and forces a second full re-precompute.
+Specifically Step 6 must wait on: **Step 3** (power ratings computed + consumed correctly, fallbacks accurately
+used), **Step 4** (GB%-informed HR9 refinement), **Step 5** (replacement level DERIVED both sides — the hitter
+floor is still the borrowed 2.0/600). These aren't optional polish; each changes the projected rates or the
+WAR zero-point that Step 6 freezes into `player_predictions` + snapshots.
 
 ---
 
@@ -180,13 +188,22 @@ oWAR conversion 0.3994 + descriptive constants → this doc.
 1. ✅ **DONE — Step 1 wiring** (C1 consolidation above). Constants live in `src/lib/wrc.ts` (one source; edge fns mirror);
    the offensive fixtures carry the `centering_population` guard. (the 0.364→
    saga is why). **Gate**: same-season test converges; replacement player ≈ 0; no double-scaling.
-2. **Scope**: gap = regular-vs-regular via existing `regular_season_pa`/`regular_season_ip`; descriptive
+2. **Scope** (NEXT): gap = regular-vs-regular via existing `regular_season_pa`/`regular_season_ip`; descriptive
    headline stays full-season (deep-postseason stars, e.g. Volantis 95 full IP → 75 reg, else fake sell-high).
-3. **B.5 rest**: per-metric power-rating math; Stuff+/pitch-log source is current not stale.
-4. **Refinement #1**: GB%-informed HR9 (project HR9 partly from ground%). Clean-contact-manager recovery
-   is the falsifiable w_luck guard.
-5. **Derive replacement** (both sides, one tier principle) — *before* the re-precompute (swapped to avoid
-   staging double-churn). Reconcile split population here.
+3. **B.5 — power ratings + fallbacks (THE GATE, must pass before any re-precompute)**: verify the per-metric
+   power-rating math is correct and that Stuff+/pitch-log sources are current not stale; **confirm every FALLBACK
+   is used accurately** (returner thin-sample power-weight bump 0.7→0.9; depth-role IP/PA defaults; combined_used
+   small-sample blend; transfer neutral-substitution; JUCO D1-baseline path). The power ratings PROJECT the rates
+   (K9/BB9/HR9, slash) that feed D1-FIP and wRC+ — if they're wrong or a fallback misfires, Step 6 freezes wrong
+   projections into `player_predictions`. Run returner + transfer projections at the new constants and confirm
+   mathematically correct BEFORE proceeding.
+4. **Refinement #1 — GB%-informed HR9** (project HR9 partly from ground%). Changes the projected HR9 rate that
+   D1-FIP consumes; clean-contact-manager recovery (Magdaleno → ~0) is the falsifiable guard for dropping w_luck.
+   Must land before Step 6 or the pitcher projection is missing a validated input refinement.
+5. **Derive replacement** (both sides, one tier principle) — the WAR ZERO-POINT. Hitter floor still borrowed
+   (2.0/600); pitcher 8.83 derived. Re-derive both on one principle; the hitter/pitcher split falls out. This
+   sets where 0 WAR sits, so it must be final before Step 6 writes WAR — swapped ahead of the re-precompute to
+   avoid staging double-churn.
 6. **Re-precompute** (staging first) — the big one, now that Step 1 + config are done:
    - **deploy the C1 edge fns** (`process-precompute-jobs` AND `recalculate-prediction` — both changed for C1),
    - **re-populate `desc_owar` on all-D1 lgwOBA 0.3782** (`populate_descriptive_war.mjs` now reads 0.3782 —
