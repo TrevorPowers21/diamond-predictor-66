@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { computeWrcRaw } from "@/lib/wrc";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSortable, SortHeader, tierColor } from "@/savant/components/SortableTable";
@@ -59,11 +60,10 @@ interface ConfRow {
   WRC_plus: number | null;
 }
 
-// wRC formula matches engine: 0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO
+// wRC numerator — canonical C1 (src/lib/wrc.ts). Conference wRC+ divides by the NCAA-row base below.
 function calcWrc(avg: number | null, obp: number | null, iso: number | null): number | null {
   if (avg == null || obp == null || iso == null) return null;
-  const slg = avg + iso;
-  return 0.45 * obp + 0.30 * slg + 0.15 * avg + 0.10 * iso;
+  return computeWrcRaw(avg, obp, avg + iso, iso);
 }
 
 // Pitching + : z-score against NCAA mean/sd, scaled by 20, anchored at 100.

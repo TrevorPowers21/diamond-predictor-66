@@ -133,7 +133,9 @@ const DEFAULT_CLASS_BASES: Record<string, { avg: number; obp: number; slg: numbe
 };
 const DEFAULT_DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
 const DEFAULT_DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
-const DEFAULT_WRC_WEIGHTS = { obp: 0.45, slg: 0.3, avg: 0.15, iso: 0.1 };
+// C1 (2026-08-10): est_wOBA = 0.011 + 0.691·OBP + 0.235·SLG (÷ ncaaWrc 0.3782). AVG/ISO redundant → 0.
+// The `intercept` centers league-avg at 100 on the true-wOBA denom; see ncaa_league_averages_2026.json.
+const DEFAULT_WRC_WEIGHTS = { intercept: 0.011, obp: 0.691, slg: 0.235, avg: 0, iso: 0 };
 
 interface ReturnerConfig {
   ncaaAvg: number;
@@ -150,7 +152,7 @@ interface ReturnerConfig {
   devCoeffs: { avg: number; obp: number; iso: number };
   isoStdNcaa: number;
   isoStdPower: number;
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   defaultDevAgg: number;
   baDampTier1Max: number;
   baDampTier2Max: number;
@@ -189,7 +191,7 @@ interface TransferConfig {
   isoParkWeight: number;
   isoStdNcaa: number;
   isoStdPower: number;
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   ncaaWrc: number;
 }
 
@@ -329,7 +331,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     obpStdNcaa: 0.046781,
     ncaaPR: 100,
     powerWeight: 0.7,
-    ncaaWrc: 0.364,
+    ncaaWrc: 0.3782,
     classBases: {
       FS: { avg: 0.03, obp: 0.03, iso: 0.045 },
       SJ: { avg: 0.02, obp: 0.02, iso: 0.03 },
@@ -412,6 +414,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     });
     applyEq("iso_std_ncaa", (v) => { returner.isoStdNcaa = toStatRate(v); });
     applyEq("iso_std_power", (v) => { returner.isoStdPower = v; });
+    applyEq("w_intercept", (v) => { returner.wrcWeights.intercept = toWeight(v); });
     applyEq("w_obp", (v) => { returner.wrcWeights.obp = toWeight(v); });
     applyEq("w_slg", (v) => { returner.wrcWeights.slg = toWeight(v); });
     applyEq("w_avg", (v) => { returner.wrcWeights.avg = toWeight(v); });
@@ -441,7 +444,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     isoStdNcaa: 0.07849797197,
     isoStdPower: 45.423,
     wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
-    ncaaWrc: 0.364,
+    ncaaWrc: 0.3782,
   };
 
   for (const row of transferRows) {
@@ -468,6 +471,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     else if (k === "iso_park_weight") transfer.isoParkWeight = v;
     else if (k === "iso_std_ncaa") transfer.isoStdNcaa = v;
     else if (k === "iso_std_power") transfer.isoStdPower = v;
+    else if (k === "wrc_weight_intercept" || k === "w_intercept") transfer.wrcWeights.intercept = v;
     else if (k.startsWith("wrc_weight_")) {
       const stat = k.replace("wrc_weight_", "") as "obp" | "slg" | "avg" | "iso";
       if (["obp", "slg", "avg", "iso"].includes(stat)) transfer.wrcWeights[stat] = v;
@@ -554,7 +558,7 @@ export function recalcReturner(
   const pOps = pObp == null || pSlg == null ? null : round3(normalizeProjectedRate(pObp + pSlg));
   const pWrc = pObp == null || pSlg == null || pAvg == null || pIso == null
     ? null
-    : round3((config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
+    : round3(config.wrcWeights.intercept + (config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
   const pWrcPlus = pWrc == null ? null : Math.round((pWrc / config.ncaaWrc) * 100);
 
   return {
@@ -638,7 +642,7 @@ function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
 
   const pSlg = round3(normalizeProjectedRate(pAvg + pIso));
   const pOps = round3(normalizeProjectedRate(pObp + pSlg));
-  const pWrc = round3((config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
+  const pWrc = round3(config.wrcWeights.intercept + (config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
   const pWrcPlus = config.ncaaWrc === 0 ? null : Math.round((pWrc / config.ncaaWrc) * 100);
 
   return {

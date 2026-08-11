@@ -250,7 +250,7 @@ function computeTransferProjection(input: TransferProjectionInputs) {
 
   const pSlgRaw = pAvgRaw + pIsoRaw;
   const pOpsRaw = pObpRaw + pSlgRaw;
-  const pWrcRaw = (input.wObp * pObpRaw) + (input.wSlg * pSlgRaw) + (input.wAvg * pAvgRaw) + (input.wIso * pIsoRaw);
+  const pWrcRaw = (input.wIntercept ?? 0) + (input.wObp * pObpRaw) + (input.wSlg * pSlgRaw) + (input.wAvg * pAvgRaw) + (input.wIso * pIsoRaw);
   const pWrcPlus = input.ncaaAvgWrc === 0 ? null : Math.round((pWrcRaw / input.ncaaAvgWrc) * 100);
 
   return {
@@ -418,7 +418,7 @@ function buildHitterTransferInputs(args: {
   const ncaaAvgBA = toRate(readEquationValue("t_ba_ncaa_avg", 0.280, remoteEquationValues));
   const ncaaAvgOBP = toRate(readEquationValue("t_obp_ncaa_avg", 0.385, remoteEquationValues));
   const ncaaAvgISO = toRate(readEquationValue("t_iso_ncaa_avg", 0.162, remoteEquationValues));
-  const ncaaAvgWrc = toRate(readEquationValue("t_wrc_ncaa_avg", 0.364, remoteEquationValues));
+  const ncaaAvgWrc = toRate(readEquationValue("t_wrc_ncaa_avg", 0.3782, remoteEquationValues));
   const baStdPower = readEquationValue("t_ba_std_pr", 31.297, remoteEquationValues);
   const baStdNcaa = toRate(readEquationValue("t_ba_std_ncaa", 0.043455, remoteEquationValues));
   const obpStdPower = readEquationValue("t_obp_std_pr", 28.889, remoteEquationValues);
@@ -440,10 +440,12 @@ function buildHitterTransferInputs(args: {
 
   const isoStdPower = readEquationValue("t_iso_std_power", 45.423, remoteEquationValues);
   const isoStdNcaa = toRate(readEquationValue("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
-  const wObp = toRate(readEquationValue("r_w_obp", 0.45, remoteEquationValues));
-  const wSlg = toRate(readEquationValue("r_w_slg", 0.30, remoteEquationValues));
-  const wAvg = toRate(readEquationValue("r_w_avg", 0.15, remoteEquationValues));
-  const wIso = toRate(readEquationValue("r_w_iso", 0.10, remoteEquationValues));
+  // wRC+ C1 (2026-08-10): est_wOBA = 0.011 + 0.691·OBP + 0.235·SLG ÷ 0.3782. AVG/ISO redundant → 0.
+  const wIntercept = toRate(readEquationValue("r_w_intercept", 0.011, remoteEquationValues));
+  const wObp = toRate(readEquationValue("r_w_obp", 0.691, remoteEquationValues));
+  const wSlg = toRate(readEquationValue("r_w_slg", 0.235, remoteEquationValues));
+  const wAvg = toRate(readEquationValue("r_w_avg", 0, remoteEquationValues));
+  const wIso = toRate(readEquationValue("r_w_iso", 0, remoteEquationValues));
 
   const safePR = (v: number | null) => v ?? 100;
   const inputs = {
@@ -459,7 +461,7 @@ function buildHitterTransferInputs(args: {
     baConferenceWeight, obpConferenceWeight, isoConferenceWeight,
     baPitchingWeight, obpPitchingWeight, isoPitchingWeight,
     baParkWeight, obpParkWeight, isoParkWeight,
-    isoStdPower, isoStdNcaa, wObp, wSlg, wAvg, wIso,
+    isoStdPower, isoStdNcaa, wIntercept, wObp, wSlg, wAvg, wIso,
   };
 
   // class-transition + dev_aggressiveness multiplier (D1 → D1 only)
@@ -494,7 +496,7 @@ function applyTransferPostprocess(projected: any, inputs: any, transferMultiplie
   const pIso = projected.pIso * transferMultiplier;
   const pSlg = pAvg + pIso;
   const pOps = pObp + pSlg;
-  const pWrc = (inputs.wObp * pObp) + (inputs.wSlg * pSlg) + (inputs.wAvg * pAvg) + (inputs.wIso * pIso);
+  const pWrc = (inputs.wIntercept ?? 0) + (inputs.wObp * pObp) + (inputs.wSlg * pSlg) + (inputs.wAvg * pAvg) + (inputs.wIso * pIso);
   const pWrcPlus = inputs.ncaaAvgWrc === 0 ? null : Math.round((pWrc / inputs.ncaaAvgWrc) * 100);
   return { pAvg, pObp, pSlg, pOps, pIso, pWrc, pWrcPlus };
 }
@@ -897,10 +899,10 @@ function ipForPitcherDepthRole(
 function computeHitterOWar(wrcPlus: number | null | undefined, depthRole: HitterDepthRoleAuto): number | null {
   if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
   const pa = paForHitterDepthRole(depthRole);
-  // D1 scale (mirror src/savant/lib/war.ts, locked 2026-08-10): fixed-wins replacement 26.2,
-  // runs/PA 0.163, RPW 13.1. Keep in lockstep with war.ts or stored ≠ live.
+  // D1 scale (mirror src/savant/lib/war.ts, C1 2026-08-10): fixed-wins replacement 26.2,
+  // runs/PA 0.3994 (=lgwOBA/wOBAscale, NOT 0.163), RPW 13.1. Keep in lockstep with war.ts or stored ≠ live.
   const replacementRuns = (pa / 600) * 26.2;
-  const raa = ((wrcPlus - 100) / 100) * pa * 0.163;
+  const raa = ((wrcPlus - 100) / 100) * pa * 0.3994;
   return (raa + replacementRuns) / 13.1;
 }
 function computeHitterMarketValue(oWar: number | null, conference: string | null | undefined, position: string | null | undefined): number | null {

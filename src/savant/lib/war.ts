@@ -11,7 +11,9 @@ import { computeWrcPlus } from "./wrcPlus";
 // TeamProfilePage for live per-pitcher pWAR. Eventually TeamProfilePage should read the stored
 // desc_pwar (display pass 2) and this helper can retire.
 export const RUNS_PER_WIN = 13.1;               // Pythagorean 2R (lgRA9 6.915)
-export const RUNS_PER_PA = 0.163;               // ΣR / ΣPA (D1 full season)
+export const RUNS_PER_PA = 0.3994;              // = lgwOBA/wOBAscale (0.3782/0.947) — the run value of a
+                                                // wRC+ point (C1). NOT ΣR/ΣPA 0.163 (that was the league's
+                                                // raw scoring rate, the wrong quantity). See ncaa_league_averages_2026.json.
 export const REPLACEMENT_RUNS_PER_600PA = 26.2; // 2.0 wins/600 × RPW — fixed-WINS (scales with rpw)
 export const PITCHER_R_PER_9 = 6.915;            // D1 lgRA9 — mirrors pitchingEquations pwar_r_per_9
 export const PITCHER_REPLACEMENT_PER_9IP = 1.92; // replRA9 8.83 − lgRA9 — mirrors pwar_replacement_runs_per_9

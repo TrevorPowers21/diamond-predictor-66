@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { computeWrcPlus } from "@/lib/wrc";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
   ArrowUpDown,
@@ -808,13 +809,9 @@ const computePitchingPrPlusFromScores = (
 };
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
-  const ncaaAvgWrc = 0.364;
   const ops = obp != null && slg != null ? obp + slg : null;
   const iso = slg != null && avg != null ? slg - avg : null;
-  const wrc = avg != null && obp != null && slg != null && iso != null
-    ? (0.45 * obp) + (0.3 * slg) + (0.15 * avg) + (0.1 * iso)
-    : null;
-  const wrcPlus = wrc != null && ncaaAvgWrc !== 0 ? (wrc / ncaaAvgWrc) * 100 : null;
+  const wrcPlus = computeWrcPlus(avg, obp, slg, iso);      // canonical C1 (src/lib/wrc.ts)
   return { ops, iso, wrcPlus };
 };
 

@@ -22,6 +22,7 @@ import {
   paForHitterDepthRole,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
+import { computeWrcPlus } from "@/lib/wrc";
 
 export type JucoReturnerResult = {
   p_avg: number | null;
@@ -56,8 +57,7 @@ const NULL_RESULT: JucoReturnerResult = {
  * adjustment — JUCO does not have the inputs to do those correctly.
  */
 function wrcPlusFromRates(avg: number, obp: number, slg: number): number {
-  const iso = slg - avg;
-  return ((0.45 * obp + 0.30 * slg + 0.15 * avg + 0.10 * iso) / 0.364) * 100;
+  return computeWrcPlus(avg, obp, slg, slg - avg) ?? 0;   // canonical C1 (src/lib/wrc.ts)
 }
 
 /**

@@ -22,6 +22,7 @@
  *   - Pitchers: IP ≥ 20
  */
 import { useMemo, useState } from "react";
+import { computeWrcPlus as computeWrcPlusCanonical } from "@/lib/wrc";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -47,11 +48,9 @@ const fmt2 = (v: number | null | undefined) => (v == null || !Number.isFinite(Nu
 const fmt1 = (v: number | null | undefined) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(1));
 const fmtInt = (v: number | null | undefined) => (v == null || !Number.isFinite(Number(v)) ? "—" : String(Math.round(Number(v))));
 
-const computeWrcPlus = (avg: number | null, obp: number | null, slg: number | null, iso: number | null): number | null => {
-  if (avg == null || obp == null || slg == null) return null;
-  const isoVal = iso != null ? iso : (slg - avg);
-  return ((0.45 * obp + 0.30 * slg + 0.15 * avg + 0.10 * isoVal) / 0.364) * 100;
-};
+// canonical C1 (src/lib/wrc.ts)
+const computeWrcPlus = (avg: number | null, obp: number | null, slg: number | null, iso: number | null): number | null =>
+  computeWrcPlusCanonical(avg, obp, slg, iso);
 
 // pRV+ uses the D1 formula weights from CLAUDE.md:
 //   pRV+ = 0.30·FIP⁺ + 0.25·ERA⁺ + 0.15·WHIP⁺ + 0.15·K9⁺ + 0.10·BB9⁺ + 0.05·HR9⁺

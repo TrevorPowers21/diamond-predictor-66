@@ -18,6 +18,8 @@
  * remaining factor weights renormalize. If all five are null, fallback to 50.
  */
 
+import { computeWrcPlus } from "@/lib/wrc";
+
 // ── Types ───────────────────────────────────────────────────────────
 
 export type RiskGrade = "Low" | "Moderate" | "Elevated" | "High";
@@ -632,8 +634,7 @@ function direction(delta: number, threshold: number, betterIsHigher: boolean): "
 function deriveWrcPlus(row: SeasonRow): number | null {
   const avg = row.AVG, obp = row.OBP, slg = row.SLG;
   if (!isNum(avg) || !isNum(obp) || !isNum(slg)) return null;
-  const iso = slg - avg;
-  return ((0.45 * obp + 0.30 * slg + 0.15 * avg + 0.10 * iso) / 0.364) * 100;
+  return computeWrcPlus(avg, obp, slg, slg - avg);        // canonical C1 (src/lib/wrc.ts)
 }
 
 function classifySkills(

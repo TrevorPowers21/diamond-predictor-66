@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { computeWrcPlus, computeWrcRaw } from "@/lib/wrc";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -69,13 +70,10 @@ const pctFormat = (v: number | null | undefined) => {
 };
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
-  const ncaaAvgWrc = 0.364;
   const ops = obp != null && slg != null ? obp + slg : null;
   const iso = slg != null && avg != null ? slg - avg : null;
-  const wrc = avg != null && obp != null && slg != null && iso != null
-    ? (0.45 * obp) + (0.3 * slg) + (0.15 * avg) + (0.1 * iso)
-    : null;
-  const wrcPlus = wrc != null && ncaaAvgWrc !== 0 ? (wrc / ncaaAvgWrc) * 100 : null;
+  const wrc = computeWrcRaw(avg, obp, slg, iso);          // canonical C1 (src/lib/wrc.ts)
+  const wrcPlus = computeWrcPlus(avg, obp, slg, iso);
   return { ops, iso, wrc, wrcPlus };
 };
 
@@ -2053,9 +2051,7 @@ function HistoricalHitterView({
   const fmt = (v: number | null | undefined, d = 3) => v == null ? "—" : Number(v).toFixed(d);
   const ops = row.OBP != null && row.SLG != null ? row.OBP + row.SLG : null;
   const wrcPlus = (() => {
-    if (row.AVG == null || row.OBP == null || row.SLG == null || row.ISO == null || ncaaWrc == null || ncaaWrc <= 0) return null;
-    const wrc = (0.45 * row.OBP) + (0.30 * row.SLG) + (0.15 * row.AVG) + (0.10 * row.ISO);
-    return Math.round((wrc / ncaaWrc) * 100);
+    return computeWrcPlus(row.AVG, row.OBP, row.SLG, row.ISO, ncaaWrc ?? undefined);
   })();
 
   return (
