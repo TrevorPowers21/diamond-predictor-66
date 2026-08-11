@@ -143,6 +143,23 @@ AVG/ISO redundant → 0). **oWAR RUNS_PER_PA `0.163 → 0.3994`.**
   was load-bearing. `t_wrc_plus_ncaa_avg = 1` confirmed a harmless orphan (no denom path reads it; transfer denom key is
   `t_wrc_ncaa_avg`, absent → C1 default 0.3782). **Staging fully C1-consistent: code + tests + config DB + ncaa_averages.**
 
+## SQL ledger — every DB change the WAR redesign touches (status as of 2026-08-11)
+
+| SQL / file | what it does | staging | prod |
+|---|---|---|---|
+| `scripts/sql/descriptive_war_columns.sql` | ALTER Hitter/Pitching Master — add `desc_owar, wraa, woba, d_war, bsr_war, total_desc_war` (hitter) + `desc_pwar, desc_ra9, desc_fip_ra9, drs_behind, total_desc_war` (pitcher) | ✅ run | ⏳ pending |
+| `scripts/sql/wrc_c1_model_config.sql` | wRC+/oWAR constants → C1 in `model_config` + `ncaa_averages.wrc` 0.3782 | ✅ run + verified | ⏳ pending |
+| `supabase/migrations/20260810_composite_war_d1_rescale.sql` | redefine `refresh_composite_war()` (d_war/bsr_war ÷13.1, full wSB) | ⚠ DEFINITION only — the `select refresh_composite_war()` fires in **Step 6** | ⏳ pending |
+| `scripts/sql/team_drs_store.sql` | team dRS storage (dRS engine, earlier) | ✅ | — |
+| ⚠ VERIFY | did the **scale-reconcile** (RPW 13.1 / pwar constants) ever get pasted into the `Equation Weights` table, or does it ride code defaults only? Confirm before prod. | ? | ? |
+
+**Population/write scripts (not SQL, run via `node` on staging):** `populate_descriptive_war.mjs` (writes desc_* — ✅ run,
+re-runs in Step 6 on 0.3782); the precompute edge fns rebuild `player_predictions`.
+
+**Equation changes — all in `WAR_SYSTEM_DESIGN.md §8`:** hitter wRC+ C1 (WIRED); pitcher D1-FIP
+`3.10 − 0.231·K9 + 0.509·(BB9+HBP9) + 1.486·HR9` (⚠ DERIVED + validated but **NOT wired** — pitcher projection still
+runs the old pRV+ blend; that wiring is a separate future step). oWAR conversion 0.3994 + descriptive constants → this doc.
+
 ## The build sequence (remaining)
 
 1. ✅ **DONE — Step 1 wiring** (C1 consolidation above). Constants live in `src/lib/wrc.ts` (one source; edge fns mirror);
