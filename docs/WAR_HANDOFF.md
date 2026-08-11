@@ -151,7 +151,7 @@ AVG/ISO redundant → 0). **oWAR RUNS_PER_PA `0.163 → 0.3994`.**
 | `scripts/sql/wrc_c1_model_config.sql` | wRC+/oWAR constants → C1 in `model_config` + `ncaa_averages.wrc` 0.3782 | ✅ run + verified | ⏳ pending |
 | `supabase/migrations/20260810_composite_war_d1_rescale.sql` | redefine `refresh_composite_war()` (d_war/bsr_war ÷13.1, full wSB) | ⚠ DEFINITION only — the `select refresh_composite_war()` fires in **Step 6** | ⏳ pending |
 | `scripts/sql/team_drs_store.sql` | team dRS storage (dRS engine, earlier) | ✅ | — |
-| ⚠ VERIFY | did the **scale-reconcile** (RPW 13.1 / pwar constants) ever get pasted into the `Equation Weights` table, or does it ride code defaults only? Confirm before prod. | ? | ? |
+| ✅ RESOLVED | scale-reconcile pwar constants: the `Equation Weights` table is EMPTY (0 rows) and `model_config` has NO pwar/pRV+/per-9 keys → pitcher WAR rides **code defaults** (`pitchingEquations.ts` = C1: r_per_9 6.915 / repl 1.92 / RPW 13.1). No stale DB weights; nothing to paste. | — | — |
 
 **Population/write scripts (not SQL, run via `node` on staging):** `populate_descriptive_war.mjs` (writes desc_* — ✅ run,
 re-runs in Step 6 on 0.3782); the precompute edge fns rebuild `player_predictions`.

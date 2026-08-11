@@ -1,4 +1,5 @@
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { resolveMetricParkFactor, type ParkFactorsMap } from "@/lib/parkFactors";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { projectedIpFromRealIp } from "@/lib/depthRoles";
@@ -466,20 +467,11 @@ export function computePitcherProjection(
   const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
   const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
 
-  // Step 5: pRvPlus = weighted composite of the six +-stats.
-  // pRV+ is stored as a whole number (mirrors wRC+, which is rounded at
-  // derivation). Rounding here means the displayed pRV+ and the p_war computed
-  // from it below both run off the same integer — hand-checks match exactly.
-  const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-    ? Math.round(
-      (Number(eraPlus) * eq.era_plus_weight) +
-      (Number(fipPlus) * eq.fip_plus_weight) +
-      (Number(whipPlus) * eq.whip_plus_weight) +
-      (Number(k9Plus) * eq.k9_plus_weight) +
-      (Number(bb9Plus) * eq.bb9_plus_weight) +
-      (Number(hr9Plus) * eq.hr9_plus_weight)
-    )
-    : null;
+  // Step 5: pRV+ = D1-FIP index from projected K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts).
+  // Rounded to a whole number so the displayed pRV+ and the p_war below run off the same integer.
+  // (+stats above are kept — they are stored/displayed; they no longer feed pRV+.)
+  const prvRaw = computePrvPlus(roleAdjustedK9, roleAdjustedBb9, roleAdjustedHr9);
+  const pRvPlus = prvRaw == null ? null : Math.round(prvRaw);
 
   // Step 6: pWar from pRvPlus + projected IP.
   const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);

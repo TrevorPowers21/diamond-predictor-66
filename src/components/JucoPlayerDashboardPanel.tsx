@@ -23,6 +23,7 @@
  */
 import { useMemo, useState } from "react";
 import { computeWrcPlus as computeWrcPlusCanonical } from "@/lib/wrc";
+import { computePrvPlus as computePrvPlusCanonical } from "@/lib/pitcherQuality";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -59,24 +60,15 @@ const computeWrcPlus = (avg: number | null, obp: number | null, slg: number | nu
 // league averages so an average JUCO pitcher centers at 100 (rather than
 // scoring below 100 against D1 baseline — that's the simulator's job, not
 // the leaderboard's).
-const JUCO_LG = { era: 7.4, fip: 7.4, whip: 1.8, k9: 9.5, bb9: 5.0, hr9: 1.0 };
+// pRV+ = D1-FIP index from K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). JUCO outcomes scored on the
+// D1 scale — consistent with JUCO projections using D1 baselines. (Signature kept; era/fip/whip unused.)
 const computePrvPlus = (
-  era: number | null, fip: number | null, whip: number | null,
+  _era: number | null, _fip: number | null, _whip: number | null,
   k9: number | null, bb9: number | null, hr9: number | null,
 ): number | null => {
-  if (era == null || fip == null || whip == null || k9 == null || bb9 == null || hr9 == null) return null;
-  if (era <= 0 || fip <= 0 || whip <= 0 || k9 <= 0 || bb9 <= 0 || hr9 <= 0) return null;
-  // Cap individual components at 250 so a single outlier rate (e.g. tiny HR/9
-  // from a 20-IP reliever) can't dominate the composite. 250 is well above
-  // realistic D1 leader ranges (~200 top end) so it only kicks in for noise.
-  const cap = (v: number) => Math.max(0, Math.min(250, v));
-  const eraPlus = cap((JUCO_LG.era / era) * 100);
-  const fipPlus = cap((JUCO_LG.fip / fip) * 100);
-  const whipPlus = cap((JUCO_LG.whip / whip) * 100);
-  const k9Plus = cap((k9 / JUCO_LG.k9) * 100);
-  const bb9Plus = cap((JUCO_LG.bb9 / bb9) * 100);
-  const hr9Plus = cap((JUCO_LG.hr9 / hr9) * 100);
-  return 0.30 * fipPlus + 0.25 * eraPlus + 0.15 * whipPlus + 0.15 * k9Plus + 0.10 * bb9Plus + 0.05 * hr9Plus;
+  if (k9 == null || bb9 == null || hr9 == null || k9 <= 0 || bb9 <= 0 || hr9 <= 0) return null;
+  const prv = computePrvPlusCanonical(k9, bb9, hr9);
+  return prv == null ? null : Math.round(prv);
 };
 
 const stripDistrictLabel = (conf: string | null): string => {

@@ -1,4 +1,5 @@
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { projectedIpFromRealIp } from "@/lib/depthRoles";
 
@@ -409,17 +410,9 @@ export function computeTransferPitcherProjection(
   const k9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
   const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
   const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-  // pRV+ stored whole (mirrors wRC+); display and the p_war below share the integer.
-  const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-    ? Math.round(
-        (eq.era_plus_weight * Number(eraPlus)) +
-        (eq.fip_plus_weight * Number(fipPlus)) +
-        (eq.whip_plus_weight * Number(whipPlus)) +
-        (eq.k9_plus_weight * Number(k9Plus)) +
-        (eq.bb9_plus_weight * Number(bb9Plus)) +
-        (eq.hr9_plus_weight * Number(hr9Plus))
-      )
-    : null;
+  // pRV+ = D1-FIP index from projected K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). +stats kept for storage.
+  const prvRaw = computePrvPlus(roleAdjustedK9, roleAdjustedBb9, roleAdjustedHr9);
+  const pRvPlus = prvRaw == null ? null : Math.round(prvRaw);
 
   const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
   const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0

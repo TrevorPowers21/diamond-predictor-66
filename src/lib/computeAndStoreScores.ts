@@ -14,6 +14,7 @@ import {
   PITCHER_IP_NOISE_FLOOR,
 } from "@/lib/combinedStats";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 
 const round2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
@@ -509,24 +510,13 @@ export async function computeAndStorePitchingScores(
         bb9_pr_plus: round2(ratings.bb9PrPlus),
         hr9_pr_plus: round2(ratings.hr9PrPlus),
         overall_pr_plus: round2(ratings.overallPrPlus),
-        // p_rv_plus = weighted composite of the six +stats. Same formula as
-        // pitcherProjection.ts step 5, applied to actual-stats-based +s
-        // (era_pr_plus etc.) instead of projected rates. Used as the
-        // "last-year pRV+" for WAR snapshots and any historical pRV+ view.
-        // Null when any input is missing — caller must handle.
-        // pRV+ stored whole (mirrors wRC+). Math.round on the composite only —
-        // null stays null (Math.round(null) would wrongly be 0).
-        p_rv_plus:
-          [ratings.eraPrPlus, ratings.fipPrPlus, ratings.whipPrPlus, ratings.k9PrPlus, ratings.bb9PrPlus, ratings.hr9PrPlus].every((v) => v != null)
-            ? Math.round(
-              (Number(ratings.eraPrPlus) * pitchingEq.era_plus_weight) +
-              (Number(ratings.fipPrPlus) * pitchingEq.fip_plus_weight) +
-              (Number(ratings.whipPrPlus) * pitchingEq.whip_plus_weight) +
-              (Number(ratings.k9PrPlus) * pitchingEq.k9_plus_weight) +
-              (Number(ratings.bb9PrPlus) * pitchingEq.bb9_plus_weight) +
-              (Number(ratings.hr9PrPlus) * pitchingEq.hr9_plus_weight)
-            )
-            : null,
+        // p_rv_plus = D1-FIP index from the pitcher's ACTUAL K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts).
+        // Consistent with the projection pRV+ (same formula, actual rates instead of projected). The +stats
+        // above (era_pr_plus…) are the projection INPUTS and are kept; they no longer feed this index.
+        p_rv_plus: (() => {
+          const pr = computePrvPlus(v.K9 ?? null, v.BB9 ?? null, v.HR9 ?? null);
+          return pr == null ? null : Math.round(pr);
+        })(),
         combined_used: blended.combined,
         combined_ip: blended.combined ? blended.totalIp : null,
         combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,

@@ -639,6 +639,17 @@ const canShowPitcherMarket = (team: string | null | undefined, conf: string | nu
   return t === "oregon state" || t.includes("oregon state");
 };
 
+// pRV+ = D1-FIP index. canonical: src/lib/pitcherQuality.ts (Deno can't import src/ — mirror in lockstep).
+// projFIP = 3.847 − 0.231·K9 + 0.509·BB9 + 1.486·HR9 (lgHBP9 folded); projRA9 = FIP×E2T(1.137);
+// pRV+ = 100 + 100·(lgRA9 6.913 − projRA9)/lgRA9. Replaces the old z-averaged 6-component blend.
+const PITCHER_FIP_C1 = { intercept: 3.847, k9: -0.231, bb9: 0.509, hr9: 1.486, e2t: 1.137, lgRA9: 6.913 };
+const computePrvPlusFromRates = (k9: number | null, bb9: number | null, hr9: number | null): number | null => {
+  if (k9 == null || bb9 == null || hr9 == null) return null;
+  const C = PITCHER_FIP_C1;
+  const projRA9 = (C.intercept + C.k9 * k9 + C.bb9 * bb9 + C.hr9 * hr9) * C.e2t;
+  return 100 + 100 * (C.lgRA9 - projRA9) / C.lgRA9;
+};
+
 const computePitcherWar = (pRvPlus: number | null, projectedIp: number, eq: PitchingEq) => {
   if (pRvPlus == null || !Number.isFinite(pRvPlus) || projectedIp <= 0 || eq.pwar_runs_per_win === 0) return null;
   const pitcherValue = (pRvPlus - 100) / 100;
@@ -708,10 +719,9 @@ function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: P
   const bb9Plus = calcPitchingPlus(rBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
   const hr9Plus = calcPitchingPlus(rHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
 
-  const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-    ? (eq.era_plus_weight * Number(eraPlus)) + (eq.fip_plus_weight * Number(fipPlus)) + (eq.whip_plus_weight * Number(whipPlus))
-      + (eq.k9_plus_weight * Number(k9Plus)) + (eq.bb9_plus_weight * Number(bb9Plus)) + (eq.hr9_plus_weight * Number(hr9Plus))
-    : null;
+  // pRV+ = D1-FIP index from projected K9/BB9/HR9 (mirror of src/lib/pitcherQuality.ts). +stats kept for storage.
+  const prvRaw = computePrvPlusFromRates(rK9, rBb9, rHr9);
+  const pRvPlus = prvRaw == null ? null : Math.round(prvRaw);
 
   const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
   const marketValue = computePitcherMarketValue(pWar, { conference: input.toConference, role: projectedRole, team: input.toTeam }, eq);
@@ -766,10 +776,9 @@ function applyPitcherPostprocess(
   const bP = calcPitchingPlus(aB, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
   const hP = calcPitchingPlus(aH, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
 
-  const pRvPlusAdj = [eP, fP, wP, kP, bP, hP].every((v) => v != null)
-    ? (Number(eP) * eq.era_plus_weight) + (Number(fP) * eq.fip_plus_weight) + (Number(wP) * eq.whip_plus_weight)
-      + (Number(kP) * eq.k9_plus_weight) + (Number(bP) * eq.bb9_plus_weight) + (Number(hP) * eq.hr9_plus_weight)
-    : result.p_rv_plus;
+  // pRV+ = D1-FIP index from overlay-adjusted K9/BB9/HR9 (mirror of src/lib/pitcherQuality.ts). +stats kept.
+  const prvAdjRaw = computePrvPlusFromRates(aK, aB, aH);
+  const pRvPlusAdj = prvAdjRaw == null ? result.p_rv_plus : Math.round(prvAdjRaw);
 
   const ipForRole = result.projected_role === "SP" ? eq.pwar_ip_sp : result.projected_role === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
   const recomputedPWar = pRvPlusAdj != null ? computePitcherWar(pRvPlusAdj, ipForRole, eq) : result.p_war;

@@ -24,6 +24,7 @@ import {
   type PitcherDepthRole,
   type ProjectedPitcherRole,
 } from "@/lib/depthRoles";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import type { PitchingEquationWeights } from "@/lib/pitchingEquations";
 
 export type JucoReturnerPitcherResult = {
@@ -115,20 +116,9 @@ export function projectJucoReturnerPitcher(args: {
   const bb9Plus  = calcPlus(bb9,  eq.bb9_plus_ncaa_avg,  eq.bb9_plus_ncaa_sd,  eq.bb9_plus_scale);
   const hr9Plus  = calcPlus(hr9,  eq.hr9_plus_ncaa_avg,  eq.hr9_plus_ncaa_sd,  eq.hr9_plus_scale);
 
-  // Step 2: weighted pRV+. Same composition as D1 engine, but applied to raw
-  // JUCO rates with no role/park/conf transform.
-  // pRV+ stored whole (mirrors wRC+); display and p_war share the integer.
-  const pRvPlus =
-    [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-      ? Math.round(
-        (Number(eraPlus) * eq.era_plus_weight) +
-        (Number(fipPlus) * eq.fip_plus_weight) +
-        (Number(whipPlus) * eq.whip_plus_weight) +
-        (Number(k9Plus) * eq.k9_plus_weight) +
-        (Number(bb9Plus) * eq.bb9_plus_weight) +
-        (Number(hr9Plus) * eq.hr9_plus_weight)
-      )
-      : null;
+  // Step 2: pRV+ = D1-FIP index from JUCO K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). +stats kept for storage.
+  const prvRaw = computePrvPlus(k9, bb9, hr9);
+  const pRvPlus = prvRaw == null ? null : Math.round(prvRaw);
 
   // Step 3: depth role + projected IP.
   // Role hint priority:

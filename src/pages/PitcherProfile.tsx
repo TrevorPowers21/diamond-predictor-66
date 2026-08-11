@@ -15,6 +15,7 @@ import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus as computePrvPlusFip } from "@/lib/pitcherQuality";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -40,7 +41,6 @@ import { JucoPitcherRiskCard } from "@/components/JucoRiskCards";
 import { isThinSamplePitcher } from "@/lib/combinedStats";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
-import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
@@ -1483,16 +1483,9 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     const k9Plus = calcPitchingPlus(k92025, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
     const bb9Plus = calcPitchingPlus(bb92025, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
     const hr9Plus = calcPitchingPlus(hr92025, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
-    const pRvPlus2025 = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-      ? Math.round(
-        (Number(eraPlus) * eq.era_plus_weight) +
-        (Number(fipPlus) * eq.fip_plus_weight) +
-        (Number(whipPlus) * eq.whip_plus_weight) +
-        (Number(k9Plus) * eq.k9_plus_weight) +
-        (Number(bb9Plus) * eq.bb9_plus_weight) +
-        (Number(hr9Plus) * eq.hr9_plus_weight)
-      )
-      : null;
+    // pRV+ = D1-FIP index from 2025 actual K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). +stats kept for display.
+    const prv2025Raw = computePrvPlusFip(k92025, bb92025, hr92025);
+    const pRvPlus2025 = prv2025Raw == null ? null : Math.round(prv2025Raw);
     const pWar2025 = pRvPlus2025 == null || storageIp == null || eq.pwar_runs_per_win === 0
       ? null
       : (((((pRvPlus2025 - 100) / 100) * (storageIp / 9) * eq.pwar_r_per_9) + ((storageIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win);
@@ -1749,14 +1742,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                       })(),
                       coach_notes: notes,
                     };
-                    const prvForRisk = computePrvPlus(
-                      (historicalRow as any)?.era_pr_plus ?? null,
-                      (historicalRow as any)?.fip_pr_plus ?? null,
-                      (historicalRow as any)?.whip_pr_plus ?? null,
-                      (historicalRow as any)?.k9_pr_plus ?? null,
-                      (historicalRow as any)?.bb9_pr_plus ?? null,
-                      (historicalRow as any)?.hr9_pr_plus ?? null,
-                    );
+                    const prvForRisk = computePrvPlusFip((historicalRow as any)?.K9 ?? null, (historicalRow as any)?.BB9 ?? null, (historicalRow as any)?.HR9 ?? null);
                     const riskResult = assessPitcherRisk({
                       conference: displayConference !== "—" ? displayConference : undefined,
                       projectedPrvPlus: prvForRisk,
@@ -1936,14 +1922,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                     })(),
                   };
                   // Attach risk assessment
-                  const prvForRisk = computePrvPlus(
-                    (historicalRow as any)?.era_pr_plus ?? null,
-                    (historicalRow as any)?.fip_pr_plus ?? null,
-                    (historicalRow as any)?.whip_pr_plus ?? null,
-                    (historicalRow as any)?.k9_pr_plus ?? null,
-                    (historicalRow as any)?.bb9_pr_plus ?? null,
-                    (historicalRow as any)?.hr9_pr_plus ?? null,
-                  );
+                  const prvForRisk = computePrvPlusFip((historicalRow as any)?.K9 ?? null, (historicalRow as any)?.BB9 ?? null, (historicalRow as any)?.HR9 ?? null);
                   const riskResult = assessPitcherRisk({
                     conference: displayConference !== "—" ? displayConference : undefined,
                     projectedPrvPlus: prvForRisk,
@@ -2361,14 +2340,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
 
             {/* Risk Assessment */}
             {(() => {
-              const prvForRisk = computePrvPlus(
-                (historicalRow as any)?.era_pr_plus ?? null,
-                (historicalRow as any)?.fip_pr_plus ?? null,
-                (historicalRow as any)?.whip_pr_plus ?? null,
-                (historicalRow as any)?.k9_pr_plus ?? null,
-                (historicalRow as any)?.bb9_pr_plus ?? null,
-                (historicalRow as any)?.hr9_pr_plus ?? null,
-              );
+              const prvForRisk = computePrvPlusFip((historicalRow as any)?.K9 ?? null, (historicalRow as any)?.BB9 ?? null, (historicalRow as any)?.HR9 ?? null);
               const confHTP = confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
                 ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
                 : null;

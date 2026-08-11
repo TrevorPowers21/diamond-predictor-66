@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { parseCsvLine, normalize } from "@/lib/csvUtils";
 
 type PitchingStorageRow = {
@@ -767,17 +768,8 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
                       const k9Plus = calcK9Plus(k9, weights.k9_plus_ncaa_avg, weights.k9_plus_ncaa_sd, weights.k9_plus_scale);
                       const bb9Plus = calcBb9Plus(bb9, weights.bb9_plus_ncaa_avg, weights.bb9_plus_ncaa_sd, weights.bb9_plus_scale);
                       const hr9Plus = calcHr9Plus(hr9, weights.hr9_plus_ncaa_avg, weights.hr9_plus_ncaa_sd, weights.hr9_plus_scale);
-                      const pRVRaw =
-                        [fipPlus, eraPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].some((v) => v == null)
-                          ? null
-                          : (
-                              (weights.fip_plus_weight * Number(fipPlus)) +
-                              (weights.era_plus_weight * Number(eraPlus)) +
-                              (weights.whip_plus_weight * Number(whipPlus)) +
-                              (weights.k9_plus_weight * Number(k9Plus)) +
-                              (weights.bb9_plus_weight * Number(bb9Plus)) +
-                              (weights.hr9_plus_weight * Number(hr9Plus))
-                            );
+                      // pRV+ = D1-FIP index from actual K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). +stats kept for display.
+                      const pRVRaw = computePrvPlus(k9, bb9, hr9);
                       const pRV = pRVRaw == null ? null : Math.round(pRVRaw);
                       const innings = parseBaseballInnings(displayValueForCol(row.values, 4));
                       const pWar = pRVRaw == null || innings == null || weights.pwar_runs_per_win === 0

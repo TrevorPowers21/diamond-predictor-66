@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole, computeHitterMarketValue } from "@/lib/depthRoles";
 import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
 import { computeTransferProjection } from "@/lib/transferProjection";
@@ -883,17 +884,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
       const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
 
-      // pRV+ stored/displayed whole (mirrors wRC+) so display and WAR share the integer.
-      const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
-        ? Math.round(
-          (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
-          (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
-          (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
-          (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
-          (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
-          (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
-        )
-        : result.p_rv_plus;
+      // pRV+ = D1-FIP index from adjusted K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts); +stats kept for display.
+      const prvAdjRaw = computePrvPlus(adjK9, adjBb9, adjHr9);
+      const pRvPlusAdj = prvAdjRaw == null ? result.p_rv_plus : Math.round(prvAdjRaw);
 
       return {
         p_avg: null,
@@ -1419,13 +1412,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         const k9P   = calcPitchingPlus(rtK9,   pitchingEq.k9_plus_ncaa_avg,   pitchingEq.k9_plus_ncaa_sd,   pitchingEq.k9_plus_scale,   true);
         const bb9P  = calcPitchingPlus(rtBb9,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
         const hr9P  = calcPitchingPlus(rtHr9,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
-        const rtPRvPlus = [eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)
-          ? Math.round(
-            (Number(eraP) * pitchingEq.era_plus_weight) + (Number(fipP) * pitchingEq.fip_plus_weight) +
-            (Number(whipP) * pitchingEq.whip_plus_weight) + (Number(k9P) * pitchingEq.k9_plus_weight) +
-            (Number(bb9P) * pitchingEq.bb9_plus_weight) + (Number(hr9P) * pitchingEq.hr9_plus_weight)
-          )
-          : (devSource.p_rv_plus ?? devSource.p_wrc_plus ?? null);
+        // pRV+ = D1-FIP index from role-adjusted K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts).
+        const rtPRvRaw = computePrvPlus(rtK9, rtBb9, rtHr9);
+        const rtPRvPlus = rtPRvRaw == null ? (devSource.p_rv_plus ?? devSource.p_wrc_plus ?? null) : Math.round(rtPRvRaw);
         return {
           ...devSource,
           p_era: rtEra, p_fip: rtFip, p_whip: rtWhip, p_k9: rtK9, p_bb9: rtBb9, p_hr9: rtHr9,
