@@ -28,8 +28,9 @@ Single source of current state for the two-number WAR rebuild. Companion: `WAR_S
 - **Not yet started**: the 8-step build (wire → scope → B.5 → GB%-HR9 → replacement → re-precompute →
   market/display → prod).
 
-**Immediate next action**: Step 1 wire — oWAR conversion `0.163 → 0.3994` and wRC+ on lgwOBA 0.3782, reading
-from the fixture (mechanism TBD: research in progress on where the constants live — code/DB/admin).
+**STEP 1 WIRING — DONE (2026-08-11).** wRC+ rebuilt to C1 and CONSOLIDATED into one source; oWAR conversion
+0.163→0.3994; staging config DB synced. Details in "Step 1 — C1 wRC+ consolidation (SHIPPED)" below.
+**Immediate next action**: Step 6 re-precompute (staging) — see the build sequence.
 
 ---
 
@@ -120,10 +121,32 @@ carries `_meta.centering_population` + `assertCentering()` guards each combine s
 
 ---
 
-## The build sequence (8 steps)
+## Step 1 — C1 wRC+ consolidation (SHIPPED 2026-08-11, branch `feature/war-recalibration`, commits `61968fc`→`ed3f79a`)
 
-1. **Wire** the two quality metrics into the projection path (wRC+ → oWAR via `RUNS_PER_PA 0.3994` on lgwOBA 0.3782;
-   D1-FIP → pWAR). Constants read from the fixture with the `centering_population` guard — **not inline** (the 0.364→
+**wRC+ = `(0.011 + 0.691·OBP + 0.235·SLG) ÷ 0.3782 × 100`** (intercept + regression weights ÷ true lgwOBA;
+AVG/ISO redundant → 0). **oWAR RUNS_PER_PA `0.163 → 0.3994`.**
+
+- **One canonical source: `src/lib/wrc.ts`** (`computeWrcPlus` / `computeWrcRaw` / `computeWrcRawFromWeights`, `WRC_C1`).
+  The Explore-agent inventory found ~25 wRC+ sites across 3 runtimes; **all** repointed:
+  - Display (10): Savant re-exports canonical; ConferenceStats ×2, HistoricalPlayerTable, PlayerProfile ×2,
+    ReturningPlayers, Juco ×2, playerRisk.
+  - Config/projection (7): predictionEngine, transferProjection, buildTransferProjectionInputs,
+    useTeamBuilderSimulation ×2, TeamBuilder, CompareTab → `computeWrcRawFromWeights`.
+  - Edge fns (4, Deno local copies, `// canonical:` linked): process-precompute, recalculate-prediction,
+    import-power-ratings-csv, google-sheets-sync (dead but consistent).
+  - platformDefaults + AdminDashboard (C1 + Intercept field; `owar_*` marked "Derived read-only"; stale text fixed).
+- **Intercept** threaded config-editable via `r_w_intercept` / `t_w_intercept` (default 0.011). Required because the
+  denom is the true lgwOBA 0.3782 (not the 0.3667 intercept-less proxy) — it centers league-avg at exactly 100.
+- **VERIFIED:** repo-wide grep = ZERO old wRC formulas / `0.364`; tsc 195 < 198 baseline; **247/247 tests** (updated to C1).
+- **Staging config synced** (`scripts/sql/wrc_c1_model_config.sql`, run + verified): model_config weights/denom/intercept/owar
+  → C1; `ncaa_averages.wrc` null → 0.3782. The DB held OLD values that would have overridden the code defaults, so this
+  was load-bearing. `t_wrc_plus_ncaa_avg = 1` confirmed a harmless orphan (no denom path reads it; transfer denom key is
+  `t_wrc_ncaa_avg`, absent → C1 default 0.3782). **Staging fully C1-consistent: code + tests + config DB + ncaa_averages.**
+
+## The build sequence (remaining)
+
+1. ✅ **DONE — Step 1 wiring** (C1 consolidation above). Constants live in `src/lib/wrc.ts` (one source; edge fns mirror);
+   the offensive fixtures carry the `centering_population` guard. (the 0.364→
    saga is why). **Gate**: same-season test converges; replacement player ≈ 0; no double-scaling.
 2. **Scope**: gap = regular-vs-regular via existing `regular_season_pa`/`regular_season_ip`; descriptive
    headline stays full-season (deep-postseason stars, e.g. Volantis 95 full IP → 75 reg, else fake sell-high).
@@ -132,9 +155,14 @@ carries `_meta.centering_population` + `assertCentering()` guards each combine s
    is the falsifiable w_luck guard.
 5. **Derive replacement** (both sides, one tier principle) — *before* the re-precompute (swapped to avoid
    staging double-churn). Reconcile split population here.
-6. **Re-precompute** on final constants: **re-populate `desc_owar` on all-D1 lgwOBA 0.3782** (closes the last
-   baseline seam, uniform ~0.016 WAR); deploy edge fn, rebuild `player_predictions` o_war/p_war, run
-   `refresh_composite_war()`, reseed `team_war_snapshots`, transfer-fill all users. Verify in DB.
+6. **Re-precompute** (staging first) — the big one, now that Step 1 + config are done:
+   - **deploy the C1 edge fns** (`process-precompute-jobs` AND `recalculate-prediction` — both changed for C1),
+   - **re-populate `desc_owar` on all-D1 lgwOBA 0.3782** (`populate_descriptive_war.mjs` now reads 0.3782 —
+     closes the last baseline seam, uniform ~0.016 WAR down),
+   - rebuild `player_predictions` p_wrc/p_wrc_plus/o_war/p_war on C1,
+   - run `refresh_composite_war()` (paste-SQL `20260810_composite_war_d1_rescale.sql`, **still not run**),
+   - reseed `team_war_snapshots`, transfer-fill all users.
+   - **Verify in DB**: Hairston oWAR ~5.3, Helfrick ~2.2, league-avg wRC+ ~100, star pWAR ~6.
 7. **Market value → projection total** + **display pass 2** (total WAR everywhere, hitters swap o_war→total,
    pitchers keep p_war; descriptive + gap on the card).
 8. **Prod replay** on explicit "prod, now?" — staging verified first.
