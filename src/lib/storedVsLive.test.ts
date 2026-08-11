@@ -19,7 +19,7 @@ import { describe, it, expect } from "vitest";
 
 // Canonical formula locations
 import { computeOWar } from "@/savant/lib/war";
-import { computeWrcPlus, SAVANT_WRC_WEIGHTS, SAVANT_NCAA_WRC } from "@/savant/lib/wrcPlus";
+import { computeWrcPlus, SAVANT_WRC_WEIGHTS, SAVANT_NCAA_WRC, SAVANT_WRC_INTERCEPT } from "@/savant/lib/wrcPlus";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { projectPitchingRate, PITCHING_POWER_RATING_WEIGHT, PITCHING_DEV_FACTOR } from "@/lib/pitcherProjection";
 
@@ -37,11 +37,11 @@ import { projectPitchingRate, PITCHING_POWER_RATING_WEIGHT, PITCHING_DEV_FACTOR 
 describe("hitter oWAR formula constants", () => {
   // D1-derived, locked 2026-08-10 (mirror src/savant/lib/war.ts). Independently hardcoded so a
   // war.ts change fails this test and forces a parity acknowledgment.
-  const RUNS_PER_PA = 0.163;
+  const RUNS_PER_PA = 0.3994;
   const REPLACEMENT_RUNS_FACTOR = 26.2; // 2.0 wins/600 PA × RPW (fixed-wins)
   const RUNS_PER_WIN = 13.1;
 
-  it("runsPerPa is 0.163 across all implementations", () => {
+  it("runsPerPa is 0.3994 across all implementations", () => {
     // Average hitter (wRC+=100, PA=600): raa=0, rar=replacementRuns=26.2; WAR = 26.2/13.1 = 2.0
     const result = computeOWar(100, 600)!;
     expect(result).toBeCloseTo(REPLACEMENT_RUNS_FACTOR / RUNS_PER_WIN, 6);
@@ -59,7 +59,7 @@ describe("hitter oWAR formula constants", () => {
     // The inline formula in transferProjection.ts (now imports the war.ts constants):
     //   const offValue = (pWrcPlus - 100) / 100;
     //   const pa = input.actualPa ?? 260;
-    //   const runsPerPa = 0.163;
+    //   const runsPerPa = 0.3994;  [C1]
     //   const replacementRuns = (pa / 600) * 26.2;
     //   const raa = offValue * pa * runsPerPa;
     //   const rar = raa + replacementRuns;
@@ -69,7 +69,7 @@ describe("hitter oWAR formula constants", () => {
     // If transferProjection.ts ever changes those constants, this test fails.
     const inlineOWar = (pWrcPlus: number, pa: number) => {
       const offValue = (pWrcPlus - 100) / 100;
-      const runsPerPa = 0.163;
+      const runsPerPa = 0.3994;
       const replacementRuns = (pa / 600) * 26.2;
       const raa = offValue * pa * runsPerPa;
       const rar = raa + replacementRuns;
@@ -103,21 +103,22 @@ describe("hitter oWAR formula constants", () => {
 // will immediately fail here.
 
 describe("hitter wRC+ weight constants", () => {
-  it("SAVANT_WRC_WEIGHTS match the canonical DEFAULT_WRC_WEIGHTS in predictionEngine", () => {
-    expect(SAVANT_WRC_WEIGHTS.obp).toBe(0.45);
-    expect(SAVANT_WRC_WEIGHTS.slg).toBe(0.30);
-    expect(SAVANT_WRC_WEIGHTS.avg).toBe(0.15);
-    expect(SAVANT_WRC_WEIGHTS.iso).toBe(0.10);
+  it("SAVANT_WRC_WEIGHTS match the canonical C1 weights (src/lib/wrc.ts)", () => {
+    expect(SAVANT_WRC_WEIGHTS.obp).toBe(0.691);
+    expect(SAVANT_WRC_WEIGHTS.slg).toBe(0.235);
+    expect(SAVANT_WRC_WEIGHTS.avg).toBe(0);
+    expect(SAVANT_WRC_WEIGHTS.iso).toBe(0);
+    expect(SAVANT_WRC_INTERCEPT).toBe(0.011);
   });
 
-  it("SAVANT_NCAA_WRC matches predictionEngine ncaaWrc constant (0.364)", () => {
-    expect(SAVANT_NCAA_WRC).toBe(0.364);
+  it("SAVANT_NCAA_WRC matches the C1 wRC+ denominator (lgwOBA 0.3782)", () => {
+    expect(SAVANT_NCAA_WRC).toBe(0.3782);
   });
 
-  it("computeWrcPlus formula is the ratio of weighted sum to ncaaWrc times 100", () => {
-    // Derive expected manually and verify computeWrcPlus agrees
+  it("computeWrcPlus formula is (intercept + weighted sum) / ncaaWrc × 100", () => {
     const avg = 0.290, obp = 0.365, slg = 0.450, iso = 0.160;
     const raw =
+      SAVANT_WRC_INTERCEPT +
       SAVANT_WRC_WEIGHTS.obp * obp +
       SAVANT_WRC_WEIGHTS.slg * slg +
       SAVANT_WRC_WEIGHTS.avg * avg +

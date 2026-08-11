@@ -31,9 +31,9 @@ describe("computeOWarFromWrcPlus", () => {
     expect(computeOWarFromWrcPlus(100, 600)).toBeCloseTo(26.2 / 13.1, 6);
   });
 
-  it("above-average hitter (130 wRC+, 600 PA) → 4.24 WAR", () => {
-    // (0.30*600*0.163 + 26.2) / 13.1
-    expect(computeOWarFromWrcPlus(130, 600)).toBeCloseTo((0.30 * 600 * 0.163 + 26.2) / 13.1, 6);
+  it("above-average hitter (130 wRC+, 600 PA) C1", () => {
+    // (0.30*600*0.3994 + 26.2) / 13.1  [C1]
+    expect(computeOWarFromWrcPlus(130, 600)).toBeCloseTo((0.30 * 600 * 0.3994 + 26.2) / 13.1, 6);
   });
 });
 
