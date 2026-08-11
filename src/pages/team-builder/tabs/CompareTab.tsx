@@ -204,7 +204,7 @@ export default function CompareTab({
       ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
       ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
       ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
-      ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
+      ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.3782)),
       baStdPower: eqNum("t_ba_std_pr", 31.297),
       baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
       obpStdPower: eqNum("t_obp_std_pr", 28.889),
@@ -222,10 +222,10 @@ export default function CompareTab({
       isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
       isoStdPower: eqNum("t_iso_std_power", 45.423),
       isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
-      wObp: toRate(eqNum("r_w_obp", 0.45)),
-      wSlg: toRate(eqNum("r_w_slg", 0.30)),
-      wAvg: toRate(eqNum("r_w_avg", 0.15)),
-      wIso: toRate(eqNum("r_w_iso", 0.10)),
+      wObp: toRate(eqNum("r_w_obp", 0.691)),
+      wSlg: toRate(eqNum("r_w_slg", 0.235)),
+      wAvg: toRate(eqNum("r_w_avg", 0)),
+      wIso: toRate(eqNum("r_w_iso", 0)),
     });
 
     const basePerOwar = eqNum("nil_base_per_owar", 25000);

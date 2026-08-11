@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
 import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole, computeHitterMarketValue } from "@/lib/depthRoles";
 import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
 import { computeTransferProjection } from "@/lib/transferProjection";
@@ -1025,7 +1026,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const ncaaAvgBA = toRate(eqNum("t_ba_ncaa_avg", 0.280));
     const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
     const ncaaAvgISO = toRate(eqNum("t_iso_ncaa_avg", 0.162));
-    const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+    const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.3782));
     const baStdPower = eqNum("t_ba_std_pr", 31.297);
     const baStdNcaa = toRate(eqNum("t_ba_std_ncaa", 0.043455));
     const obpStdPower = eqNum("t_obp_std_pr", 28.889);
@@ -1045,10 +1046,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const isoParkWeight = toWeight(jW("t_iso_park_weight", eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)));
     const isoStdPower = eqNum("t_iso_std_power", 45.423);
     const isoStdNcaa = toRate(eqNum("t_iso_std_ncaa", 0.07849797197));
-    const wObp = toRate(eqNum("r_w_obp", 0.45));
-    const wSlg = toRate(eqNum("r_w_slg", 0.30));
-    const wAvg = toRate(eqNum("r_w_avg", 0.15));
-    const wIso = toRate(eqNum("r_w_iso", 0.10));
+    const wObp = toRate(eqNum("r_w_obp", 0.691));
+    const wSlg = toRate(eqNum("r_w_slg", 0.235));
+    const wAvg = toRate(eqNum("r_w_avg", 0));
+    const wIso = toRate(eqNum("r_w_iso", 0));
 
     const projected = computeTransferProjection({
       lastAvg,
@@ -1109,7 +1110,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const pObpAdj = projected.pObp * transferMult;
     const pIsoAdj = projected.pIso * transferMult;
     const pSlgAdj = pAvgAdj + pIsoAdj;
-    const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+    const pWrcAdj = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObpAdj, pSlgAdj, pAvgAdj, pIsoAdj);
     const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
     const owarAdj = computeOWarFromWrcPlus(pWrcPlusAdj, 260); // centralized (war.ts constants)
     const basePerOwar = eqNum("nil_base_per_owar", 25000);
@@ -1478,13 +1479,13 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const pSlg = Number(shown?.p_slg);
       const pIso = Number(shown?.p_iso ?? ((Number.isFinite(pSlg) && Number.isFinite(pAvg)) ? (pSlg - pAvg) : NaN));
       if (![pAvg, pObp, pSlg, pIso].every(Number.isFinite)) return null;
-      const wObp = eqNum("r_w_obp", 0.45);
-      const wSlg = eqNum("r_w_slg", 0.3);
-      const wAvg = eqNum("r_w_avg", 0.15);
-      const wIso = eqNum("r_w_iso", 0.1);
-      const ncaaWrc = eqNum("r_ncaa_avg_wrc", 0.364);
+      const wObp = eqNum("r_w_obp", 0.691);
+      const wSlg = eqNum("r_w_slg", 0.235);
+      const wAvg = eqNum("r_w_avg", 0);
+      const wIso = eqNum("r_w_iso", 0);
+      const ncaaWrc = eqNum("r_ncaa_avg_wrc", 0.3782);
       if (!Number.isFinite(ncaaWrc) || ncaaWrc <= 0) return null;
-      const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
+      const pWrc = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObp, pSlg, pAvg, pIso);
       return Math.round((pWrc / ncaaWrc) * 100);
     })();
     // Stored o_war is the canonical baseline — depth and dev_aggressiveness are

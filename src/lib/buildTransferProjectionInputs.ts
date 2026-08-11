@@ -17,6 +17,7 @@ import {
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { batsHandToHandedness } from "@/lib/parkFactors";
 import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
+import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
 import type { TransferProjectionInputs, TransferProjectionOutput } from "@/lib/transferProjection";
 
 // ---------- helpers (kept local so the precompute script doesn't need to
@@ -257,7 +258,7 @@ export function buildHitterTransferInputs(
   const ncaaAvgBA = toRate(readEquationValue("t_ba_ncaa_avg", 0.280, remoteEquationValues));
   const ncaaAvgOBP = toRate(readEquationValue("t_obp_ncaa_avg", 0.385, remoteEquationValues));
   const ncaaAvgISO = toRate(readEquationValue("t_iso_ncaa_avg", 0.162, remoteEquationValues));
-  const ncaaAvgWrc = toRate(readEquationValue("t_wrc_ncaa_avg", 0.364, remoteEquationValues));
+  const ncaaAvgWrc = toRate(readEquationValue("t_wrc_ncaa_avg", 0.3782, remoteEquationValues));
   const baStdPower = readEquationValue("t_ba_std_pr", 31.297, remoteEquationValues);
   const baStdNcaa = toRate(readEquationValue("t_ba_std_ncaa", 0.043455, remoteEquationValues));
   const obpStdPower = readEquationValue("t_obp_std_pr", 28.889, remoteEquationValues);
@@ -280,10 +281,10 @@ export function buildHitterTransferInputs(
   const isoStdPower = readEquationValue("t_iso_std_power", 45.423, remoteEquationValues);
   const isoStdNcaa = toRate(readEquationValue("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
 
-  const wObp = toRate(readEquationValue("r_w_obp", 0.45, remoteEquationValues));
-  const wSlg = toRate(readEquationValue("r_w_slg", 0.30, remoteEquationValues));
-  const wAvg = toRate(readEquationValue("r_w_avg", 0.15, remoteEquationValues));
-  const wIso = toRate(readEquationValue("r_w_iso", 0.10, remoteEquationValues));
+  const wObp = toRate(readEquationValue("r_w_obp", 0.691, remoteEquationValues));
+  const wSlg = toRate(readEquationValue("r_w_slg", 0.235, remoteEquationValues));
+  const wAvg = toRate(readEquationValue("r_w_avg", 0, remoteEquationValues));
+  const wIso = toRate(readEquationValue("r_w_iso", 0, remoteEquationValues));
 
   // JUCO sources: PRs aren't used (power weight=0). Coerce nulls to 100 (NCAA
   // avg) so the math doesn't NaN out — gets multiplied by 0 anyway.
@@ -388,7 +389,7 @@ export function applyTransferPostprocess(
   const pSlg = pAvg + pIso;
   const pOps = pObp + pSlg;
   const { wObp, wSlg, wAvg, wIso, ncaaAvgWrc } = inputs;
-  const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
+  const pWrc = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObp, pSlg, pAvg, pIso);
   const pWrcPlus = ncaaAvgWrc === 0 ? null : Math.round((pWrc / ncaaAvgWrc) * 100);
   const offValue = pWrcPlus == null ? null : (pWrcPlus - 100) / 100;
   const pa = opts?.plateAppearances ?? 260;

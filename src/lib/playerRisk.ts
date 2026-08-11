@@ -628,7 +628,7 @@ function direction(delta: number, threshold: number, betterIsHigher: boolean): "
 
 /**
  * Compute wRC+ from raw slash stats per the locked formula:
- *   wRC+ = ((0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO) / 0.364) · 100
+ *   wRC+ = ((0.011 + 0.691·OBP + 0.235·SLG) / 0.3782) · 100  [C1, canonical src/lib/wrc.ts]
  * Returns null if any required input is missing.
  */
 function deriveWrcPlus(row: SeasonRow): number | null {

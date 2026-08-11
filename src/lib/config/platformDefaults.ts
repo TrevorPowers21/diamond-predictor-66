@@ -124,12 +124,14 @@ export const JUCO_DISTRICT_HTP_OVERRIDES: Record<string, number> = {
  * Coefficients for the wRC+ composite formula.
  * wRC+ = ((w_obp × OBP + w_slg × SLG + w_avg × AVG + w_iso × ISO) / divisor) × 100
  */
+// C1 (2026-08-10): canonical values in src/lib/wrc.ts (WRC_C1). Kept here for the platform-defaults surface.
 export const WRC_PLUS_COEFFICIENTS = {
-  w_obp: 0.45,
-  w_slg: 0.30,
-  w_avg: 0.15,
-  w_iso: 0.10,
-  divisor: 0.364,
+  intercept: 0.011,
+  w_obp: 0.691,
+  w_slg: 0.235,
+  w_avg: 0,
+  w_iso: 0,
+  divisor: 0.3782,
 } as const;
 
 /**

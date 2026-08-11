@@ -15,7 +15,7 @@
  *   - "Conference" is labeled "District" since JUCO conferences are districts
  *
  * wRC+ uses the locked D1 formula (CLAUDE.md):
- *   wRC+ = ((0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO) / 0.364) · 100
+ *   wRC+ = ((0.011 + 0.691·OBP + 0.235·SLG) / 0.3782) · 100  [C1, canonical src/lib/wrc.ts]
  *
  * Qualifier thresholds match the simulator + add-new flows:
  *   - Hitters: PA ≥ 75

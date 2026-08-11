@@ -15,7 +15,7 @@ const DEFAULT_CLASS_BASES: Record<string, { avg: number; obp: number; slg: numbe
 };
 const DEFAULT_DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
 const DEFAULT_DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
-const DEFAULT_WRC_WEIGHTS = { obp: 0.45, slg: 0.3, avg: 0.15, iso: 0.1 };
+const DEFAULT_WRC_WEIGHTS = { intercept: 0.011, obp: 0.691, slg: 0.235, avg: 0, iso: 0 }; // C1 canonical: src/lib/wrc.ts
 
 function round3(val: number): number {
   return Math.round(val * 1000) / 1000;
@@ -31,7 +31,7 @@ interface Config {
   classBases: Record<string, { avg: number; obp: number; slg: number }>;
   devCoeffs: { avg: number; obp: number; slg: number };
   dampeningDivisors: { avg: number; obp: number; slg: number };
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   defaultDevAgg: number;
 }
 interface TransferConfig {
@@ -51,7 +51,7 @@ interface TransferConfig {
   isoParkWeight: number;
   isoStdNcaa: number;
   isoStdPower: number;
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   ncaaWrc: number;
 }
 
@@ -181,7 +181,7 @@ function recalcTransfer(pred: any, config: TransferConfig) {
 
   const pSlg = round3(pAvg + pIso);
   const pOps = round3(pObp + pSlg);
-  const pWrc = round3((config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
+  const pWrc = round3(config.wrcWeights.intercept + (config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
   const pWrcPlus = config.ncaaWrc === 0 ? null : Math.round((pWrc / config.ncaaWrc) * 100);
 
   return { p_avg: pAvg, p_obp: pObp, p_slg: pSlg, p_ops: pOps, p_iso: pIso, p_wrc: pWrc, p_wrc_plus: pWrcPlus };
@@ -211,7 +211,7 @@ Deno.serve(async (req) => {
       .eq("model_type", "transfer");
 
   const config: Config = {
-      ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364,
+      ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.3782,
       classBases: { ...DEFAULT_CLASS_BASES },
       devCoeffs: { ...DEFAULT_DEV_COEFFS },
       dampeningDivisors: { ...DEFAULT_DAMPENING_DIVISORS },
@@ -271,7 +271,7 @@ Deno.serve(async (req) => {
       isoStdNcaa: 0.07849797197,
       isoStdPower: 45.423,
       wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
-      ncaaWrc: 0.364,
+      ncaaWrc: 0.3782,
     };
     for (const row of transferConfigRows || []) {
       const k = row.config_key;

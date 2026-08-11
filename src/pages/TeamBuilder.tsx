@@ -30,6 +30,7 @@ import {
   teamMatchesSelectedTeam, splitFullNameExport as splitFullName, isPitcher,
 } from "./team-builder/helpers";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
   calcPlayerScore,
@@ -2630,7 +2631,7 @@ export default function TeamBuilder() {
               ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
               ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
               ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
-              ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
+              ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.3782)),
               baStdPower: eqNum("t_ba_std_pr", 31.297),
               baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
               obpStdPower: eqNum("t_obp_std_pr", 28.889),
@@ -2648,10 +2649,10 @@ export default function TeamBuilder() {
               isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
               isoStdPower: eqNum("t_iso_std_power", 45.423),
               isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
-              wObp: toRate(eqNum("r_w_obp", 0.45)),
-              wSlg: toRate(eqNum("r_w_slg", 0.30)),
-              wAvg: toRate(eqNum("r_w_avg", 0.15)),
-              wIso: toRate(eqNum("r_w_iso", 0.10)),
+              wObp: toRate(eqNum("r_w_obp", 0.691)),
+              wSlg: toRate(eqNum("r_w_slg", 0.235)),
+              wAvg: toRate(eqNum("r_w_avg", 0)),
+              wIso: toRate(eqNum("r_w_iso", 0)),
             });
             const classKey = "SJ";
             const classAdj = classKey === "SJ" ? 0.02 : 0.02;
@@ -2661,12 +2662,12 @@ export default function TeamBuilder() {
             const pObpAdj = projected.pObp * transferMult;
             const pIsoAdj = projected.pIso * transferMult;
             const pSlgAdj = pAvgAdj + pIsoAdj;
-            const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
-            const wObp = toRate(eqNum("r_w_obp", 0.45));
-            const wSlg = toRate(eqNum("r_w_slg", 0.30));
-            const wAvg = toRate(eqNum("r_w_avg", 0.15));
-            const wIso = toRate(eqNum("r_w_iso", 0.10));
-            const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+            const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.3782));
+            const wObp = toRate(eqNum("r_w_obp", 0.691));
+            const wSlg = toRate(eqNum("r_w_slg", 0.235));
+            const wAvg = toRate(eqNum("r_w_avg", 0));
+            const wIso = toRate(eqNum("r_w_iso", 0));
+            const pWrcAdj = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObpAdj, pSlgAdj, pAvgAdj, pIsoAdj);
             const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
             const owarAdj = computeOWarFromWrcPlus(pWrcPlusAdj, 260); // centralized (war.ts constants)
             const basePerOwar = eqNum("nil_base_per_owar", 25000);

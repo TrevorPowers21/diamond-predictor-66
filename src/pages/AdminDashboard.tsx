@@ -808,14 +808,15 @@ function EquationConstantsTab() {
     r_obp_std_pr: "28.889",
     r_obp_std_ncaa: "0.046781",
     r_ncaa_avg_iso: "0.162",
-    r_w_obp: "0.45",
-    r_w_slg: "0.30",
-    r_w_avg: "0.15",
-    r_w_iso: "0.10",
-    r_ncaa_avg_wrc: "0.364",
+    r_w_obp: "0.691",
+    r_w_slg: "0.235",
+    r_w_avg: "0",
+    r_w_iso: "0",
+    r_w_intercept: "0.011",
+    r_ncaa_avg_wrc: "0.3782",
     owar_wrc_plus_baseline: "100",
     owar_plate_appearances: "260",
-    owar_run_value_per_pa: "0.163",
+    owar_run_value_per_pa: "0.3994",
     owar_replacement_runs_per_600: "26.2",
     owar_runs_per_win: "13.1",
     r_ba_class_fs: "3",
@@ -864,10 +865,11 @@ function EquationConstantsTab() {
     t_iso_conference_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight),
     t_iso_pitching_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight),
     t_iso_park_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight),
-    t_w_obp: "0.45",
-    t_w_slg: "0.30",
-    t_w_avg: "0.15",
-    t_w_iso: "0.10",
+    t_w_obp: "0.691",
+    t_w_slg: "0.235",
+    t_w_avg: "0",
+    t_w_iso: "0",
+    t_w_intercept: "0.011",
     t_wrc_plus_ncaa_avg: "1.000",
     nil_base_per_owar: "25000",
     nil_tier_sec: "1.5",
@@ -1509,7 +1511,9 @@ function EquationConstantsTab() {
               </div>
               <div className={sectionPanelClass}>
                 {editableSectionHeader("r_wrc")}
+                <p className="text-[10px] text-muted-foreground">wRC+ = (Intercept + Σ weight·stat) ÷ NCAA avg wOBA × 100 · C1: est_wOBA = 0.011 + 0.691·OBP + 0.235·SLG (AVG/ISO redundant → 0)</p>
                 <div className="space-y-1.5">
+                  {editableField("r_wrc", "r_w_intercept", "Intercept")}
                   {editableField("r_wrc", "r_w_obp", "OBP Weight")}
                   {editableField("r_wrc", "r_w_slg", "SLG Weight")}
                   {editableField("r_wrc", "r_w_avg", "AVG Weight")}
@@ -1808,15 +1812,15 @@ function EquationConstantsTab() {
                   <div>• ProjectedWRC+</div>
                   <div>• WRC+Baseline (100)</div>
                   <div>• PlateAppearances</div>
-                  <div>• Runs/PA</div>
-                  <div>• ReplacementRuns/600PA (25)</div>
-                  <div>• Runs/Win</div>
-                  <div>• *For future projections, at 260 plate appearances = 10.83</div>
+                  <div>• Runs/PA (0.3994 = lgwOBA/wOBAscale)</div>
+                  <div>• ReplacementRuns/600PA (26.2 = 2.0 wins × RPW)</div>
+                  <div>• Runs/Win (13.1)</div>
+                  <div>• DERIVED (league physics) — displayed for reference; the live values are the war.ts / edge-fn constants (C1, 2026-08-10)</div>
                 </div>
               </div>
               <div className={sectionPanelClass}>
-                {editableSectionHeader("owar_eq")}
-                <p className="text-[10px] text-muted-foreground">* assuming future projections</p>
+                {editableSectionHeader("owar_eq", "Derived (read-only) — league physics")}
+                <p className="text-[10px] text-muted-foreground">These are DERIVED constants (not tuning knobs) — editing does not affect WAR. The live values are hardcoded in war.ts + the precompute edge fn.</p>
                 <div className="space-y-1.5">
                   {editableField("owar_eq", "owar_wrc_plus_baseline", "WRC+Baseline")}
                   {editableField("owar_eq", "owar_plate_appearances", "PlateAppearances")}

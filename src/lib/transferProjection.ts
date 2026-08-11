@@ -1,4 +1,5 @@
 import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
+import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
 
 export type TransferProjectionInputs = {
   lastAvg: number;
@@ -116,7 +117,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
 
   const pSlgRaw = pAvgRaw + pIsoRaw;
   const pOpsRaw = pObpRaw + pSlgRaw;
-  const pWrcRaw = (input.wObp * pObpRaw) + (input.wSlg * pSlgRaw) + (input.wAvg * pAvgRaw) + (input.wIso * pIsoRaw);
+  const pWrcRaw = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: input.wObp, slg: input.wSlg, avg: input.wAvg, iso: input.wIso }, pObpRaw, pSlgRaw, pAvgRaw, pIsoRaw);
   const pWrcPlus = input.ncaaAvgWrc === 0 ? null : Math.round((pWrcRaw / input.ncaaAvgWrc) * 100);
 
   const offValue = pWrcPlus == null ? null : (pWrcPlus - 100) / 100;
