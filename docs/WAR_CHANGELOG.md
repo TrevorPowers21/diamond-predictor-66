@@ -36,3 +36,16 @@ note then.
 ## (earlier) 2026-08-07 — D1 scale reconcile (RPW 10 → 13.1, D1 run environment)
 Moved all WAR onto the D1 run environment. NOTE: this pass introduced the wrong 0.163 oWAR conversion
 constant (corrected 2026-08-10 above).
+
+---
+
+## 2026-08-11 — Pitcher pRV+ → D1-FIP (staging code; live at Step-6 re-precompute)
+**What moves:** pitcher pRV+ and (via it) pWAR, market value, rankings. Aces stop being buried (the old
+z-averaged blend compressed the top tail); pRV+ now tracks projected run prevention directly.
+
+**Why:** the old pRV+ blended six overlapping `+`-stats (FIP already contains K/BB/HR) and z-averaged them,
+compressing the ace tail. Replaced with the validated D1-FIP index: `projRA9 = (3.847 − 0.231·K9 + 0.509·BB9
++ 1.486·HR9) × 1.137`, `pRV+ = 100 + 100·(6.913 − projRA9)/6.913`. One definition everywhere (projection from
+projected rates, actuals from actual rates). Descriptive pWAR (`desc_pwar`) unchanged.
+
+**Status:** on staging (code); reaches prod at Step 8. team_war_snapshots reseed (from desc_pwar) folds into Step 6.

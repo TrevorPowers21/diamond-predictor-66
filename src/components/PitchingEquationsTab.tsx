@@ -827,7 +827,7 @@ export default function PitchingEquationsTab() {
           <div className={sectionPanelClass}>
             <p className="text-base font-semibold">pRV+</p>
             <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
-              <div><span className="text-muted-foreground">pRV+ =</span> ({weights.fip_plus_weight.toFixed(2)} × FIP+) + ({weights.era_plus_weight.toFixed(2)} × ERA+) + ({weights.whip_plus_weight.toFixed(2)} × WHIP+) + ({weights.k9_plus_weight.toFixed(2)} × K/9+) + ({weights.bb9_plus_weight.toFixed(2)} × BB/9+) + ({weights.hr9_plus_weight.toFixed(2)} × HR/9+)</div>
+              <div><span className="text-muted-foreground">pRV+ (C1, 2026-08-11) =</span> 100 + 100·(lgRA9 6.913 − projRA9)/6.913, where projRA9 = (3.847 − 0.231·K/9 + 0.509·BB/9 + 1.486·HR/9) × E2T 1.137. <span className="text-muted-foreground">The `+`-weights below are the projection RATE inputs (they no longer blend into pRV+); pRV+ is now the D1-FIP index. Canonical: src/lib/pitcherQuality.ts.</span></div>
             </div>
           </div>
 
@@ -1333,7 +1333,7 @@ export default function PitchingEquationsTab() {
           <div className={sectionPanelClass}>
             <p className={sectionHeadingClass}>pRV+</p>
             <div className="text-sm font-mono">
-              ({weights.fip_plus_weight.toFixed(2)}×FIP+) + ({weights.era_plus_weight.toFixed(2)}×ERA+) + ({weights.whip_plus_weight.toFixed(2)}×WHIP+) + ({weights.k9_plus_weight.toFixed(2)}×K/9+) + ({weights.bb9_plus_weight.toFixed(2)}×BB/9+) + ({weights.hr9_plus_weight.toFixed(2)}×HR/9+)
+              100 + 100·(6.913 − projRA9)/6.913, projRA9 = (3.847 − 0.231·K/9 + 0.509·BB/9 + 1.486·HR/9) × 1.137 &nbsp;[C1 D1-FIP; canonical src/lib/pitcherQuality.ts]
             </div>
             {editableSectionHeader("Editable Weights")}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">

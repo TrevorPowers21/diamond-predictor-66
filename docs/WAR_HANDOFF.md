@@ -143,12 +143,27 @@ AVG/ISO redundant → 0). **oWAR RUNS_PER_PA `0.163 → 0.3994`.**
   was load-bearing. `t_wrc_plus_ncaa_avg = 1` confirmed a harmless orphan (no denom path reads it; transfer denom key is
   `t_wrc_ncaa_avg`, absent → C1 default 0.3782). **Staging fully C1-consistent: code + tests + config DB + ncaa_averages.**
 
+## Step 1b — pitcher pRV+ → D1-FIP (SHIPPED 2026-08-11)
+
+Replaced the old z-averaged 6-component pRV+ blend with the validated D1-FIP index. **One canonical
+`src/lib/pitcherQuality.ts`** (edge fn mirrors it): `projFIP = 3.847 − 0.231·K9 + 0.509·BB9 + 1.486·HR9`
+(lgHBP9 1.467 folded into the intercept — there's no projected HBP9 rate); `projRA9 = projFIP × E2T 1.137`;
+`pRV+ = 100 + 100·(6.913 − projRA9)/6.913` (linear — the ratio form blows up in a 6.9-run env). pWAR formula
+unchanged (consumes pRV+ via `pwar_r_per_9` 6.915). **ONE pRV+ definition** (Trevor): projection pRV+ from
+projected rates, actuals pRV+ from actual K9/BB9/HR9 — same formula. The `era_pr_plus…` power-rating `+`-stats
+STAY (they're the projection rate INPUTS, not the blend). Wired across all 3 engines + edge (×2) + effective ×2
++ computeAndStoreScores + PitcherProfile ×4 + JucoPanel + storage table. **Savant `prvPlus.ts` left as-is**
+(legacy skill-composite, flagged; dies in the Savant rewrite). tsc 195=baseline, 247/247 tests.
+⚠ **Step 6:** reseed `team_war_snapshots` from `desc_pwar` — the old `seed_team_war_snapshots_2026.sql` uses an
+inline power-rating blend on the OLD `5.5/2.5/10` scale and must be retired.
+
 ## SQL ledger — every DB change the WAR redesign touches (status as of 2026-08-11)
 
 | SQL / file | what it does | staging | prod |
 |---|---|---|---|
 | `scripts/sql/descriptive_war_columns.sql` | ALTER Hitter/Pitching Master — add `desc_owar, wraa, woba, d_war, bsr_war, total_desc_war` (hitter) + `desc_pwar, desc_ra9, desc_fip_ra9, drs_behind, total_desc_war` (pitcher) | ✅ run | ⏳ pending |
 | `scripts/sql/wrc_c1_model_config.sql` | wRC+/oWAR constants → C1 in `model_config` + `ncaa_averages.wrc` 0.3782 | ✅ run + verified | ⏳ pending |
+| `scripts/sql/pitcher_c1_model_config.sql` | pitcher D1-FIP/pWAR constants → `model_config` (REFERENCE only — pitcher path rides code defaults, not read; parity with hitters) | ⏳ pending | ⏳ pending |
 | `supabase/migrations/20260810_composite_war_d1_rescale.sql` | redefine `refresh_composite_war()` (d_war/bsr_war ÷13.1, full wSB) | ⚠ DEFINITION only — the `select refresh_composite_war()` fires in **Step 6** | ⏳ pending |
 | `scripts/sql/team_drs_store.sql` | team dRS storage (dRS engine, earlier) | ✅ | — |
 | ✅ RESOLVED | scale-reconcile pwar constants: the `Equation Weights` table is EMPTY (0 rows) and `model_config` has NO pwar/pRV+/per-9 keys → pitcher WAR rides **code defaults** (`pitchingEquations.ts` = C1: r_per_9 6.915 / repl 1.92 / RPW 13.1). No stale DB weights; nothing to paste. | — | — |
@@ -156,9 +171,9 @@ AVG/ISO redundant → 0). **oWAR RUNS_PER_PA `0.163 → 0.3994`.**
 **Population/write scripts (not SQL, run via `node` on staging):** `populate_descriptive_war.mjs` (writes desc_* — ✅ run,
 re-runs in Step 6 on 0.3782); the precompute edge fns rebuild `player_predictions`.
 
-**Equation changes — all in `WAR_SYSTEM_DESIGN.md §8`:** hitter wRC+ C1 (WIRED); pitcher D1-FIP
-`3.10 − 0.231·K9 + 0.509·(BB9+HBP9) + 1.486·HR9` (⚠ DERIVED + validated but **NOT wired** — pitcher projection still
-runs the old pRV+ blend; that wiring is a separate future step). oWAR conversion 0.3994 + descriptive constants → this doc.
+**Equation changes — all in `WAR_SYSTEM_DESIGN.md §8`:** hitter wRC+ C1 (WIRED); pitcher D1-FIP (WIRED 2026-08-11 —
+projection form `3.847 − 0.231·K9 + 0.509·BB9 + 1.486·HR9`, HBP folded; canonical src/lib/pitcherQuality.ts);
+oWAR conversion 0.3994 + descriptive constants → this doc.
 
 ## The build sequence (remaining)
 
