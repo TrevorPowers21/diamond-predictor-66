@@ -574,20 +574,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return Array.from(ids);
   }, [targetPredictionIds, liveTargetPredictions]);
 
-  const { data: predictionInternalsRows = EMPTY_INTERNALS } = useQuery({
-    queryKey: ["team-builder-prediction-internals", internalsPredictionIds],
-    enabled: internalsPredictionIds.length > 0,
-    staleTime: 60 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("player_prediction_internals")
-        .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
-        .in("prediction_id", internalsPredictionIds);
-      if (error) throw error;
-      return (data || []) as PredictionInternalsRow[];
-    },
-  });
+  // COLLAPSE (2026-08-12): internals read removed. This feeds only simulateTransferProjection,
+  // which is void'd (stored-first). Kept as an empty constant so the hook's shape + the empty
+  // internalsByPredictionId map are unchanged; the dead sim path + plumbing get swept in the
+  // app-wide dead-code audit. No player_prediction_internals reference remains here.
+  const predictionInternalsRows = EMPTY_INTERNALS;
 
   const internalsByPredictionId = useMemo(() => {
     const map = new Map<string, PredictionInternalsRow>();
