@@ -40,7 +40,6 @@ import {
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
@@ -2423,27 +2422,10 @@ export default function TeamBuilder() {
     const current = rosterPlayers[idx];
     setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
     setDirty(true);
-    if (!current || (current.roster_status || "returner") === "target") return;
-    const predictionId = current.prediction?.id;
-    if (!predictionId) return;
-    const classTransition = (updates.class_transition ?? current.class_transition ?? null) as string | null;
-    const devAgg = Number(updates.dev_aggressiveness ?? current.dev_aggressiveness ?? 0);
-    try {
-      const res = await recalculatePredictionById(predictionId, {
-        class_transition: classTransition ?? undefined,
-        dev_aggressiveness: Number.isFinite(devAgg) ? devAgg : undefined,
-      });
-      setRosterPlayers((prev) =>
-        prev.map((p, i) =>
-          i === idx
-            ? { ...p, prediction: p.prediction ? { ...p.prediction, ...(res?.prediction || {}) } : p.prediction }
-            : p,
-        ),
-      );
-    } catch (e: any) {
-      toast({ title: "Recalc failed", description: e?.message || "Could not recalculate player outputs.", variant: "destructive" });
-    }
-  }, [rosterPlayers, toast]);
+    // COLLAPSE (2026-08-12): recalculatePredictionById removed (retired dead path). Class-transition /
+    // dev-aggressiveness are session-only now (no DB recalc round trip). This callback is itself
+    // never invoked (passed to PlayerTableRow but never called) — sweep the shell in the dead-code audit.
+  }, [rosterPlayers]);
 
   const markPlayerLeaving = useCallback((idx: number, name: string) => {
     setRosterPlayers((prev) => prev.filter((_, i) => i !== idx));

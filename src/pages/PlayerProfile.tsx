@@ -23,7 +23,6 @@ import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { usePitchLog2026HitterRates } from "@/hooks/usePitchLog2026HitterRates";
 import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
 import { percentileRank } from "@/savant/lib/percentile";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
@@ -539,9 +538,9 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
           .update(updates)
           .eq("id", predId);
         if (error) throw error;
-        await recalculatePredictionById(predId, {
-          dev_aggressiveness: updates.dev_aggressiveness,
-        });
+        // COLLAPSE (2026-08-12): recalculatePredictionById removed (retired dead path).
+        // This mutation chain (savePredEdit/updatePrediction) is itself dead — never wired
+        // into JSX; sweep the shell in the app-wide dead-code audit.
         // Re-lock
         await supabase.from("player_predictions").update({ locked: true }).eq("id", predId);
       }

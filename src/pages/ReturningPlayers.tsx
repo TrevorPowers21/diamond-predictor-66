@@ -25,7 +25,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
 import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
@@ -2184,22 +2183,6 @@ export default function ReturningPlayers() {
     onError: (e) => toast.error(`Bulk save failed: ${e.message}`),
   });
 
-  const updateClassTransition = useMutation({
-    mutationFn: async ({ predictionId, value }: { predictionId: string; value: string }) => {
-      const result = await recalculatePredictionById(predictionId, { class_transition: value });
-      return { predictionId, value, result };
-    },
-    onSuccess: ({ predictionId, value, result }) => {
-      applyPredictionPatchToCache(predictionId, {
-        class_transition: value,
-        ...(result?.prediction || {}),
-      } as Partial<ReturnerPlayer["prediction"]>);
-      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
-      toast.success("Class adjustment updated");
-    },
-    onError: (e) => toast.error(`Class adjustment failed: ${e.message}`),
-  });
-
   const updatePortalStatus = useMutation({
     mutationFn: async ({ playerId, value }: { playerId: string; value: string }) => {
       const { error } = await supabase
@@ -2214,51 +2197,6 @@ export default function ReturningPlayers() {
       toast.success("Portal status updated");
     },
     onError: (e) => toast.error(`Portal status update failed: ${e.message}`),
-  });
-
-  const updateDevAgg = useMutation({
-    mutationFn: async ({ predictionId, value }: { predictionId: string; value: number }) => {
-      const result = await recalculatePredictionById(predictionId, { dev_aggressiveness: value });
-      return { predictionId, value, result };
-    },
-    onSuccess: ({ predictionId, value, result }) => {
-      applyPredictionPatchToCache(predictionId, {
-        dev_aggressiveness: value,
-        ...(result?.prediction || {}),
-      } as Partial<ReturnerPlayer["prediction"]>);
-      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
-      toast.success("Dev aggressiveness updated");
-    },
-    onError: (e) => toast.error(`Dev aggressiveness failed: ${e.message}`),
-  });
-
-  const applyTemplateDefaults = useMutation({
-    mutationFn: async () => {
-      const { data: allReturnerPreds, error } = await supabase
-        .from("player_predictions")
-        .select("id")
-        .eq("season", PROJECTION_SEASON)
-        .eq("model_type", "returner")
-        .eq("variant", "regular")
-        .in("status", ["active", "departed"]);
-      if (error) throw error;
-      const returnerRows = (allReturnerPreds || []).map((r) => ({ prediction_id: r.id }));
-      const BATCH = 40;
-      for (let i = 0; i < returnerRows.length; i += BATCH) {
-        const batch = returnerRows.slice(i, i + BATCH);
-        await Promise.all(
-          batch.map(async (p) => {
-            await recalculatePredictionById(p.prediction_id, { class_transition: "SJ", dev_aggressiveness: 0.0 });
-          }),
-        );
-      }
-      return returnerRows.length;
-    },
-    onSuccess: (count) => {
-      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
-      toast.success(`Applied template to ${count} returner rows`);
-    },
-    onError: (e) => toast.error(`Template apply failed: ${e.message}`),
   });
 
   const handleEditField = (playerId: string, field: "team" | "position", value: string) => {

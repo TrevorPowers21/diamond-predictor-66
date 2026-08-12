@@ -42,7 +42,6 @@ import { isThinSamplePitcher } from "@/lib/combinedStats";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
