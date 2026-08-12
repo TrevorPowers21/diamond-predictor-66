@@ -468,24 +468,6 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
 
   const { data: nilValuation } = useNilValuation(id);
 
-  // Admin-only: fetch internal power ratings
-  const { data: internalRatings } = useQuery({
-    queryKey: ["player-internal-ratings", id],
-    queryFn: async () => {
-      const predIds = predictions.map((p) => p.id);
-      if (predIds.length === 0) return null;
-      const { data, error } = await supabase
-        .from("player_prediction_internals" as any)
-        .select("*")
-        .in("prediction_id", predIds)
-        .limit(1)
-        .maybeSingle();
-      if (error) return null;
-      return data as unknown as { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null } | null;
-    },
-    enabled: !!id && isAdmin && predictions.length > 0,
-  });
-
   // MLB Draft slot value (most recent draft cycle for this player).
   // Returns null when the player isn't in player_slot_values — surface hides
   // itself in that case.

@@ -3,7 +3,6 @@ import AnalyticsTab from "./team-builder/tabs/AnalyticsTab";
 import RosterTab from "./team-builder/tabs/RosterTab";
 import TargetBoardTab from "./team-builder/tabs/TargetBoardTab";
 import DepthTab from "./team-builder/tabs/DepthTab";
-import CompareTab from "./team-builder/tabs/CompareTab";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -4107,19 +4106,6 @@ export default function TeamBuilder() {
               targetPositionTableTotals={targetPositionTableTotals}
               targetPitcherTableTotals={targetPitcherTableTotals}
               totalBudget={totalBudget}
-            />
-          </TabsContent>
-
-          <TabsContent value="compare-hidden" className="hidden">
-            <CompareTab
-              allPlayersForSearch={allPlayersForSearch}
-              teams={teams}
-              allPlayersById={allPlayersById}
-              resolveConferenceStats={resolveConferenceStats}
-              teamByKey={teamByKey}
-              teamParkComponents={teamParkComponents}
-              eqNum={eqNum}
-              seedByName={seedByName}
             />
           </TabsContent>
 
