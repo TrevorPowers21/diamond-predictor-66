@@ -14,7 +14,6 @@ import {
   applyJucoOutlierRegression,
   JUCO_REGRESSION_CONFIG,
 } from "@/lib/transferWeightDefaults";
-import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { batsHandToHandedness } from "@/lib/parkFactors";
 import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
 import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
@@ -89,14 +88,13 @@ export type BuildHitterTransferInputsArgs = {
   toConference: string | null;
   toConferenceId?: string | null;
 
-  // Stat-specific PR+ values already resolved upstream when available.
-  internals?: {
-    avg_power_rating?: number | null;
+  // COLLAPSE (2026-08-12): stored Master PR by source_player_id (single source, fresh),
+  // NOT the retired player_prediction_internals copy. seedPower live-compute removed (dead — never passed here).
+  masterPR?: {
+    ba_power_rating?: number | null;
     obp_power_rating?: number | null;
-    slg_power_rating?: number | null;
+    iso_power_rating?: number | null;
   } | null;
-  // Optional seed power fallback used to compute PR+ when internals are missing.
-  seedPower?: SeedPowerInputs;
 
   // Resolvers (caller wires these to its data source)
   resolveConferenceHitting: (
@@ -144,8 +142,7 @@ export function buildHitterTransferInputs(
     fromConferenceId,
     toConference,
     toConferenceId,
-    internals,
-    seedPower,
+    masterPR,
     resolveConferenceHitting,
     resolveParkFactor,
     remoteEquationValues,
@@ -177,29 +174,12 @@ export function buildHitterTransferInputs(
     return (lastAvg ?? rawLastAvg) + adjIso;
   })();
 
-  // PR+ resolution: internals first, then compute from seed power data
-  let baPR = internals?.avg_power_rating ?? null;
-  let obpPR = internals?.obp_power_rating ?? null;
-  let isoPR = internals?.slg_power_rating ?? null;
-
-  if ((baPR == null || obpPR == null || isoPR == null) && seedPower) {
-    const computed = computeHitterPowerRatings({
-      contact: seedPower.contact ?? null,
-      lineDrive: seedPower.lineDrive ?? null,
-      avgExitVelo: seedPower.avgExitVelo ?? null,
-      popUp: seedPower.popUp ?? null,
-      bb: seedPower.bb ?? null,
-      chase: seedPower.chase ?? null,
-      barrel: seedPower.barrel ?? null,
-      ev90: seedPower.ev90 ?? null,
-      pull: seedPower.pull ?? null,
-      la10_30: seedPower.la10_30 ?? null,
-      gb: seedPower.gb ?? null,
-    } as any);
-    if (baPR == null) baPR = computed.baPlus;
-    if (obpPR == null) obpPR = computed.obpPlus;
-    if (isoPR == null) isoPR = computed.isoPlus;
-  }
+  // COLLAPSE (2026-08-12): PR+ from the stored Master by source_player_id (single source).
+  // scrubPR: 0/neg → null (missing input → blocked below), matching backfill/edge fn.
+  const scrubPR = (n: number | null | undefined) => (n != null && n > 0 ? n : null);
+  const baPR = scrubPR(masterPR?.ba_power_rating);
+  const obpPR = scrubPR(masterPR?.obp_power_rating);
+  const isoPR = scrubPR(masterPR?.iso_power_rating);
 
   if (!isJucoSource) {
     if (baPR == null) missingInputs.push("BA Power Rating+");

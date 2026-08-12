@@ -213,7 +213,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa, class_year"),
+      .select("id, source_player_id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
@@ -272,21 +272,24 @@ async function main() {
     if (!existing || rank(row) > rank(existing)) bestPredByPlayer.set(k, row);
   }
 
-  // 2g. Internals for the chosen predictions (batched same as predictions)
-  const predIds = Array.from(bestPredByPlayer.values()).map((r) => r.id);
-  const internalsRows: any[] = [];
-  for (let i = 0; i < predIds.length; i += PRED_ID_BATCH) {
-    const idsChunk = predIds.slice(i, i + PRED_ID_BATCH);
+  // 2g. COLLAPSE (2026-08-12): power ratings from Hitter Master by source_player_id
+  // (single source, fresh), NOT player_prediction_internals (retired copy). For the
+  // live JUCO path these are null anyway (JUCO PRs nulled) → identical no-op.
+  const hitterSourceIds = Array.from(new Set(hitters.map((p) => (p as any).source_player_id).filter(Boolean)));
+  const masterPRRows: any[] = [];
+  for (let i = 0; i < hitterSourceIds.length; i += PRED_ID_BATCH) {
+    const idsChunk = hitterSourceIds.slice(i, i + PRED_ID_BATCH);
     const chunk = await loadAllPaged<any>(() =>
       supabase
-        .from("player_prediction_internals")
-        .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
-        .in("prediction_id", idsChunk),
+        .from("Hitter Master")
+        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating")
+        .eq("Season", CURRENT_SEASON)
+        .in("source_player_id", idsChunk),
     );
-    internalsRows.push(...chunk);
+    masterPRRows.push(...chunk);
   }
-  const internalsByPredId = new Map<string, any>();
-  for (const r of internalsRows) internalsByPredId.set(r.prediction_id, r);
+  const masterPRBySourceId = new Map<string, any>();
+  for (const r of masterPRRows) masterPRBySourceId.set(String(r.source_player_id), r);
 
   // 3. Compute
   console.log(`${C.cyan}→${C.reset} computing projections...`);
@@ -320,7 +323,7 @@ async function main() {
   for (const p of hitters) {
     const pred = bestPredByPlayer.get(p.id);
     const resolvedCt = resolveClassTransition((p as any).class_year, pred); // class_year-authoritative (see eligibility-and-class.md)
-    const internals = pred ? internalsByPredId.get(pred.id) : null;
+    const masterPR = (p as any).source_player_id ? (masterPRBySourceId.get(String((p as any).source_player_id)) ?? null) : null;
 
     const fromTeamName = (p.from_team || p.team || "") as string;
     const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
@@ -346,7 +349,7 @@ async function main() {
       fromConferenceId,
       toConference,
       toConferenceId,
-      internals,
+      masterPR,
       resolveConferenceHitting,
       resolveParkFactor,
       remoteEquationValues,
