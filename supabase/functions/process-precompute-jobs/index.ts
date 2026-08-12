@@ -144,6 +144,9 @@ function applyJucoOutlierRegression(
 
 // ─────────────────────────────────────────────────────────────────────────
 // MATH: port of src/lib/powerRatings.ts (just computeHitterPowerRatings)
+// DEAD as of the 2026-08-12 collapse: the only caller (seedPower live-compute) was removed;
+// power ratings now come from the Master's stored ba/obp/iso_power_rating. Remove with the
+// Track-B live-compute cleanup (kept for now to keep the collapse diff read-only + minimal).
 // ─────────────────────────────────────────────────────────────────────────
 
 const erf = (x: number) => {
@@ -173,6 +176,7 @@ const HITTER_DEFAULTS = {
   pull: { mean: 36.5, sd: 8.03 },
   la10_30: { mean: 29, sd: 6.81 },
   gb: { mean: 43.2, sd: 8.0, invert: true },
+  pullAir: { mean: 12.9, sd: 11.9 },
 } as const;
 
 function computeHitterPowerRatings(raw: any): { baPlus: number | null; obpPlus: number | null; isoPlus: number | null } {
@@ -191,13 +195,16 @@ function computeHitterPowerRatings(raw: any): { baPlus: number | null; obpPlus: 
   const pullScore = s("pull", raw.pull);
   const laScore = s("la10_30", raw.la10_30);
   const gbScore = s("gb", raw.gb);
+  const pullAirScore = s("pullAir", raw.pullAir);
+  const pullAirEff = pullAirScore ?? pullScore;   // pulled-in-air (isoPlus); fall back to raw pull%
 
+  // Hitter composites refit 2026-08-11 — MIRROR of src/lib/powerRatings.ts (keep in lockstep).
   const baPower = (contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null)
-    ? null : (0.4 * contactScore) + (0.25 * lineDriveScore) + (0.2 * avgEVScore) + (0.15 * popUpScore);
+    ? null : (0.35 * contactScore) + (0.20 * lineDriveScore) + (0.30 * avgEVScore) + (0.15 * popUpScore);
   const obpPower = (contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null || bbScore == null || chaseScore == null)
-    ? null : (0.35 * contactScore) + (0.2 * lineDriveScore) + (0.15 * avgEVScore) + (0.1 * popUpScore) + (0.15 * bbScore) + (0.05 * chaseScore);
-  const isoPower = (barrelScore == null || ev90Score == null || pullScore == null || laScore == null || gbScore == null)
-    ? null : (0.45 * barrelScore) + (0.3 * ev90Score) + (0.15 * pullScore) + (0.05 * laScore) + (0.05 * gbScore);
+    ? null : (0.20 * contactScore) + (0.10 * lineDriveScore) + (0.15 * avgEVScore) + (0.10 * popUpScore) + (0.40 * bbScore) + (0.05 * chaseScore);
+  const isoPower = (barrelScore == null || ev90Score == null || pullAirEff == null || gbScore == null)
+    ? null : (0.30 * barrelScore) + (0.35 * ev90Score) + (0.10 * pullAirEff) + (0.25 * gbScore);
 
   const toPlus = (v: number | null) => (v == null ? null : (v / 50) * 100);
   return { baPlus: toPlus(baPower), obpPlus: toPlus(obpPower), isoPlus: toPlus(isoPower) };
@@ -320,13 +327,12 @@ function buildHitterTransferInputs(args: {
   toTeam: { id: string; name: string };
   toConference: string | null;
   toConferenceId: string | null;
-  internals: { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null } | null;
-  seedPower?: any;
+  masterPR: { ba_power_rating: number | null; obp_power_rating: number | null; iso_power_rating: number | null } | null;
   resolveConferenceHitting: (name: string | null, id: string | null) => any;
   resolveParkFactor: (teamId: string | null, teamName: string | null, metric: "avg" | "obp" | "iso", hand: any) => number | null;
   remoteEquationValues: Record<string, number>;
 }) {
-  const { player, fromTeam, toTeam, toConference, toConferenceId, internals, seedPower,
+  const { player, fromTeam, toTeam, toConference, toConferenceId, masterPR,
     resolveConferenceHitting, resolveParkFactor, remoteEquationValues } = args;
 
   const missingInputs: string[] = [];
@@ -353,15 +359,14 @@ function buildHitterTransferInputs(args: {
     return (lastAvg ?? rawLastAvg) + adjIso;
   })();
 
-  let baPR = internals?.avg_power_rating ?? null;
-  let obpPR = internals?.obp_power_rating ?? null;
-  let isoPR = internals?.slg_power_rating ?? null;
-  if ((baPR == null || obpPR == null || isoPR == null) && seedPower) {
-    const c = computeHitterPowerRatings(seedPower);
-    if (baPR == null) baPR = c.baPlus;
-    if (obpPR == null) obpPR = c.obpPlus;
-    if (isoPR == null) isoPR = c.isoPlus;
-  }
+  // COLLAPSE (2026-08-12): stored Master PR by source_player_id (single source, fresh).
+  // null → actuals-only, identical to the returner path (backfill-2027). seedPower
+  // live-compute deleted — it was never passed by the caller (dead). scrubPR mirrors
+  // backfill's readSpecificPlus so a degenerate 0/negative PR → missing, not fed as real.
+  const scrubPR = (n: number | null | undefined) => (n != null && n > 0 ? n : null);
+  const baPR = scrubPR(masterPR?.ba_power_rating);
+  const obpPR = scrubPR(masterPR?.obp_power_rating);
+  const isoPR = scrubPR(masterPR?.iso_power_rating);
 
   if (!isJucoSource) {
     if (baPR == null) missingInputs.push("BA Power Rating+");
@@ -908,9 +913,9 @@ function ipForPitcherDepthRole(
 function computeHitterOWar(wrcPlus: number | null | undefined, depthRole: HitterDepthRoleAuto): number | null {
   if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
   const pa = paForHitterDepthRole(depthRole);
-  // D1 scale (mirror src/savant/lib/war.ts, C1 2026-08-10): fixed-wins replacement 26.2,
+  // D1 scale (mirror src/savant/lib/war.ts): replacement 21.22 (1.62 wins/600 × RPW; .380 anchor, DERIVED 2026-08-11),
   // runs/PA 0.3994 (=lgwOBA/wOBAscale, NOT 0.163), RPW 13.1. Keep in lockstep with war.ts or stored ≠ live.
-  const replacementRuns = (pa / 600) * 26.2;
+  const replacementRuns = (pa / 600) * 21.22;
   const raa = ((wrcPlus - 100) / 100) * pa * 0.3994;
   return (raa + replacementRuns) / 13.1;
 }
@@ -1093,19 +1098,20 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     if (!existing || rank(row) > rank(existing)) bestPredByPlayer.set(k, row);
   }
 
-  // Internals (PR+)
-  const predIds = Array.from(bestPredByPlayer.values()).map((r: any) => r.id);
-  const internalsRows: any[] = [];
-  for (let i = 0; i < predIds.length; i += PRED_ID_BATCH) {
-    const chunk = predIds.slice(i, i + PRED_ID_BATCH);
+  // COLLAPSE (2026-08-12): power ratings from Hitter Master by source_player_id
+  // (single source, fresh), NOT player_prediction_internals (retired copy).
+  const hitterSourceIds = Array.from(new Set(hitters.map((p: any) => p.source_player_id).filter(Boolean)));
+  const masterPRRows: any[] = [];
+  for (let i = 0; i < hitterSourceIds.length; i += PRED_ID_BATCH) {
+    const chunk = hitterSourceIds.slice(i, i + PRED_ID_BATCH);
     const r = await loadAllPaged(() =>
-      supabase.from("player_prediction_internals")
-        .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
-        .in("prediction_id", chunk));
-    internalsRows.push(...r);
+      supabase.from("Hitter Master")
+        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating")
+        .eq("Season", CURRENT_SEASON).in("source_player_id", chunk));
+    masterPRRows.push(...r);
   }
-  const internalsByPredId = new Map<string, any>();
-  for (const r of internalsRows) internalsByPredId.set(r.prediction_id, r);
+  const masterPRBySourceId = new Map<string, any>();
+  for (const r of masterPRRows) masterPRBySourceId.set(String(r.source_player_id), r);
 
   // Diagnostic: counts to surface in response
   const blockReasons = new Map<string, number>();
@@ -1115,7 +1121,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     teamsRows: allTeams.length,
     hittersInScope: hitters.length,
     predRows: predRows.length,
-    internalsRows: internalsRows.length,
+    masterPRRows: masterPRRows.length,
     bestPredsForPlayers: bestPredByPlayer.size,
     sampleConfHitting: resolveConferenceHitting(toConference, toConferenceId),
     sampleParkForToTeam: resolveParkFactor(toTeam.id, toTeam.name, "avg", "lhb"),
@@ -1126,7 +1132,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
   let blocked = 0;
   for (const p of hitters) {
     const pred = bestPredByPlayer.get(p.id);
-    const internals = pred ? internalsByPredId.get(pred.id) : null;
+    const masterPR = p.source_player_id ? (masterPRBySourceId.get(String(p.source_player_id)) ?? null) : null;
     const fromTeamName = (p.from_team || p.team || "") as string;
     const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
 
@@ -1141,7 +1147,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
       },
       fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name, conference: fromTeamRow.conference, conference_id: fromTeamRow.conference_id } : { id: null, name: fromTeamName, conference: p.conference ?? null, conference_id: null },
       toTeam, toConference, toConferenceId,
-      internals,
+      masterPR,
       resolveConferenceHitting, resolveParkFactor,
       remoteEquationValues,
     });

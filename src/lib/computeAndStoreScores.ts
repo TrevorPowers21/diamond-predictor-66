@@ -172,6 +172,8 @@ async function fetchAllPrior(table: "Hitter Master" | "Pitching Master", select:
       .select(select)
       .lt("Season", cutoffSeason)
       .order("Season", { ascending: false })
+      .order("id", { ascending: true })   // unique tiebreaker — Season alone is non-unique, so range() pages
+                                          // overlap/skip and silently drop prior seasons from the blend
       .range(from, from + pageSize - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -253,7 +255,7 @@ async function fetchSeasonBaselines(season: number): Promise<{ hitter: HitterBas
  * Compute and store all hitter power rating scores for a given season.
  * Reads raw sub-metrics from Hitter Master, computes scores, writes back.
  */
-export async function computeAndStoreHitterScores(season = 2026): Promise<{ updated: number; errors: number }> {
+export async function computeAndStoreHitterScores(season = 2026, opts?: { propagate?: boolean }): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
   console.time("[ComputeHitter] TOTAL");
@@ -289,7 +291,7 @@ export async function computeAndStoreHitterScores(season = 2026): Promise<{ upda
   while (true) {
     const { data: rows, error } = await supabase
       .from("Hitter Master")
-      .select("id, source_player_id, Season, ab, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
+      .select("id, source_player_id, Season, ab, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb, pull_air")
       .eq("Season", season)
       .order("id", { ascending: true })
       .range(from, from + readPageSize - 1);
@@ -319,6 +321,7 @@ export async function computeAndStoreHitterScores(season = 2026): Promise<{ upda
       pull: v.pull,
       la10_30: v.la_10_30,
       gb: v.gb,
+      pullAir: (v as any).pull_air ?? (row as any).pull_air ?? null,   // pitch-log pulled-in-air% (isoPlus)
     }, hitterBaselines);
     return {
       id: row.id,
@@ -334,6 +337,7 @@ export async function computeAndStoreHitterScores(season = 2026): Promise<{ upda
         pull_score: round2(ratings.pullScore),
         la_score: round2(ratings.laScore),
         gb_score: round2(ratings.gbScore),
+        pull_air_score: round2(ratings.pullAirScore),
         ba_power_rating: round2(ratings.baPlus),
         obp_power_rating: round2(ratings.obpPlus),
         iso_power_rating: round2(ratings.isoPlus),
@@ -386,18 +390,22 @@ export async function computeAndStoreHitterScores(season = 2026): Promise<{ upda
   //    player matches this season. Keeps the dashboard / profile / high-follow
   //    displays in lockstep with the freshly-recomputed Hitter Master values
   //    without relying on the legacy CSV/sheet writeback paths.
-  console.time("[ComputeHitter] 6. propagate scores to predictions");
-  const { data: propagatedRows, error: propErr } = await supabase.rpc(
-    "propagate_hitter_scores_to_predictions",
-    { target_season: season },
-  );
-  if (propErr) {
-    console.error("[ComputeHitter] propagation rpc failed:", propErr);
-    errors++;
+  if (opts?.propagate === false) {
+    console.log("[ComputeHitter] propagate=false — stopping at Master power ratings, NOT touching player_predictions");
   } else {
-    console.log(`[ComputeHitter] propagated scores to ${propagatedRows ?? 0} prediction rows`);
+    console.time("[ComputeHitter] 6. propagate scores to predictions");
+    const { data: propagatedRows, error: propErr } = await supabase.rpc(
+      "propagate_hitter_scores_to_predictions",
+      { target_season: season },
+    );
+    if (propErr) {
+      console.error("[ComputeHitter] propagation rpc failed:", propErr);
+      errors++;
+    } else {
+      console.log(`[ComputeHitter] propagated scores to ${propagatedRows ?? 0} prediction rows`);
+    }
+    console.timeEnd("[ComputeHitter] 6. propagate scores to predictions");
   }
-  console.timeEnd("[ComputeHitter] 6. propagate scores to predictions");
 
   console.timeEnd("[ComputeHitter] TOTAL");
 
@@ -411,6 +419,7 @@ export async function computeAndStoreHitterScores(season = 2026): Promise<{ upda
 export async function computeAndStorePitchingScores(
   season = 2026,
   sourcePlayerIds?: string[],
+  opts?: { propagate?: boolean },
 ): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
@@ -569,18 +578,22 @@ export async function computeAndStorePitchingScores(
   //    player matches this season. Same 1=1 pattern as hitters — keeps the
   //    dashboard / profile / high-follow displays in lockstep with the
   //    freshly-recomputed Pitching Master values.
-  console.time("[ComputePitching] 6. propagate scores to predictions");
-  const { data: propagatedRows, error: propErr } = await supabase.rpc(
-    "propagate_pitcher_scores_to_predictions",
-    { target_season: season },
-  );
-  if (propErr) {
-    console.error("[ComputePitching] propagation rpc failed:", propErr);
-    errors++;
+  if (opts?.propagate === false) {
+    console.log("[ComputePitching] propagate=false — stopping at Master power ratings, NOT touching player_predictions");
   } else {
-    console.log(`[ComputePitching] propagated scores to ${propagatedRows ?? 0} prediction rows`);
+    console.time("[ComputePitching] 6. propagate scores to predictions");
+    const { data: propagatedRows, error: propErr } = await supabase.rpc(
+      "propagate_pitcher_scores_to_predictions",
+      { target_season: season },
+    );
+    if (propErr) {
+      console.error("[ComputePitching] propagation rpc failed:", propErr);
+      errors++;
+    } else {
+      console.log(`[ComputePitching] propagated scores to ${propagatedRows ?? 0} prediction rows`);
+    }
+    console.timeEnd("[ComputePitching] 6. propagate scores to predictions");
   }
-  console.timeEnd("[ComputePitching] 6. propagate scores to predictions");
 
   console.timeEnd("[ComputePitching] TOTAL");
 

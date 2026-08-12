@@ -21,7 +21,7 @@ FIP_C = 3.10  # league FIP constant placeholder (recalc = lgERA − (13HR+3(BB+H
 def v(r, k): return (r.get(k) or "").strip()
 
 def blank():
-    return {"outs": 0, "k": 0, "bb": 0, "hbp": 0, "h": 0, "hr": 0, "bf": 0, "er": 0}
+    return {"outs": 0, "k": 0, "bb": 0, "hbp": 0, "h": 0, "hr": 0, "bf": 0, "er": 0, "r": 0}
 
 def add(dst, pid, key, n=1):
     d = dst.setdefault(pid, blank()); d[key] += n
@@ -89,24 +89,28 @@ def main():
     for key, slot in innings.items():
         slot["rows"].sort(key=lambda x: x[0])
         pas = [(pid, ev, occ, runs_by_pitch.get(uid, 0)) for _, pid, ev, occ, uid in slot["rows"]]
-        local = {}
-        process_half_inning(pas, local)
+        local = {}; localr = {}
+        process_half_inning(pas, local, localr)
         for pid, n in local.items():
             add(full, pid, "er", n)
             if slot["reg"]: add(reg, pid, "er", n)
+        for pid, n in localr.items():        # total R (earned+unearned) for desc RA9
+            add(full, pid, "r", n)
+            if slot["reg"]: add(reg, pid, "r", n)
 
     def line(d):
         ip = d["outs"] / 3.0
         if ip <= 0: return None
         return {"IP": round(ip, 1), "BF": d["bf"], "K": d["k"], "BB": d["bb"], "HBP": d["hbp"],
                 "H": d["h"], "HR": d["hr"], "ER": d["er"], "ERA": round(d["er"] * 9 / ip, 2),
+                "R": d["r"], "RA9": round(d["r"] * 9 / ip, 2),
                 "FIP": round((13*d["hr"] + 3*(d["bb"]+d["hbp"]) - 2*d["k"]) / ip + FIP_C, 2),
                 "WHIP": round((d["bb"] + d["h"]) / ip, 2), "K9": round(d["k"]*9/ip, 2),
                 "BB9": round(d["bb"]*9/ip, 2), "HR9": round(d["hr"]*9/ip, 2),
                 "K_pct": round(100*d["k"]/d["bf"], 1) if d["bf"] else 0,
                 "BB_pct": round(100*d["bb"]/d["bf"], 1) if d["bf"] else 0}
     os.makedirs("scripts/drs/output", exist_ok=True)
-    cols = ["IP","BF","K","BB","HBP","H","HR","ER","ERA","FIP","WHIP","K9","BB9","HR9","K_pct","BB_pct"]
+    cols = ["IP","BF","K","BB","HBP","H","HR","ER","ERA","R","RA9","FIP","WHIP","K9","BB9","HR9","K_pct","BB_pct"]
     out = "scripts/drs/output/pitcher_line.csv"
     n = 0
     with open(out, "w", newline="") as fh:

@@ -55,7 +55,9 @@ async function loadAllPaged<T>(builder: () => any): Promise<T[]> {
   let out: T[] = [];
   let from = 0;
   while (true) {
-    const { data, error } = await builder().range(from, from + PAGE - 1);
+    // .order("id") = unique tiebreaker; without it range() pages have no guaranteed order and silently
+    // overlap/skip, dropping whole players (and their fallbacks) from the precompute.
+    const { data, error } = await builder().order("id", { ascending: true }).range(from, from + PAGE - 1);
     if (error) throw error;
     out = out.concat(data || []);
     if (!data || data.length < PAGE) break;

@@ -39,6 +39,51 @@ constant (corrected 2026-08-10 above).
 
 ---
 
+## 2026-08-11 — Step 5: hitter replacement level derived (WAR zero-point) — staging
+**What moves:** ALL hitter oWAR — descriptive (re-populated now) + projected (at Step 6). Every hitter shifts down
+~0.38 WAR for a full-timer (scales with PA). Pitcher WAR unchanged. Rankings/NIL/team totals shift with oWAR.
+
+**Why:** the hitter replacement floor was **2.0 wins/600 (borrowed from MLB)**; the pitcher floor (RA9 8.83) was
+**derived from a .380 win% anchor** (a replacement team wins 38% — the standard definition). Step 5 puts BOTH on
+that one principle: replacement offense scores 5.41 R/9 (vs 6.913 avg) at D1's empirical 42.4 PA/9 → 21.25 runs/600
+→ **1.62 wins/600**. The borrowed 2.0 was too generous for D1's higher-offense environment.
+
+**Verified, not tuned:** 1.62 lands between the empirical part-time (100–200 PA, −0.79) and depth (50–100 PA, −2.47)
+tiers — i.e. the real "freely-available ~100–150 PA player." Kept the principled .380 value rather than snapping to
+a band (selection bias means played-depth guys overstate replacement talent).
+
+**Sites:** war.ts (21.22 = 1.62×13.1) + edge fn + woba_weights.json/ncaa_averages fixtures + AdminDashboard +
+model_config; descriptive oWAR re-populated (Hairston 5.28→5.07, Helfrick 2.19→1.99). 247 tests updated + pass.
+**Status:** staging. Projected oWAR updates at Step 6. Reaches prod at Step 8.
+
+## 2026-08-11 — Power-rating composites refit on 2026 data (staging; live at Step-6)
+**What moves:** the `+`-stat composites that steer projected rates — era⁺ and the three hitter composites
+(baPlus/obpPlus/isoPlus). Hitter composites move projected AVG/OBP/SLG → wRC+ → oWAR; era⁺ is display/scouting.
+
+**Why:** the composite weights were hand-set; refit same-season on 2026 (D1, rounded 0.05, rounding-free) they
+correct several things the hand-weights missed, all consistent with our derived physics:
+- **era⁺** — walks were badly under-weighted (0.17→0.30, now the top run-prevention input, matching D1-FIP's 0.570
+  walk); in-zone-whiff dropped (redundant with whiff+Stuff+). `bb .30 · whiff .25 · stuff .20 · hardHit .15 · chase .05 · barrel .05`.
+- **baPlus** — exit velo up (0.20→0.30). `contact .35 · lineDrive .20 · avgEV .30 · popUp .15`.
+- **obpPlus** — built to the measured **57/43 hits/walks split** of OBP: walks 0.15→0.40. `contact .20 · lineDrive .10 · avgEV .15 · popUp .10 · bb .40 · chase .05`.
+- **isoPlus** — la dropped (redundant with barrel); raw pull → **pull_air** (pulled-in-air %, pitch-log derived,
+  the truer power skill); gb up. `barrel .30 · ev90 .35 · pullAir .10 · gb .25`.
+
+**Data-verified:** era⁺ high-walk arms drop (Vigue 5.14 BB9 → 126), complete arms hold (Berggren 183); obpPlus
+surfaces elite plate-discipline (CJ Griggs 21.8% BB → top-4); isoPlus tops are pull-air power hitters. Kept in
+lockstep across `powerRatings.ts` + edge Deno port + AdminDashboard; **`pull_air` backfilled from the pitch log**
+(retires the dead CSV importer). What the same-season fit could NOT touch (circular): k9⁺/bb9⁺ — left as-is.
+
+**Status:** on staging (code + store re-run, propagate=false so predictions untouched). Reaches prod at Step 8.
+
+**Round 2 (2026-08-11, full composite audit vs 2026 data):**
+- **hr9⁺** = `barrel .15 · hard_hit .30 · gb .30 · pull .25` — added hard_hit (strong HR9 predictor, was unused);
+  dropped ev90 (corr 0.005) + la (hurt fit); whiff/flyball tested + rejected (whiff double-counts K9). MOVES pWAR (D1-FIP HR9 term).
+- **whip⁺** = `bb .30 · whiff .45 · stuff .25` — WHIP is 71% hits / 29% walks (like obpPlus): walks (bb) + hit-suppression
+  via MISS-BATS (whiff+stuff, not contact quality — pitcher controls whiffs, not BABIP). Dropped weak ld/ev/gb/chase. DISPLAY-only.
+- Confirmed no change: era⁺/baPlus/obpPlus/isoPlus (current inputs already top predictors); k9⁺/bb9⁺ (circular).
+model_config sync for all metrics applied on staging.
+
 ## 2026-08-11 — Pitcher pRV+ → D1-FIP (staging code; live at Step-6 re-precompute)
 **What moves:** pitcher pRV+ and (via it) pWAR, market value, rankings. Aces stop being buried (the old
 z-averaged blend compressed the top tail); pRV+ now tracks projected run prevention directly.

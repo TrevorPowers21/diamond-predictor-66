@@ -38,11 +38,11 @@ describe("hitter oWAR formula constants", () => {
   // D1-derived, locked 2026-08-10 (mirror src/savant/lib/war.ts). Independently hardcoded so a
   // war.ts change fails this test and forces a parity acknowledgment.
   const RUNS_PER_PA = 0.3994;
-  const REPLACEMENT_RUNS_FACTOR = 26.2; // 2.0 wins/600 PA × RPW (fixed-wins)
+  const REPLACEMENT_RUNS_FACTOR = 21.22; // 1.62 wins/600 PA × RPW (fixed-wins)
   const RUNS_PER_WIN = 13.1;
 
   it("runsPerPa is 0.3994 across all implementations", () => {
-    // Average hitter (wRC+=100, PA=600): raa=0, rar=replacementRuns=26.2; WAR = 26.2/13.1 = 2.0
+    // Average hitter (wRC+=100, PA=600): raa=0, rar=replacementRuns=21.22; WAR = 21.22/13.1 = 1.62
     const result = computeOWar(100, 600)!;
     expect(result).toBeCloseTo(REPLACEMENT_RUNS_FACTOR / RUNS_PER_WIN, 6);
   });
@@ -60,7 +60,7 @@ describe("hitter oWAR formula constants", () => {
     //   const offValue = (pWrcPlus - 100) / 100;
     //   const pa = input.actualPa ?? 260;
     //   const runsPerPa = 0.3994;  [C1]
-    //   const replacementRuns = (pa / 600) * 26.2;
+    //   const replacementRuns = (pa / 600) * 21.22;
     //   const raa = offValue * pa * runsPerPa;
     //   const rar = raa + replacementRuns;
     //   const owar = rar / 13.1;
@@ -70,7 +70,7 @@ describe("hitter oWAR formula constants", () => {
     const inlineOWar = (pWrcPlus: number, pa: number) => {
       const offValue = (pWrcPlus - 100) / 100;
       const runsPerPa = 0.3994;
-      const replacementRuns = (pa / 600) * 26.2;
+      const replacementRuns = (pa / 600) * 21.22;
       const raa = offValue * pa * runsPerPa;
       const rar = raa + replacementRuns;
       return rar / 13.1;

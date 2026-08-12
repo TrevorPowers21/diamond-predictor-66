@@ -817,7 +817,7 @@ function EquationConstantsTab() {
     owar_wrc_plus_baseline: "100",
     owar_plate_appearances: "260",
     owar_run_value_per_pa: "0.3994",
-    owar_replacement_runs_per_600: "26.2",
+    owar_replacement_runs_per_600: "21.22",
     owar_runs_per_win: "13.1",
     r_ba_class_fs: "3",
     r_ba_class_sj: "2",
@@ -1813,7 +1813,7 @@ function EquationConstantsTab() {
                   <div>• WRC+Baseline (100)</div>
                   <div>• PlateAppearances</div>
                   <div>• Runs/PA (0.3994 = lgwOBA/wOBAscale)</div>
-                  <div>• ReplacementRuns/600PA (26.2 = 2.0 wins × RPW)</div>
+                  <div>• ReplacementRuns/600PA (21.22 = 1.62 wins × RPW; .380 win% anchor)</div>
                   <div>• Runs/Win (13.1)</div>
                   <div>• DERIVED (league physics) — displayed for reference; the live values are the war.ts / edge-fn constants (C1, 2026-08-10)</div>
                 </div>
@@ -1975,21 +1975,21 @@ function AdminPowerRatingsTab() {
     iso_pull_pct_std_dev: "8.03",
     iso_la_10_30_std_dev: "6.81",
     iso_gb_pct_std_dev: "8.0",
-    ba_contact_pct_weight: "0.40",
-    ba_line_drive_pct_weight: "0.25",
-    ba_avg_exit_velocity_weight: "0.20",
+    ba_contact_pct_weight: "0.35",
+    ba_line_drive_pct_weight: "0.20",
+    ba_avg_exit_velocity_weight: "0.30",
     ba_pop_up_pct_weight: "0.15",
-    obp_contact_pct_weight: "0.35",
-    obp_line_drive_pct_weight: "0.20",
+    obp_contact_pct_weight: "0.20",
+    obp_line_drive_pct_weight: "0.10",
     obp_avg_exit_velocity_weight: "0.15",
     obp_pop_up_pct_weight: "0.10",
-    obp_walk_pct_weight: "0.15",
+    obp_walk_pct_weight: "0.40",
     obp_chase_pct_weight: "0.05",
-    iso_barrel_pct_weight: "0.45",
-    iso_ev90_weight: "0.30",
-    iso_pull_pct_weight: "0.15",
-    iso_la_10_30_weight: "0.05",
-    iso_gb_pct_weight: "0.05",
+    iso_barrel_pct_weight: "0.30",
+    iso_ev90_weight: "0.35",
+    iso_pull_air_pct_weight: "0.10",
+    iso_la_10_30_weight: "0",
+    iso_gb_pct_weight: "0.25",
     overall_avg_exit_velocity_weight: "0.35",
     overall_barrel_pct_weight: "0.15",
     overall_contact_pct_weight: "0.30",
@@ -2010,7 +2010,7 @@ function AdminPowerRatingsTab() {
       merged.obp_ncaa_avg_power_rating = defaultEditableValues.obp_ncaa_avg_power_rating;
       merged.iso_barrel_pct_weight = defaultEditableValues.iso_barrel_pct_weight;
       merged.iso_ev90_weight = defaultEditableValues.iso_ev90_weight;
-      merged.iso_pull_pct_weight = defaultEditableValues.iso_pull_pct_weight;
+      merged.iso_pull_air_pct_weight = defaultEditableValues.iso_pull_air_pct_weight;
       merged.iso_la_10_30_weight = defaultEditableValues.iso_la_10_30_weight;
       merged.iso_gb_pct_weight = defaultEditableValues.iso_gb_pct_weight;
       merged.iso_ncaa_avg_power_rating = defaultEditableValues.iso_ncaa_avg_power_rating;
@@ -2089,21 +2089,20 @@ function AdminPowerRatingsTab() {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
   };
-  const baContactWeight = safeNumber(editableValues.ba_contact_pct_weight, 0.4);
-  const baLineDriveWeight = safeNumber(editableValues.ba_line_drive_pct_weight, 0.25);
-  const baAvgEVWeight = safeNumber(editableValues.ba_avg_exit_velocity_weight, 0.2);
+  const baContactWeight = safeNumber(editableValues.ba_contact_pct_weight, 0.35);
+  const baLineDriveWeight = safeNumber(editableValues.ba_line_drive_pct_weight, 0.20);
+  const baAvgEVWeight = safeNumber(editableValues.ba_avg_exit_velocity_weight, 0.30);
   const baPopUpWeight = safeNumber(editableValues.ba_pop_up_pct_weight, 0.15);
-  const obpContactWeight = safeNumber(editableValues.obp_contact_pct_weight, 0.35);
-  const obpLineDriveWeight = safeNumber(editableValues.obp_line_drive_pct_weight, 0.2);
+  const obpContactWeight = safeNumber(editableValues.obp_contact_pct_weight, 0.20);
+  const obpLineDriveWeight = safeNumber(editableValues.obp_line_drive_pct_weight, 0.10);
   const obpAvgEVWeight = safeNumber(editableValues.obp_avg_exit_velocity_weight, 0.15);
-  const obpPopUpWeight = safeNumber(editableValues.obp_pop_up_pct_weight, 0.1);
-  const obpWalkWeight = safeNumber(editableValues.obp_walk_pct_weight, 0.15);
+  const obpPopUpWeight = safeNumber(editableValues.obp_pop_up_pct_weight, 0.10);
+  const obpWalkWeight = safeNumber(editableValues.obp_walk_pct_weight, 0.40);
   const obpChaseWeight = safeNumber(editableValues.obp_chase_pct_weight, 0.05);
-  const isoBarrelWeight = safeNumber(editableValues.iso_barrel_pct_weight, 0.45);
-  const isoEV90Weight = safeNumber(editableValues.iso_ev90_weight, 0.3);
-  const isoPullWeight = safeNumber(editableValues.iso_pull_pct_weight, 0.15);
-  const isoLA1030Weight = safeNumber(editableValues.iso_la_10_30_weight, 0.05);
-  const isoGBWeight = safeNumber(editableValues.iso_gb_pct_weight, 0.05);
+  const isoBarrelWeight = safeNumber(editableValues.iso_barrel_pct_weight, 0.30);
+  const isoEV90Weight = safeNumber(editableValues.iso_ev90_weight, 0.35);
+  const isoPullAirWeight = safeNumber(editableValues.iso_pull_air_pct_weight, 0.10);
+  const isoGBWeight = safeNumber(editableValues.iso_gb_pct_weight, 0.25);
 
   return (
     <div className="space-y-4">
@@ -2188,7 +2187,7 @@ function AdminPowerRatingsTab() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
-            <div><span className="text-muted-foreground">ISOPowerRating =</span> ({isoBarrelWeight.toFixed(2)} × BarrelScore) + ({isoEV90Weight.toFixed(2)} × EV90Score) + ({isoPullWeight.toFixed(2)} × Pull%Score) + ({isoLA1030Weight.toFixed(2)} × LA10-30Score) + ({isoGBWeight.toFixed(2)} × GB%Score)</div>
+            <div><span className="text-muted-foreground">ISOPowerRating =</span> ({isoBarrelWeight.toFixed(2)} × BarrelScore) + ({isoEV90Weight.toFixed(2)} × EV90Score) + ({isoPullAirWeight.toFixed(2)} × PullAir%Score) + ({isoGBWeight.toFixed(2)} × GB%Score)</div>
             <div className="mt-2"><span className="text-muted-foreground">ISOPowerRating+ =</span> (ISOPowerRating / NCAAAverageISOPowerRating(50)) / 100</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
@@ -2197,8 +2196,7 @@ function AdminPowerRatingsTab() {
               <div className="ml-2 space-y-0.5">
                 <div>• Barrel %</div>
                 <div>• EV90</div>
-                <div>• Pull %</div>
-                <div>• LA10-30</div>
+                <div>• Pull Air %</div>
                 <div>• GB %</div>
               </div>
             </div>
@@ -2208,8 +2206,7 @@ function AdminPowerRatingsTab() {
                 {editableField("pr_iso", "iso_ncaa_avg_power_rating", "NCAA Average ISO Power Rating")}
                 {editableField("pr_iso", "iso_barrel_pct_weight", "Barrel % Weight")}
                 {editableField("pr_iso", "iso_ev90_weight", "EV90 Weight")}
-                {editableField("pr_iso", "iso_pull_pct_weight", "Pull % Weight")}
-                {editableField("pr_iso", "iso_la_10_30_weight", "LA10-30 Weight")}
+                {editableField("pr_iso", "iso_pull_air_pct_weight", "Pull Air % Weight")}
                 {editableField("pr_iso", "iso_gb_pct_weight", "GB % Weight")}
               </div>
             </div>
@@ -2382,12 +2379,13 @@ function PitchingPowerRatingsTab() {
     p_fip_hr9_power_rating_plus_weight: "0.45",
     p_fip_bb9_power_rating_plus_weight: "0.30",
     p_fip_k9_power_rating_plus_weight: "0.25",
-    p_whip_bb_pct_weight: "0.25",
-    p_whip_ld_pct_weight: "0.20",
-    p_whip_avg_ev_weight: "0.15",
-    p_whip_whiff_pct_weight: "0.25",
-    p_whip_gb_pct_weight: "0.10",
-    p_whip_chase_pct_weight: "0.05",
+    p_whip_bb_pct_weight: "0.30",
+    p_whip_whiff_pct_weight: "0.45",
+    p_whip_stuff_plus_weight: "0.25",
+    p_whip_ld_pct_weight: "0",
+    p_whip_avg_ev_weight: "0",
+    p_whip_gb_pct_weight: "0",
+    p_whip_chase_pct_weight: "0",
     p_k9_whiff_pct_weight: "0.35",
     p_k9_stuff_plus_weight: "0.30",
     p_k9_in_zone_whiff_pct_weight: "0.25",
@@ -2395,11 +2393,12 @@ function PitchingPowerRatingsTab() {
     p_bb9_bb_pct_weight: "0.55",
     p_bb9_in_zone_pct_weight: "0.30",
     p_bb9_chase_pct_weight: "0.15",
-    p_hr9_barrel_pct_weight: "0.32",
-    p_hr9_ev90_weight: "0.24",
-    p_hr9_gb_pct_weight: "0.18",
-    p_hr9_pull_pct_weight: "0.14",
-    p_hr9_la_10_30_pct_weight: "0.12",
+    p_hr9_barrel_pct_weight: "0.15",
+    p_hr9_hh_pct_weight: "0.30",
+    p_hr9_gb_pct_weight: "0.30",
+    p_hr9_pull_pct_weight: "0.25",
+    p_hr9_ev90_weight: "0",
+    p_hr9_la_10_30_pct_weight: "0",
     p_ncaa_avg_stuff_plus: "100",
     p_ncaa_avg_whiff_pct: "22.9",
     p_ncaa_avg_bb_pct: "11.3",
@@ -2495,16 +2494,9 @@ function PitchingPowerRatingsTab() {
     return () => window.clearTimeout(timeout);
   }, [editableValues]);
 
-  useEffect(() => {
-    // Locked constant: keep WHIP Chase% weight fixed at 5%.
-    if (editableValues.p_whip_chase_pct_weight !== "0.05") {
-      setEditableValues((prev) => ({ ...prev, p_whip_chase_pct_weight: "0.05" }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // (WHIP Chase% force-lock removed 2026-08-11 — whip⁺ refit dropped chase; weight is now 0.)
 
   const setEditable = (key: string, value: string) => {
-    if (key === "p_whip_chase_pct_weight") return;
     setEditableValues((prev) => ({ ...prev, [key]: value }));
   };
   const sectionHeadingClass = "text-[11px] uppercase tracking-wide font-semibold text-foreground";
@@ -2558,12 +2550,9 @@ function PitchingPowerRatingsTab() {
   const fipHr9Weight = toNumber(editableValues.p_fip_hr9_power_rating_plus_weight, 0.45);
   const fipBb9Weight = toNumber(editableValues.p_fip_bb9_power_rating_plus_weight, 0.30);
   const fipK9Weight = toNumber(editableValues.p_fip_k9_power_rating_plus_weight, 0.25);
-  const whipBbWeight = toNumber(editableValues.p_whip_bb_pct_weight, 0.25);
-  const whipLdWeight = toNumber(editableValues.p_whip_ld_pct_weight, 0.20);
-  const whipAvgEvWeight = toNumber(editableValues.p_whip_avg_ev_weight, 0.15);
-  const whipWhiffWeight = toNumber(editableValues.p_whip_whiff_pct_weight, 0.25);
-  const whipGbWeight = toNumber(editableValues.p_whip_gb_pct_weight, 0.10);
-  const whipChaseWeight = 0.05;
+  const whipBbWeight = toNumber(editableValues.p_whip_bb_pct_weight, 0.30);
+  const whipWhiffWeight = toNumber(editableValues.p_whip_whiff_pct_weight, 0.45);
+  const whipStuffWeight = toNumber(editableValues.p_whip_stuff_plus_weight, 0.25);
   const k9WhiffWeight = toNumber(editableValues.p_k9_whiff_pct_weight, 0.35);
   const k9StuffWeight = toNumber(editableValues.p_k9_stuff_plus_weight, 0.30);
   const k9InZoneWhiffWeight = toNumber(editableValues.p_k9_in_zone_whiff_pct_weight, 0.25);
@@ -2571,11 +2560,10 @@ function PitchingPowerRatingsTab() {
   const bb9BbWeight = toNumber(editableValues.p_bb9_bb_pct_weight, 0.55);
   const bb9InZoneWeight = toNumber(editableValues.p_bb9_in_zone_pct_weight, 0.30);
   const bb9ChaseWeight = toNumber(editableValues.p_bb9_chase_pct_weight, 0.15);
-  const hr9BarrelWeight = toNumber(editableValues.p_hr9_barrel_pct_weight, 0.32);
-  const hr9Ev90Weight = toNumber(editableValues.p_hr9_ev90_weight, 0.24);
-  const hr9GbWeight = toNumber(editableValues.p_hr9_gb_pct_weight, 0.18);
-  const hr9PullWeight = toNumber(editableValues.p_hr9_pull_pct_weight, 0.14);
-  const hr9LaWeight = toNumber(editableValues.p_hr9_la_10_30_pct_weight, 0.12);
+  const hr9BarrelWeight = toNumber(editableValues.p_hr9_barrel_pct_weight, 0.15);
+  const hr9HhWeight = toNumber(editableValues.p_hr9_hh_pct_weight, 0.30);
+  const hr9GbWeight = toNumber(editableValues.p_hr9_gb_pct_weight, 0.30);
+  const hr9PullWeight = toNumber(editableValues.p_hr9_pull_pct_weight, 0.25);
   const eraPowerRatingAvg = toNumber(editableValues.p_era_ncaa_avg_power_rating, 50);
   const whipPowerRatingAvg = toNumber(editableValues.p_ncaa_avg_whip_power_rating, 50);
   const k9PowerRatingAvg = toNumber(editableValues.p_ncaa_avg_k9_power_rating, 50);
@@ -2675,7 +2663,7 @@ function PitchingPowerRatingsTab() {
           <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
             <div className="whitespace-nowrap text-[13px] leading-tight">
               <span className="text-muted-foreground">WHIP Power Rating =</span>{" "}
-              ({whipBbWeight.toFixed(2)} * BB%Score) + ({whipLdWeight.toFixed(2)} * LineDrive%Score) + ({whipAvgEvWeight.toFixed(2)} * AvgEVScore) + ({whipWhiffWeight.toFixed(2)} * Whiff%Score) + ({whipGbWeight.toFixed(2)} * GB%Score) + ({whipChaseWeight.toFixed(2)} * Chase%Score)
+              ({whipBbWeight.toFixed(2)} * BB%Score) + ({whipWhiffWeight.toFixed(2)} * Whiff%Score) + ({whipStuffWeight.toFixed(2)} * Stuff+Score)
             </div>
             <div className="mt-2">
               <span className="text-muted-foreground">WHIP Power Rating+ =</span>{" "}
@@ -2699,10 +2687,8 @@ function PitchingPowerRatingsTab() {
               <div className="space-y-1.5">
                 {editableField("p_pr_whip", "p_ncaa_avg_whip_power_rating", "NCAA Average WHIP Power Rating")}
                 {editableField("p_pr_whip", "p_whip_bb_pct_weight", "BB% Weight")}
-                {editableField("p_pr_whip", "p_whip_ld_pct_weight", "LineDrive% Weight")}
-                {editableField("p_pr_whip", "p_whip_avg_ev_weight", "AvgEV Weight")}
                 {editableField("p_pr_whip", "p_whip_whiff_pct_weight", "Whiff% Weight")}
-                {editableField("p_pr_whip", "p_whip_gb_pct_weight", "GB% Weight")}
+                {editableField("p_pr_whip", "p_whip_stuff_plus_weight", "Stuff+ Weight")}
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-muted-foreground">Chase% Weight (Locked)</p>
                   <Input
@@ -2801,7 +2787,7 @@ function PitchingPowerRatingsTab() {
           <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
             <div className="whitespace-nowrap text-[13px] leading-tight">
               <span className="text-muted-foreground">HR/9 Power Rating =</span>{" "}
-              ({hr9BarrelWeight.toFixed(2)} * Barrel%Score) + ({hr9Ev90Weight.toFixed(2)} * EV90Score) + ({hr9GbWeight.toFixed(2)} * GB%Score) + ({hr9PullWeight.toFixed(2)} * Pull%Score) + ({hr9LaWeight.toFixed(2)} * LA 10-30%Score)
+              ({hr9BarrelWeight.toFixed(2)} * Barrel%Score) + ({hr9HhWeight.toFixed(2)} * HardHit%Score) + ({hr9GbWeight.toFixed(2)} * GB%Score) + ({hr9PullWeight.toFixed(2)} * Pull%Score)
             </div>
             <div className="mt-2">
               <span className="text-muted-foreground">HR/9 Power Rating+ =</span>{" "}
@@ -2824,10 +2810,9 @@ function PitchingPowerRatingsTab() {
               <div className="space-y-1.5">
                 {editableField("p_pr_hr9", "p_ncaa_avg_hr9_power_rating", "NCAA Average HR/9 Power Rating")}
                 {editableField("p_pr_hr9", "p_hr9_barrel_pct_weight", "Barrel% Weight")}
-                {editableField("p_pr_hr9", "p_hr9_ev90_weight", "EV90 Weight")}
+                {editableField("p_pr_hr9", "p_hr9_hh_pct_weight", "HardHit% Weight")}
                 {editableField("p_pr_hr9", "p_hr9_gb_pct_weight", "GB% Weight")}
                 {editableField("p_pr_hr9", "p_hr9_pull_pct_weight", "Pull% Weight")}
-                {editableField("p_pr_hr9", "p_hr9_la_10_30_pct_weight", "LA 10-30% Weight")}
               </div>
             </div>
           </div>

@@ -34,10 +34,11 @@ def charge_lead(n, resp, pres, er, cur):
         er[cur] = er.get(cur, 0) + 1; n -= 1; c += 1
     return c
 
-def process_half_inning(pas, er):
+def process_half_inning(pas, er, runs=None):
     """pas = [(pitcherId, ev_or_None, occ_names{1,2,3}, N)] in pitch order. N = score-delta runs on that pitch.
     Base-slot occupancy tracking (name-agnostic; courtesy runners keep the slot's pitcher). Returns
-    (charged, unearned, runs_seen)."""
+    (charged, unearned, runs_seen). If `runs` (a dict) is passed, ALSO tallies TOTAL runs (earned +
+    unearned) per responsible pitcher — same inherited-runner attribution, no unearned strip (for reg_R)."""
     resp = {1: None, 2: None, 3: None}
     taint = {1: False, 2: False, 3: False}       # runner reached/advanced via an error (rule 2 → unearned)
     recon_outs = 0                               # reconstructed outs (actual + error phantom); ≥3 → rule 3
@@ -47,10 +48,11 @@ def process_half_inning(pas, er):
         """Charge one run from base slot b to responsible pitcher rp; earned unless tainted / inning dead / tag."""
         nonlocal charged, unearned, runs_seen
         runs_seen += 1
+        pid = rp if rp is not None else cur
+        if runs is not None: runs[pid] = runs.get(pid, 0) + 1   # total R (earned+unearned), same attribution
         if forced_unearned or taint.get(b, False) or recon_outs >= 3:
             unearned += 1
         else:
-            pid = rp if rp is not None else cur
             er[pid] = er.get(pid, 0) + 1; charged += 1
 
     for cur, ev, occ, N in pas:
