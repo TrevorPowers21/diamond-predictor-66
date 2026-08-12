@@ -21,7 +21,13 @@ Companions: `WAR_HANDOFF.md` (full modeling state), `INTERNALS_COLLAPSE_HANDOFF.
 
 ## 1. COMPLETE internals surface (re-audit — the 6-site audit was partial)
 
-Everything that still touches `player_prediction_internals`. **All must be gone before `DROP`.**
+Everything that touches `player_prediction_internals`. **All must be gone before `DROP`.**
+
+> **STATUS 2026-08-12 — reads DONE.** All live readers repointed to the Master (backfill, edge fn,
+> precompute-transfers) and all dead readers deleted (Sweeps A/B: CompareTab, recalcById+fetchPitcherContext,
+> PlayerProfile query, TB-sim read). Writer stripped from createPredictionsFromMaster. **Only remaining refs:
+> `bulkRecalculatePredictionsLocal` (retire-staged) + `import-internal-ratings` (writer)** — Track B, then DROP.
+> Method + reachability lessons: `docs/AGENT_LEARNINGS_internals_collapse_2026_08_12.md`.
 
 | # | Site | Kind | Status / action |
 |---|---|---|---|

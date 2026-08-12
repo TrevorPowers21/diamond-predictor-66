@@ -81,8 +81,23 @@ Full evidence in agent report; summary:
 - **Investigation finding (no store bug):** the 981 Master rows with null PR = 829 JUCO (excluded by design) + 152
   D1 without tracking inputs (correct null). Fed the [[project_division_table_separation]] proposal.
 
-**Remaining before DROP (Track B):** neuter the 3 DEAD app-side reads (recalcById/CompareTab/TB-sim) + retire
-`bulkRecalc` + `import-internal-ratings` edge fn, then `DROP TABLE player_prediction_internals`. Table stays until then.
+**DEAD-CODE SWEEPS A+B DONE (2026-08-12, committed `3a0f428` / `54cdb10` / `cecedee`):**
+- Sweep A — deleted superseded `CompareTab.tsx` (old dead code; the REAL compare is the routed, stored-first
+  `PlayerComparison.tsx` at `/dashboard/compare`, reads `player_predictions` directly) + the orphaned `PlayerProfile`
+  internals query.
+- Sweep B — deleted `recalculatePredictionById` + `fetchPitcherContext` (retired interactive recompute path; all
+  callers detached) and cleared the `TB-sim` internals read (fed the void'd `simulateTransferProjection`). KEPT the
+  shared `recalcReturner/recalcTransfer/recalcPitcher` (live via backfill + retire-staged bulkRecalc).
+- Each verified: 0 refs to the deleted fns; tsc error count == baseline (no new errors); 247 tests pass.
+
+**COMPLETE re-audit finding:** the original 6-site audit was PARTIAL. Full surface catalogued in
+`docs/WAR_COLLAPSE_NEXT_STEPS.md §1`; the broader audit found the site list but OVER-CALLED reachability (flagged
+detached interactive paths as live — re-verified each by tracing to rendered JSX). Live-reader miss it caught:
+`precompute-transfer-projections.ts` (npm `precompute-transfers`, JUCO/legacy-D1 batch) — now repointed (`584dd4c`).
+
+**ONLY remaining internals references (Track B, before DROP):** `bulkRecalculatePredictionsLocal` (predictionEngine,
+retire-staged read+write) + `import-internal-ratings` CSV writer. Retire those, then
+`DROP TABLE player_prediction_internals` + regen types. Table sits inert until then — nothing coach-facing touches it.
 
 ## 3. The plan (phased)
 
