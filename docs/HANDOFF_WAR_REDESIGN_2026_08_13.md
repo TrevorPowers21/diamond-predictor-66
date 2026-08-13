@@ -75,7 +75,10 @@ never-delete" pattern at the process level, across THREE axes (hitter/pitcher, C
 | TB live toggle recomputes rates+WAR+market live both sides, snapshot on save; check for old code | 2 | verify active/dead |
 | TWP: ONLY add total_hitter_war + redirect oWAR→total; don't overcomplicate | 2 | pending |
 | Confirm conference Stuff+ accuracy + how derived from pitch logs | 3 | ✅ DONE — derivation sound, DB clean; canonical conf Stuff+ = pitch-weighted V2, retire V1 |
-| HTP pick-apart: isolate hitter talent from run-environment / weak pitching | 3 | ✅ DONE — sound + sniff-test-valid; DECISION: flip `100−wRC+` term → conf-avg PARK FACTOR (isolates env from OPR talent); Independent=OSU-schedule case; OPR-context flagged. Detail: TRANSFER_ENGINE_AUDIT §Bucket 3 |
+| HTP pick-apart: isolate hitter talent from run-environment / weak pitching | 3 | ✅ DONE — sound + sniff-test-valid; `100−wRC+` → conf-avg PARK FACTOR **MODELED+VALIDATED** (all 30 confs; Ivy/Patriot/BigEast/MAAC over-boost fixed, top stable). Detail: TRANSFER_ENGINE_AUDIT §Bucket 3 |
+| Store conf aggregates (Stuff+, park factor, HTP, OPR) in `Conference Stats` + make it part of the UPLOAD | 3/TrackB | pending — add `wrc_park_factor`+HTP+OPR cols; calc+insert on upload (unified pipeline) |
+| Independent = schedule-based opponent HTP/Stuff+ faced (not own HTP) | 3 | future item |
+| Future: resolve "Conference Stats" calc (conf-vs-conf raw stats vs overall OPR/HTP/Stuff+) | future | logged |
 | Role from IP/GS like PA from AB; verify depth-role PA/IP RANGES use regular-season totals | 4 | pending |
 | Defensive depth tiers so d/bsr scale under position/depth toggles (returner AND transfer) | 4 | pending |
 | Edge fn d/bsr→market "UNTESTED" = what we're testing; 1-for-1 into transfer (depth tier) | 1/4 | pending |

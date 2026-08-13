@@ -92,17 +92,32 @@ Stuff+ = above; wRC+ = conf offense (SLG+OBP based).
   right — NOT a data-fit; keep that in mind for any re-weighting.)
 
 **DECISIONS / DIRECTIONS (Trevor 2026-08-13):**
-1. **⭐ wRC+ term (`100−wRC+`) → replace with CONFERENCE-AVERAGE PARK FACTOR.** It was built BEFORE park factors
-   existed — a proxy for run ENVIRONMENT. But raw conf offense conflates environment WITH hitter quality (already in
-   OPR) → the **Ivy double-count**: OPR 96.7 (weak talent) + wRC+ 89.9 → +7.6 boost → HTP 104.7, leapfrogging better
-   leagues. The clean fix: the term should isolate ENVIRONMENT = a conference-average PARK FACTOR (derived via wRC+ =
-   SLG+OBP), so OPR carries talent and park carries environment, no overlap. "Let's think about it" — a direction, not
-   final. (Also open: `1.25`/`0.75` weights are tinker-tuned, not fit.)
-2. **PARK FACTOR = its own future project (SAVE, not now):** we now have per-player park factor across the season
-   (pitch-log venues) storable, plus conference-average park factor. Park factor is a separate review — [[project_park_factor_rework]].
-3. **Independent outlier:** HTP 113.6 (7th) is driven by a single team (Oregon State) with an outlier Stuff+ 110.9. No
-   clean conference-based fix; the real fix = sum the TALENT LEVEL of Oregon State's actual SCHEDULE (schedule-based
-   opponent strength). Discuss/future — no resolution now.
+1. **⭐ wRC+ term (`100−wRC+`) → CONFERENCE-AVERAGE PARK FACTOR — MODELED + VALIDATED (approved direction).** It was
+   built BEFORE park factors — a proxy for run ENVIRONMENT that conflates environment WITH hitter quality (already in
+   OPR) → the Ivy double-count. **Formula (principled):** per team `slg_f = 0.675·avg_f + 0.325·iso_f` (SLG=AVG+ISO by
+   rate share), `wrc_park = 0.72·obp_f + 0.28·slg_f` (est-wOBA weights 0.691·OBP/0.235·SLG normalized at league
+   OBP .355/SLG .400). Use the **COMBINED (both-sides) `avg/obp/iso_factor`**, NOT the lhb/rhb splits (splits are for
+   individual-hitter projection; a conference environment is both-handed). Conference park = simple member average,
+   joined by **`conference_id`** (name-join missed 8 confs; conference_id → 30/30). **Result (2026, all 30 D1 confs):**
+   fixes the weak-hitter over-boost — Ivy 104.7→98.4, Patriot 100→93.7, Big East 104.7→100, MAAC 91.1→87; top power
+   confs barely move (SEC 132→131, ACC 122, Big 12 121, Big Ten 114 — their parks ≈ neutral); bottom stays bottom.
+   Still passes the sniff test, strictly cleaner. Weights `1.25`/`0.75` + `0.72/0.28` are tinker/rate-derived — tunable.
+   MWC (altitude) rises +2.3 and that's FINE (high+low-altitude parks average out — Trevor).
+2. **⭐ STORE IT IN `Conference Stats` + MAKE IT PART OF THE UPLOAD.** Conference Stats is the home for the conference
+   aggregates per conference × season: `Stuff_plus` (already), + ADD `wrc_park_factor`, the `HTP` we actually use, and
+   OPR — all STORED, not recomputed live. **These must CALCULATE + INSERT as part of the data UPLOAD** (the unified
+   pipeline, Track B): when an upload lands, recompute the conference roll-ups (Stuff+, park factor, HTP, OPR) and write
+   them. Today they're scattered one-off scripts (conferenceStuffPlusV2, populate-conference-stats-env-plus) → fold into
+   the upload. Per-player season park factor is also now storable from pitch-log venues. [[project_park_factor_rework]].
+3. **⚠ FUTURE DISCUSSION — how "Conference Stats" are calculated (definitional inconsistency, Trevor):** the raw
+   Conference Stats (AVG/ERA/etc.) are **conference-vs-conference** stats (intra-conference matchups), whereas OPR / HTP
+   / Stuff+ are **overall** aggregates across ALL the conference's players/games. That mismatch needs resolving —
+   decide the ONE definition of a "conference stat." Logged as a future idea, not now.
+4. **Independent — the real fix is SCHEDULE-BASED opponent strength (Trevor).** The park swap makes Independent WORSE
+   (113.6→118.3, rank 4) because it's Oregon State alone in a pitcher-friendly park. **OSU's OWN HTP is irrelevant —
+   they don't face themselves.** The fix = compute the HTP/Stuff+ of the teams OSU **actually FACED** (their schedule).
+   Broader insight: schedule-based "competition faced" is the *correct* form; conference-average is a proxy that works
+   for conference members but breaks for independents. Own item, future.
 4. **Two Stuff+ types are BOTH NEEDED (not a bug to collapse):** (a) individual-pitcher Stuff+, (b) per-conference
    Stuff+. Canonical conference Stuff+ = take **every** pitcher's impact **weighted by their pitch totals** from the
    pitch log (the V2 pitch-weighted method). **Retire V1** (per-pitcher-composite, name-keyed). "Don't care how we get
