@@ -132,6 +132,12 @@ only Track B) — SDs on the qualified subset (PA≥100 / IP≥30), means on all
    games (power ratings are season-long; the 2026-05-18 boundary is only for descriptive-WAR accumulation). If they
    exclude postseason, that's a data-inclusion fix (Trevor: "we intentionally include postseason within the full season").
 5. **Retire dead `scripts/import-pull-air.ts`** — superseded by pitch-log-derived pull_air.
+6. **JUCO FIP is wrong at the source (Trevor, 2026-08-13)** — `jucoReturnerPitcherProjection.ts` passes the stored
+   JUCO FIP through (`from_fip`) but that stored value is miscalculated (different source; e.g. Cole Harris FIP 5.89
+   vs 12.93 ERA), so JUCO pRV+/WAR (D1-FIP index from K9/BB9/HR9) inherit it. **Fix:** recompute FIP from components
+   we have (HR, K, BB, IP). NOT urgent, JUCO-only — fold into the division-separation / JUCO project
+   ([[project_division_table_separation]]). Fix D1 first, finish the redesign, then JUCO separately. (Also verify no
+   D1 FIP is similarly source-miscalculated.)
 
 ---
 
