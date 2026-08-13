@@ -60,17 +60,41 @@ Master repoint) via `supabase functions deploy --project-ref <staging>`, then fi
 (`precompute-players` / `rerun_all_teams_precompute`). Run the transfer A/B (OLD-vs-NEW = 0 on a warm cache, same
 method as returners) to confirm neutrality. JUCO transfers via `juco-precompute-all` (already repointed).
 
-### Step 7 — market value → total WAR + display pass 2 (staging)
-- Repoint market value at **total WAR** (was oWAR). `nil_base_per_owar` stays; the input becomes total_hitter_war.
-- Display swap: `o_war → total_hitter_war` where oWAR is the HEADLINE (hitters); pitchers keep `p_war`. Use
-  `pickHitterWar`/`pickPitcherWar`. Keep raw `o_war` where it's the batting COMPONENT of a breakdown.
-- Surface **descriptive + the gap** (descriptive − projection = buy-low/sell-high) on the player card.
-- Verify TWP 2-profiles/2-lines/2-market-values intact.
-- **⚠ FILL player/transfer snapshots (Trevor, 2026-08-13):** the display pass MUST also refresh
-  `player_snapshot` / `transfer_snapshot` so any TOGGLE updates coaches made (roster_status, class_transition,
-  dev_aggressiveness saved in team-builder snapshots) are caught — otherwise the new WAR numbers render against
-  stale snapshots and a coach's saved changes look lost. Discuss the exact mechanism when we get there (which
-  snapshots, precedence vs the fresh precompute, TWP handling).
+### Step 7 — market value → total WAR + display pass 2 + snapshot fill (staging)
+**Scope decisions LOCKED with Trevor 2026-08-13.**
+
+**7a. Market value → total WAR (formula wiring).**
+- `market_value = f(total_hitter_war) × PVF × PTM × 25,000` — the WAR INPUT becomes **`total_hitter_war` (oWAR +
+  dWAR + bsrWAR)**, not oWAR. `nil_base_per_owar` (25,000) + PVF + PTM (per-conference program tier) unchanged.
+- **Trevor's framing:** market is *moved* only by OFFENSIVE value (oWAR is the destination-varying piece; dWAR +
+  bsrWAR are destination-invariant), BUT that offensive move — combined with d + bsr — is what sets **total WAR**,
+  and **total WAR is the ONLY thing that feeds market value.** So plug `total_hitter_war` into the formula; a
+  transfer's market still moves only via its oWAR delta (d/bsr constant across destinations), but the *input value*
+  is the full total.
+- **Sites to rewire** (everywhere market is computed): `computeHitterMarketValue` callers — returner backfill,
+  `process-precompute-jobs` edge fn, `precompute-transfers` batch, and any interactive market read. Swap the oWAR arg
+  → `total_hitter_war`.
+- **TWP: UNCHANGED — stays SIDE-SPLIT (non-negotiable now).** `twp_hitter_market_value` from the hitter side,
+  `twp_pitcher_market_value` from the pitcher side; shared `market_value` NULL for TWPs. Do NOT fold a TWP into a
+  combined market. A combined-TWP-market may be its own future RESEARCH project — **do not break the split now.**
+
+**7b. Display swap.** `o_war → total_hitter_war` where oWAR is the HEADLINE (hitters); pitchers keep `p_war`. Via
+`pickHitterWar`/`pickPitcherWar` (mirror `pickHitter/PitcherMarketValue`). Keep raw `o_war` only where it's the
+batting COMPONENT of a breakdown. Descriptive + the GAP (descriptive − projection = buy-low/sell-high) on the card.
+
+**7c. Snapshot fill — TOGGLES PERSIST (NON-NEGOTIABLE, Trevor 2026-08-13).** The rule, exactly:
+- **Coach TOGGLES (`class_transition`, `dev_aggressiveness`, `roster_status`) saved in the team-builder snapshots
+  PERSIST — they are NEVER overwritten by a re-precompute. Non-negotiable.**
+- What CHANGES is the saved player **PROJECTIONS** (the fresh WAR numbers). The mechanism is a **RECOMPUTE, not a
+  freeze and not a discard:** take the fresh precompute → apply the coach's PERSISTED toggles on top → save the
+  resulting values into `player_snapshot` / `transfer_snapshot`. Those snapshot values are the ACTUAL numbers that
+  display on **Team Builder + Player Profile** — i.e. the coach's toggle changes applied over the fresh projection.
+- So the fill flow per saved build: fresh `player_predictions` (Step 6) → for each snapshot, re-apply that snapshot's
+  persisted toggle inputs to the fresh baseline → write the recomputed display values back to the snapshot. Toggles
+  in = unchanged; values out = fresh-numbers-with-those-toggles. Never null/reset a toggle; never show the raw
+  precompute where a coach saved an override — show the override-on-fresh.
+
+**7d. Verify** TWP 2-profiles / 2-lines / 2-market-values intact after the market swap.
 
 ### Step 8 — PROD replay (on explicit "prod, now?")
 Staging fully verified first. One event carries everything to prod:

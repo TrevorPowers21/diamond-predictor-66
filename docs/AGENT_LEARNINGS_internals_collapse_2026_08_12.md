@@ -177,3 +177,28 @@ re-precomputed, deterministic, and consistent. Several durable lessons + a list 
 5. **Market → total WAR (Step 7)** — the formula shape stays `WAR×PVF×PTM×25,000`; swap the WAR input oWAR→total WAR.
    Design note: Teams Table is intentionally per-Season (program id + per-season team id + per-season `conference_id`
    for realignment, e.g. Delaware CAA 2025 → CUSA 2026) — respect the Season model in any market/conference rework.
+
+## STEP 7 LOGIC — market→total WAR + snapshot fill (Trevor decisions 2026-08-13, → projections-and-scouting) — save exactly
+
+- **Market rides `total_hitter_war`, and total WAR is the ONLY input to market.** `market_value = f(total_hitter_war)
+  × PVF × PTM × 25,000`, total_hitter_war = oWAR + dWAR + bsrWAR. The subtle part (Trevor's words): market is *moved*
+  only by OFFENSIVE value — oWAR is the destination-varying piece; dWAR + bsrWAR are destination-INVARIANT — but that
+  offensive move combined with d+bsr is what sets total WAR, and **total WAR is the only thing that feeds market.** So
+  wire `total_hitter_war` into the formula (not oWAR); a transfer's market still moves only through its oWAR delta
+  (d/bsr constant across destinations). Rewire every `computeHitterMarketValue` caller (returner backfill, edge fn,
+  transfer batch). *Protects against:* wiring market off oWAR (undercounts glove/legs) or off a per-destination d/bsr
+  (they don't move by destination).
+- **TWP market stays SIDE-SPLIT — non-negotiable now.** `twp_hitter_market_value` + `twp_pitcher_market_value`;
+  shared `market_value` NULL for TWPs. Do NOT fold a TWP into a combined market (may be a future research project).
+  *Protects against:* breaking the TWP 2-profiles/2-lines/2-market-values model while rewiring market.
+- **⭐ SNAPSHOT FILL — TOGGLES PERSIST, VALUES RECOMPUTE (NON-NEGOTIABLE).** When projections are re-precomputed, the
+  coach TOGGLES saved in the team-builder snapshots (`class_transition`, `dev_aggressiveness`, `roster_status`) are
+  NEVER overwritten — they persist. What changes is the saved player PROJECTIONS. The fill is a **recompute, not a
+  freeze and not a discard:** fresh precompute → apply the coach's PERSISTED toggles on top → write the result into
+  `player_snapshot`/`transfer_snapshot` (the ACTUAL values shown on Team Builder + Player Profile). So a coach who set
+  `dev_aggressiveness=1` on a player keeps that toggle, and the snapshot shows the fresh WAR *computed with* that
+  toggle — the coach's change layered on the new numbers. Never null/reset a toggle; never render the raw precompute
+  where a coach saved an override. *Protects against:* a re-precompute silently wiping a coach's saved roster/toggle
+  decisions (they'd look lost) OR freezing stale numbers under a saved toggle (they'd never see the WAR update).
+  Ties to the `production_notes` "sacred" rule ([[project_recruit_ids_scouting_status]] / eligibility runbook —
+  `production_notes` holds the serialized toggle state; carry it through every recompute untouched).
