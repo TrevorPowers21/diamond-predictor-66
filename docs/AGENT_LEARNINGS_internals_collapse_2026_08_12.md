@@ -202,3 +202,20 @@ re-precomputed, deterministic, and consistent. Several durable lessons + a list 
   decisions (they'd look lost) OR freezing stale numbers under a saved toggle (they'd never see the WAR update).
   Ties to the `production_notes` "sacred" rule ([[project_recruit_ids_scouting_status]] / eligibility runbook —
   `production_notes` holds the serialized toggle state; carry it through every recompute untouched).
+
+## 7a BUILT — market → total WAR + the ratio-verification method (2026-08-13, → projections-and-scouting + review-and-parity)
+
+- **Implementation (all precompute paths):** each site already computes offensive `oWar`; the fix loads `d_war` +
+  `bsr_war` from the Hitter Master by `source_player_id` (destination-invariant — SAME values `refresh_composite_war`
+  sums into `total_hitter_war`) and feeds `computeHitterMarketValue(oWar + dWar + bsrWar, …)`; null oWar → null market.
+  Sites: returner backfill (`74905fc`, VERIFIED), edge fn + transfer batch (`8bf4677`, untested-until-transfer-deploy),
+  JUCO unchanged (null d/bsr → total=oWAR), TWP side-split untouched. *Protects against:* wiring market off the wrong
+  WAR (oWAR undercounts glove/legs) or off a per-destination d/bsr (they're invariant — read from the Master once).
+- **⭐ Verify a linear transform by the RATIO, not the delta.** Market is linear in WAR (`WAR × PVF × PTM × 25k`,
+  `Math.max(0,·)`), so the clean correctness test for "market now rides total WAR" is `mv_after / mv_before ==
+  total_WAR / oWAR` per player — it cancels PVF/PTM/nil entirely, so a match proves the ONLY change was the WAR input.
+  Got 8/8 exact (Helfrick 2.013=2.013, his elite-D catcher WAR doubling → NIL doubling). *Protects against:* eyeballing
+  raw $ deltas (noisy, conflates PVF/PTM) — the ratio isolates the one thing that changed. General rule: to verify a
+  single-input swap through a linear/multiplicative function, check the output RATIO equals the input ratio.
+- **Run ALL precompute paths as a SET when a shared input changes.** oWAR→total touched returner + transfer +
+  edge fn; a partial rollout leaves market inconsistent across paths. (Same "keep hitter+pitcher in lockstep" family.)

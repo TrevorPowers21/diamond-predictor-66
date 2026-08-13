@@ -21,11 +21,23 @@ So `total_hitter_war` is already populated + correct on returner rows — 7a can
 
 ---
 
-## 7a — Market value → total WAR (the input swap)
+## 7a — Market value → total WAR (the input swap) — ✅ DONE (precompute side, 2026-08-13)
 
-**Change:** `computeHitterMarketValue(oWar, {conference, position})` → feed **`total_hitter_war` (o+d+bsr)** instead of
-`oWar`. `computeHitterMarketValue` (`src/lib/depthRoles.ts:314`) itself is unchanged (`WAR × PVF × PTM × 25,000`,
-`Math.max(0,·)`); only the WAR ARG changes.
+**BUILT (commits `74905fc` returner + `8bf4677` transfer):** each precompute site now loads `d_war, bsr_war` from the
+Hitter Master (destination-invariant; same values `refresh_composite_war` sums into `total_hitter_war`) and feeds
+`computeHitterMarketValue(oWar + dWar + bsrWar, …)`. Pattern per site: `const dWar = master?.d_war ?? 0; const bsrWar
+= master?.bsr_war ?? 0; const total = oWar!=null ? oWar+dWar+bsrWar : null; market = total!=null ? f(total,…) : null`.
+- **Returner backfill:** DONE + VERIFIED on staging — `mv_after/mv_before == total/oWAR` EXACTLY for all movers
+  (Helfrick oWAR 2.53 + d 2.49 → total 5.09, $123k→$248k, ratio 2.013=2.013; Fawley 2.395 ✓; 8/8 ✓). 3,402 hitters
+  moved (1,852 up good-glove/legs, 1,550 down poor D); o_war unchanged. **Verification method: ratio check
+  mv_after/mv_before == total/oWAR** (market is linear in WAR, so the ratio is the clean correctness test).
+- **Edge fn (D1 transfers) + transfer batch:** code-complete, **UNTESTED** (transfers paused) — ride the Step-6b
+  transfer deploy for warm-cache A/B. JUCO: null d/bsr → total=oWAR, unchanged. TWP: side-split untouched.
+- **NOT done in 7a:** PlayerProfile `:985` live-computes market for DISPLAY → that's 7b (read the stored total-WAR
+  market, don't recompute from oWAR).
+
+**Change (reference):** `computeHitterMarketValue(oWar, {conference, position})` → feed **`total_hitter_war` (o+d+bsr)**.
+`computeHitterMarketValue` (`src/lib/depthRoles.ts:314`) unchanged (`WAR × PVF × PTM × 25,000`, `Math.max(0,·)`).
 
 **Wiring decision (recommend the centralized option):**
 - d_war + bsr_war are DESTINATION-INVARIANT (on the Master by `source_player_id` / `player_season_defense` +
@@ -116,7 +128,12 @@ Then Step 8 (prod replay via `STEP8_PROD_MIGRATION_LEDGER.md`) folds 7a/7b/7c co
 ## STATUS TABLE (update as built)
 | piece | status |
 |---|---|
-| 7a market → total WAR | ⏳ not started |
-| 7b display swap + pick helpers + descriptive/gap | ⏳ not started |
+| 7a market → total WAR | ✅ DONE — returner VERIFIED (`74905fc`); transfer code-ready/untested (`8bf4677`) |
+| 7b display swap + pick helpers + descriptive/gap | ⏳ not started — NEXT |
 | 7c snapshot fill (toggles persist) | ⏳ not started — design Qs open |
 | 7d TWP verify | ⏳ not started |
+
+**NEXT: run a consistency check** (Step 6 + 7a) before 7b — confirm on staging that for returner hitters
+`market_value == f(total_hitter_war)` and `total_hitter_war == o_war + d_war + bsr_war` line up end-to-end, TWP
+side-split intact, and the team_war_snapshots still reconcile. Then start 7b (`pickHitterWar`/`pickPitcherWar` +
+the 6 display choke points from `project_war_display_audit`).
