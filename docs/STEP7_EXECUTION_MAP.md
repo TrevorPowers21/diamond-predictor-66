@@ -133,7 +133,19 @@ Then Step 8 (prod replay via `STEP8_PROD_MIGRATION_LEDGER.md`) folds 7a/7b/7c co
 | 7c snapshot fill (toggles persist) | ⏳ not started — design Qs open |
 | 7d TWP verify | ⏳ not started |
 
-**NEXT: run a consistency check** (Step 6 + 7a) before 7b — confirm on staging that for returner hitters
+## ⚠ ORDERING GUARD — re-fire `refresh_composite_war()` after ANY `o_war` re-precompute (7a)
+7a's market re-precompute **rewrites `o_war`**. `total_hitter_war` is a stored column = `o_war + d_war/13.1 +
+bsr_war/13.1`, frozen the last time `refresh_composite_war()` ran. So a re-precompute of `o_war` that is NOT followed
+by `refresh_composite_war()` leaves `total_hitter_war` stale (market is fine — it's computed from the fresh `o_war`
+inline). **Rule: `o_war` re-precompute → ALWAYS `select refresh_composite_war();` right after.** This matches the prod
+ledger order (`STEP8_PROD_MIGRATION_LEDGER.md`: G re-precompute → **F2** fire), so prod is already safe if run in
+order. Staging hit 37 stale-`total` rows because Step 6 fired the refresh, THEN 7a rewrote `o_war` — order inverted.
+Consistency check (2026-08-13) confirmed: market rides total **0/8,235 inconsistent**, TWP split intact, **37/8,235**
+stale `total_hitter_war` (all `o_war` moved by the 7a re-precompute; Δ = o_war_at_refresh − o_war_now, analytically).
+Resync = `select refresh_composite_war();` (idempotent + `IS DISTINCT FROM` guard → touches only the 37).
+
+**NEXT: (1) resync `refresh_composite_war()`, re-verify 0 mismatches; then start 7b.** Prior note — run a consistency
+check (Step 6 + 7a) before 7b — confirm on staging that for returner hitters
 `market_value == f(total_hitter_war)` and `total_hitter_war == o_war + d_war + bsr_war` line up end-to-end, TWP
 side-split intact, and the team_war_snapshots still reconcile. Then start 7b (`pickHitterWar`/`pickPitcherWar` +
 the 6 display choke points from `project_war_display_audit`).
