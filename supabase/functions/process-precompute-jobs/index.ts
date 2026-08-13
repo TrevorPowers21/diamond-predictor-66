@@ -1106,7 +1106,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const chunk = hitterSourceIds.slice(i, i + PRED_ID_BATCH);
     const r = await loadAllPaged(() =>
       supabase.from("Hitter Master")
-        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating")
+        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war")
         .eq("Season", CURRENT_SEASON).in("source_player_id", chunk));
     masterPRRows.push(...r);
   }
@@ -1164,7 +1164,13 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const hitterDepthRole = defaultHitterDepthRoleFromActualPa((p as any).pa ?? null);
     const projectedPa = paForHitterDepthRole(hitterDepthRole);
     const oWar = computeHitterOWar(final.pWrcPlus, hitterDepthRole);
-    const marketValue = computeHitterMarketValue(oWar, toConference, p.position);
+    // STEP 7 (2026-08-13): market rides TOTAL hitter WAR (oWAR + dWAR + bsrWAR), not oWAR alone.
+    // dWAR/bsrWAR are destination-invariant — from the Master by source_player_id. UNTESTED until the
+    // transfer deploy (transfers paused); mirrors the verified returner backfill change.
+    const dWar = masterPR?.d_war != null ? Number(masterPR.d_war) : 0;
+    const bsrWar = masterPR?.bsr_war != null ? Number(masterPR.bsr_war) : 0;
+    const totalHitterWar = oWar != null ? oWar + dWar + bsrWar : null;
+    const marketValue = totalHitterWar != null ? computeHitterMarketValue(totalHitterWar, toConference, p.position) : null;
     // TWP routing: hitter side MV goes to twp_hitter_market_value, raw
     // market_value is NULL'd. Pitcher loop will populate twp_pitcher_market_value
     // separately. Avoids the previous stomp where the pitcher loop's MV

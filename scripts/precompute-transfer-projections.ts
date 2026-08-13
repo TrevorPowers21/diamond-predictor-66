@@ -282,7 +282,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("Hitter Master")
-        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating")
+        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war")
         .eq("Season", CURRENT_SEASON)
         .in("source_player_id", idsChunk),
     );
@@ -382,10 +382,15 @@ async function main() {
     const hitterDepthRole = defaultHitterDepthRoleFromActualPa(rawPa);
     const projectedPa = paForHitterDepthRole(hitterDepthRole);
     const oWar = computeHitterOWar(final.pWrcPlus, null, hitterDepthRole);
-    const marketValue = computeHitterMarketValue(oWar, {
+    // STEP 7 (2026-08-13): market rides TOTAL hitter WAR (oWAR + dWAR + bsrWAR). d/bsr destination-invariant
+    // (Master by source_player_id; null for JUCO -> total = oWAR, unchanged). Mirrors the returner backfill.
+    const dWar = masterPR?.d_war != null ? Number(masterPR.d_war) : 0;
+    const bsrWar = masterPR?.bsr_war != null ? Number(masterPR.bsr_war) : 0;
+    const totalHitterWar = oWar != null ? oWar + dWar + bsrWar : null;
+    const marketValue = totalHitterWar != null ? computeHitterMarketValue(totalHitterWar, {
       conference: toConference,
       position: p.position,
-    });
+    }) : null;
 
     upserts.push({
       player_id: p.id,
