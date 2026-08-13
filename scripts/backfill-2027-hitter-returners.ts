@@ -183,7 +183,7 @@ async function main() {
   const masterRatingRows = await loadAllPaged<any>(() =>
     (supabase as any)
       .from("Hitter Master")
-      .select("id, source_player_id, ba_power_rating, obp_power_rating, iso_power_rating")
+      .select("id, source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war")
       .eq("Season", CURRENT_SEASON),
   );
   const masterRatingsBySourceId = new Map<string, any>();
@@ -286,10 +286,15 @@ async function main() {
       const hitterDepthRole = defaultHitterDepthRoleFromActualPa(meta.pa);
       const projectedPa = paForHitterDepthRole(hitterDepthRole);
       const oWar = computeHitterOWar(result.p_wrc_plus, null, hitterDepthRole);
-      const marketValue = computeHitterMarketValue(oWar, {
-        conference: meta.conference,
-        position: meta.position,
-      });
+      // STEP 7 (2026-08-13): market rides TOTAL hitter WAR (oWAR + dWAR + bsrWAR), not oWAR alone.
+      // dWAR/bsrWAR are destination-invariant — read from the Master (same values refresh_composite_war
+      // sums into total_hitter_war). Market still moves only via oWAR, but the input is the full total.
+      const dWar = master?.d_war != null ? Number(master.d_war) : 0;
+      const bsrWar = master?.bsr_war != null ? Number(master.bsr_war) : 0;
+      const totalHitterWar = oWar != null ? oWar + dWar + bsrWar : null;
+      const marketValue = totalHitterWar != null
+        ? computeHitterMarketValue(totalHitterWar, { conference: meta.conference, position: meta.position })
+        : null;
       // TWPs keep the hitter market in twp_hitter_market_value and NULL the shared
       // market_value column — same convention as the transfer precompute /
       // deriveHitterStored. Writing the shared column for a TWP is a bug that
