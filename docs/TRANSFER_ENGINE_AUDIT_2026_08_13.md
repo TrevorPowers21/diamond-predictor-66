@@ -128,6 +128,39 @@ Stuff+ = above; wRC+ = conf offense (SLG+OBP based).
 6. HTP shape is directionally correct + sniff-test-validated → keep it; the refinements are the wRC+→park-factor swap
    (#1), the OPR-context question (#5), and the Independent/schedule case (#3).
 
+### BUCKET 3b — Stuff+ engine RECHECK (2026-08-13, verified in code + DB)
+
+**Verdict: the Stuff+ math is TRUSTWORTHY.** Per-pitch z-score models (per pitch type × hand) vs a **D1-clean baseline**
+(`pitcher_stuff_plus_ncaa`, all 18 rows division=D1 — the JUCO-contamination risk is code-only, didn't materialize),
+recentered per bucket, pitch-weighted composite + conference. IP≥20 leaderboard is legit (Cal Randall UCLA, McElvain
+Arkansas, Dax Whitney OSU-SP, Garcia LSU…); distribution centered ~101.6.
+
+**DECISIONS / OPEN (Trevor 2026-08-13):**
+- **STORE finalized conference stats via a ONE-TIME SQL (add column + populate), then fold the ongoing calc into the
+  UPLOAD.** Pitch log = source of truth → the current 5-6 manual admin buttons are the OLD process; build the NEW
+  process off the pitch log (automatic, part of upload — Track B). Retire the old manual chain.
+- **⭐ WEIGHTING FORK (OPEN — needs Trevor's call):** the recenter is DELIBERATELY per-pitcher UNWEIGHTED
+  (`stuffPlusEngine.ts:450-454`: "pitch-weighted double-counts high-volume pitchers who tend to be the better ones").
+  Trevor's instinct = pitch-weighted (1000-pitch arm ≫ 1-pitch arm). QUANTIFIED: pitch-weighted mean runs +3-6 above
+  per-pitcher on fastballs/sinkers (Sinker::L 99.0→105.2, 4S FB::R 99.9→103.4) — good arms throw more. So pitch-weighting
+  = a real 3-6pt recalibration (drops all FB/SI Stuff+), NOT just small-sample cleanup. Small-sample noise is ALREADY
+  controlled in aggregates (conference is pitch-weighted; recenter dilutes a 1-pitch arm 1-in-4800); the leaderboard
+  1-IP arms are a DISPLAY-qualifier issue (min pitches to appear), not a weighting bug. **Options: A keep unweighted +
+  display floor; B pitch-weight recenter (consistent w/ conference, −3-6 ripple); C unweighted + min-pitch threshold in
+  the recenter (agent's lean — fixes small-sample without the ripple).** AWAITING DECISION.
+- **Curveball HB weight `−0.15` = LIKELY A BUG (Trevor).** Sinker is arm-side (its sign is right), but Sweeper AND
+  Curveball are glove-side breaking balls and should share sign — Curveball's `−0.15` vs Sweeper's `+0.40` is
+  inconsistent. Fix as part of the "big Stuff+ conversation." (`stuffPlusEngine.ts:247`)
+- **Gyro Slider non-z HB term = CORRECT as-is (Trevor);** the real gyro fix is in RECLASSIFICATION — separate later project.
+- **Velocity convention per-pitch (z vs zMax vs velo-diff) = FINE (Trevor)** — deliberately didn't punish a slow-but-
+  effective curveball. Part of the future "big Stuff+ conversation."
+- **Dead inputs (vaa, whiff_pct unused in scoring; gyro_stuff_plus null) = NORMAL (Trevor), no action.**
+- **Idempotency: essentially converged** (max bucket deviation 1.02, 0 outliers) — a re-run nudges ≤1pt. Minor.
+- **⚠ FUTURE "big Stuff+ conversation":** velocity/spin conventions, curveball sign, gyro reclassification, the
+  weighting philosophy — a dedicated Stuff+ review.
+- **Two competing composite writers** (`stuffPlusEngine` excludes needs_review vs `rollupStuffPlusToMaster` doesn't) +
+  two baseline writers → collapse to ONE canonical each when building the pitch-log upload process.
+
 ### NEW REQUIREMENTS (Trevor, 2026-08-13)
 - **Verify depth-role RANGES use REGULAR-SEASON totals:** the hitter PA tiers (`defaultHitterDepthRoleFromActualPa`:
   ≥220/130/50/15 → PA 245/215/145/85/25) and pitcher IP/GS tiers must project off the correct **regular-season** PA/IP
