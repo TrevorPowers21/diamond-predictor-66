@@ -71,12 +71,47 @@ Same math exists in THREE independently-maintained implementations; they've drif
   total_hitter_war. Nothing else.** (Re-examine whether the "batch script doesn't route TWP market" is even the active
   path or dead — the display handles the split regardless.)
 
-### TALK-THROUGH / EVALUATE (the core value — needs its own investigation, NOT yet done)
-- **Conference Stuff+ accuracy + derivation:** confirm the per-conference Stuff+ numbers are accurate and TEST how they
-  were computed from the pitch-log data. This is the competition-level lever for hitters — must be trustworthy.
-- **Hitter talent HTP pick-apart:** `HTP = OPR + 1.25(Stuff+−100) + 0.75(100−wRC+)`. Idea = how talented are the
-  hitters, balanced so talent isn't inflated by a high-run-scoring environment or weak pitching faced. Question every
-  term for accuracy (makes sense to Trevor as-is, but wants it stress-tested for the most accurate numbers).
+### BUCKET 3 — Stuff+ / HTP competition-translation levers — INVESTIGATED 2026-08-13
+
+**Derivation (verified in code + DB).** Conference Stuff+ chain: pitch-shape data (`pitcher_stuff_plus_inputs`:
+velo/IVB/HB/release/extension/spin) → per-pitch Stuff+ z-scored vs a **D1 population baseline**
+(`pitcher_stuff_plus_ncaa`, per pitch-type×hand), recentered to mean 100 → per-pitcher composite
+(`Pitching Master.stuff_plus`, pitch-weighted) → conference roll-up. JUCO/D2 z-scored vs the D1 baseline (locked
+`juco_uses_d1_baselines`). **HTP = OPR + 1.25·(Stuff+−100) + 0.75·(100−wRC+)**, all from the conf's `Conference Stats`
+row: OPR = PA-weighted conf avg of each hitter's **process** power rating (batted-ball/EV/contact — not run outcomes);
+Stuff+ = above; wRC+ = conf offense (SLG+OBP based).
+
+**DB reality — corrected the audit agent's over-calls (research, not guess):**
+- ❌ "duplicate rows / two pipelines wrote dupes" → **0 true duplicates** (162 rows = 30 conf × 5 seasons 2022-25 + 42
+  for 2026; the "Big 12 twice" was cross-season).
+- ❌ "wRC+ hand-entered/untraceable" → **computed** (precise decimals 89.9…105.9). The 30 real D1 conferences are
+  complete; the only null-input rows are the 10 **JUCO districts** → they use hardcoded `JUCO_DISTRICT_HTP_OVERRIDE`
+  by design.
+- **HTP ranking 2026 D1 passes the sniff test:** SEC 132 › ACC 122 › Big 12 120 › American 115 › Big Ten 115 › CUSA 114
+  › … › OVC 93 › MAAC 91 › SWAC 78 › NEC 78. (Calibrated historically by tinkering the weights until the ranking looked
+  right — NOT a data-fit; keep that in mind for any re-weighting.)
+
+**DECISIONS / DIRECTIONS (Trevor 2026-08-13):**
+1. **⭐ wRC+ term (`100−wRC+`) → replace with CONFERENCE-AVERAGE PARK FACTOR.** It was built BEFORE park factors
+   existed — a proxy for run ENVIRONMENT. But raw conf offense conflates environment WITH hitter quality (already in
+   OPR) → the **Ivy double-count**: OPR 96.7 (weak talent) + wRC+ 89.9 → +7.6 boost → HTP 104.7, leapfrogging better
+   leagues. The clean fix: the term should isolate ENVIRONMENT = a conference-average PARK FACTOR (derived via wRC+ =
+   SLG+OBP), so OPR carries talent and park carries environment, no overlap. "Let's think about it" — a direction, not
+   final. (Also open: `1.25`/`0.75` weights are tinker-tuned, not fit.)
+2. **PARK FACTOR = its own future project (SAVE, not now):** we now have per-player park factor across the season
+   (pitch-log venues) storable, plus conference-average park factor. Park factor is a separate review — [[project_park_factor_rework]].
+3. **Independent outlier:** HTP 113.6 (7th) is driven by a single team (Oregon State) with an outlier Stuff+ 110.9. No
+   clean conference-based fix; the real fix = sum the TALENT LEVEL of Oregon State's actual SCHEDULE (schedule-based
+   opponent strength). Discuss/future — no resolution now.
+4. **Two Stuff+ types are BOTH NEEDED (not a bug to collapse):** (a) individual-pitcher Stuff+, (b) per-conference
+   Stuff+. Canonical conference Stuff+ = take **every** pitcher's impact **weighted by their pitch totals** from the
+   pitch log (the V2 pitch-weighted method). **Retire V1** (per-pitcher-composite, name-keyed). "Don't care how we get
+   there but necessary."
+5. **OPR (batted-ball) susceptibility — complex, needs doing:** unlike Stuff+ (pure pitch shape, context-independent),
+   batted-ball data CAN be manipulated by ball-flight ENVIRONMENT and QUALITY OF STUFF FACED. So OPR may itself need a
+   park/competition context-adjustment. Complex conversation, flagged for a dedicated pass (ties to park factor + Stuff+).
+6. HTP shape is directionally correct + sniff-test-validated → keep it; the refinements are the wRC+→park-factor swap
+   (#1), the OPR-context question (#5), and the Independent/schedule case (#3).
 
 ### NEW REQUIREMENTS (Trevor, 2026-08-13)
 - **Verify depth-role RANGES use REGULAR-SEASON totals:** the hitter PA tiers (`defaultHitterDepthRoleFromActualPa`:
