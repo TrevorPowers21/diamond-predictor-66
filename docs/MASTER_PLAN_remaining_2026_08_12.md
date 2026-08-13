@@ -34,6 +34,12 @@ Prod replay (Step 8) is the single event that carries Steps 1-5 + reg columns + 
 ## TRACK A — finish the WAR redesign (Steps 6-8)
 
 ### Step 6 — returner re-precompute (staging) — NEAR-TERM, correction-only
+> **STATUS 2026-08-13 — RETURNER PROJECTIONS DONE + verified.** Both `precompute-returner-hitters` and
+> `precompute-returner-pitchers` re-run on staging; rates+WAR deterministic (convergence: two consecutive re-runs =
+> 0 diffs, market_value included). Pitcher: 8,073 rows, 6,263 WAR changed (refit+D1-FIP+collapse). Hitter: fresh
+> re-run cleaned a one-time market staleness (see agent-learnings). STILL TODO below: desc_owar@0.3782, refresh_composite_war,
+> reseed snapshots. Reminder: hitter & pitcher returner precomputes are SEPARATE scripts — run BOTH as a set.
+
 Order matters (verify inputs before the write that freezes them). Do NOT run `populate-conf-stats`. Ignore JUCO.
 1. **Re-populate `desc_owar` on all-D1 lgwOBA 0.3782** — `node scripts/drs/populate_descriptive_war.mjs` (reads
    0.3782). Uniform ~0.016 WAR down; closes the last descriptive baseline seam.
@@ -136,8 +142,15 @@ only Track B) — SDs on the qualified subset (PA≥100 / IP≥30), means on all
    JUCO FIP through (`from_fip`) but that stored value is miscalculated (different source; e.g. Cole Harris FIP 5.89
    vs 12.93 ERA), so JUCO pRV+/WAR (D1-FIP index from K9/BB9/HR9) inherit it. **Fix:** recompute FIP from components
    we have (HR, K, BB, IP). NOT urgent, JUCO-only — fold into the division-separation / JUCO project
-   ([[project_division_table_separation]]). Fix D1 first, finish the redesign, then JUCO separately. (Also verify no
-   D1 FIP is similarly source-miscalculated.)
+   ([[project_division_table_separation]]). Fix D1 first, finish the redesign, then JUCO separately. (D1 FIP verified
+   sane — good arms show FIP<ERA; the problem is JUCO-only.)
+7. **Pitcher small-sample HR9 pullback** — 109 pitchers project absurd HR9 (>3, up to ~9 → FIP 20+ → pRV+ crashes);
+   pre-existing ~1.7% tail (market $0, drops out). Tighten the sub-~20-IP band so the projected-HR9 z-shift can't blow
+   up. Surfaced by the Step-6 mover-tracking.
+8. **`from_avg` market-staleness hardening** — the returner backfill's `from_avg NOT NULL` loop filter skips players
+   whose from_avg is null at run time, leaving a stale `market_value` until a full re-run reaches them (once from_avg
+   is populated). Benign (only $0-worthy below-replacement players; a full re-run converges it), but for Step-7 market
+   work: clear market on exit or always full-re-run. `market_value` itself is deterministic (proven by convergence).
 
 ---
 

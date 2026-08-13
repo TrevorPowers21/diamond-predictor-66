@@ -105,3 +105,75 @@ Commits: `70738cb` (Steps 1-5) · `95f0760` (audit+plan) · `584dd4c` (transfer-
 Collapse **code-complete**: all live readers on the Master; all dead readers removed; write stripped. Only
 `bulkRecalculatePredictionsLocal` + `import-internal-ratings` still reference the table (Track B, before DROP).
 Steps 1-5 verified (247 tests + model_config@2026). Next: Step-6 pitcher-returner re-precompute; Track B retire+DROP.
+
+---
+
+# STEP 6 — Returner re-precompute + the market investigation (2026-08-13)
+
+Ran the returner re-precompute (staging) for pitchers, then verified hitters got the same treatment. Both are now
+re-precomputed, deterministic, and consistent. Several durable lessons + a list of what-to-change.
+
+## Mover-tracking is the verification method for any re-precompute (→ review-and-parity) — the transferable technique
+- **Snapshot BEFORE, run, snapshot AFTER, rank the largest deltas with names.** This single technique surfaced
+  every real finding this session: the pitcher small-sample HR9 tail, the JUCO FIP-wrong-at-source, and the hitter
+  market staleness. A pass/fail count hides them; the *ranked movers* expose them. *Protects against:* shipping a
+  re-precompute whose aggregate "looks fine" while a tail is degenerate.
+- **A clean pre-change baseline only exists if the precompute was DORMANT before the run.** Pitchers had a genuine
+  pre-refit baseline (`P_BEFORE`) because the pitcher precompute hadn't run since June — so its movers showed the
+  full refit repricing. Hitters did NOT: the hitter precompute ran 5× during the collapse A/B, and every run's
+  step-1 `createPredictionsFromMaster` refreshes internals/`from_*` to the current (refit) Master — so all hitter
+  snapshots are post-refit and can't show the refit delta. *Protects against:* mistaking residual noise for the
+  change you're trying to measure. Capture baselines BEFORE the first run of a changed pipeline.
+
+## Determinism is proven by CONVERGENCE, not by one diff (→ review-and-parity) — the closing move
+- **Two consecutive fresh re-runs diffing to 0 is the definitive proof a pipeline is deterministic.** When the
+  hitter market looked non-deterministic (170 rows changed vs the prior state), the answer wasn't more theorizing —
+  it was: re-run once more, diff. `H_FINAL2 vs H_FINAL = 0 across every field including market_value` → deterministic,
+  case closed. *Protects against:* endless speculation about a suspected non-determinism; the convergence run settles it.
+
+## OWN a wrong mechanism call — trace to the INPUT before broadcasting (→ review-and-parity) — I got this wrong
+- **I diagnosed "market swings thousands run-to-run from a conference-resolution bug." That was WRONG.** The real
+  cause: the 170 market-changed players had **identical oWar** (0 diffs) and were all-null / below-replacement; their
+  correct market is $0. The prior state held a **stale POSITIVE** value; the fresh re-run corrected it to $0. It was
+  a one-time stale-data cleanup, not randomness, and `computeHitterMarketValue` is a pure `oWar×PVF×PTM×nil` function
+  (deterministic given inputs). *Lesson:* before naming a mechanism (esp. an alarming one), verify the INPUT is what
+  you think — here oWar was identical, which immediately rules out "the projection changed" and points at stale
+  writes. Empirically check, then speak. (Reinforces [[feedback_predictions_on_record_at_right_grain]] and the parity
+  doc's "internal, data-checkable claims are the trustworthy ones.")
+
+## The `from_avg NOT NULL` loop filter causes downstream staleness (→ projections-and-scouting) — the residual bug
+- **A player excluded from a run's recalc loop keeps STALE downstream fields until a full re-run reaches them.** The
+  returner backfill loads `... .not("from_avg","is",null)`. A player whose `from_avg` is null at run time is skipped
+  entirely, so an old `market_value` (or any written field) lingers. When `createPredictionsFromMaster` later
+  populates `from_avg`, the next run's loop recomputes and corrects it. The D1 write ALWAYS sets `market_value`
+  (`meta.is_twp ? null : marketValue`, null for null-oWar) — so being *in* the loop is correct; the gap is only for
+  players transitioning in/out of the projectable set. *Protects against:* assuming a stored field is current when
+  its owner may have been filtered out of recent runs. **Hardening (Step 7):** clear market on exit, or always full-re-run.
+
+## Hitter and pitcher returner precomputes are SEPARATE scripts — keep them in lockstep (→ process) — the "lost sight of hitters" lesson
+- **`precompute-returner-hitters` and `precompute-returner-pitchers` are independent; running one does NOT refresh
+  the other** (the pitcher script does not even call `createPredictionsFromMaster`). Focusing on pitchers left the
+  hitter side carrying stale market values. *Rule:* a "re-precompute the returners" task means BOTH scripts as a set
+  (and transfers), or the un-run side silently drifts. *Protects against:* declaring "Step 6 done" after one side.
+
+## Step-6 run results (staging, for the record)
+- **Pitcher returners:** 8,073 rows, 0 lost; 6,263 WAR changed (3,123 up / 1,638 down) — the refit `*_pr_plus` +
+  D1-FIP + collapse repricing. Blocked: 196 = sub-1-IP (PM load `.gte("IP",1)`) or no PM row — correctly excluded
+  (label "no_pm_row" is imprecise; many DO have a <1-IP row). Absurd projected HR9 (>3) is a **pre-existing** ~1.7%
+  small-sample tail (103→109, market $0, drops out) — NOT a refit regression. JUCO rates are actuals-passthrough
+  (confirmed unchanged); JUCO pRV+/WAR move only via the D1-FIP formula.
+- **Hitter returners:** re-run fresh; rates+WAR deterministic; the 170-row market drift was one-time stale cleanup
+  (above), converged to 0 on re-run. D1 FIP sanity-checked fine (good arms show FIP<ERA); the FIP problem is
+  JUCO-only (below).
+
+## WHAT WE NEED TO CHANGE (the running list from this session)
+1. **Pitcher small-sample pullback** — 109 pitchers project absurd HR9 (>3, up to ~9); tighten the sub-~20-IP band so
+   the projected-HR9 z-shift can't blow up. Pre-existing; the mover-tracking exposed it.
+2. **JUCO FIP is wrong at the source** — recompute FIP from components (HR/K/BB/IP) instead of the miscalculated
+   stored FIP; JUCO pRV+/WAR follow. JUCO-only, fold into [[project_division_table_separation]]. Fix D1 first.
+3. **`from_avg` market-staleness hardening** — clear market on exit or always full-re-run (Step 7).
+4. **Recompute `ncaa_averages` means + SDs in the upload/update run** — they're the denominators of every rating; a
+   static fixture rots (null `pitcher_in_zone_pct`). Order it right before the store. Near-term + Track B.
+5. **Market → total WAR (Step 7)** — the formula shape stays `WAR×PVF×PTM×25,000`; swap the WAR input oWAR→total WAR.
+   Design note: Teams Table is intentionally per-Season (program id + per-season team id + per-season `conference_id`
+   for realignment, e.g. Delaware CAA 2025 → CUSA 2026) — respect the Season model in any market/conference rework.
