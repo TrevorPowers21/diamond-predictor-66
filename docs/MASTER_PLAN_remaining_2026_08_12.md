@@ -60,6 +60,11 @@ method as returners) to confirm neutrality. JUCO transfers via `juco-precompute-
   `pickHitterWar`/`pickPitcherWar`. Keep raw `o_war` where it's the batting COMPONENT of a breakdown.
 - Surface **descriptive + the gap** (descriptive − projection = buy-low/sell-high) on the player card.
 - Verify TWP 2-profiles/2-lines/2-market-values intact.
+- **⚠ FILL player/transfer snapshots (Trevor, 2026-08-13):** the display pass MUST also refresh
+  `player_snapshot` / `transfer_snapshot` so any TOGGLE updates coaches made (roster_status, class_transition,
+  dev_aggressiveness saved in team-builder snapshots) are caught — otherwise the new WAR numbers render against
+  stale snapshots and a coach's saved changes look lost. Discuss the exact mechanism when we get there (which
+  snapshots, precedence vs the fresh precompute, TWP handling).
 
 ### Step 8 — PROD replay (on explicit "prod, now?")
 Staging fully verified first. One event carries everything to prod:
