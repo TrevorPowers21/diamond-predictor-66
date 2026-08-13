@@ -102,9 +102,17 @@ Staging fully verified first. One event carries everything to prod:
 ### B3 — unified on-upload edge function (the durable build — larger, own effort)
 Trevor's target architecture ([[project_unified_projection_edge_function]]): ONE edge fn fires ON UPLOAD (no button),
 weekly through spring: pitch-log lands → derive all metrics (in-zone%, chase, whiff, EV, Stuff+) → marry into the
-Masters (pitch-log-owned) → compute power ratings (one stored path, no live compute) → run projections → write
-`player_predictions`. Retires the manual scripts; makes today's bug classes (pagination, header-drop) structurally
-impossible. This is where bulkRecalc + the CSV cascade are truly replaced. Sequenced AFTER Track A ships.
+Masters (pitch-log-owned) → **recompute `ncaa_averages` means + SDs from the current Master** → compute power ratings
+(one stored path, no live compute) → run projections → write `player_predictions`. Retires the manual scripts; makes
+today's bug classes (pagination, header-drop) structurally impossible. This is where bulkRecalc + the CSV cascade are
+truly replaced. Sequenced AFTER Track A ships.
+
+**⚠ ncaa_averages must be RECOMPUTED, not a stale fixture (Trevor, 2026-08-13).** The D1 means + SDs in
+`ncaa_averages` are the denominators for EVERY percentile score / z-shift in the power ratings — a static fixture
+silently drifts every rating as data updates (the null `pitcher_in_zone_pct` is this rot). Wire a "recompute
+ncaa_averages + SDs from the current Master" step into the big upload/update run, **ORDERED right before the store**
+(ratings depend on the averages). Near-term: it's a discrete step that can be added to the current pipeline now (not
+only Track B) — SDs on the qualified subset (PA≥100 / IP≥30), means on all-D1, per the existing fixture convention.
 
 ---
 
