@@ -7,6 +7,9 @@ bring the edge fn UP to canonical. Verify everything in code + database — do N
 right; prove each claim before acting.**
 
 ## Detailed companions (all current-cycle)
+- `PLAYER_SCORE_NIL_ALLOCATION_2026_08_14.md` — **NIL allocation architecture v1** (rank-based decay curve, decoupled
+  from market, floor toggle, surplus-only PVF) + the fit data (Arkansas ground truth top1/3/8 = 10/30/65%, per-tier
+  roster shapes, below-replacement counts, current constants). Supersedes the flat-68 / proportional-share model.
 - `TRANSFER_ENGINE_AUDIT_2026_08_13.md` — the full transfer equation (both sides), divergences, active/dead, edge-fn sync list.
 - `AGENT_LEARNINGS_step7b_war_display_audit_2026_08_13.md` — WAR display/market/value map, the scale reshape, calibration, my two errors.
 - `STEP7_EXECUTION_MAP.md` · `MASTER_PLAN_remaining_2026_08_12.md` · `STEP8_PROD_MIGRATION_LEDGER.md` · memory
