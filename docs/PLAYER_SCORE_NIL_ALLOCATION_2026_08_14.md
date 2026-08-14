@@ -90,7 +90,53 @@ not proportional. ⚠ **CAVEAT for the real fit:** the B pull matched on *descri
 
 ---
 
+---
+
+## POSITIONAL SCARCITY LAYER — data + ★ PROGRAM-ANALYTICS VALUE (over industry) (2026-08-14)
+
+**★ This is a value-over-industry program-analytics asset, not just a NIL input.** No competitor offers a national,
+pitch-log-derived positional-scarcity SURFACE — how many credible Tier-1 players exist at each position, and how steep
+the replacement cliff is behind them. A program can see the **national talent market by position** (where the market is
+thin, where premiums are real) to drive recruiting priorities, roster construction, portal strategy, and NIL. Its
+FIRST use is validating/replacing the hand-set position ladder; its SECOND is a standalone program-analytics feature.
+
+**Method (locked for this pull):** credible fielder = `player_season_defense.half_innings ≥ 100` (uniform; `bip_opps`
+is ~0 for C/1B so can't be the measure — catcher value is framing/blocking, not range). Tier-1 = top decile of
+projection WAR *within position*, Tier-2 = 50–90th. Weekend-SP = `Role=SP & IP≥65` (`derivePitcherDepthRole`).
+Projection WAR = returner/regular/2027 (`total_hitter_war` fielders, `p_war` pitchers). **JUCO excluded naturally**
+(no pitch log → not in `player_season_defense`). **Availability DELIBERATELY dropped** (Trevor): project forward, can't
+predict who's actually in the portal — scarcity = how many Tier-1 EXIST, and that sets the market. Multi-position
+players count at EVERY credible position. Scarcity = replacement CLIFF per position × tier, NOT raw counts.
+
+**### 1. Supply counts (D1, 2026)** `position,total_credible,tier1_top10pct,tier2_50to90,below50`
+C,524,53,210,261 · SS,321,32,129,159 · 2B,307,31,121,155 · 3B,269,27,107,135 · 1B,374,37,150,185 · LF,184,19,74,91 ·
+CF,274,28,109,137 · RF,191,20,76,95 · weekend-SP,416,38,180,198 · other-P,3502,361,1411,1729
+
+**### 3. Within-position projection-WAR** `position,n,p10,p25,p50,p75,p90,max`
+C,524,-0.55,-0.17,0.48,1.20,2.00,5.09 · SS,320,-0.63,-0.09,0.63,1.37,2.17,3.45 · 2B,307,-0.23,0.20,0.77,1.46,1.94,3.37 ·
+3B,269,-0.20,0.31,0.89,1.56,2.06,3.02 · 1B,372,-0.01,0.41,0.99,1.58,2.19,3.63 · LF,184,-0.08,0.46,0.99,1.55,2.26,3.67 ·
+CF,274,-0.35,0.18,0.79,1.55,2.08,3.09 · RF,191,0.12,0.44,0.97,1.64,2.30,3.25 ·
+weekend-SP,416,1.28,1.73,2.18,2.68,3.08,4.08 · other-P,3501,-0.02,0.15,0.43,0.85,1.25,2.54
+
+**### 5. Weekend-SP** (`Role=SP&IP≥65`): weekend-SP n=416, IP p50 76.3/p90 90.3, WAR p10 1.28/p50 2.18/p90 3.08/max 4.08;
+other-P n=3502, IP p50 27.3/p90 53.0, WAR p10 −0.02/p50 0.43/p90 1.25/max 2.54.
+
+**### 6. Sanity (hand-ladder vs Tier-1 count):** C 1.3→53 · SS 1.3→32 · 2B 1.1→31 · 3B 1.1→27 · 1B 1.0→37 · LF 1.1→19 ·
+CF 1.1→28 · RF 1.1→20 · weekend-SP 1.3→38 · other-P 1.0→361.
+
+**### 2. Multi-position translation** = 34 D1 players credible at 2+ positions (raw `half_innings, bip_opportunities,
+drs_total, range_runs, drs/half-inning` per position; full table in the 2026-08-14 transcript). No `positional_scales`
+table exists → chat derives the conversion matrix from these. C↔1B movers show `0` catcher BIP → C translation needs
+framing runs, not range.
+
+**⭐ THE KEY FINDING:** raw Tier-1 COUNT would INVERT the current ladder — **catcher is the LEAST scarce by count (53
+Tier-1)** while LF (19), RF (20), 3B (27), CF (28) are thinnest. So counts alone are misleading; the value is the
+**replacement CLIFF** (C falls p90 2.00 → p50 0.48 — steep despite the count). The scarcity surface (built in chat from
+these pulls) prices the cliff × tier, then compares to the hand ladder before any constant changes.
+
 ## NEXT
+0. **Positional scarcity surface** — chat assembles it from the pulls above, compares to the hand ladder → locked
+   position constants (successor to PVF); also ships as a program-analytics feature (value over industry).
 1. (optional) Clean B rerun off projection score + player_id → true $-vs-score fit.
 2. Fit the decay curve's concentration parameter to Arkansas dollars; check Lackey lands ~$500K-ceiling not $790K.
 3. Lock the v1 spec (curve form, concentration-vs-log-budget, floor toggle, surplus-only PVF ladder, zero-slot boundary
