@@ -98,6 +98,26 @@ never-delete" pattern at the process level, across THREE axes (hitter/pitcher, C
 - Then **Step 6b** (deploy edge fn + fire transfers + A/B BOTH sides) — the prerequisite for 7c and the transfer-facing
   parts of 7b.
 
+## ★ CURRENT EXECUTION ORDER (confirmed Trevor 2026-08-14) — supersedes the sequence above
+Bucket 3 (Stuff+/HTP) is DONE. The remaining work is gated by TWO open modeling DECISIONS; everything after them is
+wiring + re-running. Order:
+
+**1. Finish the PLAYER SCORE** (`PLAYER_SCORE_NIL_ALLOCATION_2026_08_14.md`) — clean B rerun (projection score by
+   `player_id`) → fit the rank-based decay curve → lock the v1 spec. **← DECISION 1: the curve spec.**
+**2. Stuff+ WEIGHTING fork (A/B/C)** — the recentering call (`TRANSFER_ENGINE_AUDIT §Bucket 3b`). **← DECISION 2.**
+   Once picked, the competition math is fully locked.
+**3. CODE CLEANUP (build once, not twice):**
+   - Bucket 1 edge-fn sync (pitcher PVF out, market→total+PVM / p_war-no-PVF, rate-index consistency, lgRA9 unify).
+   - Bucket 2 delete dead (triple-oWAR, `simulateTransferProjection`, retire V1 conf Stuff+).
+   - Bucket 4 depth-role regular-season PA/IP ranges + defensive depth tiers.
+   - Wire the **player score on total WAR** + the new allocation curve; store **Conference Stats** (park factor + Stuff+
+     + HTP + OPR) as part of the upload.
+**4. RECOMPUTES (wrap-up):** Step 6b deploy fixed edge fn → re-run **returners + transfers** BOTH sides (A/B verify) so
+   everything reflects the finalized math → 7b display swap → 7c snapshot fill → 7d TWP → Step 8 prod replay.
+
+**The two gating decisions are (1) the player-score curve spec and (2) the Stuff+ weighting fork. Everything downstream
+is wiring + recompute.**
+
 ## STANDING DISCIPLINE (from this session's misses)
 - **Verify BOTH hitter and pitcher sides at every step** (the "finish one side, neglect the other" pattern bit us on
   Step 6 market + almost on 7a). Now extended: verify all THREE copies (canonical/edge/live) agree.
