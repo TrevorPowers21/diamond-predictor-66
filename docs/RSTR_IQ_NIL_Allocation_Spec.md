@@ -24,15 +24,22 @@ For a roster ranked by score, budget B:
 paid set  = players with score > 0
 n_paid    = |paid set|
 floor     = floor_frac × B / n_paid          (floor_frac = 0.10)
-surplus_i = max(score_i, 0) ^ alpha          (alpha = 0.9)
+surplus_i = max(score_i, 0) ^ alpha          (alpha = 1.1)
 rate      = (B − floor × n_paid) / Σ surplus_i
 NIL_i     = floor + rate × surplus_i          (paid set)
 NIL_i     = 0                                 (score ≤ 0)
 ```
-**Fit provenance:** alpha=0.9, floor_frac=0.10 fitted in chat vs observed Arkansas payroll (top-1 10.3%, top-3 30.8%,
-top-8 66.7% of $4.875M). On Texas at $5M → 11.7/30.1/63.6, star $584K (vs broken proportional $790K/16%), mid-roster
-$60–110K, emergent floor $22K ≈ Arkansas's $20–30K tier. Same params hold shape across all six tier rosters (top-1 stays
-9–12% Texas→UMBC) with NO budget-flex param — score distributions already carry tier structure.
+**★ ANCHOR FRAMING REJECTED (Trevor 2026-08-15):** there is NO fixed "top-1% player = X% of budget" target, no cap,
+implied or otherwise. The star's dollar FLOATS with his WAR and the budget through the formula — permanently, by design.
+What was calibrated is the **ELASTICITY** — how much more a generational #1 commands than a merely-very-good #1 on the
+same roster.
+**alpha = 1.1 LOCKED.** Sensitivity on the Texas $5M roster (star's WAR swapped 2.5→5.5, same supporting cast):
+alpha 0.9 → 3-WAR topper $350K (7.0%) / 5-WAR $523K (10.5%), ratio 1.49; alpha 1.0 → $362K/$563K, ratio 1.56; alpha 1.2
+→ $379K/$643K, ratio 1.70. **1.1** sets a 5-WAR elite ~$600K (12%) and a 3-WAR roster-topper ~$370K (7.4%) on $5M, every
+share emergent from WAR × budget, never anchored. **Rationale:** the observed Arkansas payroll fits ~0.9, but that curve
+embeds coach-side suppression (caps, hometown discounts, peace-keeping); the model prices TALENT, coaches apply discounts
+on top → price a step above the observed curve. **floor_frac stays 0.10.** Alpha + floor_frac live in the stamped
+constants fixture (no inline copies).
 
 **Floor toggle (ships v1, GM SETTINGS):** per-team GM setting, both modes always available.
 - "Balanced roster" = floor on (default) · "Top-heavy" = floor_frac=0, difference redistributes upward.
