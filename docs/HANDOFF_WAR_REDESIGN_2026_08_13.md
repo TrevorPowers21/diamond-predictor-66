@@ -118,6 +118,37 @@ wiring + re-running. Order:
 **The two gating decisions are (1) the player-score curve spec and (2) the Stuff+ weighting fork. Everything downstream
 is wiring + recompute.**
 
+## ★★ WHERE TO START TOMORROW (2026-08-14 EOD state + plan)
+**Where we stopped:** deep in the NIL allocation / player-score work. NIL Allocation **Spec v1.0 is LOCKED**
+(`RSTR_IQ_NIL_Allocation_Spec.md`). Ran §6 item 1 (Arkansas re-fit) → **INCONCLUSIVE, not a failure**: I scored against
+the wrong source (base un-toggled `returner/regular` projection + transfers on own-school). **KEY INSIGHT:** the coach's
+payroll tracks the **build `player_snapshot`** (dev-agg + cornerstone toggles applied), NOT the base projection — which
+is exactly what §7c produces. Returner projections are FRESH (2026-08-13); transfer projections stale (Step 6b). The
+positional-scarcity data is pulled + saved (value-over-industry program-analytics asset).
+
+**The NIL work and Step 7 are INTERLEAVED:** the NIL fit's scoring source = the toggled build snapshot (7c) + fresh
+Arkansas-context transfer projections (Step 6b). So NIL can't be finished until Step 7's snapshot + transfer recompute
+land. Plan:
+
+1. **Quick re-do of §6 item 1** off the build `player_snapshot` (toggled values the coach saw), transfers flagged as
+   needing Arkansas-context. Tells us fast whether the payroll tracks projected WAR once scored right. Data re-pull only.
+2. **Make the Stuff+ weighting call (A/B/C)** — the other gating decision (`TRANSFER_ENGINE_AUDIT §Bucket 3b`).
+3. **Then GET BACK TO STEP 7** (the NIL work depends on it):
+   - Buckets 1+2: edge-fn sync (pitcher PVF out, market→total+PVM/p_war, rate-index, lgRA9) + delete dead (triple-oWAR,
+     `simulateTransferProjection`, V1 conf Stuff+).
+   - Bucket 4: depth-role **regular-season PA/IP ranges** (resolve the Pompey `pa`-vs-`regular_season_pa` role source here)
+     + defensive depth tiers.
+   - Wire **player score on total WAR** (score = total_WAR × PTM, PVF removed per spec §1) + **Conference Stats storage**
+     (park factor + Stuff+ + HTP + OPR, part of the upload).
+   - **Step 6b:** deploy fixed edge fn → re-run returners + transfers (BOTH sides, A/B) → yields the fresh
+     Arkansas-context transfer projections the NIL fit needs.
+   - **7b** display swap → **7c** snapshot fill (toggles persist — THE scoring source for NIL) → **7d** TWP → **Step 8** prod.
+4. **Then finish NIL:** re-run §6 items 1–7 on the fresh toggled-snapshot + transfer data → lock alpha/floor_frac →
+   wire the decay-curve allocation + need ladder/detection. Then the positional-scarcity feature (program analytics).
+
+**Open calibration questions logged for chat (not blockers):** reliever role/leverage pay adjustment; whether the
+projection lifts a good hitter's down year enough (Traeger 102→117 vs expected 125–130).
+
 ## STANDING DISCIPLINE (from this session's misses)
 - **Verify BOTH hitter and pitcher sides at every step** (the "finish one side, neglect the other" pattern bit us on
   Step 6 market + almost on 7a). Now extended: verify all THREE copies (canonical/edge/live) agree.

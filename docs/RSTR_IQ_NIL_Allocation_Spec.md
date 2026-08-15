@@ -130,6 +130,27 @@ Disagreement → argued in chat. Hand ladder stays live until then.
 yet. Revisit next season: credibility threshold → ~50 half-innings (fixes corner truncation), larger multi-position
 sample, wSP 1.3-vs-derived on the table.
 
+## §6 EXECUTION STATUS (2026-08-14) — item 1 INCONCLUSIVE, scoring-source correction found
+Item 1 (Arkansas projection re-fit) was run and is **inconclusive, NOT a real failure — I fit against the WRONG
+scoring source.** Findings:
+- **Returner projections are FRESH** (`updated_at=2026-08-13`, Step 6); WAR math is correct for the projected wRC+
+  (Traeger desc wRC+ 102 → proj 117 → 1.77 WAR checks out).
+- **The base `returner/regular` projection is the UN-TOGGLED baseline.** The coach's build applied **dev aggressiveness +
+  cornerstone role**, which lift WAR above the baseline (Souza base ~104 wRC+/1.15 WAR → the toggled build number the
+  coach paid $500K against). **The payroll tracks the TOGGLED `player_snapshot` values, not the base projection** — so
+  the fit MUST score off the build snapshot (toggle-applied), which is exactly what §7c produces.
+- **Transfers were scored on their OWN-SCHOOL projection** (Gomez's 3.24 is his FDU value, not SEC-trimmed for Arkansas).
+  The Arkansas-context transfer projection is stale until Step 6b runs.
+- Gomez ($25K, 3.24-WAR FDU SS, correct cornerstone role) = a real bargain the tool would surface — hometown-discount
+  layer, not a model error. Relievers are systematically paid below WAR (market/leverage) — the coach's layer.
+- **Reframe (Trevor):** the tool INFORMS off projected WAR; the coach applies discounts/role/retention. Do NOT fit
+  alpha/floor_frac to reproduce the exact payroll. Open calibration question flagged: reliever role/leverage adjustment;
+  and whether the projection lifts a good hitter's down year enough (Traeger 102→117 vs expected 125–130).
+- One role caveat: TJ Pompey stored cornerstone on `regular_season_pa` 190 (but total `pa` 225 ≥ 220 → cornerstone is
+  right if the role uses total pa) — resolve the pa-vs-regular_season_pa role source in bucket 4.
+**TO RE-DO ITEM 1 CLEANLY:** score off the build `player_snapshot` (toggled) with transfers on the Arkansas-context
+projection (post Step 6b). Items 2–7 not started.
+
 ## 8. DATA PULLS for §7 — DONE 2026-08-14 (in `PLAYER_SCORE_NIL_ALLOCATION_2026_08_14.md`)
 Six pulls returned (availability dropped per Trevor — project forward, can't predict portal; JUCO excluded naturally):
 supply counts + Tier-1 by position, within-position projection-WAR distributions, weekend-SP identification (Role=SP &
