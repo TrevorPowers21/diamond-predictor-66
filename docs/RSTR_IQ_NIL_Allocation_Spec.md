@@ -41,6 +41,26 @@ embeds coach-side suppression (caps, hometown discounts, peace-keeping); the mod
 on top → price a step above the observed curve. **floor_frac stays 0.10.** Alpha + floor_frac live in the stamped
 constants fixture (no inline copies).
 
+**alpha 1.1 CONFIRMED LOCKED (Trevor 2026-08-15) — no re-run for decimal reconciliation.** The calibrated quantity was
+always the ELASTICITY (the whole point of rejecting the anchor framing); the codebase exhibit reproduced it (ratio 1.62
+vs chat's 1.63 = the formula reproducing to within rounding). The absolute dollars were never a promise — they were an
+illustration on ONE roster with ONE WAR source. The ~8% gap between the descriptive-WAR exhibit ($650K @ 5-WAR) and the
+chat illustration ($600K) has **fully named causes** (WAR source = descriptive total WAR; weaker supporting cast in the
+auto-picked Texas roster) → a discrepancy explained by identified mechanisms is a RECONCILIATION, not a bug. And the
+**wire-time scoring source (toggled build snapshot + post-Step-6b transfer projections) will differ from BOTH** the chat
+illustration and the descriptive exhibit — so decimal-matching a roster that will never exist in production chases a
+number with no referent. Both illustrations sit inside the same behavior: **star share floating 7–14% with his WAR.**
+
+**EMERGENT-SHARES DEMONSTRATION (on the record — Oklahoma is the useful outlier):** in the exhibit, Oklahoma's top-1 =
+**10.7%** while every other tier sits 13–15%. That is NOT noise — the curve is correctly reading a **deeper roster**:
+their supporting cast holds more surplus, so the topper claims less of the same budget, same formula. This is the answer
+to a coach asking "why does my guy show a smaller % than that other program's guy": **deeper roster, same formula —
+shares are EMERGENT, never anchored.**
+
+**ACCEPTED COST OF 1.1 (eyes-open, documented):** choosing steeper-than-observed compresses the middle roster. On the
+Texas exhibit (balanced), rank-15 drops **$114K → $95K** and rank-20 **$66K → $51K** going 0.9 → 1.1. That transfer of
+value to the top is the deliberate, accepted cost of pricing talent a step above the coach-suppressed observed curve.
+
 **Floor toggle (ships v1, GM SETTINGS):** per-team GM setting, both modes always available.
 - "Balanced roster" = floor on (default) · "Top-heavy" = floor_frac=0, difference redistributes upward.
 - Label by philosophy, never mechanism. Effect concentrated at the bottom (contributors → $0), modest at top. Every
@@ -88,9 +108,13 @@ Encodes conversion difficulty. A derived supply-scarcity version is a logged som
    top-1/3/8 shares, star $, rank-10 $, rank-20 $, floor $, paid count — and same under top-heavy toggle.
 3. **Lackey case.** Old proportional $790K vs new allocation on the $5M roster, with rank context — BOTH modes.
 4. **Need-state detection dry run.** For six rosters: 50th-pct starter line per position (projection WAR, national),
-   then each roster's position state (empty/thin/solid) + which player clears it. Sanity: SEC mostly solid, low-major mostly need.
+   then each roster's position state (empty/thin/solid) + which player clears it. Sanity: SEC mostly solid, low-major
+   mostly need. **REMINDER (Trevor): starter lines compute from PROJECTION WAR per the spec → this item inherits NONE of
+   the descriptive-vs-projection ambiguity from the alpha exhibits.**
 5. **Need multiplier effect.** One roster with an SS need: sample board SS priced with/without 1.3, and the reprice when
-   a qualifying SS is added (his frozen value + board's new SS at 1.0). BOTH floor modes.
+   a qualifying SS is added (his frozen value + board's new SS at 1.0). BOTH floor modes. **REMINDER (Trevor): the freeze
+   demo must use the WIRE-TIME scoring source (toggled build snapshot + post-Step-6b transfer projections) so it shows
+   the PRODUCT, not another illustration.**
 6. **Conservation assertion (goldens):** Σ NIL_i = B exactly, every roster, both modes. Add to regression suite.
 7. **Retired-constant sweep.** grep proof the five retired constants + dups are gone (the 33 had 4 dup copies).
 Every dollar table in 1–5 shown in BOTH modes side by side. No UI, no DB writes until 1–7 shown + confirmed in chat.
