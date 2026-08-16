@@ -1352,7 +1352,7 @@ export default function PitchingEquationsTab() {
           <div className={sectionPanelClass}>
             <p className={sectionHeadingClass}>Overall Pitcher Power Rating</p>
             <div className="text-sm font-mono">
-              (0.15 × ERA Power Rating+) + (0.25 × FIP Power Rating+) + (0.10 × WHIP Power Rating+) + (0.20 × K/9 Power Rating+) + (0.15 × BB/9 Power Rating+) + (0.15 × HR/9 Power Rating+)
+              (ERA Power Rating+ + FIP Power Rating+) / 2
             </div>
           </div>
 

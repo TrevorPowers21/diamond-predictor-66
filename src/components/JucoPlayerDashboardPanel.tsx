@@ -53,15 +53,10 @@ const fmtInt = (v: number | null | undefined) => (v == null || !Number.isFinite(
 const computeWrcPlus = (avg: number | null, obp: number | null, slg: number | null, iso: number | null): number | null =>
   computeWrcPlusCanonical(avg, obp, slg, iso);
 
-// pRV+ uses the D1 formula weights from CLAUDE.md:
-//   pRV+ = 0.30·FIP⁺ + 0.25·ERA⁺ + 0.15·WHIP⁺ + 0.15·K9⁺ + 0.10·BB9⁺ + 0.05·HR9⁺
-// Each component is a ratio-based env+ (lgValue / pitcherValue × 100 for
-// lower-is-better; pitcherValue / lgValue × 100 for K/9). Uses JUCO 2026
-// league averages so an average JUCO pitcher centers at 100 (rather than
-// scoring below 100 against D1 baseline — that's the simulator's job, not
-// the leaderboard's).
-// pRV+ = D1-FIP index from K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). JUCO outcomes scored on the
-// D1 scale — consistent with JUCO projections using D1 baselines. (Signature kept; era/fip/whip unused.)
+// pRV+ = D1-FIP index from K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts):
+//   projFIP = 3.847 − 0.231·K/9 + 0.509·BB/9 + 1.486·HR/9;  projRA9 = projFIP × 1.137;
+//   pRV+ = 100 + 100·(6.913 − projRA9)/6.913. JUCO outcomes scored on the D1 scale —
+// consistent with JUCO projections using D1 baselines. (Signature kept; era/fip/whip unused.)
 const computePrvPlus = (
   _era: number | null, _fip: number | null, _whip: number | null,
   k9: number | null, bb9: number | null, hr9: number | null,

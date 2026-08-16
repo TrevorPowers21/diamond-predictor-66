@@ -38,9 +38,9 @@ const ScoutMiniBox = ({ label, value }: { label: string; value: number | null })
 
 type SortKey = "name" | "team" | "avg" | "obp" | "slg" | "ops" | "iso" | "wrc";
 
-// wRC+ formula: linear weights from the projection engine
-// wRC = (0.45 × OBP) + (0.30 × SLG) + (0.15 × AVG) + (0.10 × ISO)
-// wRC+ via the canonical src/lib/wrc.ts (C1). `ncaaWrc` denom comes from ncaa_averages.wrc (0.3782).
+// wRC+ formula (C1, canonical src/lib/wrc.ts):
+// est_wOBA = 0.011 + 0.691·OBP + 0.235·SLG (AVG/ISO redundant → 0); wRC+ = est_wOBA / ncaaWrc × 100
+// `ncaaWrc` denom comes from ncaa_averages.wrc (0.3782).
 const wrcPlusFor = (
   avg: number | null, obp: number | null, slg: number | null, iso: number | null, ncaaWrc: number | null,
 ): number | null => computeWrcPlus(avg, obp, slg, iso, ncaaWrc ?? undefined);
