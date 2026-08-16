@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { loadGmBuildRoster } from "@/gm/lib/loadGmBuildRoster";
 import type { GmRow } from "@/gm/hooks/useGmRoster";
 import { useGmTargetBoard, type GmTarget } from "@/gm/hooks/useGmTargetBoard";
+import { useNilAllocationMode } from "@/gm/hooks/useNilAllocationMode";
 import { allocateNil } from "@/lib/nilAllocation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -182,6 +183,7 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
   const buildId = pickedBuild ?? defaultBuildId;
   const buildName = builds.find((b) => b.id === buildId)?.name ?? "—";
 
+  const nilMode = useNilAllocationMode(teamId);
   const { data: roster, isLoading } = useQuery({
     queryKey: ["gm-scenario-roster", teamId ?? null, buildId],
     enabled: !!userId && !!teamId && !!buildId,
@@ -214,10 +216,7 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
   // Projected Value via the NIL allocation curve (allocateNil) over the kept
   // roster's WAR — PVM out of the score (spec §1), PTM cancels within a roster.
   const nilAllocByRow = (() => {
-    // NOTE: GMScenarios loads its roster via loadGmBuildRoster (no gm_budget mode
-    // in scope), so it stays "balanced" until the mode is threaded through that
-    // loader. The scenario planner is a what-if surface; balanced is a safe default.
-    const dollars = allocateNil(kept.map((r) => Number(r.war ?? 0)), budget ?? 0, "balanced");
+    const dollars = allocateNil(kept.map((r) => Number(r.war ?? 0)), budget ?? 0, nilMode);
     const m = new Map<GmRow, number>();
     kept.forEach((r, i) => m.set(r, dollars[i]));
     return m;

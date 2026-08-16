@@ -246,6 +246,8 @@ interface UseTeamBuilderSimulationParams {
   rosterPlayers: any[];
   totalBudget: number;
   fallbackRosterTotalPlayerScore: number;
+  /** Team's shared Balanced/Top-Heavy NIL allocation setting (from gm_budget). */
+  nilAllocationMode: NilAllocationMode;
   programTierMultiplier: number;
 
   // power lookup (computed in TB from powerRatingsData)
@@ -272,6 +274,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     rosterPlayers,
     totalBudget,
     fallbackRosterTotalPlayerScore,
+    nilAllocationMode,
     programTierMultiplier,
     powerLookup,
   } = params;
@@ -1625,21 +1628,21 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // and the budget is distributed via the allocateNil curve (rank-decay +
   // budget-flex, sums to budget by construction — docs/RSTR_IQ_NIL_Allocation_Spec
   // §2). PVM is NOT in the score (spec §1); positional value is priced by the
-  // scarcity layer, not the allocation. Mode is balanced for now; the GM top-heavy
-  // toggle threads in when the setting lands.
-  const NIL_ALLOCATION_MODE: NilAllocationMode = "balanced";
+  // scarcity layer, not the allocation. nilAllocationMode is the team's SHARED
+  // Balanced/Top-Heavy setting (from gm_budget), so TB's projected values match
+  // whatever the GM toggle is set to.
   const nilAllocation = useMemo(() => {
     // Overridden players stay in the ranked set BY SCORE (they display their
     // coach-entered $ below), so entering an actual on one player does not
     // reshuffle everyone else's projected value — the "stable share" property.
     const onRoster = rosterPlayers.filter((rp) => isProjectedStatus(rp) && countsTowardRoster(rp));
     const scores = onRoster.map((rp) => projectedPlayerScore(rp));
-    const dollars = allocateNil(scores, totalBudget, NIL_ALLOCATION_MODE);
+    const dollars = allocateNil(scores, totalBudget, nilAllocationMode);
     const byPlayer = new Map<BuildPlayer, number>();
     onRoster.forEach((rp, i) => byPlayer.set(rp, dollars[i]));
     return { byPlayer, scores };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectedPlayerScore, totalBudget, rosterPlayers]);
+  }, [projectedPlayerScore, totalBudget, rosterPlayers, nilAllocationMode]);
 
   const projectedBudgetShareForPlayer = useCallback((p: BuildPlayer): number => {
     if (!isProjectedStatus(p) || totalBudget <= 0) return 0;
@@ -1654,9 +1657,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // PLUS this one target and read its slot, so off-roster targets never dilute
     // each other's marginal value (each priced as if it were the next addition).
     const withTarget = [...nilAllocation.scores, projectedPlayerScore(p)];
-    const dollars = allocateNil(withTarget, totalBudget, NIL_ALLOCATION_MODE);
+    const dollars = allocateNil(withTarget, totalBudget, nilAllocationMode);
     return Math.max(0, dollars[dollars.length - 1] ?? 0);
-  }, [nilAllocation, projectedPlayerScore, totalBudget]);
+  }, [nilAllocation, projectedPlayerScore, totalBudget, nilAllocationMode]);
 
   const effectiveNilForPlayer = useCallback((p: BuildPlayer, _side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;

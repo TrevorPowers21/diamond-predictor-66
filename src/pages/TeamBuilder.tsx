@@ -31,6 +31,7 @@ import {
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { useNilAllocationMode } from "@/gm/hooks/useNilAllocationMode";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -763,6 +764,9 @@ export default function TeamBuilder() {
     remoteEquationValues, allPlayersForSearch, hitterMasterPaMap,
     seasonUsage, builds, buildsLoading, returners, returnersUpdatedAt,
   } = useTeamBuilderData({ effectiveTeamId, selectedTeam });
+  // Team's shared Balanced/Top-Heavy NIL setting (from gm_budget) — same value
+  // the GM toggle writes, so TB's projected values mirror the GM's choice.
+  const nilAllocationMode = useNilAllocationMode(effectiveTeamId);
   const thinSampleMap = seasonUsage.thinSample;
 
   const isAdmin = hasRole("admin");
@@ -1390,7 +1394,7 @@ export default function TeamBuilder() {
     hitterStats, teamParkComponents, remoteEquationValues,
     pitchingEq, pitchingConfLookup, pitchingStatsByNameTeam,
     selectedTeam, effectiveTeamId,
-    rosterPlayers, totalBudget, fallbackRosterTotalPlayerScore,
+    rosterPlayers, totalBudget, fallbackRosterTotalPlayerScore, nilAllocationMode,
     programTierMultiplier,
     powerLookup,
   });
