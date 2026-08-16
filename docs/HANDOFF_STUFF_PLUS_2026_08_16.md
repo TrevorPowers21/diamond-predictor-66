@@ -25,9 +25,21 @@ slow pitch is labeled "Change-up" regardless of shape, a hard one a fastball —
     score better vs a cleaner (higher-ride) baseline, and sinkers finally get scored as sinkers (arm-side run + drop).
 - **Revisit breaking-ball / gyro thresholds:** Trevor — "**0 HB, −6 IVB = a dope gyro slider**." Classification and
   scoring are designed together (what gets CALLED a gyro pairs with the calc rewarding its depth).
-- **Method:** pull the IVB/HB/velo distributions of what's currently tagged 4S/Sinker/Cutter/Change-up (`pitcher_stuff_
-  plus_inputs`), set boundaries off real clusters, then a **validation loop** — spot-check a known sinkerballer, a true
-  4S guy, a change-up guy, and the 0-HB/−6-IVB gyro. Rule-based + review flags (like the breaking-ball reclassifier).
+- **Method (revised after external review 2026-08-16 — details in the agent-learnings doc):**
+  0. **Venue/sensor-variance check FIRST** — per-venue mean IVB/HB residuals off pitcher-season means (visiting-pitcher
+     logic, like the framing park fix); if any park ≥ 1.5″ offset, correct BEFORE classifying. One query; makes every
+     threshold trustworthy.
+  1. Pull the IVB/HB/velo distributions (`pitcher_stuff_plus_inputs`), **per-pitcher cluster** (≥~150–300 pitches; below →
+     global boundaries on the pitcher's cluster MEANS, never per-pitch). **Label at the cluster level.**
+  2. **Classify SWEEPER out first**, then set the Cutter/Slider boundary on what remains — velo-gap cut at the cluster
+     VALLEY (~6 mff per review, CONFIRM on our data) + **binary arsenal tiebreaker** (2nd breaking ball → Cutter, else
+     Slider) for the ambiguous band.
+  3. 4S/Sinker split on **release-height-conditioned IVB bands** (low slots ride less); **verify HB is handedness-
+     normalized first** (one-line check, else lefty sinker condition silently fails). Sweeper threshold gets the same
+     release-height guard (sidearmers).
+  4. **Validation loop** — spot-check a known sinkerballer, a true 4S guy, a change-up guy, the 0-HB/−6-IVB gyro; log the
+     two known-ambiguous archetypes (86–88 cutter-shaped slider; low-slot sinker/4S straddler) with documented tiebreaker,
+     do NOT let them block the build. Rule-based + `needs_review` flags (like the breaking-ball reclassifier).
 
 ### 2. Fix the equation bugs (calc)
 - **Curveball HB sign** — `stuffPlusEngine.ts:247` has `hbSign·(−0.15)·zh`; a glove-side curveball is penalized while
