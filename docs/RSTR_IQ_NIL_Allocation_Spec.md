@@ -100,20 +100,36 @@ score gaps. Value-honest allocation; the coach applies politics on top.
 
 ## 3. Need Detection (from existing roster state)
 - **Coverage authority:** a player covers ONLY his slotted position. Pitch-log innings are the position authority, not listed autofills.
-- **Starter line:** 50th-percentile total WAR at the position, one national line, no tier cutting. Checked against PROJECTION WAR.
+- **Starter line = CHAMPIONSHIP-starter bar (LOCKED 2026-08-16, `src/lib/positionNeed.ts`).** Per-position WAR bar =
+  **p70 of full-time regulars** (reg_season_pa≥200 hitters / reg_season_ip≥65 wSP) on **2026 DESCRIPTIVE full-season WAR**
+  (`total_desc_war` / `desc_pwar`) — NOT projection (projection bakes in the depth role we assign). p70 (top-tier, past
+  SS's glove-first cluster) because users strive for championships: a spot is "solid" only if a rostered player is a
+  championship-caliber regular there. Stamped bars: C 2.11 · RF 1.88 · 1B 1.77 · CF 1.74 · LF 1.70 · 3B 1.57 · 2B 1.48 ·
+  SS 1.42 · weekend-SP 3.06. Generic pitch-log `OF`/`IF` labels use the group average until the position-display fix.
+  A returner clears on his DESCRIPTIVE WAR; a target has no descriptive history so his board value is his projection, but
+  the roster's need-state is decided by the returners' descriptive WAR vs the bar.
 - **Freshmen / no-history:** carry 0 WAR (freshman valuation logged future work); a slotted freshman does not clear the line.
 - **Three states, pricing is BINARY:** `empty` (nobody clears / nobody slotted → full need premium) · `thin` (someone
   slotted, nobody clears → full need premium; DISPLAY state only so the coach sees his player acknowledged) · `solid`
   (a slotted player clears the 50th line → multiplier 1.0).
 
-## 4. Need Ladder (judgment-set by Trevor)
+## 4. Need Ladder (judgment-set by Trevor) — ★ THE positional-value layer (LOCKED 2026-08-16)
+**Decision (Trevor 2026-08-16): positional value is PURELY team-need-driven — this need ladder is the ONLY positional
+multiplier. There is NO always-on national positional multiplier** (the old PVM is retired, NOT replaced by a derived
+national index — see §7.4). A position commands a premium ONLY when it's an actual hole on the roster (empty/thin per §3),
+which is the scarcity a coach actually feels. No bench tier.
 Applied to target-board displayed prices ONLY while position is in need (empty/thin). Never touches rostered allocations.
 | Position | Need multiplier |
 |---|---|
 | C, SS, weekend SP | 1.3 |
 | All OF (incl CF), 2B, 3B | 1.1 |
 | 1B, DH, non-starter pitchers | 1.0 always |
-Encodes conversion difficulty. A derived supply-scarcity version is a logged someday-check, not v1.
+- **CF = 1.1 (not 1.3) is COACH-FEEDBACK-backed** (a receipt, not a guess) — and the 2026 descriptive re-pull agreed (CF
+  not distinctly scarce). Up-the-middle premium is C/SS, not CF.
+- **Generic `OF` / `IF` labels also map to 1.1** — the pitch-log position read still emits generic `OF`/`IF` until the
+  position-display fix lands (a wiring dependency). Conservative: `IF`→1.1 (never auto-credit a generic infielder the SS
+  1.3), `OF`→1.1 (all OF is 1.1 regardless).
+Encodes conversion difficulty. Magnitudes 1.3/1.1/1.0 are Trevor-set (validated ordering, not fitted).
 
 ## 5. Conditional Values, Repricing, Freeze
 - Board values CONDITIONAL on roster state: `board_price = allocation-implied value × need multiplier (if in need)`.
@@ -183,6 +199,19 @@ Disagreement → argued in chat. Hand ladder stays live until then.
 **V1 verdict:** hand ladder ships (ordering + conversion + tier-scaling validated). Derived surface does NOT replace it
 yet. Revisit next season: credibility threshold → ~50 half-innings (fixes corner truncation), larger multi-position
 sample, wSP 1.3-vs-derived on the table.
+
+**★ 2026-08-16 DESCRIPTIVE RE-PULL — national derived surface PARKED for good (v1), hand ladder is final.** Re-ran at
+≥50 half-innings (corner truncation fixed: LF/RF now mid-pack; 311 multi-position players vs the old 34). Switched the
+value axis to DESCRIPTIVE reg-season WAR (Trevor: projected WAR bakes in the depth-role we assign, so it's not a clean
+talent signal). Findings: (a) wSP scarcest by a mile (median weekend starter 2.46 > every position's Tier-1; scarcity is
+ROLE-slot, ~1.2/team, not elite-count); (b) on descriptive WAR the within-position elite→median cliff is nearly FLAT
+(~1.75–1.92 all positions except 2B 1.46) — so cliff barely differentiates; (c) raw elite-SUPPLY count (≥2.0 WAR bar)
+INVERTS intuition (2B/3B fewest elite; C/SS/RF abundant) because catcher counting-WAR is SUPPRESSED by fewer innings
+(rest days → lower ceiling, p90 only 1.52) and raw count tracks total bodies. **Conclusion: the national "how much is a
+position worth in the abstract" signal is inherently noisy at this level (answer flips by metric; catcher needs a special
+per-inning normalization). Not worth chasing.** Positional value → PURELY the §4 team-need premium (Trevor 2026-08-16).
+The re-pull scripts were throwaway; data source = `"Hitter Master".total_desc_war_reg` / `"Pitching Master".desc_pwar_reg`
+(Season 2026) joined to `player_season_defense` (2026, half_innings≥50) by `source_player_id`, D1 only.
 
 ## §6 EXECUTION STATUS (2026-08-14) — item 1 INCONCLUSIVE, scoring-source correction found
 Item 1 (Arkansas projection re-fit) was run and is **inconclusive, NOT a real failure — I fit against the WRONG
