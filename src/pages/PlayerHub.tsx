@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { useAuth } from "@/hooks/useAuth";
-import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { allocateNil } from "@/lib/nilAllocation";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
@@ -268,16 +268,17 @@ export default function PlayerHub() {
   const c = row ? playerComp(row) : null;
   const schMode = gm.budget?.scholarship_mode ?? "pct";
   const schDisplay = row?.scholarship_amount == null ? "—" : (schMode === "dollar" ? money(row.scholarship_amount) : `${Math.round(row.scholarship_amount)}%`);
-  // Projected Value = the roster's budget-share (position-weighted WAR / roster
-  // total × budget), falling back to stored market value when there's no budget.
-  const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
-  const rosterScore = [...gm.hitters, ...gm.pitchers].reduce((s, r) => s + posWeightedWar(r), 0);
+  // Projected Value = the NIL allocation curve's share for this player (allocateNil
+  // over the roster's WAR — PVM out of the score per spec §1, PTM cancels), falling
+  // back to stored market value when there's no budget or the player isn't rostered.
   const projValue = (() => {
     if (!row) return null;
     const budget = gm.coachTotalBudget ?? 0;
     if (budget <= 0) return null;
-    const denom = Math.max(rosterScore, 33);
-    return denom > 0 ? Math.max(0, (posWeightedWar(row) / denom) * budget) : null;
+    const rosterRows = [...gm.hitters, ...gm.pitchers];
+    const dollars = allocateNil(rosterRows.map((r) => Number(r.war ?? 0)), budget, "balanced");
+    const idx = rosterRows.findIndex((r) => r.build_player_id === row.build_player_id);
+    return idx >= 0 ? dollars[idx] : null;
   })();
   const displayValue = projValue ?? row?.market_value ?? null;
   const liveBuildName = gm.builds.find((b) => b.id === gm.liveBuildId)?.name ?? null;

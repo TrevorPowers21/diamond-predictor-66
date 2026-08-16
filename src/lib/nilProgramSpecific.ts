@@ -63,39 +63,22 @@ export const getPositionValueMultiplier = (position: string | null | undefined):
 export const calcPlayerScore = ({
   owar,
   programTierMultiplier,
-  position,
 }: {
   owar: number | null | undefined;
   programTierMultiplier: number;
-  position: string | null | undefined;
 }): number => {
+  // Player score = WAR × PTM. PVM (positional value) is REMOVED from the score
+  // per docs/RSTR_IQ_NIL_Allocation_Spec.md §1: scarcity must never inflate a
+  // player's rank on his own roster. Positional value is priced in the pricing
+  // layer instead — §7.2 always-on positional premium + §4 need premium — via
+  // the derived cliff scarcity index, not baked into the allocation score.
   const safeOwar = Number(owar) || 0;
   const ptm = Number(programTierMultiplier) || 0;
-  const pvm = getPositionValueMultiplier(position);
-  return safeOwar * ptm * pvm;
+  return safeOwar * ptm;
 };
 
-export const calcProgramSpecificAllocation = ({
-  playerScore,
-  rosterTotalPlayerScore,
-  nilBudget,
-  fallbackTotalPlayerScore = DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
-}: {
-  playerScore: number;
-  rosterTotalPlayerScore: number;
-  nilBudget: number;
-  fallbackTotalPlayerScore?: number;
-}): number => {
-  const budget = Number(nilBudget) || 0;
-  if (budget <= 0) return 0;
-
-  // Keep 68 (or configured fallback) as the default denominator for partial rosters.
-  // Only use the calculated roster score once it exceeds the fallback baseline.
-  const calculatedTotal = Number(rosterTotalPlayerScore) || 0;
-  const denominator = calculatedTotal > fallbackTotalPlayerScore
-    ? calculatedTotal
-    : fallbackTotalPlayerScore;
-
-  if (denominator <= 0) return 0;
-  return (playerScore / denominator) * budget;
-};
+// calcProgramSpecificAllocation retired 2026-08-16 — the old proportional NIL
+// split (score / max(Σscore, DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE) × budget) is
+// replaced everywhere by the roster-level allocateNil curve (src/lib/nilAllocation.ts).
+// DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE is kept only for the NIL tier-color helper
+// (projectedNilTierClass) until that display threshold is repointed.

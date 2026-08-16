@@ -3,9 +3,7 @@ import {
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
   calcPlayerScore,
-  calcProgramSpecificAllocation,
   DEFAULT_NIL_TIER_MULTIPLIERS,
-  DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
 } from "./nilProgramSpecific";
 
 describe("getProgramTierMultiplierByConference", () => {
@@ -113,101 +111,35 @@ describe("getPositionValueMultiplier", () => {
 });
 
 describe("calcPlayerScore", () => {
-  it("computes oWAR × PTM × PVM correctly (SS + SEC + 2.0 oWAR)", () => {
-    // SS → PVM 1.3, SEC → PTM 1.5, oWAR = 2.0
-    const result = calcPlayerScore({ owar: 2.0, programTierMultiplier: 1.5, position: "SS" });
-    expect(result).toBeCloseTo(2.0 * 1.5 * 1.3);
+  // PVM removed from the score (spec §1) — score = WAR × PTM only.
+  it("computes oWAR × PTM correctly (SEC + 2.0 oWAR)", () => {
+    // SEC → PTM 1.5, oWAR = 2.0 (position no longer affects the score)
+    const result = calcPlayerScore({ owar: 2.0, programTierMultiplier: 1.5 });
+    expect(result).toBeCloseTo(2.0 * 1.5);
   });
 
-  it("computes 1B + Big Ten + 3.0 oWAR", () => {
-    // 1B → PVM 1.0, Big Ten → PTM 1.0, oWAR = 3.0
-    expect(calcPlayerScore({ owar: 3.0, programTierMultiplier: 1.0, position: "1B" })).toBeCloseTo(3.0);
+  it("computes Big Ten + 3.0 oWAR", () => {
+    // Big Ten → PTM 1.0, oWAR = 3.0
+    expect(calcPlayerScore({ owar: 3.0, programTierMultiplier: 1.0 })).toBeCloseTo(3.0);
   });
 
   it("returns 0 when oWAR is null", () => {
-    expect(calcPlayerScore({ owar: null, programTierMultiplier: 1.5, position: "SS" })).toBe(0);
+    expect(calcPlayerScore({ owar: null, programTierMultiplier: 1.5 })).toBe(0);
   });
 
   it("returns 0 when oWAR is undefined", () => {
-    expect(calcPlayerScore({ owar: undefined, programTierMultiplier: 1.5, position: "SS" })).toBe(0);
+    expect(calcPlayerScore({ owar: undefined, programTierMultiplier: 1.5 })).toBe(0);
   });
 
   it("returns 0 when programTierMultiplier is 0", () => {
-    expect(calcPlayerScore({ owar: 2.0, programTierMultiplier: 0, position: "SS" })).toBe(0);
+    expect(calcPlayerScore({ owar: 2.0, programTierMultiplier: 0 })).toBe(0);
   });
 
   it("handles negative oWAR (bench/replacement-level player)", () => {
-    const result = calcPlayerScore({ owar: -0.5, programTierMultiplier: 1.2, position: "DH" });
-    expect(result).toBeCloseTo(-0.5 * 1.2 * 1.0);
+    const result = calcPlayerScore({ owar: -0.5, programTierMultiplier: 1.2 });
+    expect(result).toBeCloseTo(-0.5 * 1.2);
   });
 });
 
-describe("calcProgramSpecificAllocation", () => {
-  it("uses fallback denominator (68) when roster total is below it", () => {
-    // rosterTotal=30 < 68, so denominator = 68
-    const result = calcProgramSpecificAllocation({
-      playerScore: 5,
-      rosterTotalPlayerScore: 30,
-      nilBudget: 1_000_000,
-    });
-    expect(result).toBeCloseTo((5 / DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE) * 1_000_000);
-  });
-
-  it("uses roster total when it exceeds fallback", () => {
-    // rosterTotal=100 > 68, so denominator = 100
-    const result = calcProgramSpecificAllocation({
-      playerScore: 5,
-      rosterTotalPlayerScore: 100,
-      nilBudget: 1_000_000,
-    });
-    expect(result).toBeCloseTo(50_000);
-  });
-
-  it("uses exact fallback as denominator when roster equals fallback exactly", () => {
-    const result = calcProgramSpecificAllocation({
-      playerScore: 10,
-      rosterTotalPlayerScore: DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
-      nilBudget: 680_000,
-    });
-    // 10 / 68 * 680_000 = 100_000
-    expect(result).toBeCloseTo(100_000);
-  });
-
-  it("returns 0 for zero budget", () => {
-    expect(
-      calcProgramSpecificAllocation({ playerScore: 5, rosterTotalPlayerScore: 100, nilBudget: 0 }),
-    ).toBe(0);
-  });
-
-  it("returns 0 for negative budget", () => {
-    expect(
-      calcProgramSpecificAllocation({ playerScore: 5, rosterTotalPlayerScore: 100, nilBudget: -500 }),
-    ).toBe(0);
-  });
-
-  it("respects custom fallbackTotalPlayerScore", () => {
-    // rosterTotal=20 < customFallback=100, so denominator=100
-    const result = calcProgramSpecificAllocation({
-      playerScore: 10,
-      rosterTotalPlayerScore: 20,
-      nilBudget: 100_000,
-      fallbackTotalPlayerScore: 100,
-    });
-    expect(result).toBeCloseTo(10_000);
-  });
-
-  it("star player (high score) gets proportionally more budget", () => {
-    const star = calcProgramSpecificAllocation({
-      playerScore: 20,
-      rosterTotalPlayerScore: 100,
-      nilBudget: 2_000_000,
-    });
-    const bench = calcProgramSpecificAllocation({
-      playerScore: 2,
-      rosterTotalPlayerScore: 100,
-      nilBudget: 2_000_000,
-    });
-    expect(star).toBeGreaterThan(bench);
-    expect(star / bench).toBeCloseTo(10); // linear proportion
-  });
-});
+// calcProgramSpecificAllocation retired — allocation now flows through
+// allocateNil (src/lib/nilAllocation.ts, tested in nilAllocation.test.ts).

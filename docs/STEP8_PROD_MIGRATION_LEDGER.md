@@ -92,3 +92,68 @@ then `staging → main` PR — **Trevor clicks the final merge**.
 ## Post-promotion
 - Append A1/A2/B1/B2/C/F1 (and the DROP, when it happens) to `PROD_MIGRATIONS_TODO.md`.
 - Post the coach-facing `WhatsNewModal` note (no em dashes) explaining the WAR move — reference `WAR_CHANGELOG.md`.
+
+---
+
+## K. CODE INVENTORY — what is USED vs what ISN'T (branch-vs-staging categorization, 2026-08-16)
+Every changed `src/` + edge-fn file on `feature/war-recalibration` was read-diffed and bucketed. The branch is **one
+coherent thing: the WAR/wRC+/pRV+ "C1" recalibration** propagated to every live compute site. Nothing unrelated snuck in.
+
+### LIVE — the recalibration (these produce the numbers; must all be on prod)
+Three number families, each with a canonical source + all consumers:
+- **wRC+ → C1** (`0.011 + 0.691·OBP + 0.235·SLG ÷ 0.3782`, AVG/ISO→0; **rounds to int**). Canonical `src/lib/wrc.ts`
+  (`computeWrcPlus`); `src/savant/lib/wrcPlus.ts` re-exports it. Consumers: predictionEngine, transferProjection,
+  buildTransferProjectionInputs, jucoReturnerProjection, playerRisk, playerCalcs, useTeamBuilderSimulation, TeamBuilder,
+  ReturningPlayers, PlayerProfile, HistoricalPlayerTable, ConferenceStatsTable, JucoPlayerDashboardPanel,
+  ConferenceStatsPage; edge fns `process-precompute-jobs`, `recalculate-prediction`, `import-power-ratings-csv`,
+  `google-sheets-sync`.
+- **oWAR constants** (`runsPerPa 0.3994 / repl 21.22 / RPW 13.1`). Canonical `src/savant/lib/war.ts`. Consumers:
+  playerCalcs, depthRoles, transferProjection, buildTransferProjectionInputs, computeAndStoreScores,
+  useTeamBuilderSimulation, TeamBuilder, edge fn. New `computeDWar/BsrWar/TotalWar/positional`.
+- **pRV+ → D1-FIP index** (new `src/lib/pitcherQuality.ts` `computePrvPlus`, replaces 6-component z-blend); pWAR run-env
+  `6.915/1.92/13.1` (`pitchingEquations.ts`); power-rating refits (`powerRatings.ts` baPlus/obpPlus/isoPlus+pullAir,
+  ERA/WHIP/HR9, izWhiff dropped). Consumers: transferPitcherProjection, pitcherProjection, projectEffective,
+  effectiveProjection, buildTransferPitcherInputs, jucoReturnerPitcherProjection, computeAndStoreScores, PitcherProfile,
+  PitchingStatsStorageTable, PitchingPowerRatingsStorageTable, `usePitchingEquationWeights` (DEFAULTS = live fallback),
+  JucoPlayerDashboardPanel, edge fn.
+
+### DEAD — retire, no live caller (safe to drop; do NOT count on for outputs)
+- `predictionEngine.ts` — `recalculatePredictionById` + `fetchPitcherContext` (callers in PlayerProfile/TeamBuilder
+  removed on this branch; "retired dead path" notes remain).
+- `src/pages/team-builder/tabs/CompareTab.tsx` — DELETED (superseded build-vs-build compare; zero refs on HEAD). The
+  shipped Year-over-Year / Championship-Benchmark analytics **survives** in `AnalyticsTab.tsx` (+ GMAnalytics).
+- `createPredictionsFromMaster.ts` — internals-table writes removed (readers repointed to Master by `source_player_id`).
+
+### ORPHAN / INERT — keep-aware (not wrong, just not doing work)
+- **`player_prediction_internals` table** — no LIVE reader remains (only reads left are inside the dead
+  `recalculatePredictionById`). One orphan WRITER survives: edge fn `import-internal-ratings` (invoked from
+  `DataSync.tsx`), now populating a table nothing reads. → **DROP at item J**; retire the edge fn + its DataSync button
+  with it. Kept until the full push to main (staging still carries the old reader shells).
+- **`platformDefaults.ts` `WRC_PLUS_COEFFICIENTS`** — updated to C1 but has **zero importers**. Intentional mirror for
+  the not-yet-built per-program equation-override surface ([[project_per_program_equation_overrides]]); inert today, not
+  a wire-up gap. Live math runs off `wrc.ts`.
+- **`AdminDashboard.tsx` editor defaults** — seed/reset strings updated to C1. Harmless as display; writes C1 config to
+  the DB only if an admin clicks "save defaults." Not touching it.
+
+### CONFIRMATIONS (grep/read, 2026-08-16)
+- **Math (rounded wRC+ → WAR):** clean. The rounded `computeWrcPlus` feeds the wRC+ *column* only; displayed WAR is read
+  from the stored precompute. The stored WAR pipeline (edge fn) rounds its own wRC+ before oWAR (`index.ts:261/505→1166`)
+  — pre-existing, uniform, ≤~0.04 WAR effect. No inconsistency.
+- **Internals collapse safe:** grep for `.from('player_prediction_internals')` reads returns only dead-fn hits → the
+  write-removal is provably identical for live paths.
+- A few display sites (ReturningPlayers/PlayerProfile) now show **integer** wRC+ (rode in with `computeWrcPlus`) — matches
+  the stored pipeline; benign, more conventional.
+
+## L. DECISIONS INDEX — where every locked decision lives (so prod-push knows the "why")
+| Decision | Home doc / memory |
+|---|---|
+| Two-number WAR architecture; all modeling LOCKED | `WAR_HANDOFF.md`, `HANDOFF_WAR_REDESIGN_2026_08_13.md`; memory `project_war_system_redesign` |
+| Power-rating composite refits (era⁺/baPlus/obpPlus/isoPlus/hr9⁺/whip⁺) | memory `project_power_rating_refits_2026_08_11`; SQL = ledger **B1** |
+| Replacement level 21.22 (owar) / 1.62 (pwar), .380/1.92 anchors | `WAR_HANDOFF.md`; ledger B1 |
+| pRV+ = D1-FIP index (not z-blend) | `WAR_CHANGELOG.md`; `src/lib/pitcherQuality.ts` |
+| Master authoritative (=Baseball Ref); pitch log = engine/cross-check | memory `project_war_pitchlog_migration_master_plan` |
+| Stuff+/HTP + conference PARK-FACTOR swap (replaces 100−wRC+ term) | `TRANSFER_ENGINE_AUDIT_2026_08_13.md`; memory `project_transfer_engine_audit`, `project_park_factor_rework` |
+| Stuff+ weighting fork A/B/C | OPEN — `TRANSFER_ENGINE_AUDIT_2026_08_13.md` §3b |
+| Internals collapse (repoint readers → Master; drop table) | `INTERNALS_COLLAPSE_HANDOFF.md`; ledger item J + §K above |
+| Step-7 display/snapshot execution (o_war→total_hitter_war swap) | `STEP7_EXECUTION_MAP.md`; memory `project_war_display_audit` |
+| NIL allocation curve + budget-flex downscaling | `RSTR_IQ_NIL_Allocation_Spec.md` §2; memory `project_player_score_nil_allocation`. **NOT wired — first NIL code change still pending; gated behind 7b/7c/6b.** |

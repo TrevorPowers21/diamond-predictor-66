@@ -17,11 +17,10 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import {
   calcPlayerScore,
-  calcProgramSpecificAllocation,
-  DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
   DEFAULT_NIL_TIER_MULTIPLIERS,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
+import { allocateNil } from "@/lib/nilAllocation";
 
 type SortKey = "name" | "estimated_value" | "p_avg" | "p_obp" | "p_slg" | "p_wrc_plus" | "owar";
 type SortDir = "asc" | "desc";
@@ -67,7 +66,6 @@ export default function NilValuations() {
   const [search, setSearch] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [consultationNilBudget, setConsultationNilBudget] = useState<number>(0);
-  const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
   const [sortKey, setSortKey] = useState<SortKey>("estimated_value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -164,7 +162,7 @@ export default function NilValuations() {
         p.conference,
         DEFAULT_NIL_TIER_MULTIPLIERS,
       );
-      const playerScore = calcPlayerScore({ owar, programTierMultiplier, position: p.position });
+      const playerScore = calcPlayerScore({ owar, programTierMultiplier });
       return {
         ...p,
         program_tier_multiplier: programTierMultiplier,
@@ -176,6 +174,19 @@ export default function NilValuations() {
   const totalRosterPlayerScore = useMemo(() => {
     return consultationRows.reduce((sum, p) => sum + p.consultation_player_score, 0);
   }, [consultationRows]);
+
+  // Program NIL ($) via the allocateNil curve (rank-decay + budget-flex, sums to
+  // the consultation budget). Replaces the old proportional share + 68 fallback.
+  const consultationAlloc = useMemo(() => {
+    const dollars = allocateNil(
+      consultationRows.map((p) => p.consultation_player_score),
+      consultationNilBudget,
+      "balanced",
+    );
+    const m = new Map<string, number>();
+    consultationRows.forEach((p, i) => m.set(p.id, dollars[i]));
+    return m;
+  }, [consultationRows, consultationNilBudget]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -270,15 +281,6 @@ export default function NilValuations() {
               <div>SEC: {DEFAULT_NIL_TIER_MULTIPLIERS.sec.toFixed(1)} | ACC/Big12: {DEFAULT_NIL_TIER_MULTIPLIERS.p4.toFixed(1)} | Big Ten: {DEFAULT_NIL_TIER_MULTIPLIERS.bigTen.toFixed(1)}</div>
               <div>Strong Mid: AAC, Sun Belt, Big West, Mountain West ({DEFAULT_NIL_TIER_MULTIPLIERS.strongMid.toFixed(1)})</div>
               <div>All other conferences: Low Tier ({DEFAULT_NIL_TIER_MULTIPLIERS.lowMajor.toFixed(1)})</div>
-            </div>
-            <div>
-              <Label className="text-xs mb-1 block">Total Roster Player Score (68 for future projections)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={fallbackRosterTotalPlayerScore || ""}
-                onChange={(e) => setFallbackRosterTotalPlayerScore(Number(e.target.value) || 0)}
-              />
             </div>
             <div className="md:col-span-4 text-xs text-muted-foreground">
               Sum of Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>
@@ -424,12 +426,7 @@ export default function NilValuations() {
                   <TableBody>
                     {consultationRows.map((p) => {
                       const cb = p.component_breakdown;
-                      const consultationValue = calcProgramSpecificAllocation({
-                        playerScore: p.consultation_player_score,
-                        rosterTotalPlayerScore: totalRosterPlayerScore,
-                        nilBudget: consultationNilBudget,
-                        fallbackTotalPlayerScore: fallbackRosterTotalPlayerScore,
-                      });
+                      const consultationValue = consultationAlloc.get(p.id) ?? 0;
                       return (
                         <TableRow key={p.id}>
                           <TableCell>

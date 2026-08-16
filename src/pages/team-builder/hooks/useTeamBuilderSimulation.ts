@@ -29,6 +29,7 @@ import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
 import { calcPlayerScore, getProgramTierMultiplierByConference, DEFAULT_NIL_TIER_MULTIPLIERS, getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { allocateNil, type NilAllocationMode } from "@/lib/nilAllocation";
 import {
   normalizeName,
   normalizeKey,
@@ -1546,7 +1547,6 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return calcPlayerScore({
       owar,
       programTierMultiplier,
-      position: p.position_slot || p.player?.position,
     });
   }, [playerProjection, programTierMultiplier]);
 
@@ -1620,75 +1620,43 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // budget after overrides). Defined here so effectiveNilForPlayer can use it
   // as the canonical "not overridden" value — coaches think in budget share,
   // not market value, when filling the Actual Value column.
+  // Roster-level NIL allocation (replaces the old proportional share + the
+  // RAW_WAR_BENCHMARK 33 floor). The on-roster projected set is ranked by score
+  // and the budget is distributed via the allocateNil curve (rank-decay +
+  // budget-flex, sums to budget by construction — docs/RSTR_IQ_NIL_Allocation_Spec
+  // §2). PVM is NOT in the score (spec §1); positional value is priced by the
+  // scarcity layer, not the allocation. Mode is balanced for now; the GM top-heavy
+  // toggle threads in when the setting lands.
+  const NIL_ALLOCATION_MODE: NilAllocationMode = "balanced";
+  const nilAllocation = useMemo(() => {
+    // Overridden players stay in the ranked set BY SCORE (they display their
+    // coach-entered $ below), so entering an actual on one player does not
+    // reshuffle everyone else's projected value — the "stable share" property.
+    const onRoster = rosterPlayers.filter((rp) => isProjectedStatus(rp) && countsTowardRoster(rp));
+    const scores = onRoster.map((rp) => projectedPlayerScore(rp));
+    const dollars = allocateNil(scores, totalBudget, NIL_ALLOCATION_MODE);
+    const byPlayer = new Map<BuildPlayer, number>();
+    onRoster.forEach((rp, i) => byPlayer.set(rp, dollars[i]));
+    return { byPlayer, scores };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectedPlayerScore, totalBudget, rosterPlayers]);
+
   const projectedBudgetShareForPlayer = useCallback((p: BuildPlayer): number => {
     if (!isProjectedStatus(p) || totalBudget <= 0) return 0;
     if (p.nil_value_overridden) {
       const v = Number(p.nil_value);
       return Number.isFinite(v) ? Math.max(0, v) : 0;
     }
-    // STABLE share: price every player against the FULL budget and the FULL
-    // roster score (overridden players included in the denominator), so a
-    // player's projected value does NOT move when a coach enters actual pay
-    // on someone else. Entering a value overrides that one player's row only
-    // (handled above). The live "redistribute the remaining budget as pay is
-    // assigned" behavior is deferred to the Situation Room, not Team Builder.
-    // Denominator includes returners + on-roster targets + the target being
-    // computed (so off-roster targets each see their own "what if I were the
-    // next add" share). Other off-roster targets are skipped so they don't
-    // dilute each other's marginal value — each priced as the lone next add.
-    let totalScore = 0;
-    for (const rp of rosterPlayers) {
-      if (!isProjectedStatus(rp)) continue;
-      if (!countsTowardRoster(rp) && rp !== p) continue;
-      totalScore += projectedPlayerScore(rp);
-    }
-    const remainingBudget = totalBudget;
-    if (totalScore <= 0) return 0;
-    const score = projectedPlayerScore(p);
-    // League-wide denominator floor — fixes "shrinking roster inflates
-    // per-player share" bug exposed by the off-roster target toggle.
-    //
-    // The raw share formula divides by the actual roster's score sum.
-    // When coaches toggle most targets off-roster, the denominator
-    // collapses (e.g., 7-WAR roster on a $3.5M budget showed a 2-WAR
-    // player at ~$1M — way above market). The floor caps that
-    // inflation by saying "for budget-share purposes, never use a
-    // denominator smaller than what a typical competitive D1 roster
-    // scores."
-    //
-    // RAW_WAR_BENCHMARK = 33 — calibrated to where the actual NIL
-    // budget money is. Customer base (12 teams, season 2026):
-    //   league p75 = 28.8 (all 309 D1 teams)
-    //   customer median = 28.1
-    //   customer mean = 29.4
-    //   customer p75 = 34.9 (Vanderbilt / Kansas / Arkansas territory)
-    //   customer top-half median ≈ 35 (Arkansas / Kansas)
-    // 33 captures "what a competitive high-budget customer expects
-    // their roster to be" — not the median of every customer (which
-    // would under-floor for the high-budget power-conference programs
-    // where the inflation actually shows up). Floor barely activates
-    // for top customers with full rosters (Georgia, Arizona State,
-    // Arkansas), activates appropriately when their roster collapses
-    // due to off-roster target toggles.
-    //
-    // adjustedBenchmark = RAW_WAR_BENCHMARK × programTierMultiplier
-    // so the floor is on the SAME scale as projectedPlayerScore
-    // (which has tier + position multipliers baked in). The tier
-    // multiplier on both numerator and denominator cancels for the
-    // SAME player, meaning two coaches at different tiers with the
-    // SAME budget see similar values — budget is the dominant signal,
-    // tier doesn't double-count on top of it. Position premium
-    // (1.3x C/SS/CF, 1.0x DH/1B, etc.) survives in the numerator only,
-    // so premium positions still command premium shares.
-    //
-    // When the actual roster score exceeds adjustedBenchmark, the
-    // formula reverts to pure proportional split — bigger rosters
-    // → smaller individual shares, exactly the prior behavior.
-    const RAW_WAR_BENCHMARK = 33;
-    const adjustedBenchmark = RAW_WAR_BENCHMARK * programTierMultiplier;
-    const denominator = Math.max(totalScore, adjustedBenchmark);
-    return (score / denominator) * remainingBudget;
-  }, [projectedPlayerScore, totalBudget, rosterPlayers, programTierMultiplier]);
+    // On-roster player → read the curve slot.
+    const share = nilAllocation.byPlayer.get(p);
+    if (share != null) return Math.max(0, share);
+    // Off-roster target → "the lone next add": run the curve on the on-roster set
+    // PLUS this one target and read its slot, so off-roster targets never dilute
+    // each other's marginal value (each priced as if it were the next addition).
+    const withTarget = [...nilAllocation.scores, projectedPlayerScore(p)];
+    const dollars = allocateNil(withTarget, totalBudget, NIL_ALLOCATION_MODE);
+    return Math.max(0, dollars[dollars.length - 1] ?? 0);
+  }, [nilAllocation, projectedPlayerScore, totalBudget]);
 
   const effectiveNilForPlayer = useCallback((p: BuildPlayer, _side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;

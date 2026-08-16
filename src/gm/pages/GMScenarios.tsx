@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { loadGmBuildRoster } from "@/gm/lib/loadGmBuildRoster";
 import type { GmRow } from "@/gm/hooks/useGmRoster";
 import { useGmTargetBoard, type GmTarget } from "@/gm/hooks/useGmTargetBoard";
-import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { allocateNil } from "@/lib/nilAllocation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -211,11 +211,17 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
   const payOf = (r: GmRow) => (r.build_player_id in payOverride ? payOverride[r.build_player_id] : (r.nil_value ?? 0));
   const kept = rows.filter((r) => !excluded.has(r.build_player_id));
 
-  const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
-  const rosterScore = kept.reduce((s, r) => s + posWeightedWar(r), 0);
+  // Projected Value via the NIL allocation curve (allocateNil) over the kept
+  // roster's WAR — PVM out of the score (spec §1), PTM cancels within a roster.
+  const nilAllocByRow = (() => {
+    const dollars = allocateNil(kept.map((r) => Number(r.war ?? 0)), budget ?? 0, "balanced");
+    const m = new Map<GmRow, number>();
+    kept.forEach((r, i) => m.set(r, dollars[i]));
+    return m;
+  })();
   const projValue = (r: GmRow): number | null => {
     if (budget == null || budget <= 0) return null;
-    return Math.max(0, (posWeightedWar(r) / Math.max(rosterScore, 33)) * budget);
+    return nilAllocByRow.get(r) ?? null;
   };
 
   const baseWar = buildRows.reduce((s, r) => s + (r.war ?? 0), 0);

@@ -21,13 +21,19 @@ Standalone "market value" is display-only context. The product number is budget-
 ## 2. Allocation Formula (fitted, validated)
 For a roster ranked by score, budget B:
 ```
-paid set  = players with score > 0
+paid set  = players with score > 0 AND NIL_i ≥ min_payment      (iterate: drop below-min → redistribute → repeat)
 n_paid    = |paid set|
-floor     = floor_frac × B / n_paid          (floor_frac = 0.10)
-surplus_i = max(score_i, 0) ^ alpha          (alpha = 1.1)
+floor     = floor_frac(B) × B / n_paid
+surplus_i = max(score_i, 0) ^ alpha(B)
 rate      = (B − floor × n_paid) / Σ surplus_i
 NIL_i     = floor + rate × surplus_i          (paid set)
-NIL_i     = 0                                 (score ≤ 0)
+NIL_i     = 0                                 (score ≤ 0, or below min_payment)
+
+  BUDGET-FLEX (ref budget B* = $5,000,000):
+    alpha(B)      = max(1.1, 1.1 + 0.5 · log10(B*/B))    — concentration ramps UP as budget drops (top holds value)
+    floor_frac(B) = 0.10 · min(1, B/B*)                  — floor drains toward 0 as budget drops (balanced default)
+    min_payment   = $10,000                              — below-line cleanup → literal $0 tail
+    top-heavy toggle: floor_frac = 0 at any budget (drains the floor immediately, redistributes up)
 ```
 **★ ANCHOR FRAMING REJECTED (Trevor 2026-08-15):** there is NO fixed "top-1% player = X% of budget" target, no cap,
 implied or otherwise. The star's dollar FLOATS with his WAR and the budget through the formula — permanently, by design.
@@ -65,6 +71,23 @@ value to the top is the deliberate, accepted cost of pricing talent a step above
 - "Balanced roster" = floor on (default) · "Top-heavy" = floor_frac=0, difference redistributes upward.
 - Label by philosophy, never mechanism. Effect concentrated at the bottom (contributors → $0), modest at top. Every
   dollar exhibit + UI surface respects the team's selected mode.
+
+**★ BUDGET DOWNSCALING (budget-flex) — settled + VERIFIED (Trevor, 2026-08-16).** The curve must NOT scale linearly with
+budget: at a small budget the top must stay COMPETITIVE (not collapse budget/$5M) while the floor drains to $0 faster.
+Two budget-flexed knobs, BOTH baked into the default curve (formulas above):
+- **Concentration ramp** `alpha(B) = max(1.1, 1.1 + 0.5·log10($5M/B))` — 1.1 at $5M, 1.45 at $1M, 1.60 at $500K. Makes
+  the top HOLD value as budget drops (top-1 holds ~28% of its $5M dollar at $1M vs 20% under pure-linear) and squeezes
+  the middle. Clamped ≥1.1 so **$5M is the fixed calibration endpoint** (locked elasticity untouched); everything below
+  concentrates from there. Budgets >$5M behave as $5M (revisit if a mega-budget program appears).
+- **Floor drain** `floor_frac(B) = 0.10·min(1, $5M/… )` → `0.10·min(1, B/$5M)` — full floor (0.10) at $5M = the locked
+  balanced default; drains linearly (0.02 at $1M) so the guaranteed floor trends to $0 progressively, not chopped.
+- **Two levers, ONE is a toggle.** The ramp is ALWAYS on (not coach-facing; "linear" is never offered — it's the naive
+  shrink we rejected). The floor toggle (balanced ↔ top-heavy) is the single GM setting, stacking on top of the ramp.
+- **DEFAULT = ramp + balanced floor** (both on). **Top-heavy toggle** = `floor_frac=0` at any budget.
+- **Verified (Georgia roster, 2026-08-16):** Σ NIL_i = B exactly at $5M/$3M/$1M/$500K, both modes; toggle behaves
+  correctly at every budget (drops the guaranteed floor, pushes up, 1 fewer paid, Σ conserved) and its top-up shrinks at
+  low budget (+$57K at $5M → +$5K at $1M) because the floor is already draining. $5M default = byte-identical to the
+  pre-budget-flex locked behavior (27 paid, floor $22.6K, top-8 58%).
 
 **Alpha justification (exactly this):** alpha is fit to the aggregate share anchors (top-1/3/8), which survive real-world
 capping noise. Model does NOT reproduce pay ties (e.g., three players capped at $500K); it spaces the top by actual
