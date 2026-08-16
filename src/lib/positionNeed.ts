@@ -6,9 +6,11 @@
 // when it's an actual hole on the roster — the scarcity a coach actually feels.
 //
 //   1. Championship-starter bar: the WAR a top-quartile-ish (p70) full-time
-//      regular produces at each position, on 2026 DESCRIPTIVE full-season WAR
-//      (not projection — projection bakes in the depth role we assign). A rostered
-//      player clears it → the spot is "solid"; nobody clears → it's a hole.
+//      regular produced at each position. The BAR is calibrated from 2026
+//      DESCRIPTIVE full-season WAR ONLY because that's the one complete season of
+//      real data to build a threshold from. Players are then checked against it
+//      with their PROJECTED WAR (we project forward): a rostered player whose
+//      projection clears the bar → "solid"; nobody clears → hole.
 //   2. Need ladder: when a spot is a hole, a target who fills it is marked up on
 //      the board. C/SS/weekend-SP 1.3; all OF (incl CF) + 2B/3B 1.1; 1B/DH/non-
 //      starter-P 1.0. CF=1.1 is coach-feedback-backed. No bench tier.
@@ -100,16 +102,18 @@ export function championshipBarForPosition(
 export type NeedState = "solid" | "hole";
 
 /**
- * A position is SOLID when at least one slotted player's descriptive WAR clears
- * the championship bar; otherwise it's a HOLE (empty or thin — both price the same
- * per spec §3). `slottedDescWars` is every player currently slotted at the spot
- * (freshmen / no-history carry 0 → they don't clear).
+ * A position is SOLID when at least one slotted player's PROJECTED WAR clears the
+ * championship bar; otherwise it's a HOLE (empty or thin — both price the same per
+ * spec §3). Players are checked with projected WAR (we project forward); the bar
+ * itself is descriptive-calibrated only because it's the one full season of data.
+ * `slottedWars` is every player slotted at the spot (freshmen / no-history carry
+ * 0 → they don't clear).
  */
 export function rosterPositionState(
   bar: number | null,
-  slottedDescWars: Array<number | null | undefined>,
+  slottedWars: Array<number | null | undefined>,
 ): NeedState {
   if (bar == null) return "solid"; // no bar → not a need position (e.g. reliever)
-  const clears = slottedDescWars.some((w) => w != null && Number.isFinite(Number(w)) && Number(w) >= bar);
+  const clears = slottedWars.some((w) => w != null && Number.isFinite(Number(w)) && Number(w) >= bar);
   return clears ? "solid" : "hole";
 }

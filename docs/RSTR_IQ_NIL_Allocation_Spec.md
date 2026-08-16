@@ -106,8 +106,9 @@ score gaps. Value-honest allocation; the coach applies politics on top.
   SS's glove-first cluster) because users strive for championships: a spot is "solid" only if a rostered player is a
   championship-caliber regular there. Stamped bars: C 2.11 · RF 1.88 · 1B 1.77 · CF 1.74 · LF 1.70 · 3B 1.57 · 2B 1.48 ·
   SS 1.42 · weekend-SP 3.06. Generic pitch-log `OF`/`IF` labels use the group average until the position-display fix.
-  A returner clears on his DESCRIPTIVE WAR; a target has no descriptive history so his board value is his projection, but
-  the roster's need-state is decided by the returners' descriptive WAR vs the bar.
+  **The BAR is descriptive ONLY because 2026 is the one full season to calibrate from; every player is CHECKED against it
+  with PROJECTED WAR (we project forward).** A rostered player is "solid" if his PROJECTION clears the bar — returners and
+  targets alike use projection (which the GM/TB rows already carry, so no descriptive-WAR join is needed to wire this).
 - **Freshmen / no-history:** carry 0 WAR (freshman valuation logged future work); a slotted freshman does not clear the line.
 - **Three states, pricing is BINARY:** `empty` (nobody clears / nobody slotted → full need premium) · `thin` (someone
   slotted, nobody clears → full need premium; DISPLAY state only so the coach sees his player acknowledged) · `solid`
