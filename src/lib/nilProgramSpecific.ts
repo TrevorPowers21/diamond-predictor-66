@@ -1,5 +1,3 @@
-export const DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE = 68;
-
 export const DEFAULT_NIL_TIER_MULTIPLIERS = {
   sec: 1.5,
   p4: 1.2, // ACC + Big12
@@ -77,8 +75,7 @@ export const calcPlayerScore = ({
   return safeOwar * ptm;
 };
 
-// calcProgramSpecificAllocation retired 2026-08-16 — the old proportional NIL
-// split (score / max(Σscore, DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE) × budget) is
-// replaced everywhere by the roster-level allocateNil curve (src/lib/nilAllocation.ts).
-// DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE is kept only for the NIL tier-color helper
-// (projectedNilTierClass) until that display threshold is repointed.
+// calcProgramSpecificAllocation + DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE (68) retired
+// 2026-08-16 — the old proportional NIL split is replaced everywhere by the
+// roster-level allocateNil curve (src/lib/nilAllocation.ts), and the tier-color
+// helper (projectedNilTierClass) now keys off the average paid allocation.

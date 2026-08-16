@@ -36,13 +36,6 @@ export const POSITION_VALUE_MULTIPLIERS = {
   utility: 0.8,     // UT, Bench
 } as const;
 
-/**
- * Baseline total player score for a full roster.
- * Used as the denominator in NIL allocation when actual roster score
- * is below this threshold (prevents inflated allocations for partial rosters).
- */
-export const DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE = 68;
-
 // ── Transfer Projection Weights ───────────────────────────────────────────────
 
 /**

@@ -245,7 +245,6 @@ interface UseTeamBuilderSimulationParams {
   effectiveTeamId: string | null;
   rosterPlayers: any[];
   totalBudget: number;
-  fallbackRosterTotalPlayerScore: number;
   /** Team's shared Balanced/Top-Heavy NIL allocation setting (from gm_budget). */
   nilAllocationMode: NilAllocationMode;
   programTierMultiplier: number;
@@ -273,7 +272,6 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     effectiveTeamId,
     rosterPlayers,
     totalBudget,
-    fallbackRosterTotalPlayerScore,
     nilAllocationMode,
     programTierMultiplier,
     powerLookup,
@@ -1638,9 +1636,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const onRoster = rosterPlayers.filter((rp) => isProjectedStatus(rp) && countsTowardRoster(rp));
     const scores = onRoster.map((rp) => projectedPlayerScore(rp));
     const dollars = allocateNil(scores, totalBudget, nilAllocationMode);
+    const paid = dollars.filter((d) => d > 0);
+    const avgAllocation = paid.length > 0 ? paid.reduce((a, b) => a + b, 0) / paid.length : 0;
     const byPlayer = new Map<BuildPlayer, number>();
     onRoster.forEach((rp, i) => byPlayer.set(rp, dollars[i]));
-    return { byPlayer, scores };
+    return { byPlayer, scores, avgAllocation };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectedPlayerScore, totalBudget, rosterPlayers, nilAllocationMode]);
 
@@ -1876,6 +1876,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     effectiveNilForPlayer,
     isProjectedStatus,
     projectedBudgetValue,
+    nilAvgAllocation: nilAllocation.avgAllocation,
     calcTotals,
     rosterTableTotals,
     positionTableTotals,

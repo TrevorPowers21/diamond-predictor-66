@@ -5,7 +5,6 @@ import {
   JUCO_OUTLIER_REGRESSION,
   D1_TRANSFER_WEIGHTS,
   JUCO_TRANSFER_WEIGHTS,
-  DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
 } from "@/lib/config/platformDefaults";
 
 type ConfigRow = { config_key: string; config_value: unknown };
@@ -47,12 +46,6 @@ export function usePlatformConfig() {
     strongMid: num(rows, "nil.tier.strong_mid", NIL_CONFERENCE_TIER_MULTIPLIERS.strongMid),
     lowMajor:  num(rows, "nil.tier.low_major",  NIL_CONFERENCE_TIER_MULTIPLIERS.lowMajor),
   };
-
-  const defaultProgramTotalPlayerScore = num(
-    rows,
-    "nil.default_program_total_player_score",
-    DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
-  );
 
   const d1TransferWeights = {
     conference: {
@@ -115,7 +108,6 @@ export function usePlatformConfig() {
 
   return {
     nilTiers,
-    defaultProgramTotalPlayerScore,
     d1TransferWeights,
     jucoTransferWeights,
     jucoOutlierRegression,

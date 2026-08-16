@@ -34,7 +34,6 @@ import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { useNilAllocationMode } from "@/gm/hooks/useNilAllocationMode";
 import {
   calcPlayerScore,
-  DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
   DEFAULT_NIL_TIER_MULTIPLIERS,
@@ -401,27 +400,9 @@ const selectTransferPortalPreferredPrediction = (predictions: any[] | null | und
 
 
 
-const projectedNilTierClass = (
-  value: number | null | undefined,
-  totalBudget: number,
-  rosterScoreBaseline: number,
-) => {
-  if (value == null) return "text-muted-foreground";
-
-  const budget = Number(totalBudget) || 0;
-  const baseline = Math.max(Number(rosterScoreBaseline) || 0, 1);
-  if (budget <= 0) return "text-muted-foreground";
-
-  // Budget-aware tiers: compare each player's projected NIL to a baseline share of budget.
-  // Baseline share is budget / roster score baseline (default 68).
-  const baselineShare = budget / baseline;
-  const averageCut = baselineShare * 0.8;
-  const goodCut = baselineShare * 1.2;
-
-  if (value >= goodCut) return "text-[hsl(var(--success))]";
-  if (value >= averageCut) return "text-[hsl(var(--warning))]";
-  return "text-destructive";
-};
+// projectedNilTierClass removed here — was a dead duplicate of the canonical
+// helper in team-builder/helpers.ts (never called from this file). PlayerTableRow
+// imports the shared one, which now colors off the average paid allocation.
 
 // Hitter depth-role multipliers scale oWAR off the 260-PA everyday-starter
 // baseline. Five tiers (quality-anchored — cornerstone gate uses overall_plus,
@@ -873,7 +854,6 @@ export default function TeamBuilder() {
   const [showNewBuildDialog, setShowNewBuildDialog] = useState(false);
   const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
   const [programTierConference, setProgramTierConference] = useState<string>("");
-  const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
   const [depthAssignments, setDepthAssignments] = useState<Record<string, number>>({});
   const [depthPlaceholders, setDepthPlaceholders] = useState<Record<string, "freshman" | "transfer">>({});
   // True after the coach's first successful save — subsequent dirty navigations
@@ -1381,7 +1361,7 @@ export default function TeamBuilder() {
     computePitcherPwar, computeReturnerPitchingProjection,
     playerProjection,
     projectedPlayerScore, projectedNilForPlayer, effectiveNilForPlayer,
-    isProjectedStatus, projectedBudgetValue,
+    isProjectedStatus, projectedBudgetValue, nilAvgAllocation,
     calcTotals,
     rosterTableTotals, positionTableTotals, pitcherTableTotals,
     targetPositionTableTotals, targetPitcherTableTotals,
@@ -1394,7 +1374,7 @@ export default function TeamBuilder() {
     hitterStats, teamParkComponents, remoteEquationValues,
     pitchingEq, pitchingConfLookup, pitchingStatsByNameTeam,
     selectedTeam, effectiveTeamId,
-    rosterPlayers, totalBudget, fallbackRosterTotalPlayerScore, nilAllocationMode,
+    rosterPlayers, totalBudget, nilAllocationMode,
     programTierMultiplier,
     powerLookup,
   });
@@ -3609,7 +3589,7 @@ export default function TeamBuilder() {
     hitterMasterPaMap,
     exitPositions,
     totalBudget,
-    fallbackRosterTotalPlayerScore,
+    nilAvgAllocation,
     selectedTeam,
     returnTo: `${location.pathname}${location.search}${location.hash}`,
     playerProjection,
@@ -3634,7 +3614,7 @@ export default function TeamBuilder() {
     hitterMasterPaMap,
     exitPositions,
     totalBudget,
-    fallbackRosterTotalPlayerScore,
+    nilAvgAllocation,
     selectedTeam,
     location,
     playerProjection,
