@@ -214,6 +214,9 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
   // Projected Value via the NIL allocation curve (allocateNil) over the kept
   // roster's WAR — PVM out of the score (spec §1), PTM cancels within a roster.
   const nilAllocByRow = (() => {
+    // NOTE: GMScenarios loads its roster via loadGmBuildRoster (no gm_budget mode
+    // in scope), so it stays "balanced" until the mode is threaded through that
+    // loader. The scenario planner is a what-if surface; balanced is a safe default.
     const dollars = allocateNil(kept.map((r) => Number(r.war ?? 0)), budget ?? 0, "balanced");
     const m = new Map<GmRow, number>();
     kept.forEach((r, i) => m.set(r, dollars[i]));

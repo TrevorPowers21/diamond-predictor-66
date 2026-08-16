@@ -124,11 +124,11 @@ export default function GMTargets() {
   const gmBudget = gm.coachTotalBudget ?? 0;
   const nilAllocByPlayerId = useMemo(() => {
     const rows = [...gm.hitters, ...gm.pitchers];
-    const dollars = allocateNil(rows.map((r) => Number(r.war ?? 0)), gmBudget, "balanced");
+    const dollars = allocateNil(rows.map((r) => Number(r.war ?? 0)), gmBudget, gm.budget?.nil_allocation_mode ?? "balanced");
     const m = new Map<string, number>();
     rows.forEach((r, i) => { if (r.player_id) m.set(r.player_id as string, dollars[i]); });
     return m;
-  }, [gm.hitters, gm.pitchers, gmBudget]);
+  }, [gm.hitters, gm.pitchers, gmBudget, gm.budget?.nil_allocation_mode]);
   const projectedValue = (t: GmTarget): number | null => {
     if (gmBudget <= 0) return null;
     return nilAllocByPlayerId.get(t.player_id) ?? null;

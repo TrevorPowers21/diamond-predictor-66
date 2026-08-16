@@ -381,7 +381,7 @@ export default function GMRoster() {
   // WAR is the score. Null when no budget → fall back to Market Value. Mode is
   // balanced for now; the GM top-heavy toggle threads in when the setting lands.
   const nilAllocByRow = (() => {
-    const dollars = allocateNil(allRows.map((r) => Number(r.war ?? 0)), coachTotalBudget ?? 0, "balanced");
+    const dollars = allocateNil(allRows.map((r) => Number(r.war ?? 0)), coachTotalBudget ?? 0, gm.budget?.nil_allocation_mode ?? "balanced");
     const m = new Map<GmRow, number>();
     allRows.forEach((r, i) => m.set(r, dollars[i]));
     return m;

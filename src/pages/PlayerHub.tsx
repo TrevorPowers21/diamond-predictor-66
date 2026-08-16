@@ -276,7 +276,7 @@ export default function PlayerHub() {
     const budget = gm.coachTotalBudget ?? 0;
     if (budget <= 0) return null;
     const rosterRows = [...gm.hitters, ...gm.pitchers];
-    const dollars = allocateNil(rosterRows.map((r) => Number(r.war ?? 0)), budget, "balanced");
+    const dollars = allocateNil(rosterRows.map((r) => Number(r.war ?? 0)), budget, gm.budget?.nil_allocation_mode ?? "balanced");
     const idx = rosterRows.findIndex((r) => r.build_player_id === row.build_player_id);
     return idx >= 0 ? dollars[idx] : null;
   })();
