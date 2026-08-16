@@ -54,17 +54,20 @@ PVM-in-calcPlayerScore, usePlatformConfig.defaultProgramTotalPlayerScore.
 
 ## WHAT'S LEFT — in order
 
-### A. Need detection + board premium (ACTIONABLE NOW — uses projected WAR, no recompute dependency)
-Wire spec §3/§4 using the tested `positionNeed.ts` helpers:
-1. **Need-state hook** (shared GM + TB): for each position, gather the slotted returners' **projected** WAR, call
-   `rosterPositionState(championshipBarForPosition(pos, {isWeekendStarter}), projectedWars)` → `solid` | `hole`.
-2. **Board premium**: on GMTargets + the TB target board, when a target's position is a `hole`, multiply the board price
-   by `needMultiplierForPosition(pos, {isWeekendStarter})` (1.3/1.1/1.0). Solid → ×1.0. **Freeze at price on add (spec §5)**.
-3. Never touches rostered allocations — target-board display only.
-- **Caveat (not a blocker):** clean specific-position labels wait on the **pitch-log position-display fix**; until then
-  generic `OF`/`IF` → 1.1 / group bar (the fixture already handles this).
+### A. Need detection + board premium — HELPERS BUILT + TESTED; WIRING RIDES THE 6b/7c TOTAL-WAR PASS
+`positionNeed.ts` is done: `computeRosterNeeds(roster)` → holes set, `needMultiplierForTarget(holes, pos)` → 1.3/1.1/1.0
+board markup, both tested (19 tests). **But the wiring is NOT actionable standalone** — realized while wiring GMTargets
+(2026-08-16): the championship bar is **TOTAL WAR** (o+d+bsr) but the GM/TB rows expose **`o_war` only** (`GmTarget.war` /
+`GmRow.war` = o_war). Checking o_war vs a total bar **under-credits defense** and over-flags exactly the defensive spots
+the premium is for (a championship defensive catcher reads as a "hole"). So the need check needs **total projected WAR**,
+which is the SAME `total_hitter_war`-on-the-rows plumbing as the score swap. **Decision (Trevor 2026-08-16): fold the need
+wiring into the total_hitter_war pass (B) — one plumbing job — rather than a partial `o_war` read that silently resolves
+wrong later.** GMTargets was wired then REVERTED (note left in-code). To wire (with B): compute holes from rostered
+returners' TOTAL projected WAR vs the bars → `needMultiplierForTarget` on GMTargets + TB target-board display prices;
+freeze on add (spec §5); never touches rostered allocations. Generic `OF`/`IF` → 1.1/group-bar until the pitch-log
+position-display fix. Weekend-SP need = a follow-on (needs the pitcher weekend-starter role on the rows).
 
-### B. Score → total_hitter_war (SEQUENCED — do NOT wire before Step 6b + 7c)
+### B. Score → total_hitter_war (SEQUENCED — do NOT wire before Step 6b + 7c) — carries the need-check plumbing too
 Per HANDOFF_WAR_REDESIGN §89 sequence (`3→(1+2)→4→Step 6b→7b→7c→7d→Step 8`): 7c snapshot = THE NIL scoring source;
 transfer `total_hitter_war` is stale until Step 6b. When there:
 - Add `d_war, bsr_war, total_hitter_war` to the TB prediction select (`useTeamBuilderData.ts:153` stops at `o_war, p_war`)

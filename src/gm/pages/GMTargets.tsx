@@ -133,6 +133,10 @@ export default function GMTargets() {
     if (gmBudget <= 0) return null;
     return nilAllocByPlayerId.get(t.player_id) ?? null;
   };
+  // NOTE: the positional NEED premium (spec §4, src/lib/positionNeed.ts) is NOT
+  // wired here yet — deferred to the total_hitter_war pass (after Step 6b + 7c).
+  // The need check must use TOTAL projected WAR (o+d+bsr) so defensive value is
+  // credited; GmTarget.war is o_war only, which would over-flag defensive spots.
   const displayValue = (t: GmTarget): number | null => projectedValue(t) ?? t.market_value ?? null;
 
   const toggleSort = (sk: SortKey) => {

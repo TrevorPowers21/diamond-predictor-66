@@ -117,3 +117,60 @@ export function rosterPositionState(
   const clears = slottedWars.some((w) => w != null && Number.isFinite(Number(w)) && Number(w) >= bar);
   return clears ? "solid" : "hole";
 }
+
+/** Positions that can carry a need premium (1B/DH are always 1.0 → omitted). */
+export type NeedHoleKey = "C" | "2B" | "3B" | "SS" | "LF" | "CF" | "RF" | "weekend_SP";
+const HITTER_NEED_KEYS: NeedHoleKey[] = ["C", "2B", "3B", "SS", "LF", "CF", "RF"];
+
+/**
+ * Which premium positions are HOLES on the roster. For each need position, a
+ * slotted player's PROJECTED WAR is checked against its championship bar; the spot
+ * is a hole unless someone clears. Generic pitch-log labels cover their group
+ * until the position-display fix: `OF` counts toward LF/CF/RF, `IF` toward 2B/3B
+ * (NOT SS — never auto-cover the premium SS with an unlabeled infielder). Weekend
+ * SP only counts pitchers the caller flags `isWeekendStarter`.
+ */
+export function computeRosterNeeds(
+  slotted: Array<{ position?: string | null; war?: number | null; isWeekendStarter?: boolean }>,
+): Set<NeedHoleKey> {
+  const holes = new Set<NeedHoleKey>();
+  for (const key of HITTER_NEED_KEYS) {
+    const isOF = key === "LF" || key === "CF" || key === "RF";
+    const isMidCornerIF = key === "2B" || key === "3B";
+    const wars = slotted
+      .filter((s) => {
+        const c = canonPosition(s.position);
+        return c === key || (isOF && c === "OF") || (isMidCornerIF && c === "IF");
+      })
+      .map((s) => s.war);
+    if (rosterPositionState(championshipBarForPosition(key), wars) === "hole") holes.add(key);
+  }
+  const wspWars = slotted
+    .filter((s) => canonPosition(s.position) === "P" && s.isWeekendStarter)
+    .map((s) => s.war);
+  if (rosterPositionState(championshipBarForPosition("P", { isWeekendStarter: true }), wspWars) === "hole") {
+    holes.add("weekend_SP");
+  }
+  return holes;
+}
+
+/**
+ * Board multiplier for a target: the need-ladder value when the target's position
+ * is currently a hole on the roster, else 1.0. Generic `OF`/`IF` targets are a
+ * hole if any position in their group is. 1B/DH/unknown → always 1.0.
+ */
+export function needMultiplierForTarget(
+  holes: Set<NeedHoleKey>,
+  targetPos: string | null | undefined,
+  opts?: { isWeekendStarter?: boolean },
+): number {
+  const c = canonPosition(targetPos);
+  let isHole = false;
+  if (c === "P") isHole = !!opts?.isWeekendStarter && holes.has("weekend_SP");
+  else if (c === "OF") isHole = holes.has("LF") || holes.has("CF") || holes.has("RF");
+  else if (c === "IF") isHole = holes.has("2B") || holes.has("3B");
+  else if (c && (["C", "2B", "3B", "SS", "LF", "CF", "RF"] as string[]).includes(c)) {
+    isHole = holes.has(c as NeedHoleKey);
+  }
+  return isHole ? needMultiplierForPosition(targetPos, opts) : 1.0;
+}

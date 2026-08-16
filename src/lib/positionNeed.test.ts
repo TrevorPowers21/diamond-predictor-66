@@ -4,6 +4,8 @@ import {
   needMultiplierForPosition,
   championshipBarForPosition,
   rosterPositionState,
+  computeRosterNeeds,
+  needMultiplierForTarget,
   CHAMPIONSHIP_STARTER_BAR,
 } from "./positionNeed";
 
@@ -76,5 +78,48 @@ describe("rosterPositionState", () => {
   });
   it("no bar (reliever) is never a need", () => {
     expect(rosterPositionState(null, [])).toBe("solid");
+  });
+});
+
+describe("computeRosterNeeds + needMultiplierForTarget", () => {
+  it("a spot with a championship-caliber returner is not a hole (no premium)", () => {
+    const holes = computeRosterNeeds([{ position: "C", war: 2.5 }]); // > C bar 2.11
+    expect(holes.has("C")).toBe(false);
+    expect(needMultiplierForTarget(holes, "C")).toBe(1.0);
+  });
+  it("a below-bar or empty spot is a hole → full ladder premium", () => {
+    const holes = computeRosterNeeds([{ position: "C", war: 1.0 }]); // < 2.11
+    expect(holes.has("C")).toBe(true);
+    expect(needMultiplierForTarget(holes, "C")).toBe(1.3);
+    // SS never slotted → hole → 1.3
+    expect(holes.has("SS")).toBe(true);
+    expect(needMultiplierForTarget(holes, "SS")).toBe(1.3);
+    // an OF target on an empty OF → 1.1
+    expect(needMultiplierForTarget(holes, "CF")).toBe(1.1);
+  });
+  it("generic OF returner covers all OF spots; generic IF covers 2B/3B but NOT SS", () => {
+    const holes = computeRosterNeeds([
+      { position: "OF", war: 3.0 }, // clears every OF bar → LF/CF/RF solid
+      { position: "IF", war: 3.0 }, // clears 2B/3B bars, but must NOT cover SS
+    ]);
+    expect(needMultiplierForTarget(holes, "CF")).toBe(1.0); // OF covered
+    expect(needMultiplierForTarget(holes, "2B")).toBe(1.0); // IF covers 2B
+    expect(holes.has("SS")).toBe(true); // SS still a hole (IF didn't cover it)
+    expect(needMultiplierForTarget(holes, "SS")).toBe(1.3);
+  });
+  it("1B/DH targets never get a premium even when empty", () => {
+    const holes = computeRosterNeeds([]);
+    expect(needMultiplierForTarget(holes, "1B")).toBe(1.0);
+    expect(needMultiplierForTarget(holes, "DH")).toBe(1.0);
+  });
+  it("weekend SP: hole only counts flagged weekend starters; target needs the flag", () => {
+    const holeNoWsp = computeRosterNeeds([{ position: "P", war: 4.0, isWeekendStarter: false }]);
+    expect(holeNoWsp.has("weekend_SP")).toBe(true); // the 4.0 arm wasn't flagged wSP
+    expect(needMultiplierForTarget(holeNoWsp, "P", { isWeekendStarter: true })).toBe(1.3);
+    const solidWsp = computeRosterNeeds([{ position: "P", war: 3.5, isWeekendStarter: true }]);
+    expect(solidWsp.has("weekend_SP")).toBe(false); // clears 3.06
+    expect(needMultiplierForTarget(solidWsp, "P", { isWeekendStarter: true })).toBe(1.0);
+    // a reliever target (not flagged) never gets the premium
+    expect(needMultiplierForTarget(holeNoWsp, "P")).toBe(1.0);
   });
 });
