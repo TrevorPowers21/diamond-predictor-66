@@ -90,9 +90,13 @@ An outside review of the synopsis (all equations + the classification problem) r
 - **Two named hard cases = known-ambiguous archetypes, log with documented tiebreaker, do NOT let them block the build:**
   (a) 86–88 cutter-shaped hard slider off a 92 FB (4–6 gap + cutter movement → cutter if he owns a 2nd breaking ball, else
   slider); (b) low-slot sinker/4-seam straddler (resolves via the release-height bands + cluster-mean labeling).
-- **My provenance flag:** all the review's specific cutpoints (3.1/7.8/valley-6, 41%, 10/12/13 IVB bands, 1400 rpm) are
-  PROPOSED — set final boundaries from our own pulled, venue-corrected distributions (matches the review's own "cut at the
-  natural valley" logic + our data-driven-thresholds discipline).
+- **★ PROVENANCE (confirmed by Trevor 2026-08-16): the review's specific numbers were MADE UP from general baseball
+  knowledge — NOT from any distributions we pulled.** There was no distributions doc; the review invented plausible
+  cutpoints (cutter ~3.1 / slider ~7.8 mff, 41%, 10/12/13 IVB bands, 1400 rpm, valley-6) from domain priors. So: treat
+  them ONLY as **directional sanity-check ranges** (a cutter ~2–4 mff off the FB, a slider ~6–9 is standard pitch-design
+  lore) — if our real clusters land far from these, investigate. **The ACTUAL boundaries come from OUR pulled,
+  venue-corrected clusters, full stop.** First real execution move = pull the distributions ourselves + run the venue
+  check; nothing in the numeric proposals is measured.
 
 ## Sequencing + deferred
 - Stuff+ edit → **before Step 6b** (so the transfer recompute lands on final Stuff+). Then 6b → 7 → Step 8.
