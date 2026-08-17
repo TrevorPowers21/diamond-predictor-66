@@ -165,10 +165,15 @@ All numeric thresholds validate on our venue-corrected clusters.
 ## ★ THE FULL PIPELINE + KEY PRINCIPLES (Trevor 2026-08-17) — diagram in `PIPELINE_pitch_log_to_projections.md`
 The "one process": pitch-log upload → derive → Stuff+ → power ratings → conference baselines → projections → NIL/display.
 **Non-negotiable principles Trevor stated (must survive):**
-- **EVERYTHING derives from the pitch log (single source of truth).** The Masters' power-rating INPUTS — hitter
-  batted-ball + discipline metrics AND pitcher rate stats — are pitch-log-derived and **married onto the Masters** (not
-  native Master columns). So the power ratings + `desc_owar/d_war/bsr_war/total_desc_war`/`desc_pwar` all trace to the
-  pitch log. `pull_air/in_zone/spray/zone` = derived-then-married (confirmed).
+- **The pitch log is the PRIMARY (highest-frequency) source of truth — NOT the only one.** The Masters' power-rating
+  INPUTS — hitter batted-ball + discipline metrics AND pitcher rate stats — are pitch-log-derived and **married onto the
+  Masters** (not native Master columns). So the power ratings + `desc_owar/d_war/bsr_war/total_desc_war`/`desc_pwar` all
+  trace to the pitch log. `pull_air/in_zone/spray/zone` = derived-then-married (confirmed).
+- **★ Hitting/Pitching Master OVERRIDES exist (Trevor 2026-08-17).** In some scenarios a Master-level override supplies
+  what the pitch log can't — **baserunning especially, plus some other fields** — uploaded **less frequently than the
+  pitch log**. The re-derive pass is pitch-log-primary but **override-aware**: where an override exists it WINS and the
+  pitch-log re-derivation must NOT clobber it (same merge-not-overwrite discipline as preserving coach toggles). Rare
+  exception, not the norm.
 - **Conference Stuff+ (V2) = pitch-weighted mean of EVERY pitcher in the conference, FULL season**
   (`Σ(pitcher Stuff+ × pitch count)/Σ(pitch count)`) = the conference's PITCHING DEPTH. **Conference HTP** = same for
   hitters (aggregate hitter talent, all teams, full season). **Conference stats are CONFERENCE-vs-CONFERENCE only** — the

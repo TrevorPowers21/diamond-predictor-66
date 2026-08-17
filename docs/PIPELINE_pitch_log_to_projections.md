@@ -66,11 +66,17 @@ flowchart TD
 ```
 
 ## ★ KEY CALCULATIONS + PRINCIPLES (Trevor 2026-08-17) — how each aggregate is actually computed
-- **EVERYTHING derives from the pitch log (single source of truth).** The Masters' **power-rating INPUTS** — hitter
-  batted-ball + discipline metrics (exit velo, barrel, ev90, pull_air, chase, contact, la, gb, …) AND pitcher rate stats
-  — are **pitch-log-derived**, then **married onto the Masters** (they are NOT native Master columns). The power ratings
-  (`ba/obp/iso_power_rating`, `pRV+`, `era⁺/fip⁺/whip⁺/…`) and thus `desc_owar/d_war/bsr_war/total_desc_war` / `desc_pwar`
-  all flow from pitch-log data. `pull_air / in_zone / spray / zone` = derived-from-pitch-log, married on (agreed).
+- **The pitch log is the PRIMARY source of truth (highest-frequency), NOT the ONLY source.** The Masters' **power-rating
+  INPUTS** — hitter batted-ball + discipline metrics (exit velo, barrel, ev90, pull_air, chase, contact, la, gb, …) AND
+  pitcher rate stats — are **pitch-log-derived**, then **married onto the Masters** (they are NOT native Master columns).
+  The power ratings (`ba/obp/iso_power_rating`, `pRV+`, `era⁺/fip⁺/whip⁺/…`) and thus `desc_owar/d_war/bsr_war/
+  total_desc_war` / `desc_pwar` all flow from pitch-log data. `pull_air / in_zone / spray / zone` = derived-from-pitch-log,
+  married on (agreed).
+- **★ HITTING/PITCHING MASTER OVERRIDES (Trevor 2026-08-17).** In SOME scenarios a Master-level override supplies values
+  the pitch log can't — **baserunning above all, plus some other fields** — uploaded **less frequently than the pitch
+  log**. So the re-derive pass is **pitch-log-primary + Master-override-aware**: where an override exists it WINS and the
+  pitch-log re-derivation must **NOT clobber it** (same discipline as preserving coach toggles — the "one function" merges,
+  never blindly overwrites). Overrides are the exception, not the norm; the pitch log still drives the vast majority.
 - **Conference Stuff+ (V2, canonical) =** the **pitch-weighted mean of EVERY pitcher in the conference across the FULL
   season**: `Σ(pitcher Stuff+ × his pitch count) / Σ(pitch count)`. It is the conference's **pitching depth/quality**.
 - **Conference HTP =** the same idea for **hitters** — the conference's aggregate hitter talent across ALL its teams,
