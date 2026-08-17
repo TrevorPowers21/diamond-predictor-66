@@ -115,6 +115,26 @@ display): **`docs/PIPELINE_pitch_log_to_projections.md`**. "Run it all + automat
   primary FB or freak; never force-labeled). **Check 4 (the one human step) OUTSTANDING:** 10 lowest-confidence seam-dweller
   clusters + the REVIEW anomalies (Gibler incl.) → Trevor eyeballs on video ~30 min. Then lock → fold equations → re-derive
   baseline (classification_version) → recenter → numeric checks. Merge thresholds + REVIEW rule = params in the deployed classifier.
+- ★ **ANCHOR-BASED ARSENAL CONSTRUCTION (Trevor 2026-08-17) — REPLACES the univariate Δ-merge rule; a real architecture
+  principle.** The pitcher's arsenal is built from his **ANCHOR pitches** (high-usage, unambiguously-distinct clusters);
+  everything marginal **gravitates to its nearest anchor** instead of standing alone ("gravity toward the main pitch").
+  **Mechanics:** (1) cluster the arm's pitches → identify **ANCHORS** = clusters with real usage (**≥60 pitches OR ≥10% of
+  his mix**) that sit **clearly separated in full movement space** (close candidate anchors merge into one). Anchors = his
+  repertoire. (2) any **residual** cluster — low-usage OR within close **MULTIVARIATE proximity** of an anchor — **folds into
+  the nearest anchor and inherits its label** (no independent identity). (3) **FAR-OUTLIER protection survives:** a small
+  cluster genuinely distant from every anchor does NOT fold → **exceptions log** (the kid experimenting with a real new pitch
+  still gets seen). (4) **GUARD so it doesn't over-eat:** proximity folding requires the candidate be **plausibly the same
+  pitch FAMILY** as the anchor — **near in VELO/GAP especially** (velo-gap similarity guard). Same speed off the same fastball
+  + near-identical sweep = **one pitch varying its finish**; same movement + different speed = **two pitches by definition**.
+  So an 80-pitch changeup never folds into a slider just because they sit close in raw movement. (5) **DISPLAY comes free:**
+  the anchor is what shows (his breaking ball / his fastball, usage-ranked); **folded pitches count into the anchor's totals**
+  so mix% reflects the merged reality. **Replaces** the univariate Δ3.5-IVB merge (dies) with multivariate proximity-to-anchor;
+  **generalizes** the distance-bounded folding (now covers the 97-pitch case too — proximity does the work, not just size).
+  **New absurdity golden:** no near-0-armHB cluster labels slider (a bullet is a gyro, not a slider). **Gibler acceptance
+  case:** expected output **one 4S, one gyro (~387 pitches, gravity-ball flag), one CH** — his 290-pitch gyro is the anchor,
+  the 97-pitch depth cluster sits within a whisker in every dimension except tilt → folds in, one gyro with a gravity-ball
+  sub-flag. **Stability should IMPROVE by construction** — a depth-varying breaker's half-season splits land in the SAME
+  anchor both halves instead of splitting on the tilt axis. **This is the merge-rule replacement to implement.**
 
 **Phase 2 — equations + baseline.** Wire the 9 FINAL EQUATIONS verbatim (see "FULL FINAL EQUATIONS"); **re-derive the
 baseline `pitcher_stuff_plus_ncaa` on the NEW taxonomy, stamp `classification_version`, BEFORE the recenter-to-100.**
