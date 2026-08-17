@@ -135,6 +135,19 @@ display): **`docs/PIPELINE_pitch_log_to_projections.md`**. "Run it all + automat
   the 97-pitch depth cluster sits within a whisker in every dimension except tilt → folds in, one gyro with a gravity-ball
   sub-flag. **Stability should IMPROVE by construction** — a depth-varying breaker's half-season splits land in the SAME
   anchor both halves instead of splitting on the tilt axis. **This is the merge-rule replacement to implement.**
+- ✅ **EXCEPTIONS = SCORE-AND-FLAG (RULING, Trevor 2026-08-17) + IMPLEMENTED/VALIDATED.** The distant low-usage clusters that
+  don't fold **keep their own centroid label (nearest bucket, so they ARE scored) + a confidence/exceptions FLAG** (queryable
+  for review; recurring far-clusters → next season's rule refinements). **Holding them unlabeled is the ONE option that both
+  loses information AND hides the loss** — violates "nothing silently dropped" (mix% would lie, per-type Stuff+ sample shrinks,
+  run-value ledger loses events). **NEW MONITORED GOLDEN:** **flagged-cluster share** — baseline **6.86% of pitches**; assert
+  it stays ~there, **alert if it drifts UP across a season** (= anchor rules degrading; the number says so before the product
+  does). **FINAL deployed Check 1 (anchor + score-and-flag, flagged clusters INCLUDED — the honest shipping number):
+  WINS ALL FOUR** — overall 0.867 v 0.822 (+0.046), FB 0.948 v 0.877 (**+0.072**), BREAKING 0.884 v 0.858 (**+0.026**), OFF
+  0.977 v 0.960 (+0.017). (Including the flagged low-usage clusters pulls breaking from the +0.084 exclude-number to +0.026 —
+  they're inherently less stable half-to-half; still wins everywhere. Thesis holds; biggest edge stays FB/sinker-extraction.)
+  Gravity-flag cosmetic fix (fire on gyro anchors only) = queued, classification-neutral. **PIPELINE IS DONE/AUTOMATIC PAST
+  THIS POINT — waiting ONLY on Trevor's Gibler video** (one breaking ball → fold validated on its origin story; two → tighten
+  proximity). Then lock → fold equations → re-derive baseline (classification_version) → recenter → numeric checks → recompute chain.
 
 **Phase 2 — equations + baseline.** Wire the 9 FINAL EQUATIONS verbatim (see "FULL FINAL EQUATIONS"); **re-derive the
 baseline `pitcher_stuff_plus_ncaa` on the NEW taxonomy, stamp `classification_version`, BEFORE the recenter-to-100.**
