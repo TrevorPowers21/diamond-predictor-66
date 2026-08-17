@@ -345,3 +345,30 @@ weighting-fork philosophy.
 - Inputs: `pitcher_stuff_plus_inputs` (per pitch_type×hand: velocity/ivb/hb/rel_height/rel_side/extension/spin), D1
   baseline `pitcher_stuff_plus_ncaa`.
 - Recompute: `scripts/recompute-stuff-plus.ts` / `npm run recompute-stuff:*`.
+
+## ★★★ PHASE 2 COMPLETE (D1) + WHAT'S NEXT — 2026-08-17
+**Stuff+ REBUILD DONE + VALIDATED on staging** (full detail: `docs/STUFF_PLUS_RESUME_2026_08_17.md`; learnings:
+`AGENT_LEARNINGS_stuff_plus` §Phase 2). Chain: anchor classifier → folded scoring (corrected layer, armHB, gap) →
+2.0M `pitch_log.stuff_plus` (means ~100, SD 9–17, velo corr +0.54) → per-player `Pitching Master.stuff_plus` (4,794) →
+`Conference Stats."Stuff_plus"` V2 (30 D1 confs; SEC/ACC/BigTen top = sane). All reversible (backups saved).
+
+### THE WHAT'S-NEXT PLAN
+**A. RECOMPUTE CHAIN — the real next step (Stuff+ now moves the product numbers).** The transfer/projection engine consumes
+   conf Stuff+ (hitter opposing-quality lever) + per-player Stuff+ (→ HTP, pitcher opposing-quality). With new values live:
+   - **Step 6b:** deploy the transfer edge fn (canonical, no-PVF etc. per `project_transfer_engine_audit`) + fire the
+     transfer recompute (+ returners if stale) → projections re-land on new Stuff+ + all WAR-redesign changes, ONCE.
+   - **Step 7b/7c/7d:** fill `player_snapshot`/`transfer_snapshot` WITHOUT touching toggles + refresh displayed metrics.
+     ⚑ This ALSO resolves [[project_teambuilder_owar_snapshot_regression]] — filled snapshots → TB reads snapshot, not the
+     divergent live-rebuild. (Verify Souza/Traeger after.)
+   - Carries the NIL wiring: score→`total_hitter_war` + need-premium (gated on 6b/7c per `HANDOFF_NIL_2026_08_16.md`).
+   - A/B both sides + verify before anything ships.
+**B. PIPELINE CONSISTENCY (housekeeping, non-blocking).** Re-aggregate `pitcher_stuff_plus_inputs` D1 rows on the new
+   taxonomy (derivers/savant read it); retire the V1 name-keyed conf-Stuff+ script; then fold the WHOLE Stuff+ recompute
+   into the ONE on-ingest function (Track B — [[project_unified_projection_edge_function]]).
+**C. DEFERRED MODELING.** JUCO Stuff+ recompute (unfreeze when ready — apply the new D1 baseline + folded eqs to JUCO data);
+   **park factors re-eval** (quick, right after Stuff+ — [[project_park_factor_rework]]); the "big Stuff+ conversation"
+   (velo/spin conventions, OPR context-adjust, OSU-faced-schedule / Stuff+-faced-per-hitter, weighting fork).
+**D. CLEANUP.** Drop backups + helper tables after acceptance (`_ncaa_backup_preanchor`, `_master_stuff_backup`,
+   `_confstats_backup`, `_reclass_result/_map/_pf`); **clear Savant** (dead) → Season Stats display is the live surface.
+**E. PROD.** Stuff+ rebuild staging→prod = REGENERATE on PROD data end-to-end (venue corrections → reclassification →
+   baseline → recompute → rollups), NOT copy staging. Append every migration to `PROD_MIGRATIONS_TODO.md`. Per-season fixture.
