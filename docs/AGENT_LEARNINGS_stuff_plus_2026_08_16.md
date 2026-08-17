@@ -130,6 +130,30 @@ stability — same pitcher's same pitch holds one label all season (cluster labe
 non-separating arms, and fallback-rule pitchers land in a **classification exceptions log** (the `NEW_VOCAB` pattern from
 the atbatDesc parser is the template). **Nothing silently forced into a bucket.**
 
+## ★ THE PARTITION (v1, Trevor 2026-08-17) — full spec in HANDOFF_STUFF_PLUS "THE PARTITION"
+10 buckets, exhaustive over (gap, armHB, IVB) + spin for CH/SPL. **Headline additions from Trevor:** the CURVE family
+splits into **12-6 Curveball vs Sweeping Curveball** (a downer and a two-plane breaker are different pitches, same as
+gyro vs sweeper); the **topspin-forces-entry blend rule** (IVB ≤ −8 at any gap = curve, graded as a hard curve); the
+**gyro/curve blend strip** (low HB, IVB −4→−8, gap decides). **Thesis to preserve: each bucket its own equation, so a
+below-average pitch grades poorly IN its correct room, never exiled to the wrong bucket.**
+
+**Agent improvements folded into the spec (why):**
+1. **Unify the HB sign convention** — the spec mixed `IVB−|HB|`, "arm-side" (signed), and "HB 12+" (glove-as-positive).
+   Store `armHB` = arm-side-positive; every rule reads it. Without this the sweeper/sinker conditions silently invert by
+   hand. (This is the handedness audit, concrete.)
+2. **Arm-side vs glove-side = the explicit first cut** after gap → offspeed vs breaking. Dissolves the gap-range overlaps
+   (offspeed 6-14 vs slider 5-11 vs sweeper 8-13 all overlap in gap; HB side separates them cleanly).
+3. **Gap anchor = the pitcher's HARDEST fastball**, two-pass (identify primaryFB first, then gap-classify). A CH off a 94
+   is a 10-gap even if he also throws a 92 sinker.
+4. **CT/SL seam = joint (gap, IVB≥+5)** — retained ride is the true cutter signature at the 5-8 overlap, not gap alone.
+5. **Sweeper HB bar stays slot-conditioned** — `IVB−|HB|` is more slot-robust than absolute-IVB bands (may reduce FF/SI
+   slot-conditioning), but a sidearmer's ordinary slider sweeps 12+ from arm angle, so the sweeper line still needs it.
+6. **Two-layer assignment:** boundary RULES give the primary label; **nearest-centroid** (data-derived bucket centers,
+   post venue-check) is the FALLBACK for boundary/low-confidence pitches; low-confidence flag + exceptions log; never
+   defaults to slider.
+**Open Qs (Trevor):** bucket count 10 vs 11 (slutter/gravity-ball = sub-flag or its own equation?); slutter graded cutter
+(IVB≥+5) vs slider eq; VAA as a seam tiebreaker (unused today) vs strict (gap,HB,IVB,spin). Numbers validate on our data.
+
 ## Sequencing + deferred
 - Stuff+ edit → **before Step 6b** (so the transfer recompute lands on final Stuff+). Then 6b → 7 → Step 8.
 - **Deferred to a later "big Stuff+ conversation"** (NOT this edit): velocity/spin conventions; OPR batted-ball

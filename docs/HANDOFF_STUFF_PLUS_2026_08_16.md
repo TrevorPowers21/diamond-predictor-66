@@ -66,6 +66,53 @@ The recompute chain — **Step 6b → 7b → 7c → 7d → Step 8 prod** — run
 corrected classification + calcs). NIL's remaining wiring (score→total_hitter_war + need premium) rides 6b/7c per
 `HANDOFF_NIL_2026_08_16.md`.
 
+## THE PARTITION — classification spec v1 (Trevor 2026-08-17, + agent improvements)
+Exhaustive partition over **(gap, armHB, IVB)** with **spin** deciding CH/SPL. **10 primary buckets, each its own
+equation** — so a below-average pitch grades poorly *inside its correct room* instead of being exiled to the wrong one
+(the whole thesis). Boundary rules give the primary label; **nearest-centroid** (data-derived bucket centers, post
+venue-check) is the fallback for boundary/low-confidence pitches; low-confidence flag + exceptions log; **NEVER defaults
+to slider.**
+
+**Conventions (agent fix — the spec mixed two; unify before coding):**
+- **`armHB`** = HB handedness-normalized to **arm-side-positive** (+ = arm-side run, − = glove-side break). "Glove-side
+  break" = `−armHB`. Every rule below reads `armHB`. (This IS the handedness audit, concrete.)
+- **`gap`** = `primaryFB_velo − pitch_velo`, where **primaryFB = the pitcher's HARDEST fastball-family cluster**. Two-pass
+  per pitcher: identify primaryFB first (gap 0), then gap-classify the rest.
+- **First cut for off-fastball pitches (gap ≳ 4):** `armHB > 0` (arm-side) → **OFFSPEED family**; `armHB ≤ 0`
+  (glove-side/neutral) → **BREAKING family**. Resolves the gap-range overlaps.
+
+**FASTBALL family** (gap 0–3, or the primary itself):
+- **Four-seam:** ride-dominant, `IVB − |armHB| > +4`. Small glove-side at FB gap stays 4S (earns the ABS|IVB| cut-ride reward).
+- **Sinker:** run-dominant, `IVB − |armHB| < −4`, arm-side. Middle strip [−4,+4] by cluster mean; rel_height tiebreaker only.
+
+**CUTTER** (gap 0–6): glove-side cut (`armHB` down to ~−6), **ride retained (IVB ≥ +5)**, FB timing. **CT/SL seam (gap
+6–8): IVB ≥ +5 → cutter, IVB < +5 → slider**, + arsenal tiebreaker.
+
+**SLIDER family** (gap ~5–11, glove-side/neutral):
+- **Gyro slider:** `|armHB| < 5`, `IVB ∈ [−4, +4]`. The bullet (incl. gravity-ball negatives).
+- **Slider:** glove-side `armHB ∈ [−11, −5]`, `IVB ∈ [−5, +4]`; + the ride-retaining low-HB "slutter" corner (IVB ~7 /
+  |armHB| ~2 at slider gap) = **display sub-flag** [OPEN: grade with cutter eq if IVB ≥ +5?].
+- **Sweeper:** glove-side `armHB ≤ −12`, `IVB ∈ [−2, +6]`, gap 8–13. **HB bar slot-conditioned** (sidearm sliders sweep
+  12+ from arm angle alone — else they mis-tag sweeper).
+
+**CURVEBALL family** (gap 12+ as the family line, OR `IVB ≤ −8` at any gap — topspin-forces-entry blend rule):
+- **12-6 Curveball:** `IVB ≤ −8`, `|armHB| < ~8`. Topspin downer. Also receives the hard low-gap sub-−8 pitches (graded a hard curve).
+- **Sweeping Curveball:** `IVB ≤ −8`, glove-side `armHB ≤ −8`. Two-plane breaker at curve velo (slider's mirror one shelf
+  down). Sweeper↔sweeping-curve seam: sweeper holds `IVB ∈ [−2,+6]`; below −8 with big HB at gap 12+ = sweeping curve;
+  the −2→−8 / gap 10–13 overlap by cluster mean.
+
+**GYRO/CURVE BLEND STRIP** (`|armHB|` low, `IVB ∈ [−8, −4]`): gap ≤8 → gyro, gap ≥10 → curve, 8–10 by cluster mean +
+arsenal. `IVB > −4` → gyro regardless of gap; `IVB < −8` → curve regardless.
+
+**OFFSPEED family** (arm-side, gap ~6–14):
+- **Changeup:** spin held (`≥ ~1600`), arm-side fade, IVB typically positive.
+- **Splitter:** killed spin (`< ~1400`), `IVB < ~3`, tumble.
+
+**Open (need Trevor):** (1) bucket count — agent counts 10 primary; "slutter"/gravity-ball a sub-flag or an 11th equation?
+(2) slutter graded with cutter eq (IVB≥+5) vs slider eq. (3) bring **VAA** in at the sinker/4S + gyro/slider seams
+(unused today; encodes ride-vs-drop) or keep strictly (gap,HB,IVB,spin)? All numeric thresholds still VALIDATE on our
+venue-corrected clusters.
+
 ## Deferred to a later "big Stuff+ conversation" (NOT this edit)
 Velo/spin conventions; OPR batted-ball context-adjustment (ties to park factor); OSU-faced-**schedule** (conference
 quality = teams actually faced, not overall avg) — same insight as a possible **Stuff+-faced-per-hitter** metric; the
