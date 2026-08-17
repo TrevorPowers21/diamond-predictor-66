@@ -75,6 +75,47 @@ display): **`docs/PIPELINE_pitch_log_to_projections.md`**. "Run it all + automat
   exam — the last gate between here and the new Stuff+ going live.** Then: fold equations (hbSign retired) → re-derive
   baseline per (type×hand) on this taxonomy (stamp classification_version) → 9 equations load → recenter → pre-registered checks.
 
+- ⛔ **THE GATE CAUGHT A REAL GAP (2026-08-17) — human panel WAIVED (Trevor can't rattle 20 arms cold), replaced by a
+  4-check ground-truth lock gate.** Checks: (1) **TrackMan stability benchmark [MANDATORY primary]** — same 3,629 arms /
+  half-split, TM raw tags vs ours, by family; **pre-registered prediction: we beat TM overall + gap concentrates in
+  BREAKING; STOP if TM ties/beats us anywhere.** (2) **Archetype-pure auto-panel** — ~15-20 DB-queried center-of-mass arms
+  (dead-center in a bucket, far from seams), assert bucket match, expect 100% (any miss = hard bug). (3) **Absurdity
+  goldens** (permanent): no 0HB/0IVB→CB, no −IVB→4S, no <1400spin→CH, no gap0→CB, no |armHB|≥12→GY. (4) **Low-confidence
+  video check** — 10 lowest-confidence exceptions-log cases (Gibler incl.), Trevor eyeballs ~30min. Consistency (stability/
+  coherence/mix) ≠ correctness — a misplaced boundary passes all consistency checks; the comparative gate is the
+  ground-truth catch.
+  **★ CHECK 1 CAUGHT THE SHORTCUT (as designed):** the implementation had quietly diverged from the LOCKED cluster-then-label
+  architecture to **per-pitch boundary labeling** — a failure mode the 4 consistency checks were structurally blind to.
+  **Failed prediction ON RECORD as written:** predicted we beat TM in breaking; the per-pitch shortcut LOST breaking
+  (0.816 vs 0.858 mix; 75.9% vs 87.2% arsenal-top) + offspeed (0.929 vs 0.960); won overall (0.834 vs 0.822) + FB (0.911 vs
+  0.877, sinker extraction working). **This is NOT evidence about the taxonomy — only about the shortcut; the comparison was
+  never fair to run pre-clustering** (per-pitch flips seam-straddlers; our 4 breaking buckets carry 3 internal seams to TM's
+  coarse-and-trivially-stable 1). 2nd time pre-registered discipline caught a finish-line gap (SS −1,141 = 1st). **Risk
+  asymmetry (Trevor):** a non-reproducing arm = THAT ARM ambiguous (→ one cluster, one label, low-confidence, exceptions log),
+  NOT a league-wide indictment; the resolution-vs-stability tradeoff only becomes real if the POPULATION still loses at
+  cluster level. **REBUILD = full locked design (NOT a patch):** per-pitcher clustering on the corrected layer → clusters
+  labeled by their MEANS vs the boundaries → all seams resolved by the pitcher's own cluster structure → arsenal tiebreakers
+  at CT/SL + gyro/curve → distance-bounded folding (far-outliers → exceptions log) → sub-150-pitch arms on global fallback
+  applied to cluster means. **Re-run Check 1 against the UNMODIFIED prediction** (no moving the target). Pass → Checks 2–4 +
+  lock. Still loses breaking at cluster level → bring the per-arm reproducibility distribution; Trevor makes the
+  resolution-vs-stability call ("we distinguish gyros from sliders" is a selling point up to the moment it costs believability).
+- ✅ **REBUILT to the locked design + GATE CHECKS 1–3 PASS (2026-08-17).** **Deployed classifier = full-season per-pitcher
+  clustering:** boundary-seed each pitch → agglomeratively MERGE a pitcher's seed-clusters that are one pitch split by a seam
+  (Δarmhb<4 & Δivb<3.5 & Δvelo<2.5) → label each merged cluster by its MEAN vs the boundaries → apply that label to all the
+  cluster's pitches (straddler collapses to one stable label; genuine two-breaker stays split). **Check 1 (re-run vs the
+  UNMODIFIED prediction): OURS WINS ALL FOUR** — overall 0.860 vs 0.822 (+0.038), FB 0.938 vs 0.877 (**+0.062**), BREAKING
+  0.870 vs 0.858 (+0.012), OFF 0.982 vs 0.960. Breaking swung **+0.15** from the shortcut — diagnosis confirmed, taxonomy
+  vindicated. **Honest deviation from the prediction's SHAPE clause:** the gap does NOT concentrate in breaking — our biggest
+  edge is **FB (+0.062, the sinker extraction)**; breaking is a narrow win (TrackMan's breaking tags steadier than the thesis
+  assumed). Our real advantage over TrackMan is pulling sinkers out of the 4-seam bin, not de-scattering breakers. **Check 2**
+  (nine center-of-mass archetypes → correct bucket): PASS. **Check 3** (absurdity goldens): PASS after a fix the golden forced
+  — **the CB rule `IVB≤−8 → curve (any gap)` was stealing ARM-SIDE deep pitches** (hard sinkers/screwballs, +11..+18 armHB)
+  **and fastball-velo depth**; fixed to **CB requires `IVB≤−8 AND armHB<4 (glove/neutral) AND gap≥4`**; arm-side-deep →
+  offspeed; **fastball-velo depth (`IVB≤−8 & gap<4`) → REVIEW/exceptions** (24 clusters, physically inconsistent = mis-identified
+  primary FB or freak; never force-labeled). **Check 4 (the one human step) OUTSTANDING:** 10 lowest-confidence seam-dweller
+  clusters + the REVIEW anomalies (Gibler incl.) → Trevor eyeballs on video ~30 min. Then lock → fold equations → re-derive
+  baseline (classification_version) → recenter → numeric checks. Merge thresholds + REVIEW rule = params in the deployed classifier.
+
 **Phase 2 — equations + baseline.** Wire the 9 FINAL EQUATIONS verbatim (see "FULL FINAL EQUATIONS"); **re-derive the
 baseline `pitcher_stuff_plus_ncaa` on the NEW taxonomy, stamp `classification_version`, BEFORE the recenter-to-100.**
 
