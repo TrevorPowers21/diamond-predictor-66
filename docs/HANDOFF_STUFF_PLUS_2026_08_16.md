@@ -45,9 +45,35 @@ display): **`docs/PIPELINE_pitch_log_to_projections.md`**. "Run it all + automat
     machinery and this movement-offset machinery are the same tool on two sensor outputs → shared code path when convenient
     (not urgent).** [[project_park_factor_rework]] Fixture computed via `supabase db query --db-url` (staging read path);
     correction table saved `scratchpad/_venue_corrections.json`.
-- ▶ NEXT: pull distributions (corrected) → per-pitcher clustering → set boundaries FROM OUR CLUSTERS → build the fastball
-  classifier + revised breaking-ball thresholds (extend `breakingBallReclassification.ts`) → validate on the named-arms
-  panel. **All clustering + boundaries run on the CORRECTED layer.**
+- ✅ **Clustering + classifier (DONE, staging, 2026-08-17).** 15,016 per-(pitcher×hand×tag) centroids on the corrected
+  layer → **textbook-clean separation; the physics-designed partition confirmed by the clusters.** **armHB convention
+  verified** (sinkers run more arm-side than 4S within each hand = the handedness audit passing): `armHB = RHP hb / LHP −hb`.
+  **Boundaries SIGNED:** FA/SI `IVB−|armHB| ±4` (strip resolves by pitcher's own fastball-cluster mean), Cutter `IVB≥+5 &
+  gap∈[2,7]` (**+5 floor HELD — do NOT loosen**), Sweeper `armHB≤−12`, Curve `IVB≤−8`, Gyro `|armHB|<5 & IVB∈[−4,4]`,
+  Split `spin<~1400`. **CT/SL gap valley = 7** (measured; band 6–8 = arsenal tiebreaker). **First-cut in-DB classifier v2
+  run on 2.0M pitches (20s, server-side):**
+  - **~20% of tagged 4-seams are sinkers** (FA→79% 4S / 19% SI); **850 arms now carry both a 4S and a distinct SI.**
+  - **Slider splits 44/22/21 → SL/gyro/sweeper**; **339 two-breaker arms (gyro+sweeper both ≥20p)**, **2,675 multi-breaker
+    arms** — the two-breaker capability (Gibler-class) is live, which is why per-pitch classify → per-(pitcher×bucket)
+    cluster was required over tag-centroid relabel.
+  - Final mix: 4S 37 / SI 16.5 / SL 14 / CH 9 / GY 6.4 / CB 5.7 / SW 5.6 / **FC 3.6** / SPL 2.3% — realistic D1.
+  - **FC = 3.6% is CORRECT (ruling): the "cutter" tag is a human catch-all** ("hard thing that cuts") the partition
+    unmixes; 30%→SL are ivb<5 hard breakers correctly re-homed, 13%→4S are gap<2 cut-ride fastballs (the |IVB| reward case).
+    MLB true-cutter ~6–7% with more pitch design; college 3.6% at the cluster valley is right. **Only a known-cutter panel
+    arm coming back wrong moves the +5 floor — not a share preference.** **CU is also a garbage-default tag** (auto/user
+    dumps any breaker into "curveball") → its 43% reclass to SL/SW/GY is correct, same lesson as FA→SI.
+- ▶ **BEFORE LOCK — remaining mechanical (panel-gated):**
+  1. **Distance-bounded small-spillover folding (RULING):** fold a pitcher's stray sub-threshold cluster into its nearest
+     real cluster ONLY IF within a sane distance; **anything small AND far from every real cluster → classification
+     EXCEPTIONS LOG, never folded** (a pitcher experimenting with a nascent pitch for 15 throws is real — folding his new
+     splitter into his changeup erases what the exceptions log exists to keep). Distance-bounded folding, far-outliers
+     logged, per the no-silent-forcing rule.
+  2. **CT/SL arsenal tiebreaker** in the 6–8 gap band (2nd breaking ball → cutter, else slider).
+- ▶ **THE GATE — named-arms panel (Trevor supplies, outstanding):** ~20 arms he knows cold, Gibler first, covering seams
+  deliberately (a two-breaker arm or two, a known true cutter, a sinker-primary guy, a splitter arm, a sweeper guy, + a
+  couple he'd bet the classifier gets wrong). Run classifier pitch-by-pitch against them BEFORE lock. **That list is the
+  exam — the last gate between here and the new Stuff+ going live.** Then: fold equations (hbSign retired) → re-derive
+  baseline per (type×hand) on this taxonomy (stamp classification_version) → 9 equations load → recenter → pre-registered checks.
 
 **Phase 2 — equations + baseline.** Wire the 9 FINAL EQUATIONS verbatim (see "FULL FINAL EQUATIONS"); **re-derive the
 baseline `pitcher_stuff_plus_ncaa` on the NEW taxonomy, stamp `classification_version`, BEFORE the recenter-to-100.**
