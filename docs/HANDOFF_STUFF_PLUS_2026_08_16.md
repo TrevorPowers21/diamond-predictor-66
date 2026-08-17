@@ -108,10 +108,25 @@ arsenal. `IVB > −4` → gyro regardless of gap; `IVB < −8` → curve regardl
 - **Changeup:** spin held (`≥ ~1600`), arm-side fade, IVB typically positive.
 - **Splitter:** killed spin (`< ~1400`), `IVB < ~3`, tumble.
 
-**Open (need Trevor):** (1) bucket count — agent counts 10 primary; "slutter"/gravity-ball a sub-flag or an 11th equation?
-(2) slutter graded with cutter eq (IVB≥+5) vs slider eq. (3) bring **VAA** in at the sinker/4S + gyro/slider seams
-(unused today; encodes ride-vs-drop) or keep strictly (gap,HB,IVB,spin)? All numeric thresholds still VALIDATE on our
-venue-corrected clusters.
+**RESOLVED (Trevor 2026-08-17):**
+- **10 equation-buckets** (FF, SI, CT, gyro, SL, SW, **12-6 CB + sweeping CB**, CH, SPL). **Sub-flags are labels, NEVER
+  formulas** — slutter + gravity-ball are display sub-flags with no equation of their own. Test: if a sub-flag ever needs
+  its own equation, that's the signal it should have been a bucket (the test that gave YES to the two curves, NO here).
+- **Slutter grades with the SLIDER equation** (not cutter). Grading it on cutter norms breaks per-bucket recentering
+  (measures a slider-labeled pitch against a population it isn't in, pollutes both). The slider eq already serves ride —
+  its `−0.10·z(ivb)` is the smallest depth penalty in the breaking family. If slutters grade low post-re-derivation, fix
+  the slider equation, never cross-bucket grade. "One room, one equation, graded against your roommates."
+- **VAA = seam TIEBREAKER only.** Replaces release-height as the **SI/FF middle-strip** tiebreaker (flat VAA → 4S, steep →
+  SI); **secondary vote** at the gyro/slider seam after cluster mean. Inherits the venue-variance flag; **NO VAA in any
+  equation** until approach angle is properly derived + validated, then it replaces the `zAbs(relH/relS)` terms.
+
+**Z-MECHANICS (confirmed in code before wiring):** z params are **per (pitch_type × hand)** — baseline
+`pitcher_stuff_plus_ncaa` has pitch_type+hand+per-metric _sd, keyed `pitch_type::hand` (`:366`,`:419`). ⇒ **HB is NOT
+pooled across hands** (Curveball::R hb_sd 4.07, not the ~10.6 a pooled fit would inflate to) — the HB-underweighting worry
+is REFUTED; same for the gyro σ_hb (Gyro::R hb_sd 2.33). `zMax(velo)` = one-sided z vs POP mean floored at 0 (below-avg
+velo = 0, not penalized). Handedness enters BOTH the per-hand baseline (primary) AND hbSign (direction). **The baseline
+must RE-DERIVE on the post-reclassification populations (upstream, stamped classification_version) BEFORE the engine's
+recenter-to-100 (`:450`).**
 
 ## Deferred to a later "big Stuff+ conversation" (NOT this edit)
 Velo/spin conventions; OPR batted-ball context-adjustment (ties to park factor); OSU-faced-**schedule** (conference
