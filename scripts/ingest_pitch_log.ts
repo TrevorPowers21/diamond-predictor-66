@@ -91,6 +91,7 @@ const FIELD_TO_HEADER = {
   spin: "Spin",
   relHeight: "RelHeight",
   relSide: "RelSide",
+  vaa: "VertApprAngle",
   exitVel: "ExitVel",
   launchAng: "LaunchAng",
   // NEW 2026-06-24 fields (only present in re-exported CSVs)
@@ -247,6 +248,7 @@ interface PitchLogRow {
   spin: number | null;
   rel_height: number | null;
   rel_side: number | null;
+  vaa: number | null;
   x_loc: number | null;
   y_loc: number | null;
   total_runs: number | null;
@@ -329,6 +331,7 @@ function buildRecord(row: string[], cols: ColPositions, csvSource: string): Pitc
     spin: numOrNull(get(row, cols, "spin")),
     rel_height: numOrNull(get(row, cols, "relHeight")),
     rel_side: numOrNull(get(row, cols, "relSide")),
+    vaa: numOrNull(get(row, cols, "vaa")),
     x_loc: numOrNull(get(row, cols, "x")),
     y_loc: numOrNull(get(row, cols, "y")),
     total_runs: intOrNull(get(row, cols, "totalRuns")),

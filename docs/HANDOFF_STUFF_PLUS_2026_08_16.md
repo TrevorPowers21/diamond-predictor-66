@@ -17,10 +17,37 @@ Full-system flow diagram (pitch-log upload → Stuff+ → power ratings → proj
 display): **`docs/PIPELINE_pitch_log_to_projections.md`**. "Run it all + automate" = a 4-phase build in forced order:
 
 **Phase 1 — data + classifier (IN PROGRESS).**
-- ▶ **Venue/sensor-variance check** — running (per-venue IVB/HB residuals off each pitcher's own 2026 season mean over
-  the 2.6M-pitch `pitch_log`; flag parks ≥1.5″ offset). Report before boundaries. Script `_venue_check.ts` (throwaway).
-- Then: pull distributions → per-pitcher clustering → set boundaries FROM OUR CLUSTERS → build the fastball classifier +
-  revised breaking-ball thresholds (extend `breakingBallReclassification.ts`) → validate on the named-arms panel.
+- ✅ **Venue movement-effect correction — DONE + validated (2026-08-17).** Named **"venue movement effects," NOT sensor
+  errors** — we neutralize the venue's effect on IVB/HB for portable talent whether the cause is a miscalibrated unit or
+  thin-air Magnus loss (altitude); Stuff+ + classification are portable talent measures, so removing it is correct either
+  way. **Method (locked doctrine):** (1) **LOO** — per-venue IVB/HB residual off each pitcher's OWN season mean *excluding
+  that venue* (visiting-pitcher logic; only pitchers who also threw elsewhere inform a park). LOO validated the predicted
+  home-heavy understatement — worst park's IVB grew −2.57→−3.00 pre-shrink. (2) **Empirical-Bayes shrinkage toward zero**,
+  pitcher as the sampling unit (`B_v=τ²/(τ²+s²_v)`, `s²_v`=pitcher-residual var ÷ #pitchers) — conservative by design
+  (under-correct noise > over-correct signal). Measured **τ≈0.63″ IVB / 0.66″ HB** = true between-park spread net of
+  noise; most of the raw ≥1.5″ tail was small-sample noise (the original 9 mostly collapsed; e.g. 6-arm park 3.69→0.95).
+  (3) **NO THRESHOLD — apply the full 310-venue shrunk layer to every pitch;** a clean park's correction is ≈0 by
+  construction, so shrinkage IS the continuous trust weight (supersedes the 8-vs-9 question — thresholds on unshrunk
+  estimates catch noise and miss signal simultaneously; here 22 well-sampled parks sat *below* the raw 1.5″ line at a
+  confident 1.0–1.6″). **Corrected movement = raw − venue offset, ONE layer feeding classification AND scoring both**
+  (classification-only would be incoherent — bucket a pitch on its true 14 IVB, grade it on the measured 11.4 — and would
+  contaminate the population means the z's center on; the population stamp exists to prevent exactly this seam).
+  - **Validation pins (all cleared):** (1) **centering golden** — pitch-weighted mean applied correction −0.006″ IVB /
+    +0.020″ HB (≈0, no common drift). (2) **home/road collapse** on the two worst parks' home staffs (81/79 arms, the exact
+    pitchers the fix protects) — IVB split −3.73→−1.27 (66%) and +2.92→+0.81 (72%); residual = deliberate conservative
+    shrinkage + the split being a broader quantity than the isolated offset. (3) **flip count (stake)** — **~7.0% of all
+    pitches cross a named movement boundary** (SI/FF 3.65%, SW 2.10%, CT/SL 1.50%); per-park flip% scales monotonically
+    with correction size (worst park 28% = biggest correction, no over-correction outlier); UPPER bounds (movement-only
+    provisional cuts; final flip count re-runs post-boundary with velo-gap + arsenal).
+  - **Provenance (locked):** raw stored alongside; corrected = a stamped VIEW with `venue_correction_version`; **per-season
+    fixture** (sensor drift isn't stable across seasons — units get recalibrated/moved), re-derived fresh each season with
+    the check re-run as a **standing early-season diagnostic**, not a one-time cleanup. **Eventually the framing park-effect
+    machinery and this movement-offset machinery are the same tool on two sensor outputs → shared code path when convenient
+    (not urgent).** [[project_park_factor_rework]] Fixture computed via `supabase db query --db-url` (staging read path);
+    correction table saved `scratchpad/_venue_corrections.json`.
+- ▶ NEXT: pull distributions (corrected) → per-pitcher clustering → set boundaries FROM OUR CLUSTERS → build the fastball
+  classifier + revised breaking-ball thresholds (extend `breakingBallReclassification.ts`) → validate on the named-arms
+  panel. **All clustering + boundaries run on the CORRECTED layer.**
 
 **Phase 2 — equations + baseline.** Wire the 9 FINAL EQUATIONS verbatim (see "FULL FINAL EQUATIONS"); **re-derive the
 baseline `pitcher_stuff_plus_ncaa` on the NEW taxonomy, stamp `classification_version`, BEFORE the recenter-to-100.**
@@ -142,9 +169,20 @@ arsenal. `IVB > −4` → gyro regardless of gap; `IVB < −8` → curve regardl
   (measures a slider-labeled pitch against a population it isn't in, pollutes both). The slider eq already serves ride —
   its `−0.10·z(ivb)` is the smallest depth penalty in the breaking family. If slutters grade low post-re-derivation, fix
   the slider equation, never cross-bucket grade. "One room, one equation, graded against your roommates."
-- **VAA = seam TIEBREAKER only.** Replaces release-height as the **SI/FF middle-strip** tiebreaker (flat VAA → 4S, steep →
-  SI); **secondary vote** at the gyro/slider seam after cluster mean. Inherits the venue-variance flag; **NO VAA in any
-  equation** until approach angle is properly derived + validated, then it replaces the `zAbs(relH/relS)` terms.
+- **VAA/HAA — RESERVED, NOT DERIVED (RULING 2026-08-17).** Verified: **per-pitch VAA is NOT in any current pitch-log export**
+  (checked 93-col + 112-col DRS; approach-angle absent; only a per-(pitcher×type) AGGREGATE VAA exists in
+  `pitcher_stuff_plus_inputs` from the Stuff+ export — old-taxonomy, can't tiebreak the new SI/FF split). **DO NOT derive an
+  approximate VAA:** the honest version needs the tracked velocity/accel components (vy0/vz0/az) we don't have; an
+  approximation (release pt + extension + plate loc + gravity) yields a number that LOOKS like VAA but isn't the
+  tracked-trajectory quantity, and when real VAA lands later you'd have two quantities under one name across a seam — the
+  exact silent inconsistency provenance exists to prevent. A derived-approximate VAA teaching the classifier things real VAA
+  later contradicts is WORSE than no VAA. **So: cluster-mean labeling carries the SI/FF middle strip now** (already works —
+  costs a marginal crispness on a narrow band, not a capability). **VAA slot RESERVED:** future **local-TrackMan access
+  (planned source of truth, not yet)** ships real VAA/HAA per pitch → it drops in as the strip tiebreaker as a **recorded
+  decision, no redesign**, with two standing conditions: (a) it computes off the **venue-corrected** movement layer; (b) its
+  arrival also **unlocks the equation upgrade** — VAA/HAA replace the `zAbs(relH/relS)` release terms. Ingest slot already
+  reserved (`pitch_log.vaa` column + `VertApprAngle→vaa` mapping in `ingest_pitch_log.ts`, forward-compatible; header name
+  may need updating to the real local-source format). **NO VAA in any equation or boundary until the real fields arrive.**
 
 **Z-MECHANICS (confirmed in code before wiring):** z params are **per (pitch_type × hand)** — baseline
 `pitcher_stuff_plus_ncaa` has pitch_type+hand+per-metric _sd, keyed `pitch_type::hand` (`:366`,`:419`). ⇒ **HB is NOT

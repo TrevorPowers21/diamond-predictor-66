@@ -155,8 +155,11 @@ own equation, so a below-average pitch grades poorly IN its correct room, never 
    defaults to slider.
 **RESOLVED (Trevor 2026-08-17):** **9 buckets** (curve collapsed to ONE; slutter, gravity-ball, AND sweeping-curveball =
 display sub-flags, NEVER equations). **Slutter grades with the SLIDER equation** (cross-bucket grading breaks per-bucket
-recentering — one room, one equation). **VAA = seam tiebreaker only** (replaces rel_height at the SI/FF strip; secondary
-vote at gyro/slider; NO VAA in any equation until derived+validated). **Equation change-list (vs current):** curveball HB
+recentering — one room, one equation). **VAA/HAA = RESERVED, NOT derived (RULING 2026-08-17)** — per-pitch VAA is in NO current
+export (verified); an approximation would seam vs the real tracked VAA in future local-TrackMan uploads (worse than none),
+so **cluster-mean labeling carries the SI/FF strip now**; VAA drops in as the strip tiebreaker when real VAA/HAA arrive
+(recorded decision, no redesign; computes off venue-corrected layer + unlocks VAA/HAA replacing `zAbs(relH/relS)`). No VAA
+in any equation/boundary until then. **Equation change-list (vs current):** curveball HB
 sign fix (−0.15→+0.15); cutter ivb `zAbs→z` (signed, ride-only bucket); **`z(fb_gap)` added to gyro/slider/sweeper/
 curveball** (velo/spin weight shaved to fit); 4S/Sinker/Changeup/Splitter untouched. **`z(fb_gap)` = z vs the
 bucket-OPTIMAL gap distribution, NOT one-sided/maximal** — an outsized gap is a classification question, not a bonus.
