@@ -57,20 +57,42 @@ flowchart TD
 
     %% ---- DISPLAY ----
     PRED --> DR["Rankings · Player Profile · Pitcher Profile"]
-    PLSP --> DS["Savant · Stuff+ leaderboards · pitch mix"]
+    PLSP --> DS["Season Stats display<br/>stats + filters + visuals<br/>(ALL pitch-log-derived, stored current)"]
+    HD --> DS
     CB --> DT["Team Builder · GM · Transfer Portal"]
     ALLOC --> DT
     PRAT --> DR
     HRAT --> DR
 ```
 
+## ★ KEY CALCULATIONS + PRINCIPLES (Trevor 2026-08-17) — how each aggregate is actually computed
+- **EVERYTHING derives from the pitch log (single source of truth).** The Masters' **power-rating INPUTS** — hitter
+  batted-ball + discipline metrics (exit velo, barrel, ev90, pull_air, chase, contact, la, gb, …) AND pitcher rate stats
+  — are **pitch-log-derived**, then **married onto the Masters** (they are NOT native Master columns). The power ratings
+  (`ba/obp/iso_power_rating`, `pRV+`, `era⁺/fip⁺/whip⁺/…`) and thus `desc_owar/d_war/bsr_war/total_desc_war` / `desc_pwar`
+  all flow from pitch-log data. `pull_air / in_zone / spray / zone` = derived-from-pitch-log, married on (agreed).
+- **Conference Stuff+ (V2, canonical) =** the **pitch-weighted mean of EVERY pitcher in the conference across the FULL
+  season**: `Σ(pitcher Stuff+ × his pitch count) / Σ(pitch count)`. It is the conference's **pitching depth/quality**.
+- **Conference HTP =** the same idea for **hitters** — the conference's aggregate hitter talent across ALL its teams,
+  full season. `HTP = OPR + 1.25·(Stuff+−100) + 0.75·park` (post wRC+→park swap).
+- **Conference stats are CONFERENCE-vs-CONFERENCE only.** The conference is the unit of comparison — the aggregates rank
+  conferences against each other (how tough is conf X vs Y). That comparison is exactly what the projection
+  competition-translation lever consumes (a player projected INTO conf X faces conf X's Stuff+ / HTP).
+- **Projections must FILL the snapshots WITHOUT touching toggles.** The returner/transfer recompute writes
+  `player_snapshot` / `transfer_snapshot` **preserving any coach-set toggles** (dev aggressiveness, roster status, class
+  transition, cornerstone) — never resets them — and **refreshes ALL displayed metrics to the most current values** (this
+  is Step 7c).
+- **Savant is DEAD/unused** — clear it after this work (logged to memory). The live surface for pitch-log stats is the
+  **Season Stats display**; every stat, filter, and visual there must be pitch-log-derived + stored up-to-date.
+- **Park factors = re-evaluate AFTER Stuff+ (quick).** [[project_park_factor_rework]] — next-after-Stuff+, small pass.
+
 ## Stage table (compute → store → display)
 
 | # | Stage | Computes | Stores (DB) | Displays |
 |---|---|---|---|---|
 | 1 | Ingest | — | `pitch_log` (per-pitch); `Hitter Master`/`Pitching Master` (season stats) | — |
-| 2 | Derive from pitch_log | Stuff+ inputs, dRS defense, wSB baserunning, pull_air/in_zone/spray/zone | `pitcher_stuff_plus_inputs`, `player_season_defense`, `player_season_baserunning`, Master columns | Savant tables |
-| 3 | **Stuff+** (the build) | reclassify → re-derive baseline → 9-eq score → recenter | `pitch_log.stuff_plus` + `.pitch_type_reclassified`, `pitcher_stuff_plus_inputs.stuff_plus`, `pitcher_stuff_plus_ncaa`, `Conference Stuff+ (V2)`, `Pitching Master.stuff_plus` | Savant Stuff+ leaderboards, pitch mix |
+| 2 | Derive from pitch_log | Stuff+ inputs, dRS defense, wSB baserunning, pull_air/in_zone/spray/zone (+ all power-rating inputs) | `pitcher_stuff_plus_inputs`, `player_season_defense`, `player_season_baserunning`, **married onto the Masters** | Season Stats display |
+| 3 | **Stuff+** (the build) | reclassify → re-derive baseline → 9-eq score → recenter | `pitch_log.stuff_plus` + `.pitch_type_reclassified`, `pitcher_stuff_plus_inputs.stuff_plus`, `pitcher_stuff_plus_ncaa`, `Conference Stuff+ (V2)`, `Pitching Master.stuff_plus` | Season Stats display (Stuff+, pitch mix) |
 | 4 | Power ratings (Masters) | hitter ba/obp/iso ratings (+pull_air) → desc WAR; pitcher pRV+/era⁺/… → desc pWAR | `Hitter Master` + `Pitching Master` (ratings + `desc_*` / `total_desc_war` cols) | Player/Pitcher Profile, Rankings |
 | 5 | Conference baselines | Conf Stuff+ (depth), wRC+, park factors, HTP | `Conference Stats` | Team Builder context |
 | 6 | Projections | returner + transfer engine (blend → competition translation via Stuff+/HTP/park → class/dev → depth-role → WAR → market) | `player_predictions` (o_war, p_war, total_hitter_war, market_value, rates) | Rankings, Profiles, Team Builder, Transfer Portal |

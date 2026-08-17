@@ -162,6 +162,26 @@ curveball** (velo/spin weight shaved to fit); 4S/Sinker/Changeup/Splitter untouc
 bucket-OPTIMAL gap distribution, NOT one-sided/maximal** — an outsized gap is a classification question, not a bonus.
 All numeric thresholds validate on our venue-corrected clusters.
 
+## ★ THE FULL PIPELINE + KEY PRINCIPLES (Trevor 2026-08-17) — diagram in `PIPELINE_pitch_log_to_projections.md`
+The "one process": pitch-log upload → derive → Stuff+ → power ratings → conference baselines → projections → NIL/display.
+**Non-negotiable principles Trevor stated (must survive):**
+- **EVERYTHING derives from the pitch log (single source of truth).** The Masters' power-rating INPUTS — hitter
+  batted-ball + discipline metrics AND pitcher rate stats — are pitch-log-derived and **married onto the Masters** (not
+  native Master columns). So the power ratings + `desc_owar/d_war/bsr_war/total_desc_war`/`desc_pwar` all trace to the
+  pitch log. `pull_air/in_zone/spray/zone` = derived-then-married (confirmed).
+- **Conference Stuff+ (V2) = pitch-weighted mean of EVERY pitcher in the conference, FULL season**
+  (`Σ(pitcher Stuff+ × pitch count)/Σ(pitch count)`) = the conference's PITCHING DEPTH. **Conference HTP** = same for
+  hitters (aggregate hitter talent, all teams, full season). **Conference stats are CONFERENCE-vs-CONFERENCE only** — the
+  conference is the comparison unit; that ranking is what the projection competition-translation lever consumes.
+- **Projections must FILL `player_snapshot`/`transfer_snapshot` WITHOUT changing toggles** (dev aggressiveness, roster
+  status, class transition, cornerstone) — never reset them — and **refresh ALL displayed metrics to current values**
+  (= Step 7c).
+- **Savant is DEAD/unused → clear after this** (logged to memory). Live pitch-log surface = the **Season Stats display**;
+  all its stats/filters/visuals must be pitch-log-derived + stored current.
+- **Park factors = re-evaluate AFTER Stuff+, quick.** [[project_park_factor_rework]].
+- **The unification goal:** ONE function on ingest runs derive→Stuff+→ratings→conference→projections, stamped
+  classification_version/constants_version, re-deriving every aggregate in the same pass (no stale scattered scripts).
+
 ## Sequencing + deferred
 - Stuff+ edit → **before Step 6b** (so the transfer recompute lands on final Stuff+). Then 6b → 7 → Step 8.
 - **Deferred to a later "big Stuff+ conversation"** (NOT this edit): velocity/spin conventions; OPR batted-ball
