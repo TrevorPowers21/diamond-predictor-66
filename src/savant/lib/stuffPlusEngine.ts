@@ -144,8 +144,8 @@ function calcSinker(row: PitchRow, pop: PopConstants, hand: string): { score: nu
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
 
-  const hbSign = hand === "L" ? -1 : 1;
-  const weighted = 0.3 * zv + (-0.2) * zi + hbSign * 0.3 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze;
+  // FOLDED (armHB): hb column = armHB (arm-side +); sinker is arm-side → +0.30·z(armHB), no hbSign
+  const weighted = 0.3 * zv + (-0.2) * zi + 0.3 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: 0 },
@@ -155,15 +155,15 @@ function calcSinker(row: PitchRow, pop: PopConstants, hand: string): { score: nu
 function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: number; zs: ZScores } {
   // MAX floor on velocity — below avg contributes zero
   const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
-  const zi = zAbs(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;
-  const zh = z(row.hb, pop.hb, pop.hb_sd) ?? 0;
+  const zi = z(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;   // FOLDED: signed (ride-only bucket) — more ride better
+  const zh = z(row.hb, pop.hb, pop.hb_sd) ?? 0;       // hb = armHB
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
   const zsp = z(row.spin, pop.spin, pop.spin_sd) ?? 0;
 
-  const hbSign = hand === "L" ? 1 : -1;
-  const weighted = 0.3 * zv + 0.15 * zi + hbSign * 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
+  // FOLDED: cutter is glove-side → −0.25·z(armHB), no hbSign
+  const weighted = 0.3 * zv + 0.15 * zi + (-0.25) * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
@@ -189,9 +189,10 @@ function calcGyroSlider(row: PitchRow, pop: PopConstants): { score: number; zs: 
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
+  const zg = z(row.fb_ch_velo_diff, pop.velo_diff, pop.velo_diff_sd) ?? 0;  // FOLDED: fb_gap (velo_diff=gap)
 
-  // Weights: 40 + 15 + 25 + 5 + 5 + 10 = 100%
-  const weighted = 0.40 * zv + 0.15 * zi + 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.10 * ze;
+  // FOLDED: velo 0.40→0.30, ADD 0.10·z(fb_gap). Weights 30+15+25+10+5+5+10 = 100%
+  const weighted = 0.30 * zv + 0.15 * zi + 0.25 * zh + 0.10 * zg + 0.05 * zrh + 0.05 * zrs + 0.10 * ze;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: 0 },
@@ -209,8 +210,9 @@ function calcSlider(row: PitchRow, pop: PopConstants, hand: string): { score: nu
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
   const zsp = z(row.spin, pop.spin, pop.spin_sd) ?? 0;
 
-  const hbSign = hand === "L" ? 1 : -1;
-  const weighted = 0.15 * zv + 0.1 * zi + hbSign * 0.35 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.2 * zsp;
+  const zg = z(row.fb_ch_velo_diff, pop.velo_diff, pop.velo_diff_sd) ?? 0;  // FOLDED: fb_gap
+  // FOLDED: glove-side −0.35·z(armHB); spin 0.20→0.10; +0.10·z(fb_gap). Weights 15+10+35+10+5+5+10+10=100
+  const weighted = 0.15 * zv + 0.1 * zi + (-0.35) * zh + 0.10 * zg + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
@@ -226,8 +228,9 @@ function calcSweeper(row: PitchRow, pop: PopConstants, hand: string): { score: n
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
   const zsp = z(row.spin, pop.spin, pop.spin_sd) ?? 0;
 
-  const hbSign = hand === "L" ? 1 : -1;
-  const weighted = 0.1 * zv + (-0.1) * zi + hbSign * 0.4 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.2 * zsp;
+  const zg = z(row.fb_ch_velo_diff, pop.velo_diff, pop.velo_diff_sd) ?? 0;  // FOLDED: fb_gap
+  // FOLDED: glove-side −0.40·z(armHB); spin 0.20→0.10; +0.10·z(fb_gap). Weights 10+10+40+10+5+5+10+10=100
+  const weighted = 0.1 * zv + (-0.1) * zi + (-0.4) * zh + 0.10 * zg + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
@@ -243,8 +246,9 @@ function calcCurveball(row: PitchRow, pop: PopConstants, hand: string): { score:
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
   const zsp = z(row.spin, pop.spin, pop.spin_sd) ?? 0;
 
-  const hbSign = hand === "L" ? 1 : -1;
-  const weighted = 0.1 * zv + (-0.3) * zi + hbSign * (-0.15) * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.25 * zsp;
+  const zg = z(row.fb_ch_velo_diff, pop.velo_diff, pop.velo_diff_sd) ?? 0;  // FOLDED: fb_gap
+  // FOLDED: glove-side −0.15·z(armHB) [sign-bug fix, folded]; spin 0.25→0.15; +0.10·z(fb_gap). Weights 10+30+15+10+5+5+10+15=100
+  const weighted = 0.1 * zv + (-0.3) * zi + (-0.15) * zh + 0.10 * zg + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.15 * zsp;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
@@ -260,8 +264,8 @@ function calcChangeup(row: PitchRow, pop: PopConstants, hand: string): { score: 
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
   const zsp = zAbs(row.spin, pop.spin, pop.spin_sd) ?? 0;  // ABS for changeup spin
 
-  const hbSign = hand === "L" ? -1 : 1;
-  const weighted = 0.15 * zvd + (-0.2) * zi + hbSign * 0.35 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
+  // FOLDED: hb=armHB; changeup arm-side → +0.35·z(armHB), no hbSign
+  const weighted = 0.15 * zvd + (-0.2) * zi + 0.35 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: 0, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp, z_velo_diff: zvd },
@@ -279,8 +283,8 @@ function calcSplitter(row: PitchRow, pop: PopConstants, hand: string): { score: 
   const zspRaw = z(row.spin, pop.spin, pop.spin_sd) ?? 0;
   const zsp = -zspRaw;
 
-  const hbSign = hand === "L" ? -1 : 1;
-  const weighted = 0.1 * zv + (-0.2) * zi + hbSign * 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.25 * zsp;
+  // FOLDED: hb=armHB; splitter arm-side → +0.25·z(armHB), no hbSign
+  const weighted = 0.1 * zv + (-0.2) * zi + 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.25 * zsp;
   return {
     score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
