@@ -74,3 +74,18 @@ Single dense handoff for the Stuff+ rebuild. Full design/rationale: `HANDOFF_STU
 - **TB oWAR regression = MUST-FIX/CHECK after projections run** → [[project_teambuilder_owar_snapshot_regression]] (live-rebuild
   vs stored snapshot; toggle/PA-driven; needs prod protections + snapshot values when snapshots filled).
 - gravity-ball flag cosmetic (fire on gyro anchors only). VAA/HAA reserved (future local-TrackMan source).
+
+## ★ FINALIZED (D1) — 2026-08-17 late
+Chain complete + validated on staging: classifier (anchor) → folded scoring (compute_pitch_log_stuff_plus, corrected
+layer, armHB + gap) → **pitch_log.stuff_plus 2.0M rows, bucket means ~100, SD 9–17, no blowups**; velo↔Stuff+ corr +0.54,
+velo bands monotonic (93+ →114, <85 →97); low-velo top arms = legit elite-shape (e.g. Combs's −6.4 IVB changeup) not a bug.
+- **Per-player Stuff+ → "Pitching Master".stuff_plus** (UPDATE 4794, D1) = pitch-weighted avg(pitch_log.stuff_plus) per pitcher. Backup `_master_stuff_backup`.
+- **Conference Stuff+ V2 → "Conference Stats"."Stuff_plus"** (UPDATE 30 D1 confs) = avg(pitch_log.stuff_plus) per conference_id (= pitcher-pitch-weighted). Backup `_confstats_backup`. Ranking sane (SEC 105.2/ACC 103.6/BigTen 102.2 top; NEC 91.3 bottom). "Independent" 109.4 = small-n quirk.
+- Rolled up DIRECTLY from pitch_log (bypassed inputs) — LOW risk, no DELETE on shared inputs.
+
+## DEFERRED after D1 finalization
+- **pitcher_stuff_plus_inputs D1 rows still OLD taxonomy** (bypassed) — re-aggregate for Track-B pipeline consistency (the derivers + savant read it). NOT needed for the Master/Conf values (those are correct off pitch_log).
+- **JUCO Stuff+ recompute** — FROZEN/deferred (JUCO conferences on old taxonomy; separate pipeline, D1 baselines). Don't regenerate JUCO overlay.
+- **V1 conf Stuff+ retirement** = code cleanup (stop the old name-keyed conf script).
+- **Backups to drop after acceptance:** _ncaa_backup_preanchor, _master_stuff_backup, _confstats_backup, _reclass_result/_map/_pf.
+- Next real step: the recompute chain (6b→7) consumes conf Stuff+ + per-player Stuff+ → projections + NIL.
