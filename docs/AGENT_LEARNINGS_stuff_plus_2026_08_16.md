@@ -131,11 +131,13 @@ non-separating arms, and fallback-rule pitchers land in a **classification excep
 the atbatDesc parser is the template). **Nothing silently forced into a bucket.**
 
 ## ★ THE PARTITION (v1, Trevor 2026-08-17) — full spec in HANDOFF_STUFF_PLUS "THE PARTITION"
-10 buckets, exhaustive over (gap, armHB, IVB) + spin for CH/SPL. **Headline additions from Trevor:** the CURVE family
-splits into **12-6 Curveball vs Sweeping Curveball** (a downer and a two-plane breaker are different pitches, same as
-gyro vs sweeper); the **topspin-forces-entry blend rule** (IVB ≤ −8 at any gap = curve, graded as a hard curve); the
-**gyro/curve blend strip** (low HB, IVB −4→−8, gap decides). **Thesis to preserve: each bucket its own equation, so a
-below-average pitch grades poorly IN its correct room, never exiled to the wrong bucket.**
+**9 buckets** (FF, SI, CT, gyro, SL, SW, CB, CH, SPL), exhaustive over (gap, armHB, IVB) + spin for CH/SPL. **Headline
+moves:** the CURVE family is **ONE bucket, both shapes** (12-6 + sweepy) — the sign-fixed curveball eq pays depth
+(`−0.30·z(ivb)`) AND sweep (`+0.15` glove-side), so it grades both fairly; splitting was UNNECESSARY (unlike slider vs
+sweeper, whose sweep/bullet-depth ARE opposing under one formula → they split). The **topspin-forces-entry blend rule**
+(IVB ≤ −8 at any gap = curve); the **gyro/curve blend strip** (low HB, IVB −4→−8, gap decides). **Thesis: each bucket its
+own equation, so a below-average pitch grades poorly IN its correct room, never exiled.** ⇒ **THE FULL FINAL EQUATIONS
+(all 9, verbatim replacement of the calc set) live in `HANDOFF_STUFF_PLUS` → "FULL FINAL EQUATIONS".**
 
 **Agent improvements folded into the spec (why):**
 1. **Unify the HB sign convention** — the spec mixed `IVB−|HB|`, "arm-side" (signed), and "HB 12+" (glove-as-positive).
@@ -151,8 +153,14 @@ below-average pitch grades poorly IN its correct room, never exiled to the wrong
 6. **Two-layer assignment:** boundary RULES give the primary label; **nearest-centroid** (data-derived bucket centers,
    post venue-check) is the FALLBACK for boundary/low-confidence pitches; low-confidence flag + exceptions log; never
    defaults to slider.
-**Open Qs (Trevor):** bucket count 10 vs 11 (slutter/gravity-ball = sub-flag or its own equation?); slutter graded cutter
-(IVB≥+5) vs slider eq; VAA as a seam tiebreaker (unused today) vs strict (gap,HB,IVB,spin). Numbers validate on our data.
+**RESOLVED (Trevor 2026-08-17):** **9 buckets** (curve collapsed to ONE; slutter, gravity-ball, AND sweeping-curveball =
+display sub-flags, NEVER equations). **Slutter grades with the SLIDER equation** (cross-bucket grading breaks per-bucket
+recentering — one room, one equation). **VAA = seam tiebreaker only** (replaces rel_height at the SI/FF strip; secondary
+vote at gyro/slider; NO VAA in any equation until derived+validated). **Equation change-list (vs current):** curveball HB
+sign fix (−0.15→+0.15); cutter ivb `zAbs→z` (signed, ride-only bucket); **`z(fb_gap)` added to gyro/slider/sweeper/
+curveball** (velo/spin weight shaved to fit); 4S/Sinker/Changeup/Splitter untouched. **`z(fb_gap)` = z vs the
+bucket-OPTIMAL gap distribution, NOT one-sided/maximal** — an outsized gap is a classification question, not a bonus.
+All numeric thresholds validate on our venue-corrected clusters.
 
 ## Sequencing + deferred
 - Stuff+ edit → **before Step 6b** (so the transfer recompute lands on final Stuff+). Then 6b → 7 → Step 8.
