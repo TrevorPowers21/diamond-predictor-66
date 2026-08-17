@@ -98,6 +98,38 @@ An outside review of the synopsis (all equations + the classification problem) r
   venue-corrected clusters, full stop.** First real execution move = pull the distributions ourselves + run the venue
   check; nothing in the numeric proposals is measured.
 
+## ★ RECLASSIFICATION BUILD CONDITIONS (external review round 2, 2026-08-16) — these are REQUIRED, not optional
+**Forced build order (not parallel):**
+1. **Venue movement check** — per-venue mean IVB/HB residuals off pitcher-season means (visiting-pitcher logic, framing
+   park fix); any park with ≥1.5″ systematic offset is corrected BEFORE any boundary is drawn.
+2. **Handedness-normalization audit on HB signs** — the "SI 13+ run" condition silently fails for LHP if HB is raw. Verify first.
+3. **Per-pitcher clustering** — classify at the CLUSTER level, never per-pitch; sub-150-pitch arms fall back to global
+   rules applied to the pitcher's cluster MEANS.
+4. **Extract SWEEPER first.**
+5. **Then set CT/SL on the REMAINING slider population** (removing sweepers moves the slider cluster — boundary set after).
+6. **SI/FF and CH/SPL** in either order.
+7. **Acceptance panel** (gates below).
+→ **Report the venue-check + clustering results back BEFORE boundary application.**
+
+**`classification_version` in the provenance chain:** stamped on every pitch-level output row alongside `constants_version`;
+stale-guard REFUSES to combine mismatched taxonomies. **Reclassification is a BREAKING SCHEMA change, not a data fix** —
+every downstream consumer of pitch type (per-type Stuff+ means, arsenal differentials, mix displays, per-type goldens,
+persistence tables) re-derives against the new taxonomy in the SAME pass; **no old-bucket means survive anywhere.**
+
+**Historical scope (amended by Trevor):** one taxonomy across all pitch-level data we have = **2026 only (no 2025 pitch
+logs exist).** DOCUMENT as a known limitation: any pitch-type-keyed persistence / YoY values built from 2025-era data
+carry a **taxonomy seam** until 2025 logs are acquired; if they land, same-ruleset reprocessing is day-one work.
+**Acquiring 2025 logs = a logged data-acquisition item.**
+
+**Pre-registered acceptance gates (before wiring):** (a) CT/SL confusion below a stated rate on a manual spot-check;
+(b) a **named-arms panel** (~20 pitchers Trevor knows cold — Trevor supplies the list) labels correctly; (c) within-season
+stability — same pitcher's same pitch holds one label all season (cluster labeling makes this ~free; assert it anyway);
+(d) league-level type mix per role passes eyeball review.
+
+**Exceptions path from day one:** a **classification confidence field** on every assignment; far-from-cluster pitches,
+non-separating arms, and fallback-rule pitchers land in a **classification exceptions log** (the `NEW_VOCAB` pattern from
+the atbatDesc parser is the template). **Nothing silently forced into a bucket.**
+
 ## Sequencing + deferred
 - Stuff+ edit → **before Step 6b** (so the transfer recompute lands on final Stuff+). Then 6b → 7 → Step 8.
 - **Deferred to a later "big Stuff+ conversation"** (NOT this edit): velocity/spin conventions; OPR batted-ball
