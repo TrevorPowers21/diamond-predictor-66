@@ -12,6 +12,28 @@ so projections land on the final numbers **once** (resolves "don't change output
 The math itself was verified trustworthy (audit §3b); this edit is **classification + two calc bugs + pipeline
 consolidation**, not a rebuild.
 
+## ★ EXECUTION — build phases + status (2026-08-17)
+Full-system flow diagram (pitch-log upload → Stuff+ → power ratings → projections → NIL/display, with every store +
+display): **`docs/PIPELINE_pitch_log_to_projections.md`**. "Run it all + automate" = a 4-phase build in forced order:
+
+**Phase 1 — data + classifier (IN PROGRESS).**
+- ▶ **Venue/sensor-variance check** — running (per-venue IVB/HB residuals off each pitcher's own 2026 season mean over
+  the 2.6M-pitch `pitch_log`; flag parks ≥1.5″ offset). Report before boundaries. Script `_venue_check.ts` (throwaway).
+- Then: pull distributions → per-pitcher clustering → set boundaries FROM OUR CLUSTERS → build the fastball classifier +
+  revised breaking-ball thresholds (extend `breakingBallReclassification.ts`) → validate on the named-arms panel.
+
+**Phase 2 — equations + baseline.** Wire the 9 FINAL EQUATIONS verbatim (see "FULL FINAL EQUATIONS"); **re-derive the
+baseline `pitcher_stuff_plus_ncaa` on the NEW taxonomy, stamp `classification_version`, BEFORE the recenter-to-100.**
+
+**Phase 3 — run + store.** Score per-pitch (`pitch_log.stuff_plus`) + aggregate (`pitcher_stuff_plus_inputs`) + recenter
+→ store **Conference Stuff+ (V2 canonical, retire V1)** + **per-player Stuff+ (Pitching Master)**. Acceptance gates first.
+
+**Phase 4 — automate (Track B).** Wrap stages 2→6 of the pipeline into ONE function firing on pitch-log ingest, retiring
+the scattered scripts. Then → the recompute chain (Step 6b onward), which carries the NIL `total_hitter_war` + need wiring.
+
+**Write discipline:** stages that WRITE to staging (baseline re-derive, scoring, storage) are handed to Trevor as
+`npm run …` commands / paste-SQL, not fired blind. Read/aggregation steps (venue check, distributions) the agent runs.
+
 ## THE PLAN (sequence — Trevor 2026-08-16)
 
 ### 1. Fix Stuff+ classification (the heart)
