@@ -316,6 +316,23 @@ recenter each (type×hand) bucket to per-pitcher mean 100 after scoring. Every b
 **Net change list:** curveball HB sign fix (+0.15) · cutter ivb signed · fb_gap added to the 4 breaking buckets (velo/spin
 weight shaved to make room) · everything else identical. 4S/Sinker/Changeup/Splitter untouched.
 
+## ★★ FOLDED FINAL EQUATIONS (armHB, hbSign RETIRED) — 2026-08-17. THIS is what wires into `stuffPlusEngine.ts` (supersedes the hbSign forms above).
+**The fold (confirmed + classifier LOCKED):** `armHB` = arm-side-positive (RHP hb / LHP −hb) is THE horizontal column everywhere.
+`hbSign` disappears; each bucket's HB term becomes a **fixed per-bucket sign on `z(armHB)`** — **`+` for arm-side buckets
+(SI/CH/SPL), `−` for glove-side buckets (FC/SL/SW/CB)**. That sign is a BUCKET property (arm-side vs glove-side virtue), not a
+hand property — no per-hand logic survives. `zAbs`/`|·|` terms already hand-agnostic → unchanged (hb→armHB). IVB does not fold.
+Baselines re-derive per (type×hand) on `armHB`. Master: `Stuff+ = 100 + 20·Σ(wᵢ·zᵢ)`, recenter each (type×hand) bucket to 100.
+- **Four-Seam:** `0.30·z(velo) + 0.25·z(ivb) + 0.15·zAbs(armHB) + 0.10·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext) + 0.05·z(spin)` — unchanged (|armHB|).
+- **Sinker** (arm-side +): `0.30·z(velo) − 0.20·z(ivb) + 0.30·z(armHB) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext)`
+- **Cutter** (glove-side −): `0.30·zMax(velo) + 0.15·z(ivb) − 0.25·z(armHB) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext) + 0.10·z(spin)`
+- **Gyro Slider:** `0.30·zMax(velo) − 0.15·z(ivb) + 0.25·((σ_armHB−|armHB|)/σ_armHB) + 0.10·z(fb_gap) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext)` — bullet term |armHB|, hand-agnostic.
+- **Slider** (glove-side −): `0.15·zMax(velo) − 0.10·z(ivb) − 0.35·z(armHB) + 0.10·z(fb_gap) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext) + 0.10·z(spin)`
+- **Sweeper** (glove-side −): `0.10·zMax(velo) − 0.10·z(ivb) − 0.40·z(armHB) + 0.10·z(fb_gap) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext) + 0.10·z(spin)`
+- **Curveball** (glove-side −): `0.10·zMax(velo) − 0.30·z(ivb) − 0.15·z(armHB) + 0.10·z(fb_gap) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext) + 0.15·z(spin)` — the `−0.15·z(armHB)` IS the sign-bug fix, now folded (glove-side sweep rewarded).
+- **Changeup** (arm-side +): `0.15·z(fb_ch_velo_diff) − 0.20·z(ivb) + 0.35·z(armHB) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext) + 0.10·zAbs(spin)`
+- **Splitter** (arm-side +): `0.10·zMax(velo) − 0.20·z(ivb) + 0.25·z(armHB) + 0.05·zAbs(relH) + 0.05·zAbs(relS) + 0.10·z(ext) − 0.25·z(spin)`
+**Equivalence check:** folded `±coeff·z(armHB)` reproduces the old `hbSign·coeff·z(hb)` exactly (sd invariant under negation), for both hands, with NO scattered sign logic. "More break the good way" is identical for L and R by construction.
+
 ## Deferred to a later "big Stuff+ conversation" (NOT this edit)
 Velo/spin conventions; OPR batted-ball context-adjustment (ties to park factor); OSU-faced-**schedule** (conference
 quality = teams actually faced, not overall avg) — same insight as a possible **Stuff+-faced-per-hitter** metric; the
