@@ -39,6 +39,24 @@ Single dense handoff for the Stuff+ rebuild. Full design/rationale: `HANDOFF_STU
 4. **Store** conf Stuff+ V2 (retire V1) + per-player Stuff+ (Pitching Master). Then Track B automation.
 5. Then the recompute chain (6b→7c→…) carries into projections + NIL. Park factors after. Clear Savant.
 
+## ★ BASELINE + SCORING METHODOLOGY (PINNED 2026-08-17 — read-before-change done)
+- **Baseline `pitcher_stuff_plus_ncaa` (18 rows = 9 types × 2 hands, keyed on ENGINE labels "4S FB"/"Sinker"/… which MATCH the
+  reclassified labels; `hb` is handedness-SIGNED: RHP 4S +10.3 / LHP −10.6; sliders glove-signed) is DERIVED FROM
+  `pitcher_stuff_plus_inputs` (per source_player_id × pitch_type × hand aggregate), NOT from pitch_log directly.**
+  - `src/savant/lib/nonBreakingBallPopConstants.ts` → fastball/offspeed families; `breakingBallReclassification.ts` → breakers.
+  - Method: `fetchAll(season)` reads `pitcher_stuff_plus_inputs` (velocity/ivb/hb/rel_height/rel_side/extension/spin/pitches),
+    filter `pitch_type in NON_BREAKING_BALLS`, require ivb+hb, group by `pitch_type::hand`, **PITCH-WEIGHTED mean + sd** (wMean/
+    wSd weighted by `pitches`) → upsert `pitcher_stuff_plus_ncaa` onConflict `(pitch_type,hand,season)`.
+- **Scoring `compute_pitch_log_stuff_plus.ts`** is PER-PITCH from `pitch_log` (reads `pitch_type_reclassified`), z vs baseline
+  popMap, recenter each (type×hand) bucket to per-pitcher mean 100, upsert `pitch_log.stuff_plus`.
+- **⇒ RE-DERIVE SEQUENCE (exact):** (1) **RE-AGGREGATE `pitcher_stuff_plus_inputs`** per (source_player_id × pitch_type_reclassified
+  × hand) from `pitch_log_corrected`: pitches, avg velocity, avg **ivb_corrected**, avg **armHB (R?hb:−hb on corrected hb)** stored
+  in the `hb` column, avg rel_height/rel_side/extension/spin, + NEW **fb_gap** (needs a new column on inputs + baseline), velo_diff
+  for CH. This is SMALL (~15–40k rows = fast GROUP BY, no ctid-batching). (2) Run the two derivers (modified: `pitch_type→
+  pitch_type_reclassified`, they already read `hb` which now = armHB; add fb_gap mean/sd) → new baseline. (3) Fold the 9 calc
+  functions (below). (4) `compute_pitch_log_stuff_plus` per-pitch (compute armHB+fb_gap per pitch, feed calc) + recenter — 2M
+  write = ctid-batch. **armHB fold = "hb" column carries armHB everywhere; no rename. fb_gap = the one genuinely-new column.**
+
 ## ★ WRITE MECHANICS LEARNED (critical — big writes to pitch_log)
 - Staging pooler (session mode, port 5432) enforces a **hard ~120s statement_timeout and IGNORES `statement_timeout=0`** via
   connection options → any single statement >120s → `57014 canceling statement due to statement timeout` + **full rollback**.
