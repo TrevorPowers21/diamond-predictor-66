@@ -906,3 +906,14 @@ Using `is_conference_game=true` + `_team_conf` on team_id, pooled per conference
   the Conference Stats aggregate (= the validated pooled rate). Per-team skipped (future).
 - **NEXT:** env+ (intra-conf rate ÷ season NCAA), wRC+ centering, then ASSEMBLE the unified conf-stats run (Bucket A rates/env+/wRC+
   from intra-conf pitch-log + Bucket B OPR/Stuff+/scouting/run_env/HTP total-season, all stored) → A/B whole → fold into edge fn → retire producers.
+## ★ #4 env+ + wRC+ RESOLVED (2026-08-18) — hitting-rate bucket fully specified
+- **env+ VALIDATED:** intra-conf rate ÷ season NCAA (avg .2777 / obp .3823 / iso .1588, from ncaa_averages) × 100 vs stored
+  ba_plus/iso_plus → corr **0.979 / 0.991**, MAD **0.66 / 1.32** pts. Clean. (SLG null in Conference Stats → derive SLG = AVG + ISO.)
+- **wRC+ = current-canonical C1** on the intra-conf OBP/SLG: `(0.011 + 0.691·OBP + 0.235·SLG)/0.3782 × 100`. The STORED WRC_plus
+  is STALE — Conference Stats last updated **2026-06-16**, but the C1 formula (AVG/ISO coeffs → 0) landed **2026-08-11**; so
+  stored is pre-C1 (that's the ~10-13 MAD; neither C1-on-aggregate nor player-wRC+-rollup reproduces it, because it's OLD-formula).
+  ⇒ The unified run COMPUTES the current C1 value (correct by definition); it CORRECTS the stale stored value (build-check-then-clear).
+- **HITTING-RATE BUCKET now fully specified (all from intra-conf pitch-log pooled by proper denominator):**
+  AVG=H/AB · OBP=(H+BB+HBP)/(AB+BB+HBP+SF) · ISO=(2B+2·3B+3·HR)/AB · SLG=AVG+ISO(=TB/AB) · env+ = rate÷NCAA×100 · wRC+ = C1(OBP,SLG).
+  All validated vs stored (rates corr 0.98; env+ 0.98; wRC+ = canonical, stored stale). NEXT: pitching-rate bucket
+  (ERA via DRS ER, FIP/WHIP/K9/BB9/HR9 from intra-conf events) → then ASSEMBLE the unified run.
