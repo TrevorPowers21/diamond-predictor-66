@@ -764,3 +764,23 @@ The live-compute elimination ships WITH the edge function: (a) edge fn produces 
 conf HTP/run-env/OPR; (b) every page repoint = read stored (types regen + PAGE-LOAD verification per CLAUDE.md — the one gate
 that needs the dev server); (c) [[project_war_display_audit]] "6 pass-2 choke points" + [[project_stored_derived_values_architecture]]
 are the same elimination. Log each repoint in PROD_MIGRATIONS as done. NOTHING computes on a page after this.
+## ★ LIVE-COMPUTE AUDIT — 2 CORRECTIONS/REFINEMENTS (Trevor 2026-08-18)
+1. **oWAR/wRC+/pWAR live compute = ACCEPTABLE (transient), NOT the anti-pattern.** It's ONLY the immediate post-toggle
+   PREVIEW (dev-aggressiveness / roster edit); **the moment the build is SAVED to the DB it reverts to all STORED values.**
+   Coach-driven interaction feedback → save → stored. So this is by-design (matches [[project_stored_derived_values_architecture]]
+   "small live recompute acceptable for coach-driven changes"). Do NOT "eliminate" it — just ensure save writes stored + read-back is stored.
+
+2. **★ TRANSFER PROJECTION live path = a BUILD-OVER LEFTOVER (Trevor confirmed the pattern: "fixed it but built over top +
+   re-used an old function without deleting").** This is the transfer-engine-audit "3 drifted copies." CONCRETE MAP for the
+   #6 transfer-sync + #7 dead-code audit:
+   - `TransferPortal.tsx:266-268` — `isLegacy`/`legacyEra` branch = old input-format path kept next to the new.
+   - **`src/lib/effectiveProjection.ts`** (OLDER: `projectEffectivePitcher`, `effectivePitcherWar`, `effectiveHitterWar`,
+     `effectiveMarket`) is PARTIALLY SUPERSEDED by **`src/lib/projectEffective.ts`** (NEWER: `projectEffectiveWar`) — but BOTH
+     are still imported; **`PitcherProfile.tsx` imports BOTH** (half-migrated). effectiveProjection.ts also imports projectEffective.ts.
+   - **`src/lib/pitcherProjection.ts`** (`projectPitchingRate`/`computePitcherProjection`, the OLD live returner-rate compute)
+     overlaps `transferPitcherProjection.ts`; imported by predictionEngine, HighFollowList, TeamBuilder, useTeamBuilderSimulation.
+   - Projection fns run in BOTH `supabase/functions/process-precompute-jobs/index.ts` (edge) AND live pages (TransferPortal,
+     TeamBuilder, useTeamBuilderSimulation, PlayerHub) — canonical(src/lib)/edge/live triplication.
+   - **RESOLUTION (#6/#7, needs page-load verify):** pick ONE canonical projection path, DELETE the superseded module(s)
+     (likely retire effectiveProjection.ts → projectEffective.ts; retire the live page compute → read edge-fn snapshot; drop
+     the isLegacy branch), repoint all importers, tsc + LOAD each page. Map here = the delete-list. [[project_transfer_engine_audit]]
