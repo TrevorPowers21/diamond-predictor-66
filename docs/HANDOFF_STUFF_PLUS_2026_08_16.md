@@ -861,3 +861,16 @@ straightforward weighted means (already done for OPR/Stuff+); wRC+ = C1 from con
   per-player) intra-conf stats in a new `team_conference_stats` table, or just produce+store the CONFERENCE aggregate with
   team/player as in-run intermediates? Pooling (Σnum/Σden) gets scaling right either way — this is a product/transparency
   choice, not correctness. Conference aggregate = required (transfer engine consumes it).
+## ★ #4 STORAGE DECISION + ERA VALIDATION (Trevor 2026-08-18)
+- **STORAGE = per-PLAYER conference stats** (Trevor): store each player's intra-conference stats so they're FILTERABLE on the
+  Season Stats view; the CONFERENCE aggregate = sum/pool of the per-player conf stats. **Per-TEAM = skipped now** ("not
+  necessary but potentially valuable" — future). So: per-player intra-conf split (surfaced on Season Stats) → pooled to
+  Conference Stats. `is_conference_game` flag on pitch_log makes the per-player conf filter a trivial `where is_conference_game`.
+- **★ ERA / DRS earned-runs = VALIDATED (Trevor asked to confirm).** DRS score-driven ER (`accrue_pitcher_er.py` →
+  `scripts/drs/output/pitcher_er.csv`, source_player_id/IP/ER/ERA) vs the Pitching Master OFFICIAL ERA, n=3,878 pitchers
+  (IP>10): **corr 0.987 · MAD 0.29 · bias +0.05 (DRS mean 6.54 vs Master 6.49) · 82% within 0.50 ERA.** Per-pitcher tight;
+  conference-pool errors average out further → conf ERA from DRS earned runs is reliable. USE it (no Master-ERA dependency).
+- **#4 BUILD PATH (locked):** (1) add `is_conference_game` to pitch_log (migration + ingest-derive + backfill, like park_code);
+  (2) per-player intra-conf rate stats (pooled by proper denominator; ERA via DRS ER) → store, surface on Season Stats; A/B;
+  (3) pool to Conference Stats aggregate + env+ + wRC+(C1); (4) Bucket B reproduce (OPR/Stuff+/scouting/run_env/HTP total-season);
+  (5) assemble one pass → fold into edge fn → retire the 5 producers LAST (build-check-then-clear).
