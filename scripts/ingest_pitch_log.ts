@@ -67,6 +67,7 @@ const FIELD_TO_HEADER = {
   probSL: "probSL",
   count: "count",
   gameVenueId: "gameVenueId",
+  gameString: "gameString",
   level: "level",
   home: "home",
   teamId: "teamId",
@@ -190,6 +191,19 @@ function boolOrNull(s: string): boolean | null {
   return null;
 }
 
+/** gameString = `cs-<parkCode><date(8)><game#(1)>` (e.g. `cs-air01202604120`).
+ *  The parkCode (`air01`, `haw01`, `st-jo01`) is the STABLE physical-stadium id —
+ *  unlike gameVenueId, which fragments per weekend series. Strip the trailing 9
+ *  digits (date + game#) and the `cs-` prefix. All park codes map 1:1 to one home
+ *  team (no neutral-site fragmentation), so this is the reliable park key for park
+ *  factors. NOTE: batting_team_id/pitching_team_id are CORRUPT in the source
+ *  (1 id → many teams); the clean ids are team_id (batting) / opponent_id (pitching). */
+function parkCodeFromGameString(s: string): string | null {
+  const t = textOrNull(s);
+  if (t == null) return null;
+  return t.replace(/\d{9}$/, "").replace(/^cs-/, "") || null;
+}
+
 function handOrNull(s: string): "L" | "R" | null {
   const t = textOrNull(s);
   if (t == null) return null;
@@ -217,6 +231,8 @@ interface PitchLogRow {
   season: number;
   date: string;
   game_venue_id: string | null;
+  game_string: string | null;
+  park_code: string | null;
   level: string | null;
   home: boolean | null;
   inn: string | null;
@@ -300,6 +316,8 @@ function buildRecord(row: string[], cols: ColPositions, csvSource: string): Pitc
     season: dateInfo.season,
     date: dateInfo.iso,
     game_venue_id: textOrNull(get(row, cols, "gameVenueId")),
+    game_string: textOrNull(get(row, cols, "gameString")),
+    park_code: parkCodeFromGameString(get(row, cols, "gameString")),
     level: textOrNull(get(row, cols, "level")),
     home: boolOrNull(get(row, cols, "home")),
     inn: textOrNull(get(row, cols, "inn")),
