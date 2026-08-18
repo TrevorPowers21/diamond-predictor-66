@@ -500,3 +500,32 @@ are the same elimination. Log each repoint in PROD_MIGRATIONS as done. NOTHING c
   intra-conf FILTER). The talent/park bucket stays total-season. wRC+ = C1 from the INTRA-CONF OBP/SLG.
 - **Producers RETIRED after the unified run is verified** (build-check-then-clear): importConferenceStats,
   populate-conference-stats-env-plus, conferenceScoutingAverages, conferenceStuffPlus(V1). Admin edits = override; edge fn absorbs compute.
+## ★★ CONFERENCE-STATS BUILD (#4) — CONSOLIDATED FINDINGS + PLAN (2026-08-18)
+Full running plan in `docs/HANDOFF_STUFF_PLUS_2026_08_16.md` (§#4 sections). Durable learnings:
+
+### THE SCOPE RULE (load-bearing) — [[project_conference_stats_scope_rule]]
+- **Conference RATE stats = INTRA-CONFERENCE games ONLY** (AVG/OBP/ISO/SLG/OPS, ERA/FIP/WHIP/K9/BB9/HR9, wRC+). Games where
+  conference teams play EACH OTHER — a direct conf-vs-conf competition measure, NOT a condensed full-season rollup. Filter
+  pitch_log to `conference_of(team_id) == conference_of(opponent_id)`, aggregate per-player (conf PA) → per-team → per-conference,
+  pool by PROPER denominator (Σnum/Σden — AVG/ISO by AB, OBP by PA, pitching IP-weighted). wRC+ = C1 from intra-conf OBP/SLG.
+- **Stuff+, OPR, Park Factor (→ HTP) = TOTAL season, ALL games**, weighted (pitches/PA/venue) — small per-unit sample needs the
+  full season. ALREADY BUILT THIS WAY; run_env + HTP stored values CORRECT as-is; OPR is a total-season PA-weighted rollup (no rework).
+
+### FINDINGS
+- **My first A/B error (instructive):** a FULL-SEASON Master rate rollup does NOT reproduce the stored conf rates (AVG corr 0.58)
+  — wrong on SCOPE (should be intra-conference) AND weighting (per-denominator). Caught BEFORE retiring the CSV upload — the
+  whole point of build-check-then-clear [[feedback_build_check_then_clear]].
+- **ERA / earned runs = SOLVED + VALIDATED.** DRS SCORE-DRIVEN ER attribution (`scripts/drs/accrue_pitcher_er.py` → walks the
+  pitch-to-pitch score DELTA, catches every run incl. the ~900 the per-play col drops (99.96% vs Master R), earned/unearned via
+  `(UR)` tags + base-slot responsibility). A/B vs OFFICIAL Master ERA (n=3,878, IP>10): **corr 0.987, MAD 0.29, bias +0.05, 82%
+  within 0.50, league means 6.54 vs 6.49.** ⇒ conf ERA off DRS earned runs is reliable; no Master-ERA dependency.
+- **`batting_team_id`/`pitching_team_id` CORRUPT** (1 id → 15 teams) — use CLEAN `team_id`/`opponent_id` (this is what maps to conference).
+- **TEAM STATS are stored NOWHERE** (only team_war_snapshots + Teams Table + build tables). Conf run stores PER-PLAYER intra-conf
+  stats (filterable on Season Stats view) → pooled to Conference Stats aggregate. Per-team = future-optional.
+- **`is_conference_game` flag → add to pitch_log** (ingest-derive + backfill, like `park_code`) so the intra-conf filter is a trivial `where` forever.
+- **5 scattered producers** (importConferenceStats, populate-conference-stats-env-plus, conferenceScoutingAverages,
+  conferenceStuffPlus V1) get RETIRED after the unified run is verified. Admin edits = override; edge fn absorbs compute.
+
+### BUILD PATH (build-check-then-clear)
+add is_conference_game → per-player intra-conf rates (DRS ERA) stored + on Season Stats + A/B → pool to Conference Stats +
+env+ + wRC+ → Bucket B reproduce (OPR/Stuff+/scouting/run_env/HTP total-season) → assemble ONE pass → fold into edge fn → retire producers LAST.
