@@ -695,3 +695,20 @@ Kills the HTP-drift problem (currently HTP recomputed live in 4 sites + attached
    (OPR/HTP/Stuff+/run_env → `Conference Stats`). Verify OPR/wRC+ currency (regular season complete → should be accurate).
 5. Order: add columns → build the conf-stats pitch-log run (computes run_env_factor + HTP + all conf fields, stored) →
    repoint the 4 readers + transfer engine → fold into edge fn. Then projections read stored HTP everywhere (consistent).
+## ★ HTP + RUN-ENV STORED IN CONFERENCE STATS (staging, 2026-08-18) — DB side DONE
+- **Columns added** to `"Conference Stats"`: `run_env_factor`, `hitter_talent_plus` (double precision).
+- **run_env_factor** = conf-avg of member-team `rg_factor` (rolling Park Factors), joined `Park Factors.source_team_id →
+  "Teams Table".source_id (Season 2026) → conference_id`. Populated 30 D1 conferences (range 82.9–115.7); 12 non-D1 null (no park factors). NO handedness.
+- **hitter_talent_plus** = `"Overall_Power_Rating" + 1.25·("Stuff_plus"−100) + 0.75·(100 − run_env_factor)` — the NEW HTP
+  (run-env term REPLACES the old `0.75·(100−WRC_plus)`). Stored 30 confs. Sanity: SEC 130.3 (old 128.1), ACC 119.9, Big 12
+  118.7, Big Ten 113.3 — rankings preserved; run-env (park-only) nudges HTP up vs the old wRC+ term (which conflated talent).
+- **CANONICAL HTP confirmed** = uses `Overall_Power_Rating` (NOT offensive_power_rating — that's the drifted ConferenceStatsPage
+  copy), `Stuff_plus`, and the env term. Source: `TransferPortal.tsx:491 calcHitterTalentPlusFromConference` (the transfer-engine path).
+- **⚠ NOTE on the column name:** the conference name column is literally `"conference abbreviation"` (with a space).
+- Backup `_confstats_backup_20260818`.
+- **NEXT — REPOINT 6 LIVE-COMPUTE SITES to read stored `hitter_talent_plus`** (kills the drift; makes the run-env change take
+  effect in projections): (1) `TransferPortal.tsx:491/1095` calcHitterTalentPlusFromConference; (2) `TeamBuilder.tsx:826`;
+  (3) `useTeamBuilderSimulation.ts` resolveConferenceStats; (4) `PitcherPage.tsx:281`; (5) `ConferenceStatsPage.tsx:159`
+  (also fix its offensive_power_rating→overall drift); (6) `PitchingConferenceStatsTable.tsx:76` calcHitterTalentPlus.
+  Each: add `hitter_talent_plus` (+ run_env_factor) to the Conference Stats fetch, replace the live compute with the stored read.
+  Verify: `tsc -p tsconfig.app.json` (no NEW errors) + LOAD the affected pages (per CLAUDE.md). Keep JUCO_DISTRICT_HTP_OVERRIDE.
