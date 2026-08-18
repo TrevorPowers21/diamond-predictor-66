@@ -629,3 +629,24 @@ Trevor confirmed all six design points. Decisions:
   TruMedia upload (phase-in); pitch-log is the forward pipeline + this gate is its validation.
 - **DECISION PENDING (Trevor A/B):** (A) fix pitch-log RG/ISO now; (B) log as known gap + proceed to HTP on the validated
   TruMedia rolling, fix pitch-log RG when wiring the edge-fn park stage. Agent leans (B).
+## ★ PITCH-LOG PARK — RESOLVED (2026-08-18): home-flag seasonal + multi-year rolling is the mechanism
+**Chased the RG/ISO discrepancy to the bottom (Trevor: "make sure it works"). Findings:**
+1. **venue_id is FRAGMENTED** — a team's home games split across multiple `game_venue_id`s (Georgia: 33 home games, only 15
+   share one id; 3-game weekend-series clusters under different ids; max any team at one venue = 16). ⇒ **do NOT key parks by
+   venue_id.** Key by the **`home` flag + `batting_team_id`** (venue-agnostic) → full ~27-game samples (avg 27.4, max 42).
+   `scripts/sql/park_home_2026.sql` = `_park_home_2026` (home-flag park compute, both teams' bats in each team's home games).
+2. **Single-season park factors are INHERENTLY NOISY** — proven both directions: home-raw (option A) mixes park WITH
+   competition quality (FAMU's weak-SWAC pitching makes a pitcher park read neutral: rg 111 vs TM 92, iso 100 vs 66);
+   home/ROAD (option B) fails oppositely (Georgia's road games at other SEC hitter parks → schedule confound → Georgia reads
+   pitcher). Well-sampled balanced teams match great (Georgia rg 104.8 vs 107.8, iso 151.6 vs 152.9); weak/unbalanced diverge.
+   **Isolating park from competition/schedule fundamentally needs a relative baseline AND multi-year** — a known-hard problem;
+   exactly why TruMedia ships a 3-YEAR product. Gate (home-flag, n=308): AVG mad 5.3 / OBP 4.0 / ISO 14.3 / RG 11.3, corr ~0.5.
+3. **RESOLUTION (fits the architecture we built):** the home-flag compute is the **SEASONAL input**; the **3-yr ROLLING**
+   (park_factors_seasonal → Park Factors) is what turns noisy single seasons into a reliable factor. **Keep the TruMedia 2026
+   seasonal now** (it's already multi-year-derived + reliable); **accumulate the pitch-log home-flag seasonal each year** so by
+   2027–28 the rolling runs on 3 pitch-log years and TruMedia fully phases out — the phase-in, working as designed.
+4. **Do NOT judge the pitch-log compute by single-season TruMedia match** — judge it as a seasonal input to the rolling. The
+   mechanics are validated (Georgia). **HTP proceeds on the TruMedia-based rolling `rg_factor` now.**
+- **Cleanup:** `_park_pitchlog_2026_raw`, `_team_home_park`, `_park_home_2026` = staging scratch (drop after edge-fn park stage built).
+- **Edge-fn park stage (future):** run `park_home_2026`-style compute on each new season's pitch_log → write that season's
+  `*_seasonal` → re-roll `Park Factors`. Fold into the ONE edge fn. (opponent/park-isolation refinement = later modeling upgrade.)
