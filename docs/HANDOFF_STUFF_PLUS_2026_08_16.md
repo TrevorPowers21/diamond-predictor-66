@@ -596,3 +596,20 @@ Trevor confirmed all six design points. Decisions:
   columns (combined/lhb/rhb × avg/obp/iso + rg/whip/hr9) would bloat Teams Table + mix park-environment into team identity;
   (c) the seasonal→rolling relationship is clean as two park tables next to each other; (d) "too many tables" isn't the real
   risk — mixing concerns is. One inputs table beside the existing `"Park Factors"` is the minimal, consistent structure. PENDING confirm.
+## ★ PARK SEASONAL + ROLLING BUILT (staging, 2026-08-18) — foundation DONE
+- **Schema:** added 10 `*_seasonal` columns to `"Park Factors"` (avg/obp/iso/rg + lhb_/rhb_ avg/obp/iso). Existing 12 factor
+  columns = the STORED ROLLING (readers UNCHANGED). One table, two granularities (per Trevor: no 2nd table).
+- **Backfill:** `scripts/backfill_park_factors_seasonal.ts` (dry-run default / --apply). Reads archived single-season TruMedia
+  CSVs 2024/25/26; per team per cohort raw = mean(hitter,pitcher); **self-normalized per year to that year's 307-team league
+  mean ×100** (centers each year ~100, own-league). Quote-aware CSV parser (embedded comma in teamFullName — Hawaii/Indiana
+  were column-shifting; DRY-RUN CAUGHT IT). Sparse handed-cohort (R/G≤0.5) → COMBINED fallback.
+- **Rolling (2026, g=1 equal weight):** main columns = mean(seasonal 2024/25/26). Verified: Georgia rg_main 109.35 =
+  mean(111.28,109,107.76); iso_main 149.75 = mean(148.77,147.61,152.88). Historical rows main=seasonal (degenerate).
+- **Cross-check vs prior TruMedia 3YR rows:** mean|Δ| AVG .65 / OBP .38 / ISO 2.1 / RG 2.2; worst ~7pts (Monmouth/Merrimack),
+  systematic small offset (my ISO league-mean ~.16 vs their fixed .158 constant → factors a hair lower). Within tolerance.
+- **Applied staging:** 922 rows (307/307/308). Backup `_park_factors_backup_20260818` (615 rows, RLS on).
+- **STILL TO DO on park (before HTP):** (1) the **2026 PITCH-LOG park compute** — derive the SAME 10 metrics from `pitch_log`
+  (venue-attributed), write the 2026 `_seasonal`, cross-check vs the TruMedia 2026 single-season set (neutral-site deltas
+  expected) = the acceptance gate + the forward pipeline piece. (2) confirm per-metric projection readers
+  (`buildTransferProjectionInputs` avg/obp/iso w/ handedness; `buildTransferPitcherInputs` era/whip/hr9) resolve correctly off
+  the rebuilt rolling. (3) games-weighted handoff wiring for LIVE in-season (g<1) — folds into the edge fn. THEN HTP run-env.

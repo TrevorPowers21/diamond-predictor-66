@@ -108,4 +108,7 @@ Apply in order at push time. All additive/idempotent. Staging dates noted.
   NOT delete the function, only its park_factors delete+insert. Then `DROP TABLE public.park_factors;`. Fold into audit (#7). STAGING+PROD.
 - [ ] `park_factors_seasonal` (NEW) — raw single-season park factors (2024/2025/2026…, own-year NCAA-normalized), pipeline
   inputs; `"Park Factors"` stays the STORED 3-yr rolling output readers consume. Create + backfill from archived TruMedia
-  CSVs. [PENDING Trevor's table-shape call: own table vs columns on Teams Table.] STAGING first, then PROD.
+  CSVs. [PENDING Trevor's table-shape call: own table vs columns on Teams Table.] STAGING first, then PROD.- [x] `"Park Factors"` seasonal columns + backfill — `ALTER TABLE "Park Factors" ADD COLUMN *_seasonal` (10 cols) +
+  `scripts/backfill_park_factors_seasonal.ts --apply` (self-normalized single-season 2024/25/26 + stored 2026 3-yr rolling).
+  APPLIED STAGING 2026-08-18 (922 rows). Backup `_park_factors_backup_20260818`. **PROD:** same ALTER + re-run backfill against
+  prod (the archived CSVs are league-wide, not per-env — same input both DBs); verify vs prod's current Park Factors rows.
