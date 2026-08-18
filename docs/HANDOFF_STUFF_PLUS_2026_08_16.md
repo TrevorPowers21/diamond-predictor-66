@@ -721,3 +721,17 @@ Kills the HTP-drift problem (currently HTP recomputed live in 4 sites + attached
 - **★ FUTURE AUDIT (logged, [[project_stuff_opr_sd_audit]]):** verify the standard deviations + NCAA baseline means used in
   Stuff+ AND OPR normalization — if an SD is off, the transfer precompute OVER/UNDER-weights that lever. Compare hand-set
   baselines to empirical pitch-log SDs; recalibrate; confirm transfer-precompute weights land right. NOT now — future note.
+## ★ FRAMING CORRECTION (Trevor 2026-08-18) — HTP #3 is DONE; reader-repoint is edge-fn-era, not part of "store HTP"
+Agent over-complicated by conflating two things. Straight:
+- **PRODUCE + STORE HTP = the #3 task = DONE.** HTP calculated from the data we have (conference OPR + conference run-env
+  park factor) and stored in `Conference Stats` (run_env_factor + hitter_talent_plus). Additive/safe — new columns, nothing
+  reads them yet, nothing breaks. NO projection-page or Supabase-type work needed to produce+store it.
+- **CONSUME the stored HTP = SEPARATE, LATER = part of the ONE edge function / stored-not-live buildout.** The transfer
+  precompute (edge fn 6b) reads the stored HTP; the few DISPLAY spots that still recompute HTP live (old wRC+ formula) get
+  repointed to read stored AS PART OF that edge-fn/stored-not-live work — NOT a standalone step now. (That's the only place
+  Supabase-type-regen + page-load verification applies — and only when we do the edge-fn consumer wiring.)
+- **OPR rollup** (`populate-conference-stats-env-plus.ts`) folds into the #4 edge-fn conf-stats run (Trevor: "should be a
+  part of the whole edge function").
+⇒ Pre-edge-fn levers now essentially staged: PVF stripped, park factors solved+validated, HTP+run-env stored. Remaining
+pre-edge-fn = build the #4 conf-stats pitch-log run (absorb OPR rollup + wRC+ + store all), #5 position-of-need, #6 transfer
+sync, #7 dead-code audit → THEN the ONE edge function (which does the conf-stats compute + reads stored HTP + projections + snapshots).
