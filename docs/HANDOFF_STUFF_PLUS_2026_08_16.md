@@ -735,3 +735,32 @@ Agent over-complicated by conflating two things. Straight:
 ⇒ Pre-edge-fn levers now essentially staged: PVF stripped, park factors solved+validated, HTP+run-env stored. Remaining
 pre-edge-fn = build the #4 conf-stats pitch-log run (absorb OPR rollup + wRC+ + store all), #5 position-of-need, #6 transfer
 sync, #7 dead-code audit → THEN the ONE edge function (which does the conf-stats compute + reads stored HTP + projections + snapshots).
+## ★★ LIVE-COMPUTE AUDIT (Trevor 2026-08-18: "I am against ANY live computing — log where + how frequently")
+Every place the app RECOMPUTES a derived value on the client instead of reading a STORED value. Root anti-pattern behind the
+TB oWAR regression ([[project_teambuilder_owar_snapshot_regression]]) + the 3-drifted-copies problem. **FIX for ALL = the ONE
+edge function precomputes + stores everything (transfer_snapshot/player_snapshot); every page READS stored, zero client compute.**
+
+### The catalog (files: TransferPortal.tsx, TeamBuilder.tsx, useTeamBuilderSimulation.ts, PlayerProfile.tsx, ReturningPlayers.tsx, PitchingConferenceStatsTable.tsx, savant PitcherPage/ConferenceStatsPage)
+1. **HTP / Hitter Talent+** (~15 sites). `calcHitterTalentPlusFromConference` (TransferPortal:491), inline (TeamBuilder:826),
+   resolveConferenceStats, PitcherPage:281, ConferenceStatsPage:159 (also OPR-drift), PitchingConferenceStatsTable:76.
+   **FREQUENCY: every render / conference lookup / from→to change / roster edit.** ⇒ NOW STORED (`Conference Stats.hitter_talent_plus`);
+   repoint these to read stored during the edge-fn/stored-not-live wiring.
+2. **oWAR / wRC+ / pWAR** (~19 sites). TeamBuilder + useTeamBuilderSimulation LIVE-REBUILD oWAR (the regression), PlayerProfile,
+   ReturningPlayers. **FREQUENCY: every roster edit, every dev-aggressiveness change (full sim re-cascade — CLAUDE.md flags it
+   SLOW), every sort/filter, every render.** ⇒ must read `player_snapshot`/`transfer_snapshot` (Step 7c fills them).
+3. **Transfer projections** (~14 sites). `buildTransferProjectionInputs` / `buildTransferPitcherInputs` /
+   `transferHitter|PitcherProjection` called live in TransferPortal + TeamBuilder + useTeamBuilderSimulation.
+   **FREQUENCY: every from/to selection, roster add, filter, preview render.** ⇒ the edge fn (6b) computes these ONCE, stored;
+   pages read the snapshot (this is the core Track-B goal).
+4. **resolveConferenceStats** (TransferPortal + useTeamBuilderSimulation) recomputes conf-derived values (incl HTP) live per lookup.
+
+### Frequency tiers (worst → mild)
+- **Per-roster-edit / per-dev-aggressiveness (heaviest):** TeamBuilder sim cascade (oWAR + projections) — full re-cascade, user-perceptible lag.
+- **Per-render / per-filter / per-sort:** HTP, oWAR sorts, projection previews, conf-stat displays.
+- **Per-page-load:** initial projection + conf computes.
+
+### Prod implication
+The live-compute elimination ships WITH the edge function: (a) edge fn produces stored snapshots (transfer/player) + stored
+conf HTP/run-env/OPR; (b) every page repoint = read stored (types regen + PAGE-LOAD verification per CLAUDE.md — the one gate
+that needs the dev server); (c) [[project_war_display_audit]] "6 pass-2 choke points" + [[project_stored_derived_values_architecture]]
+are the same elimination. Log each repoint in PROD_MIGRATIONS as done. NOTHING computes on a page after this.
