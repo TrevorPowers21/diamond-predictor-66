@@ -821,3 +821,13 @@ values (must match within tolerance; investigate diffs) → (d) verify OPR/wRC+ 
 ONE edge fn → (f) ONLY THEN retire importConferenceStats/populate-conference-stats-env-plus/conferenceStuffPlus(V1)/scouting scripts.
 JUCO district rows (Phase 2) handled separately (regional baselines, not D1 pitch-log). AdminDashboard manual edits stay as override.
 FIRST BUILD STEP = confirm the WRC_plus producer + the exact conferenceScoutingAverages field list, then write the unified rollup for the RATES + OPR + wRC+ slice, A/B vs current.
+## ★ #4 FIRST A/B — conf-rate rollup vs stored upload (2026-08-18): reconciliation needed (denominator weighting)
+A/B'd a PA-weighted Hitter Master rollup vs the stored `Conference Stats` rates (n=30): AVG MAD .0085 / corr **0.58**,
+OBP MAD .009, ISO MAD .0077 / corr 0.91. ⇒ **ISO ~tracks, AVG does NOT.** DIAGNOSIS: I PA-weighted every rate, but a
+conference rate is a POOLED rate over its proper denominator — **AVG & ISO = AB-weighted (or pooled H/AB, XB/AB); OBP =
+PA-weighted (reached/PA)**. Weighting player rates by PA gives rate-of-rates ≠ pooled rate → the AVG divergence. **#4 build
+detail:** roll up each conf rate by its CORRECT denominator (sum numerators / sum denominators, i.e. Σplayer_H/Σplayer_AB —
+or weight by AB for AVG/ISO, PA for OBP; pitching rates IP-weighted). Hitter Master may lack raw AB → derive (AB≈PA−BB−HBP−SF)
+or pull H/AB from pitch-log directly. VERIFY the rollup reproduces the stored upload (per-denominator) BEFORE retiring
+`importConferenceStats.ts`. This is the concrete first slice of the unified run; the OPR/Stuff+/scouting rollups are
+straightforward weighted means (already done for OPR/Stuff+); wRC+ = C1 from conf OBP/SLG; run_env/HTP done.
