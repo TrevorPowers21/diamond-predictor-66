@@ -372,3 +372,58 @@ weighting-fork philosophy.
    `_confstats_backup`, `_reclass_result/_map/_pf`); **clear Savant** (dead) → Season Stats display is the live surface.
 **E. PROD.** Stuff+ rebuild staging→prod = REGENERATE on PROD data end-to-end (venue corrections → reclassification →
    baseline → recompute → rollups), NOT copy staging. Append every migration to `PROD_MIGRATIONS_TODO.md`. Per-season fixture.
+
+## ★★★ PRE-EDGE-FN PLAN + TREVOR'S DECISIONS (2026-08-18) — finalize EVERY lever before firing 6b
+Stuff+ is done, but the edge fn (6b) must NOT fire until every OTHER projection lever is final too (don't-change-twice).
+Trevor's decisions below are the plan. **Overarching principle: everything STORED + consistent in the DB — NO live computes
+on a single page that aren't in the transfer snapshot; ONE edge function start-to-finish (Track B) that computes conference
+stats → HTP/park → projections → snapshots, all stored.**
+
+### A. PVF — DROP IT (Trevor)
+Strip the weekend-SP `1.2×` market premium from the edge fn (`index.ts:672`) to match canonical (`depthRoles.ts:264`, which
+dropped it: a starter's role value is already in WAR via IP, so a PVF premium double-counts). Any starter/position premium
+"will only most likely live in the TEAM BUILDER setting" — to discuss separately, and it ties into position-of-need (below).
+
+### B. POSITION OF NEED — must be STORED, not a live compute (Trevor: "I hate any live computes on one singular page that
+isn't stored in the transfer snapshot and consistent in the database")
+Open DESIGN (decide before it drives values): the p70 championship-starter need premium ([[project_player_score_nil_allocation]],
+positionNeed helpers) must be STORED in the transfer snapshot, not computed live on one page. Two options:
+- **(Trevor leaning) Coach declares "positions of need" pre-offseason via a POPUP** → stored → increases per-player values
+  when p70 is NOT a starter *at that declared position* (targeted, program-specific need premium).
+- **Across-the-board** need ladder (uniform, no coach input).
+Either way: STORE it (snapshot), consistent DB-wide. Do NOT wire the need premium until this is settled + stored.
+
+### C. HTP — STORE IT (agreed)
+Compute HTP once and store per conference×season in the stored conference table (kills the 3-copies live-recompute drift;
+matches stored-derived-values). Update the readers (canonical/edge/TB) to read stored HTP.
+
+### D. CONFERENCE STATS — finalize/check + stabilize + fold into the edge fn (Trevor)
+Trevor waited until the regular season ended before running another projection, so values SHOULD be accurate — but CHECK
+them, and **stabilize HOW they're computed and include that in the MAIN edge function start-to-finish** (conf-stats
+computation becomes part of the one pipeline, not a side script). Keep the **conf-vs-conf vs overall-across-conference**
+distinction clean: wRC+ + raw conf factors are conference-SPECIFIC (separate table — `conference_adjusted_stats`); OPR/HTP/
+Stuff+ are overall-across-conference (`Conference Stats`).
+
+### E. PARK FACTOR — TWO DISTINCT USES (Trevor's key correction)
+1. **HTP run-environment term:** conference-average RUN factor (`runs_factor`/`overall_factor`), normalized to 100, REPLACING
+   `0.75·(100−wRC+)`. (Run friendliness is exactly what the wRC+ term stood in for.)
+2. **Per-metric PROJECTION park adjustment:** project each HITTING metric (AVG, OBP, ISO/SLG) source-park→dest-park using
+   **PER-METRIC** park factors — NOT a run factor ("we are projecting batting average from one park to another, not runs").
+   PITCHING (ERA/FIP) uses the RUN factor. These per-metric factors ALREADY EXIST and resolve via `resolveMetricParkFactor`
+   (`src/lib/parkFactors.ts`; metrics avg/obp/iso/era/whip/hr9) — "all of that is in there." Confirm the source-column mapping
+   in `fetchParkFactors` when wiring (table has overall/runs/hits/hr/doubles/bb_factor → avg/obp/iso/era derived there).
+- **DATA SOURCE = the existing MANUAL 3-YEAR ROLLING park factors** (Trevor's manual calc combining pitching + offense) —
+  STABLE (parks need multi-year to settle). Use these NOW.
+- **Pitch-log venue-specific park factors** (per-player + per-venue, from the pitch-log venues) = FUTURE upgrade — the pitch
+  log gives venue-specific but only 2026; 1 year is too noisy for parks, and we lack 2024/25 without imports. **Gated on
+  importing prior-year pitch logs (multi-year); deferred + to discuss.** [[project_park_factor_rework]]
+
+### PRE-EDGE-FN PUNCH LIST (order)
+1. **PVF:** strip weekend-SP premium from edge fn (align canonical).
+2. **HTP:** swap `(100−wRC+)` → conf-avg RUN factor; STORE HTP per conf×season; readers read stored.
+3. **Conference stats:** check/finalize + stabilize computation + fold into the edge fn start-to-finish; conf-vs-conf vs overall clean.
+4. **Park factor:** per-metric (existing 3-yr manual) for projection; run factor for HTP + ERA/FIP. Confirm fetchParkFactors mapping.
+5. **Position-of-need:** decide (coach-popup-stored vs across-board) + STORE in snapshot — before it drives values.
+6. **Transfer engine:** sync the 3 copies to canonical (edge-fn PVF removal is part of this; triple-oWAR delete) — [[project_transfer_engine_audit]].
+7. **Verify OPR / wRC+ currency.**
+→ THEN edge fn (6b) → snapshots (7c, also fixes the TB oWAR regression) → NIL wiring. All inputs final, projections land ONCE.

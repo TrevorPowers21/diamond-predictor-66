@@ -253,3 +253,30 @@ per-player→Master + conference V2→Conference Stats DIRECTLY from pitch_log.
 - **JUCO:** separate conferences + separate pipeline (D1 baselines applied to JUCO data; NOT in D1 pitch_log). D1 finalization
   never touches or mixes JUCO; JUCO recompute stays FROZEN.
 - **REVERSIBLE:** backup before every destructive write (`_ncaa_backup_preanchor`, `_master_stuff_backup`, `_confstats_backup`).
+
+## ★ PROJECTION-EQUATION LEVERS + "STORED-NOT-LIVE" PRINCIPLE (Trevor 2026-08-18)
+Full plan: `HANDOFF_STUFF_PLUS` §PRE-EDGE-FN PLAN. Context: after Stuff+ finalized, before firing the transfer edge fn (6b),
+EVERY other lever must be final (don't-change-twice). Trevor's directives that must survive:
+
+- **★ STORED, NOT LIVE — the load-bearing principle.** Trevor: *"I hate any live computes on one singular page that isn't
+  stored in the transfer snapshot and consistent in the database."* Every derived value (HTP, park term, position-of-need
+  premium, projections) must be STORED in the snapshot / a canonical table and read from there — never recomputed live on one
+  page. This is the SAME root cause as the TB oWAR regression ([[project_teambuilder_owar_snapshot_regression]]) and the
+  3-drifted-copies problem. The end goal is ONE edge function start-to-finish (Track B) that computes conf stats → HTP/park →
+  projections → snapshots, all stored.
+- **★ PARK FACTOR HAS TWO USES — do not conflate:** (1) HTP run-environment term = a conference-average **RUN** factor
+  (replaces `100−wRC+`); (2) per-metric PROJECTION adjustment = **PER-METRIC** park factors — you project batting AVERAGE
+  park-to-park, NOT runs, so AVG/OBP/ISO each get their own factor (pitching ERA/FIP use the run factor). Per-metric factors
+  already resolve via `resolveMetricParkFactor` (parkFactors.ts).
+- **★ PARK DATA = manual 3-YEAR ROLLING (stable) NOW; pitch-log venue-specific is DEFERRED.** Parks need multi-year to
+  settle; the pitch log gives venue-specific factors but only 2026 (1 yr = too noisy), and we lack 2024/25 without imports.
+  Use the existing manual 3-yr factors; the pitch-log venue-specific (per-player + per-venue) rework is gated on importing
+  prior-year pitch logs. [[project_park_factor_rework]]
+- **PVF DROPPED:** the weekend-SP `1.2×` premium double-counts (a starter's role value is already in WAR via IP). Strip it
+  from the edge fn to match canonical. Any starter/position premium lives in the Team Builder setting only (to discuss).
+- **POSITION-OF-NEED must be STORED** (not live): Trevor leans toward a coach-declared "positions of need" pre-offseason
+  POPUP → stored → raises per-player value where p70 isn't a starter at that declared position (vs across-the-board). Decide
+  + store before wiring the need premium. [[project_player_score_nil_allocation]]
+- **HTP STORED** per conference×season (kills the 3-copies drift). **Conference stats:** check/finalize + stabilize + fold
+  into the edge fn start-to-finish; keep conf-vs-conf (wRC+/raw factors, `conference_adjusted_stats`) vs overall
+  (OPR/HTP/Stuff+, `Conference Stats`) clean — the definitional mismatch.
