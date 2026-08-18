@@ -388,3 +388,20 @@ These SUPERSEDE the earlier "park = manual 3-yr forever / pitch-log deferred ind
   columns (combined/lhb/rhb × avg/obp/iso + rg/whip/hr9) would bloat Teams Table + mix park-environment into team identity;
   (c) the seasonal→rolling relationship is clean as two park tables next to each other; (d) "too many tables" isn't the real
   risk — mixing concerns is. One inputs table beside the existing `"Park Factors"` is the minimal, consistent structure. PENDING confirm.
+## ★ PARK-FACTOR FROM PITCH-LOG — DURABLE LEARNINGS (2026-08-18)
+The long "why don't pitch-log park factors match TruMedia" dig. Answer: NOT a modeling limit — two data issues. Learnings:
+1. **`gameString` is the park key, NOT `game_venue_id`.** gameString = `cs-<parkCode><date8><game#1>` (e.g. `cs-air01202604120`).
+   parkCode (`air01`) = strip trailing 9 digits + `cs-`. It's a STABLE stadium id; `game_venue_id` FRAGMENTS per weekend
+   series (a team's home games spread across ~13 venue_ids). All 308 park codes map 1:1 to one home team → NO neutral-site
+   fragmentation. We never ingested gameString — now do (ingest_pitch_log.ts parkCodeFromGameString → park_code column).
+2. **`batting_team_id`/`pitching_team_id` are CORRUPT** in the TruMedia source (1 id → up to 15 team abbrevs). The CLEAN ids
+   are **`teamId`→team_id (batting)** and **`opponentId`→opponent_id (pitching)**, both already ingested. ALWAYS use team_id/
+   opponent_id for team attribution from pitch_log; NEVER batting_team_id/pitching_team_id. (My park scripts used the corrupt
+   col → Air Force mis-counted 30 mixed games/13.3 R/G vs the true 22 air01 games/18.8.) DRS/WAR unaffected (comment refs only).
+3. **Park factor = both teams' bats AT the park / league ×100, keyed park_code + team_id.** No road data, no multi-year model,
+   no opponent adjustment needed for D1 single-season — it MATCHES TruMedia (AF 141v140, NKU 139v139, Hawaii 65v65, Lamar
+   64v62, Michigan 69v70; hitter AND pitcher parks). The earlier "single-season inherently noisy / keep TruMedia / it's hard"
+   conclusion was WRONG — it was the venue_id fragmentation + corrupt id, not noise.
+4. **METHOD DISCIPLINE (Trevor):** when a computed value is off but the source "collects all the proper data," there is a
+   CAUSE (missing field / wrong column / missing games) — find it, don't retreat to "it's fundamentally hard." Georgia matching
+   exactly was the tell that the method was right and the DATA/wiring was wrong. [[project_park_factor_rework]]
