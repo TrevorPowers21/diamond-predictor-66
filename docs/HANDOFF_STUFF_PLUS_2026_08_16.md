@@ -656,3 +656,13 @@ Trevor confirmed all six design points. Decisions:
 - **ROOT CAUSE 2 — `batting_team_id`/`pitching_team_id` are CORRUPT in the source** (one id → up to 15 teams). The CLEAN ids are **`teamId`→`pitch_log.team_id`** (batting team) and **`opponentId`→`opponent_id`** (pitching team), BOTH already in the DB. My park scripts wrongly grouped by `batting_team_id` → mis-attributed games (Air Force 30 mixed games/13.3 R/G instead of the true 22 `air01` games/18.8). DRS/WAR are UNAFFECTED (DRS references those cols only in comments; ReturningPlayers uses a name-alias map).
 - **VALIDATION (park_code + team_id, both-team bats at the park, /league×100):** Air Force 141 vs TruMedia 140 · Northern Kentucky 139 vs 139 · Morehead 138 vs 134 · Hawaii 65 vs 65 · Lamar 64 vs 62 · UC Davis 65 vs 66 · Michigan 69 vs 70. Dead-on hitter AND pitcher parks; every team's dominant code = its full home slate (AFA 22/22, HAW 31/31). ⇒ **The pitch-log CAN produce correct park factors NOW — no multi-year model needed, no road data, no TruMedia dependency.**
 - **THE FIX (approved by Trevor):** (1) ingest `gameString` → derive/store `park_code` on `pitch_log` (+ backfill existing rows from source by uniq_pitch_id); store each team's home `park_code` on `Park Factors`. (2) Rebuild the pitch-log park compute keyed by **`park_code` + `team_id`** (NOT batting_team_id, NOT venue_id) — all metrics avg/obp/iso/rg + handedness. (3) Store as the pitch-log seasonal → the rolling. TruMedia phases out cleanly. Source-computed factors: `scratchpad/park_by_code.csv`.
+## ★ PITCH-LOG PARK — VALIDATED COMPLETE (2026-08-18)
+Rebuilt `scripts/sql/park_home_2026.sql` keyed on CLEAN `team_id` (was corrupt batting_team_id). Gate vs TruMedia 2026:
+- **rg corr 0.996 / MAD 0.68 · iso 0.997 · avg 0.994** (all metrics); handedness LHB avg 0.95/iso 0.97, RHB avg 0.99/iso 0.99.
+- Spot: Air Force 140 v 140, Georgia 108 v 108, Lamar 62 v 62, Hawaii 63 v 65. **Essentially exact across hitter+pitcher parks.**
+- **KEY:** the compute only needs `team_id` + `home` flag (both already in DB) — the `park_code` backfill is NOT required for
+  the compute (team_id correctly attributes home games). park_code stays ingested (forward robustness / explicit stadium id).
+- **STATUS:** pitch-log park factor = the proven forward mechanism (this SQL becomes the edge-fn park stage). TruMedia 2026
+  seasonal STAYS the active value (pitch-log matches it at 0.996, so equivalent — no overwrite per phase-in); pitch-log takes
+  over 2027+. 2M park_code backfill DEFERRED (unnecessary now). Scratch: `_park_home_2026` kept; drop `_park_pitchlog_2026_raw`,
+  `_team_home_park` in audit. **PARK FACTOR WORK COMPLETE — HTP proceeds on the TruMedia-based rolling rg_factor.**
