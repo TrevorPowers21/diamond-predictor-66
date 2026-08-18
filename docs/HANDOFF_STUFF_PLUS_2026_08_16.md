@@ -784,3 +784,8 @@ are the same elimination. Log each repoint in PROD_MIGRATIONS as done. NOTHING c
    - **RESOLUTION (#6/#7, needs page-load verify):** pick ONE canonical projection path, DELETE the superseded module(s)
      (likely retire effectiveProjection.ts → projectEffective.ts; retire the live page compute → read edge-fn snapshot; drop
      the isLegacy branch), repoint all importers, tsc + LOAD each page. Map here = the delete-list. [[project_transfer_engine_audit]]
+## ★ PRINCIPLE CORRECTION (Trevor 2026-08-18): it's "BUILD, CHECK, ENSURE IT WORKS, THEN CLEAR" — not "clear then build"
+Everywhere this doc/plan says "clear then build" or implies deleting old code first, the correct ORDER is: build the new →
+check (tsc/DB/page-load) → ensure it works (A/B vs old) → THEN clear the old. Never delete the working path first; the delete
+is the LAST, verification-gated step. Applies to the transfer build-over delete-list, the corrupted-column DROP (after readers
+repointed+verified), and the scattered-script retirements (after the unified edge-fn run is proven). [[feedback_build_check_then_clear]]
