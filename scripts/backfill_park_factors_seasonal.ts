@@ -198,10 +198,20 @@ async function main() {
     console.log(`${y}: ${s.teamCount} teams | league R/G mean=${r2(s.leagueMeans.combined.rg ?? 0)} AVG=${r2(s.leagueMeans.combined.avg ?? 0)} OBP=${r2(s.leagueMeans.combined.obp ?? 0)} ISO=${r2(s.leagueMeans.combined.iso ?? 0)} | handed-fallback cells=${s.fallbackCells}`);
   }
 
-  // Team lookup from Teams Table (season 2026) for ids
-  const { data: teams } = await (sb as any).from("Teams Table").select("id, abbreviation, full_name, source_id").eq("Season", 2026);
-  const lookup = new Map<string, any>();
-  for (const t of teams ?? []) { if (t.abbreviation) lookup.set(normTeam(t.abbreviation), t); if (t.full_name) lookup.set(normTeam(t.full_name), t); }
+  // Team id lookup — PER SEASON team_id (UUIDs differ by season) + a STABLE
+  // source_team_id (same across seasons). Teams Table has 2025 + 2026 only;
+  // 2024 park rows get null team_id (no Teams Table row) but keep source_team_id.
+  const perSeasonId = new Map<number, Map<string, string>>();
+  const stableSource = new Map<string, string>();
+  for (const yr of [2025, 2026]) { // 2026 loaded last → wins for the stable source map
+    const { data } = await (sb as any).from("Teams Table").select("id, abbreviation, full_name, source_id").eq("Season", yr);
+    const idMap = new Map<string, string>();
+    for (const t of data ?? []) for (const nm of [t.abbreviation, t.full_name]) if (nm) {
+      idMap.set(normTeam(nm), t.id);
+      if (t.source_id) stableSource.set(normTeam(nm), String(t.source_id));
+    }
+    perSeasonId.set(yr, idMap);
+  }
 
   // 2026 rolling = mean of the three seasonal factors, per metric, per team
   const cur = perYear.get(CURRENT)!;
@@ -253,13 +263,12 @@ async function main() {
   for (const y of SEASONS) {
     const sy = perYear.get(y)!;
     for (const [key, sf] of sy.result) {
-      const tm = lookup.get(key);
       const isCur = y === CURRENT;
       const main = isCur ? rolling.get(key)! : sf; // current → rolling; historical → its own seasonal
       rows.push({
         team_name: sy.names.get(key) || key,
-        team_id: tm?.id ?? null,
-        source_team_id: tm?.source_id ?? null,
+        team_id: perSeasonId.get(y)?.get(key) ?? null, // per-season UUID (null for 2024 — no Teams Table row)
+        source_team_id: stableSource.get(key) ?? null, // stable across seasons
         season: y,
         // main factor columns (readers) — rolling for current, seasonal for historical
         avg_factor: main.avg, obp_factor: main.obp, iso_factor: main.iso, rg_factor: main.rg,
