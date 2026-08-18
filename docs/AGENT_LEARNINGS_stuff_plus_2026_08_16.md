@@ -325,3 +325,49 @@ gated on per-event pitch-log data + multi-year imports. [[project_park_factor_re
   into the `player_snapshot` → BOTH the ROSTER (player_snapshot) and the TARGET BOARD (transfer_snapshot) carry a consistent
   flag. The need premium then READS the stored flag (never recomputed live). FUTURE: a per-year coach "positions of need"
   questionnaire layered on top for offseason planning.
+## ★ PUNCH-LIST REFINEMENTS (Trevor 2026-08-18, after full doc re-read) — park phase-in, HTP run-env, conf-stats-as-build
+These SUPERSEDE the earlier "park = manual 3-yr forever / pitch-log deferred indefinitely" framing.
+
+1. **HTP run-env term = RUN SCORING ENVIRONMENT, NO handedness, 3-YEAR ROLLING.** HTP's replacement for `0.75·(100−wRC+)`
+   is a pure run-scoring-environment factor — **no handedness split** (handedness lives ONLY on the hitter-side per-metric
+   avg/obp/iso factors; HTP is a run environment, not a batted-ball metric) — as a **3-year rolling average**, stored in
+   `Conference Stats` (conf-avg of member-team run factors), folded into the edge fn.
+
+2. **★ PARK FACTOR PHASE-IN (concrete plan — replaces "deferred indefinitely"):** BUILD a pitch-log→park-metrics process
+   that calculates ALL park-factor metrics from the pitch log, then phase manual→pitch-log over 3 years:
+   - **End of 2026:** 2026 park metrics computed FROM the pitch log + **upload the 2 prior seasons (2024 + 2025)** → the
+     three combine into the **end-of-2026 3-year-rolling park factors**.
+   - **2027:** both 2026 + 2027 come from pitch logs, + the one leftover uploaded year (2025) still in the 3-yr window →
+     rolling = 2025(uploaded) + 2026(PL) + 2027(PL).
+   - **2028+:** 2026+2027+2028 all pitch-log-derived → **fully pitch-log-specific**, uploads fully rolled off.
+   - ⇒ The park factors THEMSELVES become pitch-log-derived (not manual-forever); parks still need multi-year to settle so
+     the 3-yr window holds. ⚠ OPEN: whether the "2 uploaded prior seasons" are prior-year pitch-log imports or Trevor's
+     existing manual park data reshaped to the new metric set — CONFIRM before building the uploader. [[project_park_factor_rework]]
+
+3. **CONFERENCE STATS = a NEW BUILT PROCESS (not a check of existing values):** "recognize the rules and build a pitch-log
+   run to store everything in the conference stats database that is used." So conf-stats computation is BUILT FRESH as a
+   pitch-log run that writes every used field into `Conference Stats`, folded into the start-to-finish edge fn. (Upgrades
+   punch-list #3 from "check/finalize existing" to "build the pitch-log conf-stats run.")
+
+4. **POSITION-OF-NEED design CONFIRMED** ("I like it") — the `is_position_of_need` toggle (read active build → per-player
+   bool next to `dev_aggressiveness` → re-check on every save → stored in transfer_snapshot, maintained into player_snapshot).
+
+5. **TRANSFER ENGINE SYNC CONFIRMED needed** — strip weekend-SP PVF from edge fn, delete triple-oWAR, sync 3 copies to canonical.
+
+6. **★ EDGE-FN BUILDOUT INCLUDES A DEAD-CODE/DATA/FUNCTION AUDIT.** Building the ONE edge-fn run for all of this is ALSO the
+   moment to "find dead code/data/functions and see what we need to keep vs remove" — the clear-then-build theme applied to
+   the whole pipeline (retire scattered scripts, drop dead tables/columns, remove superseded functions AS the one process is
+   assembled). Savant clear + V1 conf-Stuff+ retirement + backup/helper-table drops all fold into this audit.
+
+### UPDATED PRE-EDGE-FN PUNCH LIST (order)
+1. **PVF:** strip weekend-SP premium from edge fn (align canonical).
+2. **HTP:** swap `(100−wRC+)` → conf run-env RUN factor (no handedness, 3-yr rolling); STORE per conf×season; readers read stored.
+3. **Conference stats:** BUILD the pitch-log conf-stats run (recognize rules → store every used field in Conference Stats);
+   keep conf-vs-conf (wRC+/raw, `conference_adjusted_stats`) vs overall (OPR/HTP/Stuff+, `Conference Stats`) clean; fold into edge fn.
+4. **Park factor:** BUILD pitch-log→park-metrics process + phase-in (2026 PL + 2024/25 upload → end-2026 3-yr; →2028 full PL).
+   Per-metric (avg/obp/iso w/ handedness; era/whip/hr9) for projection; run factor for HTP. Confirm `fetchParkFactors` mapping + the upload source.
+5. **Position-of-need:** `is_position_of_need` toggle — stored, roster-reactive, transfer_snapshot→player_snapshot.
+6. **Transfer engine:** sync 3 copies to canonical (edge-fn PVF removal + triple-oWAR delete).
+7. **Dead-code/data/function audit** — keep-vs-remove as the one edge fn is assembled (Savant clear, V1 conf retire, backups drop).
+8. Verify OPR / wRC+ currency.
+→ THEN edge fn (6b) → snapshots (7c, also fixes TB oWAR regression) → NIL wiring. All inputs final, projections land ONCE.
