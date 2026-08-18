@@ -712,3 +712,12 @@ Kills the HTP-drift problem (currently HTP recomputed live in 4 sites + attached
   (also fix its offensive_power_rating→overall drift); (6) `PitchingConferenceStatsTable.tsx:76` calcHitterTalentPlus.
   Each: add `hitter_talent_plus` (+ run_env_factor) to the Conference Stats fetch, replace the live compute with the stored read.
   Verify: `tsc -p tsconfig.app.json` (no NEW errors) + LOAD the affected pages (per CLAUDE.md). Keep JUCO_DISTRICT_HTP_OVERRIDE.
+## ★ OPR + SD-AUDIT NOTES (Trevor 2026-08-18)
+- **OPR is NOT a raw hand-upload** (unlike park factors): player `overall_power_rating` is computed in
+  `computeAndStoreScores.ts:344` from Masters power ratings (pitch-log-derived). **Conference OPR** (`Conference Stats.
+  Overall_Power_Rating`, consumed by HTP) = **PA-weighted rollup** of per-hitter OPR in `scripts/populate-conference-stats-env-plus.ts:119/220`
+  — computed, but a SCATTERED script. **#4 conf-stats pitch-log build must ABSORB this rollup** (retire that script) so OPR,
+  HTP, run_env_factor, wRC+, all used conf fields land in ONE pitch-log run.
+- **★ FUTURE AUDIT (logged, [[project_stuff_opr_sd_audit]]):** verify the standard deviations + NCAA baseline means used in
+  Stuff+ AND OPR normalization — if an SD is off, the transfer precompute OVER/UNDER-weights that lever. Compare hand-set
+  baselines to empirical pitch-log SDs; recalibrate; confirm transfer-precompute weights land right. NOT now — future note.
