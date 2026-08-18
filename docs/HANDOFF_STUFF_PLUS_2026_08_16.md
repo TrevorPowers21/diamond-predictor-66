@@ -560,3 +560,22 @@ these are true single seasons).
   Expectation: CLOSE but not exact, with **neutral-site parks the expected divergence points; "shouldn't be off by a ton."**
   ⇒ Gate = agreement within a sane tolerance on non-neutral parks + explainable neutral-site deltas — NOT bit-exact equality.
   A large delta at a NORMAL home park = investigate; a delta at a known neutral site = expected. [[feedback_predictions_on_record_at_right_grain]]
+## ★ PARK-FACTOR ARCHITECTURE LOCKED (Trevor 2026-08-18) — two-table, stored rolling
+Trevor confirmed all six design points. Decisions:
+- **"Combined per program" = YES:** each team's factor per metric per cohort = `mean(hitter_file_value, pitcher_file_value)`
+  — Hitter file = team offense in its home park; Pitcher file = opponents in that same park; averaging cancels team-quality bias.
+- **Per-season normalization to that season's OWN NCAA baseline** (2024 NCAA for 2024, etc.) — Trevor: "i take back what i said" (agrees each year normalizes to its own league averages, NOT a single shared baseline).
+- **★ TWO-TABLE SHAPE (stored rolling, NOT rolling-on-read — rolling-on-read would violate stored-not-live):**
+  - **`park_factors_seasonal` (NEW):** raw SINGLE-SEASON factors, one row per team per season (2024, 2025, 2026, …). Pipeline inputs/archive only.
+  - **`Park Factors` (EXISTING, schema unchanged):** the STORED 3-yr ROLLING blend per season = avg of the last 3 single-seasons.
+    Every existing reader keeps reading `Park Factors[season]` UNCHANGED — the number still means "3-yr rolling for that season"
+    (same as the old `3YR` export), only now BUILT by our pipeline from stored inputs instead of a black-box TruMedia export.
+  - ⇒ Rolling stays STORED, inputs reproducible, NO downstream/reader changes.
+- **Sparse handed-cohort → COMBINED fallback:** any limited-sample handed cell (e.g. Penn 2024 LHB .100/.250/.000) uses the
+  combined factor rather than averaging noise. "Shouldn't happen a ton; any limited sample on handedness simply uses combined."
+- **NEXT (logged, wired into future steps):** the ONE edge function computes the 2026 (then 2027+) SINGLE-SEASON park row FROM
+  THE PITCH LOG → writes `park_factors_seasonal` → re-rolls `Park Factors` automatically. 2026 pitch-log output cross-checks
+  vs the TruMedia 2026 single-season set (neutral-site deltas expected). Manual uploads phase out; 2028 = fully pitch-log.
+- **BUILD ORDER:** (1) create `park_factors_seasonal` + backfill 2024/25/26 from archived CSVs (per-season, own-year NCAA norm);
+  (2) build roll-up → `Park Factors` + DIFF vs current 2026 rows as a sanity check (should be close — current is a 3YR blend too);
+  (3) 2026 pitch-log single-season compute + TruMedia cross-check. THEN this whole park build folds into the edge fn.
