@@ -529,3 +529,25 @@ These SUPERSEDE the earlier "park = manual 3-yr forever / pitch-log deferred ind
   (b) a reshape/import of Trevor's manual 2024+2025 park data into the SAME columns. Trevor will send example rows to
   define the exact target metric set/schema both paths must produce. BUILD ORDER: lock the target park-metric schema from
   his examples FIRST, then build the 2026 pitch-log compute to that schema, then the manual-reshape import to the same schema.
+## ★ PARK DATA ACQUIRED + VALIDATED (2026-08-18) — single-season 2024/2025 in hand
+**Trevor pulled single-season 2024 + 2025 park factors from TruMedia and archived them by year (permanent, "never do it
+again").** This UNBLOCKS the real 3-yr-rolling phase-in (the prior `3YR 0518` export was pre-blended → not decomposable;
+these are true single seasons).
+- **Location (LOCAL RSTR IQ Data, the one with `staging/` — NOT the Google Drive pitch-log folder):**
+  `/Users/danielleogonowski/RSTR IQ Data/park-factors/2024/` and `/2025/` — 6 cohort files each
+  (Combined/LeftHanded/RightHanded × Hitter/Pitching), 307 teams per file.
+- **Schema (header-name-keyed, order-robust):** `Rank, teamId, teamName, team, teamFullName, location, teamAbbrevName,
+  teamLevel, synergyTeamId, newestTeamId, newestTeamLevel, newestTeamName, newestTeamAbbrevName, newestTeamLocation` +
+  metrics `AVG, OBP, ISO, R/G`. NOTE: 2024/25 handed files ALSO carry R/G (2026 handed files didn't) — we IGNORE handed
+  R/G (HTP run-env = combined-only, no handedness). Column ORDER differs from the 2026 files — harmless, importer keys by name.
+- **Validated single-season** (Penn combined-hitter R/G 2024=9.22 vs 2025=7.21 — distinct years, not the blend).
+- **★ SMALL-SAMPLE CAVEAT (from the data):** single-season HANDED splits are noisy at small parks — e.g. Penn 2024 LHB
+  hitter = `.100/.250/.000, R/G 0.11` (≈no LHB data that year). The pre-blended 3YR smoothed this; OUR rolling build must
+  handle sparse cohort cells (fall back to combined OR PA-weight the blend) — never average a near-empty cell in raw.
+- **PARK PROCESS DESIGN (locked target):** per-SEASON park factors, normalized to THAT season's league baseline (per-year
+  NCAA avg/obp/iso from `ncaa_averages`; R/G constant per year), stored by season; the pipeline computes the 3-yr ROLLING
+  as "last 3 seasons averaged" at build time (pipeline owns the blend, data stays single-season). Cohorts: Combined (→
+  pitchers + switch hitters), LHB, RHB. Factor = `((hitter_at_home + opp_at_home)/2) / season_NCAA × 100` per cohort/metric
+  (same method as `import-park-factors-2026.ts`). 2026 = pitch-log-derived to this SAME schema; 2027 both PL; 2028 all PL.
+- **ACCEPTANCE GATE (optional, recommended):** pull TruMedia single-season 2026 too → cross-check our pitch-log-derived
+  2026 park numbers against TruMedia's own 2026 before park ever feeds HTP. (Not yet pulled.)
