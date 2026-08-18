@@ -301,3 +301,13 @@ layered on top. So: automatic + stored + roster-reactive now; coach questionnair
 player, the EXACT quality of hitters/pitchers he faced + the EXACT parks he hit/pitched in, per at-bat/pitch — not conference
 averages. The granular truth of competition + environment (ties to OSU-faced-SCHEDULE + per-player park factor). Deferred,
 gated on per-event pitch-log data + multi-year imports. [[project_park_factor_rework]]
+## ★ CORRECTION (Trevor 2026-08-18) — the "era" factor IS a run factor + handedness is critical
+- **The `era` park factor is actually a per-team RUNS-PER-GAME factor.** Trevor labeled it "era" only because it was designed
+  to feed ERA projection — it is NOT an ERA-specific quantity, it's runs/game. So DISREGARD the earlier "ERA is not a run
+  factor": pitching park adjustment IS run-based, just at **per-team (individual) granularity**. ⇒ **The conference
+  RUN-ENVIRONMENT metric for HTP = the conference-AVERAGE of these per-team runs/game ("era") park factors** — the SAME
+  underlying quantity as the pitching park factor, aggregated to the conference. (Verify the exact column feeding "era" in
+  `fetchParkFactors` — it maps to a runs/game park effect, likely `runs_factor`/`overall_factor`.)
+- **★ HANDEDNESS is VERY important on the HITTER side.** The per-metric hitting park factors (avg/obp/iso) MUST use the
+  **lhb/rhb handedness splits** (`resolveParkFactor(..., playerHand)` → lhb_/rhb_ columns) — a LHB and RHB see different park
+  effects. Require + preserve handedness in the hitting park projection; do NOT collapse to combined factors on the hitter side.
