@@ -613,3 +613,19 @@ Trevor confirmed all six design points. Decisions:
   expected) = the acceptance gate + the forward pipeline piece. (2) confirm per-metric projection readers
   (`buildTransferProjectionInputs` avg/obp/iso w/ handedness; `buildTransferPitcherInputs` era/whip/hr9) resolve correctly off
   the rebuilt rolling. (3) games-weighted handoff wiring for LIVE in-season (g<1) — folds into the edge fn. THEN HTP run-env.
+## ★ PITCH-LOG PARK COMPUTE — BUILT + GATED (2026-08-18), RG/ISO NEED WORK
+- **Built** `scripts/sql/park_from_pitchlog_2026.sql` → `_park_pitchlog_2026_raw` (449 venues). Method: group by
+  `game_venue_id`; reconstruct AVG=H/AB, OBP=(H+BB+HBP)/(AB+BB+HBP+SF), ISO=(2B+2·3B+3·HR)/AB from terminal
+  `pitch_result_category` PAs; R/G = mean per-game final `max(total_runs)` per side; **50/50 home/visitor blend** per venue
+  (mirrors TruMedia hitter+pitcher mean); venue→team = **modal home batting_team_id**; each team's PRIMARY park = max g_home
+  (117 teams had a stray neutral venue — resolved; Georgia real park 46g vs 1g neutral). game id = `split_part(uniq_pitch_id,'-',1)`.
+- **`home` flag = batting team's home/away** (verified). `total_runs` = batting team's running/final score (verified, but
+  disagrees with `current_runs` on some rows — the RG suspect).
+- **ACCEPTANCE GATE vs TruMedia 2026 (n=243, primary parks g_home≥10):** AVG mad **3.03**, OBP **2.35** (GOOD — PA
+  reconstruction + venue attribution sound), ISO mad **8.49**, **RG mad 6.62 / corr 0.735 (NOISY + systematic flips**:
+  Florida A&M 144 vs 92, FDU 97 vs 145, Milwaukee 148 vs 104 — NOT sample-driven, corr(|Δ|,g_home)=−0.41). 28 thin parks (<10g).
+- **RG feeds HTP** → must be tightened before pitch-log is the SOLE park source (~2027–28). Prime suspects: `total_runs`
+  final-score semantics (vs current_runs); ISO 2B/3B/HR mix. **Does NOT block HTP now** — 2026 park = the validated
+  TruMedia upload (phase-in); pitch-log is the forward pipeline + this gate is its validation.
+- **DECISION PENDING (Trevor A/B):** (A) fix pitch-log RG/ISO now; (B) log as known gap + proceed to HTP on the validated
+  TruMedia rolling, fix pitch-log RG when wiring the edge-fn park stage. Agent leans (B).
