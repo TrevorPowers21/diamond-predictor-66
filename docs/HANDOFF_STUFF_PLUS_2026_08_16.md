@@ -894,3 +894,15 @@ straightforward weighted means (already done for OPR/Stuff+); wRC+ = C1 from con
   unavailable. TS keyset REST upserts stay timeout-immune for row-by-row compute-then-write. [[feedback_claude_runs_backfills_dry_run]]
 - **PROVEN:** is_conference_game backfill (2.6M rows) — ctid-batching at 8000 blocks failed ~30% (each batch ~90-120s); the
   DIRECT+raised-timeout single UPDATE ran it in ~2-3 min. (Staging: raising the role timeout globally is fine temporarily; RESTORE after.)
+## ★★ #4 RATE-BUCKET VALIDATED (intra-conference) — 2026-08-18
+Using `is_conference_game=true` + `_team_conf` on team_id, pooled per conference by proper denominator:
+- **AVG/OBP/ISO vs stored Conference Stats:** corr **0.979 / 0.986 / 0.991**, MAD ~**0.002** (2 pts). DEAD-ON. ⇒ the stored conf
+  rates ARE intra-conf pooled rates; the pitch-log rollup reproduces them → **can retire the importConferenceStats CSV upload.**
+  (My earlier FULL-SEASON rollup gave AVG corr 0.58 — the intra-conference SCOPE was the fix, confirming the scope rule.)
+- **wRC+ (C1 = (0.011+0.691·OBP+0.235·SLG)/0.3782×100 from intra-conf OBP/SLG) vs stored WRC_plus:** corr **0.942** but MAD **12.1**
+  — a CENTERING/normalization offset (C1 raw output isn't re-centered to league=100 like the stored value), NOT a method error.
+  BUILD TODO: match the stored wRC+ normalization (re-center to the D1/league mean = 100) — the ranking is already right.
+- **STORAGE (Trevor):** compute per-PLAYER intra-conf stats (surface on Season Stats via the is_conference_game filter) → pool to
+  the Conference Stats aggregate (= the validated pooled rate). Per-team skipped (future).
+- **NEXT:** env+ (intra-conf rate ÷ season NCAA), wRC+ centering, then ASSEMBLE the unified conf-stats run (Bucket A rates/env+/wRC+
+  from intra-conf pitch-log + Bucket B OPR/Stuff+/scouting/run_env/HTP total-season, all stored) → A/B whole → fold into edge fn → retire producers.
