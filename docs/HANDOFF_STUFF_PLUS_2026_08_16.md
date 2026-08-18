@@ -551,3 +551,12 @@ these are true single seasons).
   (same method as `import-park-factors-2026.ts`). 2026 = pitch-log-derived to this SAME schema; 2027 both PL; 2028 all PL.
 - **ACCEPTANCE GATE (optional, recommended):** pull TruMedia single-season 2026 too → cross-check our pitch-log-derived
   2026 park numbers against TruMedia's own 2026 before park ever feeds HTP. (Not yet pulled.)
+## ★ 2026 CROSS-CHECK SET IN + NEUTRAL-SITE TOLERANCE (pre-registered, 2026-08-18)
+- **2026 single-season TruMedia park files placed** at `/Users/danielleogonowski/RSTR IQ Data/park-factors/2026/`
+  (6 cohorts, ~308 teams). This is the ACCEPTANCE-GATE reference for the pitch-log-derived 2026 park compute.
+- **★ PRE-REGISTERED TOLERANCE (Trevor):** the pitch-log compute will NOT match TruMedia exactly, BY DESIGN — TruMedia
+  filters by HOME/AWAY, while our pitch-log compute attributes each pitch to its ACTUAL `game_venue_id`, so **NEUTRAL-SITE
+  venues resolve differently** (we credit the real neutral park; TruMedia's home/away filter handles it differently/excludes).
+  Expectation: CLOSE but not exact, with **neutral-site parks the expected divergence points; "shouldn't be off by a ton."**
+  ⇒ Gate = agreement within a sane tolerance on non-neutral parks + explainable neutral-site deltas — NOT bit-exact equality.
+  A large delta at a NORMAL home park = investigate; a delta at a known neutral site = expected. [[feedback_predictions_on_record_at_right_grain]]
