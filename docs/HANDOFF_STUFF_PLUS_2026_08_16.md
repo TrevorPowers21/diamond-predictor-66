@@ -789,3 +789,35 @@ Everywhere this doc/plan says "clear then build" or implies deleting old code fi
 check (tsc/DB/page-load) → ensure it works (A/B vs old) → THEN clear the old. Never delete the working path first; the delete
 is the LAST, verification-gated step. Applies to the transfer build-over delete-list, the corrupted-column DROP (after readers
 repointed+verified), and the scattered-script retirements (after the unified edge-fn run is proven). [[feedback_build_check_then_clear]]
+## ★★ #4 CONFERENCE-STATS UNIFIED PITCH-LOG RUN — DESIGN + PRODUCER MAP (2026-08-18)
+Goal: ONE pitch-log-sourced run computes + stores EVERY used `Conference Stats` field per conference_id×season; then (AFTER
+verification, per BUILD-CHECK-ENSURE-THEN-CLEAR [[feedback_build_check_then_clear]]) retire the scattered producers. Folds into the ONE edge fn.
+
+### CURRENT PRODUCERS (the things to unify → then retire)
+- `src/lib/importConferenceStats.ts` (11 writes) — raw conf rates AVG/OBP/ISO/SLG(/ERA/FIP/WHIP/K9/BB9/HR9) + env+. HAND-UPLOAD CSV path.
+- `scripts/populate-conference-stats-env-plus.ts` (28) — env+ (÷ season NCAA), **Overall_Power_Rating = PA-weighted rollup of
+  per-hitter overall_power_rating (Hitter Master)**, + Phase-2 JUCO district rows.
+- `src/savant/lib/conferenceScoutingAverages.ts` — `offensive_power_rating`, `ba_power_rating`, ~40 `hitter_*`/`pitcher_*` score+pct (scouting averages rollup).
+- `src/savant/lib/conferenceStuffPlusV2.ts` — `Stuff_plus` (DONE, V2 pitch-weighted). `conferenceStuffPlus.ts` = V1 → RETIRE.
+- `WRC_plus` — producer TBD (grep found no clear writer; likely importConferenceStats or admin or C1-derived — CONFIRM at build; `scripts/sql/wrc_c1_model_config.sql` relates).
+- NEW (done): `run_env_factor` (conf-avg per-team rg_factor from rolling Park Factors) + `hitter_talent_plus` (HTP).
+- Also write to Conference Stats: `AdminDashboard.tsx` (manual edits — keep as override), `process-precompute-jobs/index.ts` (edge fn).
+
+### UNIFIED RUN — per conference_id × season, from pitch-log-derived sources
+1. **Raw conf rates** = PA-weighted (hitters) / IP-weighted (pitchers) rollup of PLAYER rates from Masters (pitch-log-derived),
+   NOT a hand CSV. → AVG/OBP/ISO/SLG/OPS, ERA/FIP/WHIP/K9/BB9/HR9.
+2. **env+** (ba/obp/slg/iso_plus) = conf rate ÷ season NCAA avg × 100 (ncaa_averages).
+3. **OPR** (Overall_Power_Rating) = PA-weighted rollup of player overall_power_rating; **offensive_power_rating** + **ba_power_rating** per conferenceScoutingAverages logic.
+4. **Stuff_plus** = pitch-weighted conf Stuff+ (V2, done).
+5. **wRC+** (WRC_plus) = C1 formula from conf OBP/SLG (mirror src/savant/lib/war.ts wRC+ C1) — conf-vs-conf.
+6. **Scouting averages** (~40 hitter_/pitcher_ score+pct) = PA/IP-weighted rollups of player scouting metrics.
+7. **run_env_factor** = conf-avg per-team rg_factor (rolling Park Factors). **HTP** = OPR + 1.25(Stuff+−100) + 0.75(100−run_env_factor).
+8. STORE all in `Conference Stats`. Keep the **conf-vs-conf** (wRC+ + raw factors → `conference_adjusted_stats`) vs
+   **overall-across-conference** (OPR/HTP/Stuff+/run_env → `Conference Stats`) split clean.
+
+### BUILD ORDER (each step verified vs current values BEFORE retiring the old producer)
+(a) Write the unified rollup (one script/edge-fn stage) → (b) run on staging → (c) A/B each field vs the current scattered-script
+values (must match within tolerance; investigate diffs) → (d) verify OPR/wRC+ currency (reg season complete) → (e) fold into the
+ONE edge fn → (f) ONLY THEN retire importConferenceStats/populate-conference-stats-env-plus/conferenceStuffPlus(V1)/scouting scripts.
+JUCO district rows (Phase 2) handled separately (regional baselines, not D1 pitch-log). AdminDashboard manual edits stay as override.
+FIRST BUILD STEP = confirm the WRC_plus producer + the exact conferenceScoutingAverages field list, then write the unified rollup for the RATES + OPR + wRC+ slice, A/B vs current.
