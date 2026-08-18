@@ -632,10 +632,10 @@ const programTierMultiplier = (conference: string | null | undefined, tiers: { s
   return tiers.lowMajor;
 };
 
-const pvfForRole = (role: "SP" | "RP" | "SM", eq: PitchingEq) =>
-  role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp;
+// pvfForRole (weekend-SP 1.2× premium) removed — PVF dropped from pitcher market
+// value to match canonical (double-counts a starter's IP-based WAR). See computePitcherMarketValue below.
 
-const canShowPitcherMarket = (team: string | null | undefined, conf: string | null | undefined) => {
+const canShowPitcherMarket =(team: string | null | undefined, conf: string | null | undefined) => {
   const c = String(conf || "").trim().toLowerCase();
   const t = String(team || "").trim().toLowerCase();
   if (!c) return false;
@@ -669,8 +669,12 @@ const computePitcherMarketValue = (
   if (!canShowPitcherMarket(ctx.team, ctx.conference)) return null;
   const tiers = { sec: eq.market_tier_sec, p4: eq.market_tier_acc_big12, bigTen: eq.market_tier_big_ten, strongMid: eq.market_tier_strong_mid, lowMajor: eq.market_tier_low_major };
   const ptm = programTierMultiplier(ctx.conference, tiers);
-  const pvm = pvfForRole(ctx.role, eq);
-  return Math.max(0, pWar * eq.market_dollars_per_war * ptm * pvm);
+  // PVF dropped (mirror canonical src/lib/depthRoles.ts computePitcherMarketValue):
+  // a starter's role value is already in WAR through IP (85 vs 35 innings), so a
+  // PVF premium on top double-counts. Market = pWAR × $/WAR × tier, matching the
+  // returner path + Team Builder. ctx.role kept for call-site parity.
+  void ctx.role;
+  return Math.max(0, pWar * eq.market_dollars_per_war * ptm);
 };
 
 type TransferPitcherInputDeno = {
