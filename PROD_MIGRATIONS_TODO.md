@@ -119,4 +119,7 @@ Apply in order at push time. All additive/idempotent. Staging dates noted.
   pitching_team_id from `scripts/ingest_pitch_log.ts` record + interface; (2) recreate the `pitch_log_corrected` VIEW
   WITHOUT those two columns (it currently SELECTs them) + re-verify Stuff+ classification/scoring still read it;
   (3) `ALTER TABLE pitch_log DROP COLUMN batting_team_id; ALTER TABLE pitch_log DROP COLUMN pitching_team_id;`.
-  DRS/WAR/ReturningPlayers do NOT use them (comments / name-alias only). STAGING + PROD.
+  DRS/WAR/ReturningPlayers do NOT use them (comments / name-alias only). STAGING + PROD.- [ ] Conference Stats HTP+run-env: `ALTER TABLE "Conference Stats" ADD COLUMN run_env_factor double precision, ADD COLUMN
+  hitter_talent_plus double precision;` + conf-stats pitch-log build populates them (run_env_factor = conf-avg per-team
+  rg_factor from rolling Park Factors; HTP = OPR + 1.25(Stuff+−100) + 0.75(100−run_env_factor)). Repoint 4 live HTP sites +
+  transfer engine to read stored. STAGING first, then PROD. (#3+#4 coordinated.)
