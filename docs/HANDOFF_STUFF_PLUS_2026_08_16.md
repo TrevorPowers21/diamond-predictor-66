@@ -427,3 +427,24 @@ Stuff+ are overall-across-conference (`Conference Stats`).
 6. **Transfer engine:** sync the 3 copies to canonical (edge-fn PVF removal is part of this; triple-oWAR delete) — [[project_transfer_engine_audit]].
 7. **Verify OPR / wRC+ currency.**
 → THEN edge fn (6b) → snapshots (7c, also fixes the TB oWAR regression) → NIL wiring. All inputs final, projections land ONCE.
+
+## ★ REFINEMENTS after reading the code (Trevor 2026-08-18) — SUPERSEDES the "run factor for HTP + ERA" phrasing above
+**Verified in code — HTP and ERA are NOT the same bucket:**
+- HITTING projection (`src/lib/buildTransferProjectionInputs.ts:203-208`): per-metric per-team park factors **avg/obp/iso**
+  (+ handedness splits). EXISTS today, unchanged.
+- PITCHING projection (`buildTransferPitcherInputs.ts:232-237` → `transferPitcherProjection.ts:134` `parkTerm`): per-metric
+  per-team park factors **era/whip/hr9**. EXISTS today, unchanged — **ERA uses its OWN individual `era` park factor, NOT a
+  run factor, NOT the conference aggregate.** (Trevor: don't bucket HTP + ERA without reading what each uses.)
+- **THE ONLY NEW PARK CHANGE = HTP's run-env term.** Replace `0.75·(100−WRC+)` with a **conference RUN-ENVIRONMENT metric**
+  (conf-average of member teams' run/overall park factor), **STORED in `Conference Stats`**, feeding HTP. Trevor: "a major
+  win and necessity." The per-metric projection factors (avg/obp/iso, era/whip/hr9) are UNTOUCHED, off the existing 3-yr manual.
+
+**POSITION-OF-NEED — RESOLVED (Trevor 2026-08-18):** AUTO-compute from the roster (where p70 isn't a starter at a position),
+but **STORE it as a per-player toggle in the DB that re-checks + REACTS as roster changes are made** — NOT a live one-page
+compute. PLUS a definite future **per-year "positions of need" QUESTIONNAIRE** (coach-declared) for offseason planning,
+layered on top. So: automatic + stored + roster-reactive now; coach questionnaire later.
+
+**★ FUTURE VISION (perfect world, like Stuff+): per-PA / per-outing park factor + per-PA/outing Stuff+/HTP FACED.** For each
+player, the EXACT quality of hitters/pitchers he faced + the EXACT parks he hit/pitched in, per at-bat/pitch — not conference
+averages. The granular truth of competition + environment (ties to OSU-faced-SCHEDULE + per-player park factor). Deferred,
+gated on per-event pitch-log data + multi-year imports. [[project_park_factor_rework]]
