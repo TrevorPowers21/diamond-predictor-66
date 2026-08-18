@@ -848,3 +848,16 @@ straightforward weighted means (already done for OPR/Stuff+); wRC+ = C1 from con
   intra-conf FILTER). The talent/park bucket stays total-season. wRC+ = C1 from the INTRA-CONF OBP/SLG.
 - **Producers RETIRED after the unified run is verified** (build-check-then-clear): importConferenceStats,
   populate-conference-stats-env-plus, conferenceScoutingAverages, conferenceStuffPlus(V1). Admin edits = override; edge fn absorbs compute.
+## ★ #4 BUILD DECISIONS (Trevor 2026-08-18) — ERA solved, conference-game label, team-stats storage Q
+- **ERA / earned runs = ALREADY SOLVED** via DRS score-driven ER attribution (`scripts/drs/accrue_pitcher_er.py`): walks the
+  pitch-to-pitch SCORE DELTA (catches every run incl. the ~900 the per-play Runs col drops; validated 99.96% vs Master R),
+  assigns earned/unearned via `(UR)` movement tags + base-slot responsibility (inherited runners charged correctly across
+  pitching changes). ⇒ intra-conf conf ERA = earned runs (this method) / IP × 9. No approximation. (Agent's "ERA is tricky" was wrong.)
+- **★ ADD `is_conference_game` flag to `pitch_log`** (Trevor): stored derived boolean = `conference_of(team_id) ==
+  conference_of(opponent_id)`, computed on ingest + backfilled (like `park_code`). Makes intra-conf filtering a trivial
+  `where is_conference_game` everywhere/forever instead of a Teams Table join each run. Migration + ingest add + backfill.
+- **TEAM STATS ARE NOT STORED ANYWHERE** — only `team_war_snapshots` (WAR), `Teams Table` (identity), build tables. No team
+  offensive/pitching rate aggregates exist. ⇒ **DECISION PENDING (Trevor):** does the conf-stats run STORE per-team (and
+  per-player) intra-conf stats in a new `team_conference_stats` table, or just produce+store the CONFERENCE aggregate with
+  team/player as in-run intermediates? Pooling (Σnum/Σden) gets scaling right either way — this is a product/transparency
+  choice, not correctness. Conference aggregate = required (transfer engine consumes it).
