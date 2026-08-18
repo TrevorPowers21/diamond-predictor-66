@@ -518,3 +518,14 @@ These SUPERSEDE the earlier "park = manual 3-yr forever / pitch-log deferred ind
 7. **Dead-code/data/function audit** — keep-vs-remove as the one edge fn is assembled (Savant clear, V1 conf retire, backups drop).
 8. Verify OPR / wRC+ currency.
 → THEN edge fn (6b) → snapshots (7c, also fixes TB oWAR regression) → NIL wiring. All inputs final, projections land ONCE.
+## ★ SEQUENCING + UPLOAD-SOURCE DECISION (Trevor 2026-08-18)
+- **PARK FACTOR before HTP** (Trevor): build + stabilize + VERIFY the park-factor process FIRST so nothing discovered
+  there later changes what feeds HTP. HTP's run-env term = conf-avg of the per-team RUN park factors, so park is HTP's
+  input — settle park before computing HTP off it. New order: PVF → **PARK** → **HTP** (computed off settled park, stored
+  in Conference Stats) → conf-stats build (stores HTP + all used fields) → position-of-need → transfer sync → dead-code
+  audit → edge fn. (HTP + conf-stats overlap: HTP computation is PART OF the conf-stats build; adjacent by design.)
+- **2024/2025 park upload source = MANUALLY-CALCULATED DATA RESHAPED to the metric set** (NOT prior-year pitch-log imports).
+  ⇒ TWO input paths into ONE target park-metric schema: (a) pitch-log→park-metrics compute for 2026 (the real process);
+  (b) a reshape/import of Trevor's manual 2024+2025 park data into the SAME columns. Trevor will send example rows to
+  define the exact target metric set/schema both paths must produce. BUILD ORDER: lock the target park-metric schema from
+  his examples FIRST, then build the 2026 pitch-log compute to that schema, then the manual-reshape import to the same schema.
