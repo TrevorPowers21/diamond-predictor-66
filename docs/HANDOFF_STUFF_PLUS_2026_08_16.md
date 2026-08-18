@@ -831,3 +831,20 @@ or weight by AB for AVG/ISO, PA for OBP; pitching rates IP-weighted). Hitter Mas
 or pull H/AB from pitch-log directly. VERIFY the rollup reproduces the stored upload (per-denominator) BEFORE retiring
 `importConferenceStats.ts`. This is the concrete first slice of the unified run; the OPR/Stuff+/scouting rollups are
 straightforward weighted means (already done for OPR/Stuff+); wRC+ = C1 from conf OBP/SLG; run_env/HTP done.
+## ★★★ #4 CORE MODELING RULE (Trevor 2026-08-18) — INTRA-CONFERENCE rates vs TOTAL-SEASON talent/park
+**THE critical scope distinction for the conf-stats build. My first A/B (full-season Master rollup) was wrong on SCOPE, not just weighting.**
+
+- **CONFERENCE RATE STATS = INTRA-CONFERENCE GAMES ONLY** (conference-vs-conference): AVG/OBP/ISO/SLG/OPS, ERA/FIP/WHIP/K9/BB9/HR9,
+  **wRC+**. Compute from the games where conference teams play EACH OTHER — a direct measure of the conference's internal
+  competition level. **NOT a condensed full-season rollup.** From pitch_log: filter to games where batting team's conference ==
+  pitching team's conference; aggregate **per-player (conf PA) → per-team → per-conference** (in that order, to scale properly),
+  pooled by proper denominator (Σnum/Σden: AVG/ISO by AB, OBP by PA, pitching IP-weighted). These are the `conference_adjusted_stats`
+  / conf-vs-conf bucket.
+- **STUFF+, OPR, PARK FACTOR (→ HTP) = TOTAL SEASON, ALL GAMES** (weighted — pitches for Stuff+, PA for OPR, pitches/venue for
+  park). **Include NON-CONFERENCE** because per-unit sample is small and needs the full season to be stable. **IMPORTANT (Trevor).**
+  ⇒ ALREADY BUILT THIS WAY (no rework): Stuff+ = pitch-weighted full season; OPR = full-season PA rollup; park = full-season/3-yr;
+  HTP = OPR+Stuff++run_env, all total-season. run_env/HTP stored values are CORRECT as-is.
+- **⇒ #4 rate rollup MUST re-scope to intra-conference** (the earlier per-denominator note stands, but the bigger fix is the
+  intra-conf FILTER). The talent/park bucket stays total-season. wRC+ = C1 from the INTRA-CONF OBP/SLG.
+- **Producers RETIRED after the unified run is verified** (build-check-then-clear): importConferenceStats,
+  populate-conference-stats-env-plus, conferenceScoutingAverages, conferenceStuffPlus(V1). Admin edits = override; edge fn absorbs compute.
