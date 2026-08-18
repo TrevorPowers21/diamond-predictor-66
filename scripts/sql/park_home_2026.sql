@@ -1,13 +1,14 @@
--- Park factors from pitch_log (2026) — HOME-FLAG based, venue-agnostic (venue_id unreliable/fragmented).
--- A team's park = ALL its home games (home flag + batting_team_id), both teams' bats.
--- AVG=H/AB · OBP=(H+BB+HBP)/(AB+BB+HBP+SF) · ISO=(2B+2*3B+3*HR)/AB · R/G=avg(both-team total runs) in the team's home games.
+-- Park factors from pitch_log (2026) — HOME-FLAG based, keyed on the CLEAN team_id
+-- (batting_team_id is CORRUPT: 1 id -> up to 15 teams; team_id<-teamId is clean).
+-- A team's park = ALL its home games (home flag + team_id), both teams' bats.
+-- AVG=H/AB · OBP=(H+BB+HBP)/(AB+BB+HBP+SF) · ISO=(2B+2*3B+3*HR)/AB · R/G=avg(both-team total runs).
 create table _park_home_2026 as
 with
-gh as ( -- game -> its home team + both-team final runs
+gh as ( -- game -> its home team (clean team_id) + both-team final runs
   select split_part(uniq_pitch_id,'-',1) as game_id,
-    max(batting_team_id) filter (where home)     as home_team,
-    max(total_runs)      filter (where home)     as home_runs,
-    max(total_runs)      filter (where not home)  as away_runs
+    max(team_id)    filter (where home)     as home_team,
+    max(total_runs) filter (where home)     as home_runs,
+    max(total_runs) filter (where not home)  as away_runs
   from pitch_log where season=2026 and total_runs is not null
   group by 1
 ),
