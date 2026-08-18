@@ -529,3 +529,23 @@ Full running plan in `docs/HANDOFF_STUFF_PLUS_2026_08_16.md` (§#4 sections). Du
 ### BUILD PATH (build-check-then-clear)
 add is_conference_game → per-player intra-conf rates (DRS ERA) stored + on Season Stats + A/B → pool to Conference Stats +
 env+ + wRC+ → Bucket B reproduce (OPR/Stuff+/scouting/run_env/HTP total-season) → assemble ONE pass → fold into edge fn → retire producers LAST.
+## ★★ BIG-WRITE MECHANICS v2 (2026-08-18) — DIRECT connection + raised statement_timeout beats ctid-batching
+**The fast, reliable way to run a big single-statement write (e.g. a 2.6M-row UPDATE) — ~2-3 min, NOT an hour of batches.**
+- **The two caps:** (1) the **session POOLER** (`aws-*.pooler.supabase.com:5432`, user `postgres.<project>`) hard-cancels any
+  statement >~120s (57014) and IGNORES a connection-option `statement_timeout=0`. (2) The **postgres ROLE itself** also defaults
+  to a **2-min `statement_timeout`** — so even the DIRECT connection cancels a long statement by default. Both must be handled.
+- **DIRECT connection** = `postgresql://postgres:<DB_PASSWORD>@db.<project>.supabase.co:5432/postgres` (DB_PASSWORD = the reset
+  password Trevor gave; the direct `postgres` user honors it). This connection BYPASSES the pooler cap AND honors a server-side
+  `statement_timeout` (unlike the pooler, which ignores it).
+- **RECIPE (one big write, fast):**
+  1. `alter role postgres set statement_timeout = '600000';`  (10 min — applies to NEW sessions; `supabase db query` opens a
+     fresh connection each call, so the next call picks it up). Verify with a fresh `show statement_timeout;` → `10min`.
+  2. Run the ONE big `UPDATE …` via the DIRECT url. (It exceeds the 120s BASH timeout → moves to background, but the DB statement
+     keeps running to completion; wait for the task-completion notification.)
+  3. **RESTORE:** `alter role postgres set statement_timeout = '2min';` (put it back — the raise is global for new sessions).
+  4. Recreate any index dropped for HOT; verify row counts.
+- **When to use this vs ctid-batching:** prefer THIS for any big single-statement write (much faster, one statement, atomic).
+  ctid-batching (drop index → CTAS → slice the SMALL driving table by ctid) remains the fallback if the direct connection is
+  unavailable. TS keyset REST upserts stay timeout-immune for row-by-row compute-then-write. [[feedback_claude_runs_backfills_dry_run]]
+- **PROVEN:** is_conference_game backfill (2.6M rows) — ctid-batching at 8000 blocks failed ~30% (each batch ~90-120s); the
+  DIRECT+raised-timeout single UPDATE ran it in ~2-3 min. (Staging: raising the role timeout globally is fine temporarily; RESTORE after.)
