@@ -219,3 +219,9 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   ⚠ team_drs left NULL — team_war_snapshots.team_drs is empty on staging (snapshot rebuilt after the 2026-08-09 populate);
   regenerate via scripts/drs/derive_team_drs.mjs (dwar_total already populated). ⚠ PROD: run (a) against PROD team_war_snapshots
   (has 2025 champions — Louisiana State + 39 conf champs) so championship history carries into 2025 team_season_stats rows.
+
+- [x] team_season_stats step 6 — faced competition + park snapshot. scripts/sql/team_season_stats_faced_park.sql (3 UPDATEs, run
+  separately). SEMANTICS (validated): pitch_log team_id=pitching side, opponent_id=batting side. faced_stuff_plus(T)=pitch-wt conf
+  Stuff+ of pitchers T's hitters faced (opponent_id=T, metric on team_id conf); faced_htp(T)=pitch-wt conf HTP of hitters T's
+  pitchers faced (team_id=T, metric on opponent_id conf). Reproduces proven OSU 100.2/104.5. Park = snapshot of USED rolling+single
+  from "Park Factors" (which STAYS historical source). APPLIED STAGING 2026-08-19: 308/308 all three. PROD: re-run from prod pitch_log/Conference Stats/Park Factors.
