@@ -549,3 +549,39 @@ env+ + wRC+ → Bucket B reproduce (OPR/Stuff+/scouting/run_env/HTP total-season
   unavailable. TS keyset REST upserts stay timeout-immune for row-by-row compute-then-write. [[feedback_claude_runs_backfills_dry_run]]
 - **PROVEN:** is_conference_game backfill (2.6M rows) — ctid-batching at 8000 blocks failed ~30% (each batch ~90-120s); the
   DIRECT+raised-timeout single UPDATE ran it in ~2-3 min. (Staging: raising the role timeout globally is fine temporarily; RESTORE after.)
+## ★★★ CONFERENCE-STATS CALCULATION SPEC (#4) — COMPLETE + VALIDATED (2026-08-18) — THIS IS AN EDGE-FUNCTION STAGE
+Every `Conference Stats` field, how it's computed, its source, and its validation. **All of this = ONE STAGE in the ONE edge
+function (Track B):** on pitch-log ingest → recompute every conf field → store in `Conference Stats`. Retires the 5 scattered
+producers (importConferenceStats, populate-conference-stats-env-plus, conferenceScoutingAverages, conferenceStuffPlus-V1) via
+build-check-then-clear [[feedback_build_check_then_clear]]. NO scattered scripts, NO live compute [[project_stored_derived_values_architecture]].
+
+### 0. `is_conference_game` (pitch_log flag) — enables the conf-vs-conf split
+= `conference_of(team_id) == conference_of(opponent_id)` (Teams Table Season 2026 source_id→conference_id; team_id/opponent_id
+are the CLEAN ids — batting_team_id/pitching_team_id are CORRUPT). Backfilled (2.58M: 1.41M intra / 1.17M non; unmapped→false).
+On ingest, the edge fn computes it (needs the Teams Table lookup — a post-row stage, like park_code).
+
+### 1. HITTING RATES = INTRA-CONFERENCE only (`where is_conference_game`), pooled per conference by PROPER denominator
+Aggregate terminal PAs (`pitch_result_category not in Ball/Strike/Foul`) in intra-conf games, grouped by conference (team_id→conf):
+- **AVG** = ΣH/ΣAB · **OBP** = Σ(H+BB+HBP)/Σ(AB+BB+HBP+SF) · **ISO** = Σ(2B+2·3B+3·HR)/ΣAB · **SLG** = AVG+ISO (≡TB/AB).
+  H=1B+2B+3B+HR; AB=H+GroundOut+FlyOut+PopOut+LineOut+Strikeout+FieldersChoice+DoublePlay+Error. VALIDATED corr 0.979/0.986/0.991, MAD ~.002.
+- **env+** (ba_plus/obp_plus/slg_plus/iso_plus) = rate ÷ season NCAA (ncaa_averages: avg .2777/obp .3823/iso .1588) × 100. VALIDATED corr 0.98, MAD ~1pt.
+- **wRC+** = **C1** `(0.011 + 0.691·OBP + 0.235·SLG)/0.3782 × 100` (current canonical, OBP/SLG version; AVG/ISO coeffs=0). Stored
+  WRC_plus is STALE (last write 2026-06-16, pre-C1-2026-08-11) → the run CORRECTS it (don't reproduce the stale value).
+
+### 2. PITCHING RATES = INTRA-CONFERENCE (same aggregation; in intra-conf games events ARE the conf's pitching-vs-its-hitting)
+IP = outs/3; outs = (Strikeout+GroundOut+FlyOut+PopOut+LineOut+Sac+FieldersChoice) + 2·DoublePlay.
+- **K9**=K·9/IP · **BB9**=BB·9/IP · **HR9**=HR·9/IP · **WHIP**=(BB+H)/IP. VALIDATED corr 0.991/0.988/0.993/0.980.
+- **FIP** = `(13·HR + 3·(BB+HBP) − 2·K)/IP + cFIP`, cFIP≈**3.157** (D1 2026; near-constant, SD .056; re-derive per season = lgERA − league FIP_core). VALIDATED corr 0.986.
+- **ERA** = DRS EARNED runs (intra-conf) × 9 / IP. DRS score-driven ER attribution (scripts/drs/accrue_pitcher_er.py) VALIDATED
+  vs Master ERA corr 0.987; BUILD = apply that attribution filtered to is_conference_game (per-game ER → conf).
+
+### 3. TALENT / PARK = TOTAL SEASON (all games incl. non-conf, weighted — small per-unit sample) — ALREADY BUILT
+- **OPR** (Overall_Power_Rating) = PA-weighted rollup of player overall_power_rating (Hitter Master, pitch-log-derived).
+- **Stuff_plus** = pitch-weighted conf Stuff+ (V2). **scouting averages** (~40 hitter_/pitcher_ scores+pcts) = PA/IP-weighted player rollups.
+- **run_env_factor** = conf-avg of member-team `rg_factor` (rolling Park Factors; no handedness, 3-yr). **hitter_talent_plus (HTP)**
+  = `OPR + 1.25·(Stuff+−100) + 0.75·(100 − run_env_factor)`. run_env + HTP already STORED (30 D1 confs).
+
+### 4. STORAGE + SPLIT
+Per-PLAYER intra-conf stats stored (filterable on the Season Stats view via is_conference_game) → POOLED to the Conference Stats
+aggregate. Per-team = future. Keep conf-vs-conf (rates/env+/wRC+ → intra-conf) vs total-season (OPR/Stuff+/run_env/HTP) clean.
+⇒ Reproduced from pitch-log at corr 0.98+ across EVERY rate field → the whole conf-stats layer sources from ONE pitch-log edge-fn stage.
