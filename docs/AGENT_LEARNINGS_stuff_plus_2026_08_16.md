@@ -585,3 +585,12 @@ IP = outs/3; outs = (Strikeout+GroundOut+FlyOut+PopOut+LineOut+Sac+FieldersChoic
 Per-PLAYER intra-conf stats stored (filterable on the Season Stats view via is_conference_game) → POOLED to the Conference Stats
 aggregate. Per-team = future. Keep conf-vs-conf (rates/env+/wRC+ → intra-conf) vs total-season (OPR/Stuff+/run_env/HTP) clean.
 ⇒ Reproduced from pitch-log at corr 0.98+ across EVERY rate field → the whole conf-stats layer sources from ONE pitch-log edge-fn stage.
+## ★★★ #4 ERA VALIDATED via DRS (option B chosen) — 2026-08-18 — ALL CONF FIELDS NOW VALIDATED
+**conf ERA (intra-conf) = (Σ runs − Σ runs on '(UR)' plays) / IP × 9.** Uses pitch_log `runs` (per-play) + `atbat_desc` (UR)
+earned/unearned tags — the DRS engine's earned rule, done on the DB (pitch_log has atbat_desc + man_on_* + runs). A/B vs stored
+ERA (n=29): **corr 0.984, MAD 0.098** (my 6.03 / stored 5.98; ~11.8% unearned = 7,022/59,386). Matches the DRS engine's 0.987.
+(The `runs` col drops ~900 league-wide per the DRS doc, negligible at conf scale; score-delta refinement optional.)
+⇒ **EVERY Conference Stats field validated from pitch-log at corr 0.98+:** AVG/OBP/ISO/SLG (.98) · env+ (.98) · wRC+ (canonical
+C1) · K9/BB9/HR9/WHIP (.98-.99) · FIP (.986, cFIP 3.157) · **ERA (.984 DRS)** · OPR/Stuff+/run_env/HTP (total-season, built) ·
+scouting (OPR-style rollup). The whole conf-stats layer sources from ONE pitch-log edge-fn stage. REMAINING #4 = ASSEMBLE the
+unified run (all fields, one pass) → A/B whole → fold into edge fn → retire the 5 producers + one-off RPCs + _team_conf helper.
