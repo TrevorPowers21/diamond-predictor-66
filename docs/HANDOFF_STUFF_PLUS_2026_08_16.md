@@ -1010,3 +1010,30 @@ the conferences a team actually PLAYED × the per-conference Stuff+/HTP, from pi
 - STORE per-team faced_stuff_plus/faced_htp (edge-fn stage). Independents → transfer engine reads FACED instead of conf row.
 - GENERALIZES: faced = correct competition for everyone (who you played); conf avg = approximation (faced≈conf-avg for conf teams).
   FUTURE: per-player faced (Stuff+-faced-per-PA). BUILD-READY — offered to implement per-team faced metrics.
+## ★★★ TEAM_SEASON_STATS TABLE — DESIGN (Trevor 2026-08-18) — the missing per-team-per-season stats layer
+Forced by Independents (faced-competition [[project_faced_competition_independents]]); becomes the general team-stats home the
+system lacks. **Comprehensive schema, POPULATE INCREMENTALLY.**
+
+### KEYS (confirmed via investigation)
+- `source_id` = **PROGRAM id, STABLE across seasons** (OSU 3111, UGA 226 — same every year). `id` = **PER-SEASON UUID** (differs
+  each season). `conference_id` = stable per team unless realignment. 774 team-seasons / 466 programs.
+- **Natural key = `(source_id, season)`** (like `team_builds`). STORE BOTH `source_id` (program) + `id` (per-season) + `conference_id`
+  for full id consistency + joins. One row per team per season.
+
+### CONTENTS (Trevor — store both team-faced AND conference metrics; not redundant)
+- **Competition (Phase 1, Independents need NOW):** `faced_stuff_plus`, `faced_htp` (schedule-weighted from pitch_log opponent_id ×
+  per-conf Stuff+/HTP) + `conference_id` + the team's conference Stuff+/HTP/run_env (baseline). Faced = exact competition PLAYED;
+  conference = baseline/context. Both valuable (faced≈conf for conf teams = validation; faced is THE metric for Independents).
+- **Rate line (Phase 2):** ERA/AVG/OBP/SLG/ISO/wRC+/K9/BB9/HR9/WHIP/FIP per team (the per-team version of the conf rollup — methods
+  validated). Optionally intra-conf vs total splits.
+- **WAR (Phase 3):** desc WAR + total WAR per team — **CONSOLIDATE `team_war_snapshots` INTO this table** (it already stores team
+  WAR — do NOT duplicate → drift; migrate + repoint readers, build-check-then-clear).
+- **Park (Phase 4):** per-team park factors — **REFERENCE/absorb `Park Factors`** (already per-team; don't triple-copy).
+- **Future:** HOME/ROAD team splits; per-PLAYER faced (Stuff+-faced/HTP-faced per PA) — the granular ultimate [[project_faced_competition_independents]].
+
+### DISCIPLINE (the load-bearing caution)
+This table = the CANONICAL per-team-per-season home. Existing per-team stores (team_war_snapshots, Park Factors) get
+CONSOLIDATED/referenced, NOT copied — else a 3rd drifting copy (the exact "built over the top" trap [[feedback_build_check_then_clear]]).
+Populated by the ONE edge fn (schedule-weighted faced = a rollup of the per-conf metrics). Stored-not-live. Transfer resolver:
+team → team_season_stats; Independent → use faced_*; else conference metrics (or faced as refinement). NOT too far ahead — right
+target, incremental build; Phase 1 (faced + conf metrics) ships with the conf-stats edge-fn stage.
