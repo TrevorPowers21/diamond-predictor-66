@@ -30,13 +30,32 @@ BEGIN
   INSERT INTO public.team_season_stats
     (source_id, season, team_season_id, conference_id, team_name, abbreviation,
      owar_reg, owar_total, dwar_reg, dwar_total, bsrwar_reg, bsrwar_total, pwar_reg, pwar_total,
-     total_war_reg, total_war_total, n_hitters, n_pitchers)
+     total_war_reg, total_war_total, hitter_war_reg, hitter_war_total, n_hitters, n_pitchers)
   SELECT tt.source_id, p_season, tt.id, coalesce(h.conference_id, p.conference_id, tt.conference_id), tt.full_name, tt.abbreviation,
      coalesce(h.owar_reg,0), coalesce(h.owar_total,0), coalesce(h.dwar_reg,0), coalesce(h.dwar_total,0),
      coalesce(h.bsrwar_reg,0), coalesce(h.bsrwar_total,0), coalesce(p.pwar_reg,0), coalesce(p.pwar_total,0),
      coalesce(h.hit_tw_reg,0)+coalesce(p.pit_tw_reg,0), coalesce(h.hit_tw,0)+coalesce(p.pit_tw,0),
+     coalesce(h.hit_tw_reg,0), coalesce(h.hit_tw,0),   -- hitter_war = Σ hitter total_desc_war = o+d+bsr
      coalesce(h.n_hitters,0), coalesce(p.n_pitchers,0)
   FROM h FULL JOIN p ON h.tid=p.tid JOIN "Teams Table" tt ON tt.id = coalesce(h.tid,p.tid);
+
+  -- 1b) pitching rotation/bullpen split (rotation = top-3 pitchers by IP, bullpen = rank 4+; descriptive pWAR, reg + total)
+  WITH ranked AS (
+    SELECT tt.source_id sid, pm.desc_pwar pw, pm.desc_pwar_reg pwr,
+      row_number() OVER (PARTITION BY tt.source_id ORDER BY pm."IP" DESC NULLS LAST) rk
+    FROM "Pitching Master" pm JOIN "Teams Table" tt ON tt.id=pm."TeamID"
+    WHERE pm."Season"=p_season AND pm.division='D1'
+  ),
+  agg AS (
+    SELECT sid,
+      sum(pw) FILTER (WHERE rk<=3) rot_t, sum(pwr) FILTER (WHERE rk<=3) rot_r,
+      sum(pw) FILTER (WHERE rk>3)  bp_t,  sum(pwr) FILTER (WHERE rk>3)  bp_r
+    FROM ranked GROUP BY sid
+  )
+  UPDATE public.team_season_stats ts SET
+    rotation_pwar_total=coalesce(agg.rot_t,0), rotation_pwar_reg=coalesce(agg.rot_r,0),
+    bullpen_pwar_total=coalesce(agg.bp_t,0),   bullpen_pwar_reg=coalesce(agg.bp_r,0)
+  FROM agg WHERE ts.source_id=agg.sid AND ts.season=p_season;
 
   -- 2) hitting rates + counting (pitch-log-primary)
   WITH pl AS (

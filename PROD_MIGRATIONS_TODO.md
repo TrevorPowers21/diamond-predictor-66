@@ -249,3 +249,9 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   counting pitch-log, pitching rates Master, records, snapshot carry, conf context, faced ×2, park). DELETE-season-then-rebuild =
   idempotent. p_reg_end defaults to <season>-05-18. APPLIED STAGING 2026-08-19: select refresh_team_season_stats(2026) → 308 rows;
   reproduces pWAR corr 1.0000, team .277/.434, Georgia 53-14 (23-7), OSU faced 100.2/104.5, all 308 fully populated. PROD: create fn + call per season.
+
+- [x] team_season_stats consolidation columns (WIRE C prep) — ALTER ADD hitter_war_reg/total, rotation_pwar_reg/total,
+  bullpen_pwar_reg/total + folded into refresh_team_season_stats() (migration 20260819010000, re-created). hitter_war = Σ hitter
+  total_desc_war (o+d+bsr); rotation = top-3 pitchers by IP, bullpen = rank 4+ (matches team_war_2025_aggregation.sql). Comparison
+  uses REGULAR-SEASON desc WAR (_reg) — NO proration (Trevor: reg-season total is more accurate). APPLIED STAGING 2026-08-19:
+  refresh(2026) → 308; rotation+bullpen=pwar (0 mismatch), hitter_war=o+d+bsr (0 mismatch); Georgia 24.0hit/7.0rot/6.1bp/37.1tot. PROD: same.
