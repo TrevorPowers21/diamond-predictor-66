@@ -260,3 +260,8 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   descriptive-from-pitch_log = 2026-only; 2025 (prod: LSU champ + 39 conf champs + prior-year WAR) CANNOT be recomputed (no 2025
   pitch_log). FEDERATE BY ERA: team_season_stats canonical 2026+, team_war_snapshots kept for 2025 historical. Readers fall back to
   snapshots for pre-2026. The earlier "retire team_war_snapshots + seed scripts" plan is CANCELLED.
+
+- [ ] ⚠ DATA FIX (ingest) — pitch_log.pitcher_full_name is CORRUPT (holds the BATTER's full name, not the pitcher's; confirmed
+  2026-08-19: each pitcher_id has 1 pitcher_abbrev_name but 28-29 pitcher_full_names = batters faced). Reliable: pitcher_id +
+  pitcher_abbrev_name. IMPACT = display-name only (all pitcher-keyed derived data uses pitcher_id → unaffected). Fix scripts/ingest_pitch_log.ts
+  mapping + backfill pitcher_full_name from pitcher_id→Pitching Master. STAGING+PROD. See memory reference_pitch_log_pitcher_name_corrupt.
