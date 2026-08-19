@@ -1092,3 +1092,15 @@ BUILD RULE: team = **Σ player values**. Sum every counting stat (per window), t
 
 **team_war_snapshots = MIGRATE, don't scrub** (staging: 2026 only, 308 rows; prod: +2025 champion seed). season is a key → every
 existing row becomes a team_season_stats row (WAR A/B-verified, champion flags/seed/proration carried), THEN retire the old table.
+## ★ team_season_stats — DB FINDINGS (probe 2026-08-19) → dedicated handoff docs/HANDOFF_team_season_stats_2026_08_19.md
+1. **WAR reg/total split ALREADY exists per player** → the team WAR rollup is a PURE `SUM ... GROUP BY (TeamID, Season)`, no
+   player-boundary work. Hitter Master: desc_owar/d_war/bsr_war/total_desc_war (+ _reg) + regular_season_pa/pa/ab. Pitching
+   Master: desc_pwar/total_desc_war/desc_ra9/desc_fip_ra9/drs_behind (+ _reg) + regular_season_ip/IP. team WAR = Σ these.
+2. **team_war_snapshots — MIGRATE not scrub.** Staging = 2026 only (308). PROD = 2025 (309, incl LSU natl champ + 39 conf champs)
+   + 2026 (466). 2025 championship history lives ONLY on prod → prod migration must read prod's own table; carry champion flags/
+   seed_rank/proration into team_season_stats rows, verify, then DROP.
+3. **Counting stats + rates come from pitch_log** (reuse conf-stats machinery), NOT the Masters (Masters store rates, not raw
+   counts, beyond pa/ab). Build rule = sum counts (pitch_log) → derive rates; sum WAR (Masters). Records = NEW pitch_log
+   game-outcome run (runs/game→W/L; is_conference_game→conf record) → enables wins-over-projection.
+4. ⚠ JOIN KEY to confirm at build: Masters `TeamID` + `Season` → "Teams Table" (id per-season vs source_id) → source_id + conference_id.
+Full execution order (0–7) + verify plan in the dedicated handoff.

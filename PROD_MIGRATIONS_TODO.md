@@ -165,7 +165,11 @@ PROD: same — migration adds the column; backfill via the RPC-loop (or compute 
   Then fold into edge fn + retire the 5 producers (build-check-then-clear).
 
 ## ★ team_season_stats — NEW canonical per-team-per-season table (feature/war-recalibration) — 2026-08-19
-DESIGN + WHY in docs/HANDOFF_STUFF_PLUS_2026_08_16.md + docs/AGENT_LEARNINGS_stuff_plus_2026_08_16.md §TEAM_SEASON_STATS.
+DEDICATED HANDOFF: docs/HANDOFF_team_season_stats_2026_08_19.md (full schema §5, sources, execution order 0–7, verify plan).
+DESIGN + WHY also in docs/HANDOFF_STUFF_PLUS_2026_08_16.md + docs/AGENT_LEARNINGS_stuff_plus_2026_08_16.md §TEAM_SEASON_STATS.
+⚠ PROD-SPECIFIC: team_war_snapshots on PROD holds 2025 (309 rows incl. Louisiana State natl champ + 39 conf champs) + 2026 (466);
+staging has 2026 only. The migrate step MUST read PROD's own team_war_snapshots so the 2025 championship history is preserved.
+WAR rollup = pure SUM over Hitter/Pitching Master (reg+total split already stored per player) — no player-boundary work.
 Forced by Independents (Oregon State transfers) needing faced-competition; becomes the team-stats layer the system lacks.
 Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots + Park Factors INTO it AFTER verify (never two live copies).
 - [ ] CREATE TABLE `team_season_stats` — key `(source_id, season)` (source_id = STABLE program id; confirmed OSU 3111 / UGA 226
