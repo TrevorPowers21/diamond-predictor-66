@@ -594,3 +594,20 @@ ERA (n=29): **corr 0.984, MAD 0.098** (my 6.03 / stored 5.98; ~11.8% unearned = 
 C1) · K9/BB9/HR9/WHIP (.98-.99) · FIP (.986, cFIP 3.157) · **ERA (.984 DRS)** · OPR/Stuff+/run_env/HTP (total-season, built) ·
 scouting (OPR-style rollup). The whole conf-stats layer sources from ONE pitch-log edge-fn stage. REMAINING #4 = ASSEMBLE the
 unified run (all fields, one pass) → A/B whole → fold into edge fn → retire the 5 producers + one-off RPCs + _team_conf helper.
+## ★★ #4 ASSEMBLY — Bucket A WRITTEN to staging (2026-08-18) + PLAN to finish
+- **DONE:** `scripts/sql/conf_stats_unified_assembly.sql` — CTAS `_conf_agg` (per-conference intra-conf aggregate, ~20s over
+  2.58M rows) → UPDATE `Conference Stats` Bucket-A fields (AVG/OBP/ISO/SLG/OPS, ba/obp/slg/iso_plus, WRC_plus=C1, K9/BB9/HR9/
+  WHIP/FIP+3.157/ERA=DRS). **29 D1 confs updated.** Backup `_confstats_backup_preassembly`. Bucket B (OPR/Stuff+/run_env/HTP/
+  scouting) left intact (validated + stored). Verified: refreshed values sane; WRC_plus now current-C1 (fixed the stale June value).
+  NOTE (intended, not a bug): intra-conf rates put WEAK confs on top offensively (SWAC/MWC high AVG/wRC+ — hitters vs weak
+  pitching) — internal balance, NOT absolute quality; exactly why HTP uses Stuff+/OPR/run_env, not wRC+, for the competition lever.
+- **PLAN — remaining #4 → then PROJECTIONS:**
+  1. **Per-player intra-conf storage** — store each player's intra-conf line (filterable on Season Stats via is_conference_game)
+     → the conference aggregate pools from it (already = the validated `_conf_agg`). [product layer]
+  2. **Scouting-averages rollup** — verify + write the ~40 hitter_/pitcher_ fields (total-season PA/IP-weighted, OPR-style).
+  3. **Fold the WHOLE run into the ONE edge function** (Track B): on ingest → is_conference_game → _conf_agg → Conference Stats
+     (Bucket A) + Bucket B rollups + run_env/HTP, all stored, stamped. Repoint the live-HTP display spots to read stored (page-load gate).
+  4. **RETIRE the 5 producers** (importConferenceStats, populate-conference-stats-env-plus, conferenceScoutingAverages,
+     conferenceStuffPlus-V1) + one-off RPCs (flag_conf_batch, set_conf_game) + helper `_team_conf` — build-check-then-clear (last).
+  5. **→ THEN PROJECTIONS (edge fn 6b):** with every lever final (Stuff+, park, HTP, conf-stats), fire the transfer recompute →
+     7c snapshots (also fixes TB oWAR regression) → NIL wiring. Everything lands ONCE. (Trevor: "next is going to be the projections.")
