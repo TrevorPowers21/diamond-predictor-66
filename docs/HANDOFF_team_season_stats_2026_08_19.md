@@ -89,3 +89,22 @@ The WAR rollup is a **pure `SUM ... GROUP BY (TeamID, Season)`** — no player-l
 ## 11. Open decisions
 - (settled) Records IN for v1 (wins-over-projection payoff). Park = both single-season + rolling. team_war_snapshots migrate not scrub.
 - (to confirm at build) Masters `TeamID` semantics (per-season id vs source_id) for the join.
+
+## ★ team_season_stats — BUILD PROGRESS + DECISIONS (2026-08-19, staging)
+STEP 1 DONE: CREATE TABLE team_season_stats (117 cols) + RLS, staging. Migration supabase/migrations/20260819000000_team_season_stats.sql.
+STEP 2 DONE: WAR rollup (Σ Masters, reg+total), D1 ONLY. 308 rows. VERIFIED: pWAR corr 1.0000 / max diff 0.005 vs
+team_war_snapshots.raw_total_pwar (exact); oWAR = Σ desc_owar correct by construction (Arkansas 16 hitters, 0 null, Σ=8.86).
+SQL: scripts/sql/team_season_stats_war_rollup.sql.
+
+DECISIONS (Trevor 2026-08-19):
+- **D1 ONLY** — JUCO (NJCAA_D1, 158 teams) EXCLUDED. Descriptive WAR is D1 (all 5343 D1 hitters have desc_owar; all 2903 JUCO NULL).
+  JUCO runs on the projection overlay elsewhere. (Aligns with the Division Table Separation direction.)
+- **DESCRIPTIVE ONLY — no projection WAR block.** Projection is a TEAM BUILDER function living in a DIFFERENT area; we have NO
+  historical projections. 2027 is the FIRST time we store preseason projections + a LIVE desc WAR accumulating through the season
+  (+ per-play). team_season_stats holds 2026 descriptive now; 2027 desc WAR folds in from the pitch log (not projection) as the season builds.
+- **ONE future column added:** preseason_proj_total_war (nullable, per program) — for tracking players/programs vs preseason
+  expectation; populated starting 2027 preseason. Per-PLAYER preseason projection lives elsewhere/future. NOT a blocker to this build.
+- **team_war_snapshots migration = historical/champion carry ONLY** (2025 champs, seed). Its old oWAR is the pre-redesign PROJECTION
+  metric — NOT a baseline for the new descriptive oWAR (it validated pWAR only). Do NOT overwrite descriptive with it.
+- Dropped scratch _conf_agg (29) + _team_home_park (368) — completed-step intermediates; results already in Conference Stats / Park
+  Factors; backups exist. Cleared the staging RLS advisory.
