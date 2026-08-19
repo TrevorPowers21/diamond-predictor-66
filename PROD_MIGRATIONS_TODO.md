@@ -255,3 +255,8 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   total_desc_war (o+d+bsr); rotation = top-3 pitchers by IP, bullpen = rank 4+ (matches team_war_2025_aggregation.sql). Comparison
   uses REGULAR-SEASON desc WAR (_reg) — NO proration (Trevor: reg-season total is more accurate). APPLIED STAGING 2026-08-19:
   refresh(2026) → 308; rotation+bullpen=pwar (0 mismatch), hitter_war=o+d+bsr (0 mismatch); Georgia 24.0hit/7.0rot/6.1bp/37.1tot. PROD: same.
+
+- [ ] ⚠ team_season_stats vs team_war_snapshots — DO NOT RETIRE team_war_snapshots (Trevor 2026-08-19). team_season_stats is
+  descriptive-from-pitch_log = 2026-only; 2025 (prod: LSU champ + 39 conf champs + prior-year WAR) CANNOT be recomputed (no 2025
+  pitch_log). FEDERATE BY ERA: team_season_stats canonical 2026+, team_war_snapshots kept for 2025 historical. Readers fall back to
+  snapshots for pre-2026. The earlier "retire team_war_snapshots + seed scripts" plan is CANCELLED.
