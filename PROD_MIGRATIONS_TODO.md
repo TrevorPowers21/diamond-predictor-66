@@ -233,3 +233,12 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
 - [ ] team_season_stats RATE/COUNTING re-source (wiring step) — rebuild from pitch_log_hitter_totals/pitcher_totals (frequent primary;
   TruMedia = cross-check). Hitting: Σ raw counts (pa/ab/singles/doubles/triples/hr/bb/hbp/sac) → derive rates + store splits. Pitching:
   needs IP(=outs/3)/ER derivation (conf-stats ERA-via-DRS). Cross-check vs Master (corr 0.996, ~16 AB/team gap = TruMedia reconcile). STAGING+PROD.
+
+- [x] team_season_stats RATE/COUNTING re-source PITCH-LOG-PRIMARY (Trevor 2026-08-19: pitch log = live/frequent, Master = occasional
+  source-of-truth fill). scripts/sql/team_season_stats_rates_pitchlog.sql (2 UPDATEs, run separately). HITTING fully pitch-log
+  (pitch_log_hitter_totals dim 'all' → rates + splits hr/2b/3b/bb/hbp/k). PITCHING counting pitch-log-native; RATES stay Master
+  IP-weighted (interim — pitch_log_pitcher_totals lacks IP/ER). APPLIED STAGING 2026-08-19: 308/308; hitting corr 0.996 vs Master,
+  pitch-log K9 corr 0.998; Georgia .324/.623 175HR. Supersedes the step-3 Master-sourced hitting rates. PROD: re-run from prod pitch_log_*_totals.
+- [ ] FOLLOW-ON: full pitch-log PITCHING rates (ERA/FIP/WHIP/K9/BB9/HR9) via IP=outs/3 + earned-run derivation (conf-stats ERA-via-DRS
+  machinery) so pitching is pitch-log-primary too. Currently Master IP-weighted (source-of-truth interim). + Master-reconcile/fill
+  logic (COALESCE pitch_log with Master where a team is thin/absent — needed for low-TrackMan programs; no-op for 2026 D1).
