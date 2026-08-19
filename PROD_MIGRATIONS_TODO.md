@@ -242,3 +242,10 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
 - [ ] FOLLOW-ON: full pitch-log PITCHING rates (ERA/FIP/WHIP/K9/BB9/HR9) via IP=outs/3 + earned-run derivation (conf-stats ERA-via-DRS
   machinery) so pitching is pitch-log-primary too. Currently Master IP-weighted (source-of-truth interim). + Master-reconcile/fill
   logic (COALESCE pitch_log with Master where a team is thin/absent — needed for low-TrackMan programs; no-op for 2026 D1).
+
+- [x] refresh_team_season_stats(p_season, p_reg_end) — the ONE idempotent routine that rebuilds team_season_stats for a season
+  (the descriptive STORE stage the unified upload edge fn calls via RPC after Masters + pitch_log_*_totals refresh). Migration
+  20260819010000_refresh_team_season_stats.sql. Assembles all 10 sub-steps (base+WAR, hitting rates+splits pitch-log, pitching
+  counting pitch-log, pitching rates Master, records, snapshot carry, conf context, faced ×2, park). DELETE-season-then-rebuild =
+  idempotent. p_reg_end defaults to <season>-05-18. APPLIED STAGING 2026-08-19: select refresh_team_season_stats(2026) → 308 rows;
+  reproduces pWAR corr 1.0000, team .277/.434, Georgia 53-14 (23-7), OSU faced 100.2/104.5, all 308 fully populated. PROD: create fn + call per season.
