@@ -225,3 +225,11 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   Stuff+ of pitchers T's hitters faced (opponent_id=T, metric on team_id conf); faced_htp(T)=pitch-wt conf HTP of hitters T's
   pitchers faced (team_id=T, metric on opponent_id conf). Reproduces proven OSU 100.2/104.5. Park = snapshot of USED rolling+single
   from "Park Factors" (which STAYS historical source). APPLIED STAGING 2026-08-19: 308/308 all three. PROD: re-run from prod pitch_log/Conference Stats/Park Factors.
+
+- [ ] ⚠ park_code/game_string BACKFILL — NOT DONE (confirmed 2026-08-19: 0 of 2,579,655 staging pitch_log rows populated). The
+  ingest logic exists (scripts/ingest_pitch_log.ts) but existing rows were never backfilled. Park factors were validated via clean
+  team_id home/away (corr 0.996), NOT park_code — so nothing downstream currently depends on park_code. Backfill from source files
+  (by uniq_pitch_id/game) when doing the pitch-log finalize; would let records key on game_string (game#) instead of the score-pair heuristic. STAGING+PROD.
+- [ ] team_season_stats RATE/COUNTING re-source (wiring step) — rebuild from pitch_log_hitter_totals/pitcher_totals (frequent primary;
+  TruMedia = cross-check). Hitting: Σ raw counts (pa/ab/singles/doubles/triples/hr/bb/hbp/sac) → derive rates + store splits. Pitching:
+  needs IP(=outs/3)/ER derivation (conf-stats ERA-via-DRS). Cross-check vs Master (corr 0.996, ~16 AB/team gap = TruMedia reconcile). STAGING+PROD.
