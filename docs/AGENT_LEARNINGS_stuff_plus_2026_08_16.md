@@ -611,3 +611,13 @@ unified run (all fields, one pass) → A/B whole → fold into edge fn → retir
      conferenceStuffPlus-V1) + one-off RPCs (flag_conf_batch, set_conf_game) + helper `_team_conf` — build-check-then-clear (last).
   5. **→ THEN PROJECTIONS (edge fn 6b):** with every lever final (Stuff+, park, HTP, conf-stats), fire the transfer recompute →
      7c snapshots (also fixes TB oWAR regression) → NIL wiring. Everything lands ONCE. (Trevor: "next is going to be the projections.")
+## ★★ INDEPENDENTS / FACED-COMPETITION DESIGN (Trevor 2026-08-18) — [[project_faced_competition_independents]]
+Oregon State players transferring → Independents have NO conference peers (OSU: 59 games, **0 is_conference_game**), so the
+intra-conf conf-stats framework produces nothing + the "Independent" conf row is a meaningless grab-bag. Stuff+ itself is fine
+(absolute D1). **SOLUTION = schedule-FACED competition** (the deferred OSU-faced-schedule concept, now proven): weighted avg of
+the conferences a team actually PLAYED × the per-conference Stuff+/HTP, from pitch_log opponent_id per PA.
+- Hitters → faced pitching = Σ(opp_conf.Stuff_plus × PA)/ΣPA. Pitchers → faced hitting = Σ(opp_conf.HTP × PA)/ΣPA.
+- **PROVEN: OSU faced Stuff+ 100.3 / HTP 104.6** (vs D1 avg 98/99) from their Big-West-heavy multi-conf schedule.
+- STORE per-team faced_stuff_plus/faced_htp (edge-fn stage). Independents → transfer engine reads FACED instead of conf row.
+- GENERALIZES: faced = correct competition for everyone (who you played); conf avg = approximation (faced≈conf-avg for conf teams).
+  FUTURE: per-player faced (Stuff+-faced-per-PA). BUILD-READY — offered to implement per-team faced metrics.
