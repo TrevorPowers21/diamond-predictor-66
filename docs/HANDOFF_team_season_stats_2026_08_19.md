@@ -265,3 +265,13 @@ Trevor: total hitter war (o+d+bsr) not just oWAR, full team (whole roster) not t
 - Hero strip (AnalyticsTab:827-838) headline pivots to full-team hitter WAR; the position-tier lineup display below (:840-857) stays (current-build starters by position).
 FRONTEND (WIRE C, page-load gated): useTeamWarSnapshots.ts (add team_season_stats source, era fallback) + GMAnalytics.tsx (hitter calc + labels)
 + AnalyticsTab.tsx (starterTotalOwar/buildLineupOwar → full-team hitter WAR + labels) + types.ts. Reg-season desc basis, no proration.
+## team_season_stats PITCHING RATES → pitch-log-primary (staging 2026-08-19)
+Trevor's outs-tracking IP method (track outs column transitions per half-inning, not atbat_desc parsing) UNLOCKED pitch-log pitching
+rates. refresh_team_season_stats() step 4a/4b:
+- IP = Σ(max(outs)+1)/3 over pitching half-innings (game key incl score-pair for DH split). corr 0.9932 vs Master IP.
+- K9/BB9/HR9 = pitch-log counts (pk/pbb/phr from step 3) ×9 / IP. WHIP=(pbb+ph)/IP. FIP=(13·phr+3·(pbb+phbp)−2·pk)/IP + 3.157 (cFIP D1 2026).
+- ERA = Master IP-weighted (SOURCE-OF-TRUTH). Pitch-log ERA = 0.825 corr (earned-run attribution via runs−(UR) is imperfect — inherited
+  runners/errors), so ERA stays official. K9/BB9/HR9/WHIP corr 0.996+; FIP mean matches Master.
+VERIFIED: 308/308, 0 null; Arkansas IP 532/K9 10.7/FIP 4.48/ERA 4.74; D1 avg IP 465 (smaller programs)/K9 8.33/FIP 5.03/ERA 6.16.
+ERA-source (Master) is the documented recommendation; overridable to pitch-log ERA if Trevor prefers. Hitting already pitch-log (step 2);
+Master-reconcile fill (step 2b) fills hitting from Master where pitch-log absent (no-op 2026 D1). FOLLOW-ON remaining: reg-window pitch-log rates; park_code backfill.

@@ -265,3 +265,9 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   2026-08-19: each pitcher_id has 1 pitcher_abbrev_name but 28-29 pitcher_full_names = batters faced). Reliable: pitcher_id +
   pitcher_abbrev_name. IMPACT = display-name only (all pitcher-keyed derived data uses pitcher_id → unaffected). Fix scripts/ingest_pitch_log.ts
   mapping + backfill pitcher_full_name from pitcher_id→Pitching Master. STAGING+PROD. See memory reference_pitch_log_pitcher_name_corrupt.
+
+- [x] team_season_stats PITCH-LOG PITCHING RATES (Trevor's outs-tracking method) — folded into refresh_team_season_stats() step 4a/4b
+  (migration 20260819010000 re-created). IP = Σ(max(outs)+1)/3 over pitching half-innings (corr 0.9932 vs Master IP). K9/BB9/HR9 =
+  pitch-log counts×9/IP; WHIP=(BB+H)/IP; FIP=(13HR+3(BB+HBP)−2K)/IP+3.157 (cFIP D1 2026). ERA = Master IP-weighted (SOURCE-OF-TRUTH;
+  pitch-log ERA noisy 0.825 due to earned-run attribution). APPLIED STAGING 2026-08-19: 308/308, Arkansas IP 532/K9 10.7/FIP 4.48/ERA 4.74;
+  D1 avg K9 8.33/FIP 5.03/ERA 6.16. PROD: same (re-run from prod pitch_log). ⚠ ERA-source decision (Master) is overridable if pitch-log ERA preferred.

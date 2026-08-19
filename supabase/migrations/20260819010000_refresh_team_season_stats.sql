@@ -78,6 +78,22 @@ BEGIN
     wrc_plus_total=((0.011+0.691*((pl.hits+pl.bb+pl.hbp)::float/nullif(pl.pa,0))+0.235*(pl.tb::float/nullif(pl.ab,0)))/0.3782)*100
   FROM pl WHERE ts.source_id=pl.sid AND ts.season=p_season;
 
+  -- 2b) MASTER-RECONCILE/FILL (Trevor's model: pitch-log primary, Master = source-of-truth fill for thin/absent teams).
+  --     Fills hitting rates from the authoritative Master ONLY where pitch-log left them null (team absent from pitch_log —
+  --     e.g. low-TrackMan programs). No-op for 2026 D1 (all 308 covered by pitch-log). Master rates = PA/AB-weighted.
+  WITH m AS (
+    SELECT tt.source_id sid, sum(hm.pa) pa, sum(hm.ab) ab,
+      sum(hm."AVG"*hm.ab)/nullif(sum(hm.ab),0) tavg, sum(hm."OBP"*hm.pa)/nullif(sum(hm.pa),0) tobp,
+      sum(hm."SLG"*hm.ab)/nullif(sum(hm.ab),0) tslg
+    FROM "Hitter Master" hm JOIN "Teams Table" tt ON tt.id=hm."TeamID"
+    WHERE hm."Season"=p_season AND hm.division='D1' AND hm.ab>0 GROUP BY tt.source_id
+  )
+  UPDATE public.team_season_stats ts SET
+    pa_total=m.pa, ab_total=m.ab, avg_total=m.tavg, obp_total=m.tobp, slg_total=m.tslg,
+    iso_total=m.tslg-m.tavg, ops_total=m.tobp+m.tslg,
+    wrc_plus_total=((0.011+0.691*m.tobp+0.235*m.tslg)/0.3782)*100
+  FROM m WHERE ts.source_id=m.sid AND ts.season=p_season AND ts.avg_total IS NULL;
+
   -- 3) pitching counting (pitch-log-native)
   WITH pl AS (
     SELECT tt.source_id sid, sum(p2.total_bf) bf, sum(p2.total_k) k, sum(p2.total_bb) bb, sum(p2.total_hbp) hbp,
@@ -91,18 +107,33 @@ BEGIN
     bf_total=pl.bf, pk_total=pl.k, pbb_total=pl.bb, phbp_total=pl.hbp, phr_total=pl.hr, ph_total=pl.h
   FROM pl WHERE ts.source_id=pl.sid AND ts.season=p_season;
 
-  -- 4) pitching RATES (Master IP-weighted, source-of-truth interim) + ip_total
+  -- 4a) ERA = Master IP-weighted (SOURCE-OF-TRUTH). Pitch-log ERA is noisy (corr 0.825) because earned-run attribution
+  --      (runs − (UR)) is imperfect — so ERA stays on the official Master. Everything else pitch-log-derived below (4b).
   WITH a AS (
-    SELECT tt.source_id sid, sum(pm."IP") ip,
-      sum(pm."ERA"*pm."IP")/nullif(sum(pm."IP"),0) tera, sum(pm."FIP"*pm."IP")/nullif(sum(pm."IP"),0) tfip,
-      sum(pm."WHIP"*pm."IP")/nullif(sum(pm."IP"),0) twhip, sum(pm."K9"*pm."IP")/nullif(sum(pm."IP"),0) tk9,
-      sum(pm."BB9"*pm."IP")/nullif(sum(pm."IP"),0) tbb9, sum(pm."HR9"*pm."IP")/nullif(sum(pm."IP"),0) thr9
+    SELECT tt.source_id sid, sum(pm."ERA"*pm."IP")/nullif(sum(pm."IP"),0) tera
     FROM "Pitching Master" pm JOIN "Teams Table" tt ON tt.id=pm."TeamID"
     WHERE pm."Season"=p_season AND pm.division='D1' AND pm."IP">0 GROUP BY tt.source_id
   )
+  UPDATE public.team_season_stats ts SET era_total=a.tera FROM a WHERE ts.source_id=a.sid AND ts.season=p_season;
+
+  -- 4b) pitch-log IP + K9/BB9/HR9/WHIP/FIP (pitch-log-PRIMARY). IP via outs-tracking: Σ (max(outs)+1)/3 over pitching
+  --      half-innings (corr 0.9932 vs Master IP). Rates from pitch-log counts (pk/pbb/phbp/phr/ph set in step 3) ÷ pitch-log IP.
+  --      cFIP=3.157 (D1 2026 descriptive constant). K9/BB9/HR9/WHIP corr 0.996+ vs Master; FIP mean matches Master FIP.
+  WITH ip AS (
+    SELECT team_id sid, sum(mo+1)/3.0 ip FROM (
+      SELECT team_id, date::date d, game_venue_id, total_runs, opponent_runs, inn, max(outs) mo
+      FROM pitch_log WHERE season=p_season AND team_id IS NOT NULL AND inn IS NOT NULL
+      GROUP BY team_id, date::date, game_venue_id, total_runs, opponent_runs, inn
+    ) h GROUP BY team_id
+  )
   UPDATE public.team_season_stats ts SET
-    ip_total=a.ip, era_total=a.tera, fip_total=a.tfip, whip_total=a.twhip, k9_total=a.tk9, bb9_total=a.tbb9, hr9_total=a.thr9
-  FROM a WHERE ts.source_id=a.sid AND ts.season=p_season;
+    ip_total  = ip.ip,
+    k9_total  = ts.pk_total*9.0/nullif(ip.ip,0),
+    bb9_total = ts.pbb_total*9.0/nullif(ip.ip,0),
+    hr9_total = ts.phr_total*9.0/nullif(ip.ip,0),
+    whip_total= (ts.pbb_total+ts.ph_total)/nullif(ip.ip,0),
+    fip_total = (13*ts.phr_total + 3*(ts.pbb_total+ts.phbp_total) - 2*ts.pk_total)/nullif(ip.ip,0) + 3.157
+  FROM ip WHERE ts.source_id=ip.sid AND ts.season=p_season;
 
   -- 5) records (pitch_log game outcomes; game key = distinct score-pair; boundary v_reg_end)
   WITH games AS (
