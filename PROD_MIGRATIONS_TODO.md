@@ -211,3 +211,11 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   ⚠ game_string/park_code are 0% populated so unavailable as a game id — the park_code ingest backfill is still pending). W/L from
   total_runs vs opponent_runs (14 ties excluded); boundary 2026-05-18. w_total/l_total=all, w_reg/l_reg=reg, w_conf/l_conf=reg-season
   conference (standings). APPLIED STAGING 2026-08-19: 308 teams avg 55 games; Georgia 53-14 (23-7 SEC), Arkansas 41-22 (17-13). PROD: re-run from prod pitch_log.
+
+- [x] team_season_stats step 5 — migrate snapshot history + conf context. scripts/sql/team_season_stats_migrate_snapshot_conf.sql
+  (run the 2 UPDATEs separately — CLI is one-statement-per-call). (a) carry proration_factor/games_played_est/champion flags/
+  national_seed_rank from team_war_snapshots (join source_team_id=source_id) — NOT the stale old oWAR. (b) conf_stuff_plus/conf_htp/
+  run_env_factor/conf_opr/conf_wrc_plus from "Conference Stats" via conference_id. APPLIED STAGING 2026-08-19: 308/308 both.
+  ⚠ team_drs left NULL — team_war_snapshots.team_drs is empty on staging (snapshot rebuilt after the 2026-08-09 populate);
+  regenerate via scripts/drs/derive_team_drs.mjs (dwar_total already populated). ⚠ PROD: run (a) against PROD team_war_snapshots
+  (has 2025 champions — Louisiana State + 39 conf champs) so championship history carries into 2025 team_season_stats rows.
