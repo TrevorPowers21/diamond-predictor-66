@@ -189,6 +189,11 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   pWAR corr 1.0000 (exact) vs team_war_snapshots.raw_total_pwar; oWAR=Σdesc_owar by construction. PROD: re-run from prod Masters.
 - [ ] STAGING cleanup (done) — DROP _conf_agg + _team_home_park (completed-step scratch; results in Conference Stats/Park Factors;
   backups exist). Cleared RLS advisory. STAGING-ONLY temps → no prod action unless prod created them.
+- [ ] team_season_stats RATES (step 3) — team rate block = weighted aggregate of the AUTHORITATIVE Masters (TruMedia=BBRef), NOT
+  pitch_log (Master is not a pitch-log total; confirmed import-csvs/registry.ts). Hitting: AVG=Σ(AVG·ab)/Σab, OBP=Σ(OBP·pa)/Σpa,
+  SLG=Σ(SLG·ab)/Σab, ISO=SLG−AVG, OPS=OBP+SLG, wRC+=C1; store pa_total/ab_total. Pitching: ERA/FIP/WHIP/K9/BB9/HR9=Σ(rate·IP)/ΣIP;
+  store ip_total/bf_total. D1 only, total season (reg rates deferred; Master has no reg-rate cols). Detailed counting splits
+  (HR/2B/3B/BB/HBP/SB/CS/SF) from pitch_log later. APPLIED STAGING 2026-08-19 (308 teams, 0 null; team .277/.381/.434 wRC+~100 = D1 baselines). Script scripts/sql/team_season_stats_rates.sql. PROD: re-agg from prod Masters.
 - [ ] Team RECORDS run (NEW) — derive overall + conference W-L per team-season from pitch_log game outcomes (runs/game →
   win/loss; is_conference_game → conf record). Not a player rollup. Stores into team_season_stats; enables wins-over-projection (future). STAGING+PROD.
 - [ ] CONSOLIDATION (build-check-then-clear, LAST) — **subsume `team_war_snapshots`, FEDERATE `Park Factors` (Trevor 2026-08-19):**
