@@ -206,3 +206,8 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
     team_season_stats stores a DERIVED SNAPSHOT of the values USED for that team-season: the 3-yr rolling (projection input) + the
     single-season, both stamped by the edge fn from `"Park Factors"` each run. Single writer = no drift; `"Park Factors"` stays source-of-truth.
   - Every step (CREATE, each ADD COLUMN, the team_war_snapshots DROP, the repoint) gets its own line logged when applied — per the banner at top.
+- [x] team_season_stats RECORDS (step 4) — scripts/sql/team_season_stats_records.sql. Derived from pitch_log game outcomes
+  (team_id=source_id; game key = DISTINCT team_id/date/game_venue_id/total_runs/opponent_runs → splits doubleheaders by final;
+  ⚠ game_string/park_code are 0% populated so unavailable as a game id — the park_code ingest backfill is still pending). W/L from
+  total_runs vs opponent_runs (14 ties excluded); boundary 2026-05-18. w_total/l_total=all, w_reg/l_reg=reg, w_conf/l_conf=reg-season
+  conference (standings). APPLIED STAGING 2026-08-19: 308 teams avg 55 games; Georgia 53-14 (23-7 SEC), Arkansas 41-22 (17-13). PROD: re-run from prod pitch_log.
