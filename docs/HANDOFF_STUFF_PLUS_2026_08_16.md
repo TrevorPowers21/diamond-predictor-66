@@ -1069,3 +1069,26 @@ feeds projections) + the **single-season**, both stamped by the edge fn from `"P
 writer (edge fn) recomputes from the source-of-truth `"Park Factors"` every run; the team row just carries the value that applied
 so reads are self-contained (stored-not-live). RULE: team_season_stats SUBSUMES same-grain per-team-season tables, FEDERATES
 different-grain input stores (Park Factors, and by the same logic any raw historical input store). [[project_park_factor_rework]] [[feedback_build_check_then_clear]]
+## ★★★ team_season_stats — AUTHORITATIVE SCHEMA + BUILD RULE (Trevor-confirmed 2026-08-19)
+The comprehensive per-team-per-season table, written AUTOMATICALLY by the ONE edge fn (read surface; edge fn = the writer).
+BUILD RULE: team = **Σ player values**. Sum every counting stat (per window), then DERIVE weighted rates from the sums
+(PA/IP weight falls out — never average player rates). Team WAR = Σ player WAR (per window). Records/park/conf/faced from their sources.
+
+**KEYS:** source_id (program, STABLE) + team_season_id (per-season Teams Table id, uuid) + season + conference_id + team_name/abbreviation.
+
+**WINDOWS:** WARs are stored TWICE — `_reg` (regular season) + `_total` (incl. postseason), split on the season boundary
+(reg ends 2026-05-18, [[project_season_boundaries]]). Counting stats also stored both windows (cheap → rates derivable either). Rates DERIVED, not split-mandated.
+
+**COLUMNS:**
+- Records (NEW run from pitch_log game outcomes — NOT a player rollup): w/l overall, w/l conference (+ total incl post). FUTURE: wins_over_projection (actual vs projected-from-team-WAR).
+- Hitting counting (Σ players): pa/ab/h/2b/3b/hr/bb/hbp/k/sb/cs/sf… → DERIVED avg/obp/slg/iso/ops/wrc+ (from sums).
+- Pitching counting (Σ players): ip(=outs/3)/k/bb/hbp/hr/h/er… → DERIVED era/fip/whip/k9/bb9/hr9 (from sums).
+- WAR matrix (Σ player WAR), each _reg + _total: owar, dwar, bsrwar, pwar, total_war. (bsrwar → "best baserunning team in the country" leaderboard.)
+  Carry from team_war_snapshots: proration_factor, games_played_est, n_hitters, n_pitchers, team_drs, is_national_champ, is_conference_champ, national_seed_rank.
+- Conference-scoped (intra-conf, MIGRATE from "Conference Stats"): conf rate line + conf_stuff_plus, conf_htp, run_env_factor.
+- Competition (faced): faced_stuff_plus, faced_htp.
+- Park (federated SNAPSHOT of values USED — Park Factors stays the historical source): park_single_season (current) + park_rolling_3yr (projection input), per component.
+- FUTURE: home/road splits, per-player faced.
+
+**team_war_snapshots = MIGRATE, don't scrub** (staging: 2026 only, 308 rows; prod: +2025 champion seed). season is a key → every
+existing row becomes a team_season_stats row (WAR A/B-verified, champion flags/seed/proration carried), THEN retire the old table.

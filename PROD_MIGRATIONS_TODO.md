@@ -169,14 +169,21 @@ DESIGN + WHY in docs/HANDOFF_STUFF_PLUS_2026_08_16.md + docs/AGENT_LEARNINGS_stu
 Forced by Independents (Oregon State transfers) needing faced-competition; becomes the team-stats layer the system lacks.
 Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots + Park Factors INTO it AFTER verify (never two live copies).
 - [ ] CREATE TABLE `team_season_stats` — key `(source_id, season)` (source_id = STABLE program id; confirmed OSU 3111 / UGA 226
-  every season) + store per-season `id` (uuid) + `conference_id`. COLUMNS (fill ALL first pass, computed in the ONE edge fn):
-  faced_stuff_plus, faced_htp, conf_stuff_plus, conf_htp, run_env_factor, ERA/AVG/OBP/SLG/ISO/wRC+/K9/BB9/HR9/WHIP/FIP,
-  desc_war, total_war, park factors USED (3-yr rolling that feeds projections + single-season, a derived snapshot from `"Park Factors"`),
-  (future: home/road splits, per-player faced). RLS ENABLE (service-role pipeline table).
+  every season) + store per-season `id` (uuid) + `conference_id` + team_name/abbreviation. AUTHORITATIVE column list + build rule
+  in handoff/agent §team_season_stats AUTHORITATIVE SCHEMA. Fill ALL first pass, computed in the ONE edge fn. BUILD RULE: team =
+  Σ player values (sum counting stats per window → DERIVE weighted rates from the sums; team WAR = Σ player WAR). COLUMNS:
+  records (w/l overall + conference, NEW run from pitch_log game outcomes) ; hitting+pitching counting (Σ) → derived rates ;
+  WAR matrix owar/dwar/bsrwar/pwar/total_war each **_reg + _total** (split on season boundary 2026-05-18) + carried proration/
+  champion-flags/seed/team_drs ; conf-scoped (migrate from "Conference Stats") ; faced_stuff_plus/faced_htp ; park snapshot
+  (single-season + 3-yr rolling, derived from "Park Factors" which STAYS as historical source). RLS ENABLE (service-role pipeline table).
   STAGING first (build + fill + A/B), then PROD (same DDL + edge-fn populate from prod pitch_log/Teams Table/Park Factors).
+- [ ] Team RECORDS run (NEW) — derive overall + conference W-L per team-season from pitch_log game outcomes (runs/game →
+  win/loss; is_conference_game → conf record). Not a player rollup. Stores into team_season_stats; enables wins-over-projection (future). STAGING+PROD.
 - [ ] CONSOLIDATION (build-check-then-clear, LAST) — **subsume `team_war_snapshots`, FEDERATE `Park Factors` (Trevor 2026-08-19):**
-  - `team_war_snapshots` is the SAME grain (team×season) → after team_season_stats WAR cols A/B-match it, repoint readers
-    (useTeamWarSnapshot/useWarBenchmarks/CLAUDE.md TB Compare) → then `DROP TABLE team_war_snapshots`. ⚠ NOT until cols verify on staging+prod.
+  - `team_war_snapshots` is the SAME grain (team×season) → **MIGRATE every existing row first (don't scrub)**: staging = 2026 (308
+    rows); prod = +2025 champion seed. season is a key → each row becomes a team_season_stats row (champion flags/seed/proration
+    carried). After team_season_stats WAR cols A/B-match, repoint readers (useTeamWarSnapshot/useWarBenchmarks/CLAUDE.md TB
+    Compare) → then `DROP TABLE team_war_snapshots`. ⚠ NOT until history migrated + cols verify on staging+prod.
   - `"Park Factors"` is a DIFFERENT grain (park-data INPUT store: raw single-season + rolling, ALL history) → **KEEP IT, do NOT retire.**
     It's always needed as the historical park source + projection ingredient (we are NOT backfilling full park history into team rows).
     team_season_stats stores a DERIVED SNAPSHOT of the values USED for that team-season: the 3-yr rolling (projection input) + the
