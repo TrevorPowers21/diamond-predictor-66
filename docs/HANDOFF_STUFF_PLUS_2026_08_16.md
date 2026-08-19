@@ -917,3 +917,16 @@ Using `is_conference_game=true` + `_team_conf` on team_id, pooled per conference
   AVG=H/AB · OBP=(H+BB+HBP)/(AB+BB+HBP+SF) · ISO=(2B+2·3B+3·HR)/AB · SLG=AVG+ISO(=TB/AB) · env+ = rate÷NCAA×100 · wRC+ = C1(OBP,SLG).
   All validated vs stored (rates corr 0.98; env+ 0.98; wRC+ = canonical, stored stale). NEXT: pitching-rate bucket
   (ERA via DRS ER, FIP/WHIP/K9/BB9/HR9 from intra-conf events) → then ASSEMBLE the unified run.
+## ★★ #4 PITCHING-RATE BUCKET VALIDATED (intra-conference) — 2026-08-18
+Same intra-conf terminal-PA aggregation as hitting (in intra-conf games both teams = same conference, so the events ARE the
+conference's pitching-vs-its-hitting). IP = outs/3 where outs = (Strikeout+GroundOut+FlyOut+PopOut+LineOut+Sac+FieldersChoice)
++ 2·DoublePlay. Grouped per conference, A/B vs stored:
+- **K9 corr 0.991 / MAD 0.22 · BB9 0.988 / 0.11 · HR9 0.993 / 0.03 · WHIP 0.980 / 0.037.** All dead-on.
+- **FIP** = `(13·HR + 3·(BB+HBP) − 2·K)/IP + cFIP`, **cFIP ≈ 3.157** (D1 2026; offset SD only 0.056 → near-constant). corr 0.986.
+  (cFIP derivable each season: lgERA − FIP_core_league; or fit the offset as here.)
+- **ERA = DRS earned runs on the INTRA-CONF subset / intra-conf IP × 9.** The DRS score-driven ER attribution is validated
+  (corr 0.987 vs Master ERA at pitcher level); the BUILD step = apply that earned-run attribution filtered to is_conference_game
+  (per-game earned runs → conf). The other 5 pitching rates need no earned-run data (pure event counts).
+⇒ BOTH rate buckets (hitting + pitching) now fully specified + validated from intra-conf pitch-log. Talent/park bucket
+(OPR/Stuff+/scouting/run_env/HTP) = total-season, done. REMAINING for #4: (1) ERA intra-conf via DRS; (2) scouting-averages
+rollup check; (3) ASSEMBLE the unified run (all fields, one pass) → A/B whole → fold into edge fn → retire the 5 producers.
