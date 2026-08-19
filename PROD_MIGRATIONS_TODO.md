@@ -1,5 +1,19 @@
 # Prod migration checklist — `feature/general-manager-interface`
 
+> ## ★★★ LOGGING DISCIPLINE — VITALLY IMPORTANT (Trevor 2026-08-19) ★★★
+> **EVERY schema or SQL change is logged HERE, no exceptions.** This file is the single
+> authoritative record for the staging→prod push. The instant we run ANY of the following
+> on staging, an entry is appended here BEFORE moving on:
+> - a `CREATE TABLE` / `ALTER TABLE` (columns, types, constraints, indexes)
+> - a `DROP` (table/column/view/function/RPC) — even a temp/helper cleanup
+> - a data write that must be reproduced on prod (backfill, recompute, UPDATE)
+> - an RLS `ENABLE` / policy, a role/GUC change, a new RPC or view
+>
+> Each entry states: the exact DDL/SQL, `APPLIED STAGING <date>` vs `PROD pending`, and any
+> **prod-specific note** (e.g. "regenerate the fixture from PROD data, do NOT copy staging"
+> when a value is per-env). A change that touches the DB but is NOT written here is a bug.
+> The prod push reads ONLY this file — if it's not here, it doesn't happen on prod. [[feedback_claude_runs_backfills_dry_run]]
+
 Every schema change on this branch that is **not yet on prod**, in apply order. Run
 these against prod at push time (staging already has them). Most use
 `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, so re-running is safe —
@@ -148,3 +162,17 @@ PROD: same — migration adds the column; backfill via the RPC-loop (or compute 
   _conf_agg → UPDATE 29 D1 confs: rates/env+/WRC_plus(C1)/K9/BB9/HR9/WHIP/FIP/ERA). Backup _confstats_backup_preassembly. Fixes
   stale pre-C1 WRC_plus. PROD: same (compute from prod pitch_log; NCAA constants from prod ncaa_averages; cFIP re-derive).
   Then fold into edge fn + retire the 5 producers (build-check-then-clear).
+
+## ★ team_season_stats — NEW canonical per-team-per-season table (feature/war-recalibration) — 2026-08-19
+DESIGN + WHY in docs/HANDOFF_STUFF_PLUS_2026_08_16.md + docs/AGENT_LEARNINGS_stuff_plus_2026_08_16.md §TEAM_SEASON_STATS.
+Forced by Independents (Oregon State transfers) needing faced-competition; becomes the team-stats layer the system lacks.
+Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots + Park Factors INTO it AFTER verify (never two live copies).
+- [ ] CREATE TABLE `team_season_stats` — key `(source_id, season)` (source_id = STABLE program id; confirmed OSU 3111 / UGA 226
+  every season) + store per-season `id` (uuid) + `conference_id`. COLUMNS (fill ALL first pass, computed in the ONE edge fn):
+  faced_stuff_plus, faced_htp, conf_stuff_plus, conf_htp, run_env_factor, ERA/AVG/OBP/SLG/ISO/wRC+/K9/BB9/HR9/WHIP/FIP,
+  desc_war, total_war, park factors (rg/hr/etc.), (future: home/road splits, per-player faced). RLS ENABLE (service-role pipeline table).
+  STAGING first (build + fill + A/B), then PROD (same DDL + edge-fn populate from prod pitch_log/Teams Table/Park Factors).
+- [ ] CONSOLIDATION (build-check-then-clear, LAST): after team_season_stats WAR cols A/B-match `team_war_snapshots` AND park cols
+  A/B-match `"Park Factors"`, repoint readers (useTeamWarSnapshot/useWarBenchmarks/CLAUDE.md TB Compare + all park readers) →
+  then retire `team_war_snapshots` + `"Park Factors"`. ⚠ DO NOT drop the old tables until their columns verify on BOTH staging+prod.
+  Every step here (CREATE, each ADD COLUMN, each DROP, the repoint) gets its own line logged when applied — per the banner at top.

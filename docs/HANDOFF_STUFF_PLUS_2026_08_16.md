@@ -1050,3 +1050,11 @@ Trevor: don't love Phase-1-only (ideas get lost) + torn on tearing down team_war
 - **THE DRIFT RULE:** the trap is not a new table — it's leaving TWO LIVE COPIES. Pick ONE: CONSOLIDATE (this table canonical, old
   retired after verify — CHOSEN) OR FEDERATE (old stays canonical, team_season_stats holds only homeless stats + a VIEW joins).
   Never both-live-copies. [[feedback_build_check_then_clear]] Consolidate matches the Masters + one-process goal.
+## ★★★ PROD-PUSH LOGGING DISCIPLINE — VITALLY IMPORTANT (Trevor 2026-08-19)
+EVERY schema or SQL change goes into `PROD_MIGRATIONS_TODO.md` the moment it runs on staging — no exceptions. That file is
+the SINGLE authoritative record the staging→prod push reads; if a DB change isn't written there, it does NOT happen on prod
+(= a bug). Log: CREATE/ALTER (cols/types/constraints/indexes), any DROP (incl temp/helper cleanup), backfills/recomputes/UPDATEs,
+RLS enables/policies, role/GUC changes, new RPCs/views. Each entry: exact DDL/SQL + `APPLIED STAGING <date>` vs `PROD pending` +
+prod-specific note (esp. "regenerate from PROD data, don't copy staging" for per-env values). team_season_stats is logged there
+(CREATE + every ADD COLUMN + the team_war_snapshots/Park Factors consolidation DROPs, each line as applied). See the banner at
+the top of PROD_MIGRATIONS_TODO.md.
