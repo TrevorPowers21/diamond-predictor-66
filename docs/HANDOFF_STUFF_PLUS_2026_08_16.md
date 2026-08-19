@@ -1058,3 +1058,14 @@ RLS enables/policies, role/GUC changes, new RPCs/views. Each entry: exact DDL/SQ
 prod-specific note (esp. "regenerate from PROD data, don't copy staging" for per-env values). team_season_stats is logged there
 (CREATE + every ADD COLUMN + the team_war_snapshots/Park Factors consolidation DROPs, each line as applied). See the banner at
 the top of PROD_MIGRATIONS_TODO.md.
+## ★ PARK FACTORS — KEEP the table (do NOT retire); team_season_stats FEDERATES it (Trevor 2026-08-19)
+Refines the "consolidate into team_season_stats" plan. Two different fates by GRAIN:
+- `team_war_snapshots` = SAME grain (team×season) → team_season_stats SUBSUMES it (data → columns, retire after A/B verify).
+- `"Park Factors"` = DIFFERENT grain — a park-data INPUT store (raw single-season + rolling, ALL history, keyed by park/team-season),
+  an ingredient projections consume, not a per-team summary. **KEEP IT.** Always need the historical park record + we are NOT
+  backfilling full park history into team rows. So park is FEDERATED, not consolidated.
+team_season_stats stores the park values USED for that team-season = a DERIVED SNAPSHOT: the **3-yr rolling** (the number that
+feeds projections) + the **single-season**, both stamped by the edge fn from `"Park Factors"` each run. NOT a drift copy — single
+writer (edge fn) recomputes from the source-of-truth `"Park Factors"` every run; the team row just carries the value that applied
+so reads are self-contained (stored-not-live). RULE: team_season_stats SUBSUMES same-grain per-team-season tables, FEDERATES
+different-grain input stores (Park Factors, and by the same logic any raw historical input store). [[project_park_factor_rework]] [[feedback_build_check_then_clear]]

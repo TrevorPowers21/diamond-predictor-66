@@ -120,9 +120,10 @@ Apply in order at push time. All additive/idempotent. Staging dates noted.
   `supabase/functions/google-sheets-sync/index.ts` (lines ~1006/1054) FIRST/together — that function is otherwise LIVE (syncs
   8 tables: players, nil_valuations, player_predictions, season_stats, conference_stats, model_config, power_ratings) so do
   NOT delete the function, only its park_factors delete+insert. Then `DROP TABLE public.park_factors;`. Fold into audit (#7). STAGING+PROD.
-- [ ] `park_factors_seasonal` (NEW) — raw single-season park factors (2024/2025/2026…, own-year NCAA-normalized), pipeline
-  inputs; `"Park Factors"` stays the STORED 3-yr rolling output readers consume. Create + backfill from archived TruMedia
-  CSVs. [PENDING Trevor's table-shape call: own table vs columns on Teams Table.] STAGING first, then PROD.- [x] `"Park Factors"` seasonal columns + backfill — `ALTER TABLE "Park Factors" ADD COLUMN *_seasonal` (10 cols) +
+- [~] ~~`park_factors_seasonal` (NEW separate table)~~ **SUPERSEDED 2026-08-19 — DO NOT RUN.** Trevor chose COLUMNS on
+  `"Park Factors"` (the `*_seasonal` entry directly below), not a separate table. No `park_factors_seasonal` table exists on
+  staging; do not create one on prod. Kept here struck-through so the audit trail is explicit.
+- [x] `"Park Factors"` seasonal columns + backfill — `ALTER TABLE "Park Factors" ADD COLUMN *_seasonal` (10 cols) +
   `scripts/backfill_park_factors_seasonal.ts --apply` (self-normalized single-season 2024/25/26 + stored 2026 3-yr rolling).
   APPLIED STAGING 2026-08-18 (922 rows). Backup `_park_factors_backup_20260818`. **PROD:** same ALTER + re-run backfill against
   prod (the archived CSVs are league-wide, not per-env — same input both DBs); verify vs prod's current Park Factors rows.- [ ] 20260818000000_pitch_log_park_code.sql — add game_string + park_code to pitch_log (+ index). park_code = stable
@@ -170,9 +171,14 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
 - [ ] CREATE TABLE `team_season_stats` — key `(source_id, season)` (source_id = STABLE program id; confirmed OSU 3111 / UGA 226
   every season) + store per-season `id` (uuid) + `conference_id`. COLUMNS (fill ALL first pass, computed in the ONE edge fn):
   faced_stuff_plus, faced_htp, conf_stuff_plus, conf_htp, run_env_factor, ERA/AVG/OBP/SLG/ISO/wRC+/K9/BB9/HR9/WHIP/FIP,
-  desc_war, total_war, park factors (rg/hr/etc.), (future: home/road splits, per-player faced). RLS ENABLE (service-role pipeline table).
+  desc_war, total_war, park factors USED (3-yr rolling that feeds projections + single-season, a derived snapshot from `"Park Factors"`),
+  (future: home/road splits, per-player faced). RLS ENABLE (service-role pipeline table).
   STAGING first (build + fill + A/B), then PROD (same DDL + edge-fn populate from prod pitch_log/Teams Table/Park Factors).
-- [ ] CONSOLIDATION (build-check-then-clear, LAST): after team_season_stats WAR cols A/B-match `team_war_snapshots` AND park cols
-  A/B-match `"Park Factors"`, repoint readers (useTeamWarSnapshot/useWarBenchmarks/CLAUDE.md TB Compare + all park readers) →
-  then retire `team_war_snapshots` + `"Park Factors"`. ⚠ DO NOT drop the old tables until their columns verify on BOTH staging+prod.
-  Every step here (CREATE, each ADD COLUMN, each DROP, the repoint) gets its own line logged when applied — per the banner at top.
+- [ ] CONSOLIDATION (build-check-then-clear, LAST) — **subsume `team_war_snapshots`, FEDERATE `Park Factors` (Trevor 2026-08-19):**
+  - `team_war_snapshots` is the SAME grain (team×season) → after team_season_stats WAR cols A/B-match it, repoint readers
+    (useTeamWarSnapshot/useWarBenchmarks/CLAUDE.md TB Compare) → then `DROP TABLE team_war_snapshots`. ⚠ NOT until cols verify on staging+prod.
+  - `"Park Factors"` is a DIFFERENT grain (park-data INPUT store: raw single-season + rolling, ALL history) → **KEEP IT, do NOT retire.**
+    It's always needed as the historical park source + projection ingredient (we are NOT backfilling full park history into team rows).
+    team_season_stats stores a DERIVED SNAPSHOT of the values USED for that team-season: the 3-yr rolling (projection input) + the
+    single-season, both stamped by the edge fn from `"Park Factors"` each run. Single writer = no drift; `"Park Factors"` stays source-of-truth.
+  - Every step (CREATE, each ADD COLUMN, the team_war_snapshots DROP, the repoint) gets its own line logged when applied — per the banner at top.
