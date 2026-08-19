@@ -1037,3 +1037,16 @@ CONSOLIDATED/referenced, NOT copied — else a 3rd drifting copy (the exact "bui
 Populated by the ONE edge fn (schedule-weighted faced = a rollup of the per-conf metrics). Stored-not-live. Transfer resolver:
 team → team_season_stats; Independent → use faced_*; else conference metrics (or faced as refinement). NOT too far ahead — right
 target, incremental build; Phase 1 (faced + conf metrics) ships with the conf-stats edge-fn stage.
+## ★★★ team_season_stats — CONSOLIDATE (one canonical table, like the Masters) — DECISION (Trevor + agent 2026-08-18)
+Trevor: don't love Phase-1-only (ideas get lost) + torn on tearing down team_war_snapshots/Park Factors that work. RESOLUTION:
+- **ONE consolidated `team_season_stats` table = canonical, holding EVERYTHING** (faced_stuff_plus/faced_htp, conference metrics,
+  all rates ERA/AVG/OBP/SLG/ISO/wRC+/K9/BB9/HR9/WHIP/FIP, desc WAR + total WAR, park factors, later home/road). The Masters
+  philosophy (one per-player table) applied to teams. Key `(source_id program-stable, season)` + store `id` (per-season) + conference_id.
+- **FILL EVERY COLUMN in the FIRST pass** (not Phase-1-only) — computed in the ONE edge fn (we already have every method:
+  rates validated, faced = schedule rollup, WAR computed, park = rolling). "Incremental" = only VERIFICATION order, NOT empty columns.
+- **BUILD-CHECK-THEN-CLEAR retires the old tables safely (NOT a reckless teardown):** (1) build team_season_stats + populate all;
+  (2) A/B the WAR columns vs `team_war_snapshots` + park columns vs `Park Factors` (must match); (3) repoint readers → retire the
+  old tables. **The old tables stay LIVE + wired until their fields verify — nothing breaks in the interim** (same pattern as park/HTP/conf-stats).
+- **THE DRIFT RULE:** the trap is not a new table — it's leaving TWO LIVE COPIES. Pick ONE: CONSOLIDATE (this table canonical, old
+  retired after verify — CHOSEN) OR FEDERATE (old stays canonical, team_season_stats holds only homeless stats + a VIEW joins).
+  Never both-live-copies. [[feedback_build_check_then_clear]] Consolidate matches the Masters + one-process goal.
