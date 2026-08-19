@@ -966,3 +966,11 @@ IP = outs/3; outs = (Strikeout+GroundOut+FlyOut+PopOut+LineOut+Sac+FieldersChoic
 Per-PLAYER intra-conf stats stored (filterable on the Season Stats view via is_conference_game) → POOLED to the Conference Stats
 aggregate. Per-team = future. Keep conf-vs-conf (rates/env+/wRC+ → intra-conf) vs total-season (OPR/Stuff+/run_env/HTP) clean.
 ⇒ Reproduced from pitch-log at corr 0.98+ across EVERY rate field → the whole conf-stats layer sources from ONE pitch-log edge-fn stage.
+## ★ #4 ERA characterized (2026-08-18) — RA9-factor vs DRS
+Intra-conf RA9 (total game runs / IP × 9) vs stored ERA (n=29): corr **0.953**, ratio RA9/ERA **1.157** (SD only **0.035** →
+near-constant earned factor ≈ 0.864). My RA9 6.91 / stored ERA 5.98.
+- **OPTION A (simple):** conf ERA = intra-conf RA9 × ~0.864 (earned factor). corr 0.95, consistent factor. Approximation.
+- **OPTION B (accurate, RECOMMENDED):** conf ERA = DRS EARNED runs (intra-conf) / intra-conf IP × 9. DRS score-driven ER
+  attribution validated corr 0.987 vs Master ERA (pitcher level). Needs per-game ER from the DRS engine filtered to
+  is_conference_game (accrue_pitcher_er currently outputs SEASON-total per pitcher → extend to per-game/intra-conf). The RA9
+  finding = a cross-check on B. **DECISION PENDING (Trevor): A (fast approx) or B (DRS, accurate)?**
