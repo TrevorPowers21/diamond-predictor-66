@@ -181,6 +181,14 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   champion-flags/seed/team_drs ; conf-scoped (migrate from "Conference Stats") ; faced_stuff_plus/faced_htp ; park snapshot
   (single-season + 3-yr rolling, derived from "Park Factors" which STAYS as historical source). RLS ENABLE (service-role pipeline table).
   STAGING first (build + fill + A/B), then PROD (same DDL + edge-fn populate from prod pitch_log/Teams Table/Park Factors).
+  [APPLIED STAGING 2026-08-19: migration 20260819000000_team_season_stats.sql (117 cols + 3 indexes + RLS ENABLE) + ALTER ADD
+  COLUMN preseason_proj_total_war (future accuracy-tracking, nullable). ⚠ D1 ONLY — JUCO (NJCAA_D1) excluded (descriptive WAR is D1).
+  Descriptive-only (no projection block; projection = TB function elsewhere). PROD: same DDL.]
+- [x] WAR rollup (step 2) — scripts/sql/team_season_stats_war_rollup.sql. Σ Hitter+Pitching Master (desc_owar/d_war/bsr_war/
+  desc_pwar/total_desc_war + _reg), D1 only, join Masters.TeamID="Teams Table".id→source_id. APPLIED STAGING 2026-08-19: 308 rows;
+  pWAR corr 1.0000 (exact) vs team_war_snapshots.raw_total_pwar; oWAR=Σdesc_owar by construction. PROD: re-run from prod Masters.
+- [ ] STAGING cleanup (done) — DROP _conf_agg + _team_home_park (completed-step scratch; results in Conference Stats/Park Factors;
+  backups exist). Cleared RLS advisory. STAGING-ONLY temps → no prod action unless prod created them.
 - [ ] Team RECORDS run (NEW) — derive overall + conference W-L per team-season from pitch_log game outcomes (runs/game →
   win/loss; is_conference_game → conf record). Not a player rollup. Stores into team_season_stats; enables wins-over-projection (future). STAGING+PROD.
 - [ ] CONSOLIDATION (build-check-then-clear, LAST) — **subsume `team_war_snapshots`, FEDERATE `Park Factors` (Trevor 2026-08-19):**
