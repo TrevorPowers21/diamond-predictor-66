@@ -372,10 +372,21 @@ async function main() {
   console.log("\nAPPLY: upserting patches + new rows keyed (source_player_id, Season)…");
   const upsertBatch = async (table: string, rows: Record<string, any>[]) => {
     const BATCH = 500;
-    for (let i = 0; i < rows.length; i += BATCH) {
-      const { error } = await (sb as any).from(table).upsert(rows.slice(i, i + BATCH), { onConflict: "source_player_id,Season" });
+    // Dedupe by the upsert conflict key (source_player_id, Season) and skip null
+    // ids — a batch can't contain two rows with the same conflict key (Postgres:
+    // "ON CONFLICT DO UPDATE command cannot affect row a second time"). Last wins.
+    const seen = new Map<string, Record<string, any>>();
+    for (const r of rows) {
+      const sid = r.source_player_id;
+      if (sid == null || sid === "") continue;
+      seen.set(`${sid}|${r.Season}`, r);
+    }
+    const deduped = [...seen.values()];
+    if (deduped.length !== rows.length) console.log(`  ${table}: deduped ${rows.length} → ${deduped.length} (${rows.length - deduped.length} dropped: dup key or null id)`);
+    for (let i = 0; i < deduped.length; i += BATCH) {
+      const { error } = await (sb as any).from(table).upsert(deduped.slice(i, i + BATCH), { onConflict: "source_player_id,Season" });
       if (error) throw new Error(`${table} upsert: ${error.message}`);
-      console.log(`  ${table}: ${Math.min(i + BATCH, rows.length)}/${rows.length}`);
+      console.log(`  ${table}: ${Math.min(i + BATCH, deduped.length)}/${deduped.length}`);
     }
   };
   await upsertBatch("Hitter Master", [...hitterPatches, ...newHitterRows]);
