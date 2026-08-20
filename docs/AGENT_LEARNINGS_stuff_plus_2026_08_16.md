@@ -1054,3 +1054,22 @@ REMAINING PHASE-1 FRONTEND: #5 position-of-need wiring (positionNeed.ts built, w
 3. INGEST pitcher_full_name — RE-DIAGNOSED: DRS CSVs have fullName=PITCHER (correct); ingest mapping is fine for that format. Original
    corruption = a different/older source. ROBUST FIX = standard post-ingest resolve pitcher_full_name from pitcher_id (fix_pnames).
    ⚠ VERIFIED via proper quote-aware parse (112-col CSV with comma-fields breaks naive comma-split — always use a quote-aware parser).
+## ★★★ RE-PRIORITIZED (Trevor 2026-08-20): CORRECT VALUES → STORE → DISPLAY → then (wiring stage) position-of-need
+Order: get correct transfer values → store → display, THEN worry about functions/storing like position-of-need. #5 position-of-need
+MOVED to the wiring stage (later). Input-mapping-from-correct-sources = part of the whole edge function.
+
+### TRANSFER-FUNCTION CORRECTNESS (Phase 1, the real work)
+1. #6a PVF — DONE (stripped e5fe955; market_pvf_weekend_sp:1.2 @ index.ts:533 is a DEAD constant, cleanup only).
+2. #6b oWAR TANGLE (revised — NOT a dead-line delete): the DISPLAY reads transferProjection.owar (hardcoded 260-PA @
+   transferProjection.ts:124) while the STORED path uses depth-role PA (computeHitterOWar) → they DISAGREE. Consumers of the 260-PA
+   owar: PlayerTableRow.tsx:174, AnalyticsTab.tsx:138/172/184/626, useTeamBuilderSimulation. FIX = reconcile display→depth-role oWAR.
+3. ★ SD AUDIT (Trevor's added point — the crux) [[project_stuff_opr_sd_audit]]: the projection scales each conference/competition/park
+   delta by an SD constant. transferPitcherProjection.ts projectLower/projectHigher args include era_pr_sd, era_plus_ncaa_sd, +
+   competition_weight×HTP, park_weight×rg. Those *_sd live in eq (transferWeightDefaults.ts / model_config), DERIVED FROM OLD DATA.
+   We recomputed Stuff+, park factors, HTP, conf rates, power ratings → their SDs SHIFTED → the eq *_sd are STALE → every lever
+   mis-weights. RE-DERIVE all *_sd (PR SDs, plus-NCAA SDs, HTP SD, park rg SD, Stuff+ SD) off CURRENT data → update eq. GATES correctness.
+4. INPUT MAPPING — point competition/env at the corrected team_season_stats faced Stuff+/HTP + park (part of the edge fn).
+Weight config: src/lib/transferWeightDefaults.ts + model_config. Equation core: src/lib/transferPitcherProjection.ts (pitcher),
+transferProjection.ts (hitter). OPEN (confirm w/ Trevor before touching): SD populations/filters; oWAR-reconcile target = depth-role.
+
+### PHASE 2 = edge-function STRUCTURAL cleanup ALONE (unify copies → one shared lib, dead-code). Outputs unchanged.
