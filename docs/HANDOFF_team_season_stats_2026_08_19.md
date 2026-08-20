@@ -386,3 +386,20 @@ isolation, clean up, then merge. The risky part — isolated on its own branch.
 3. ingest_pitch_log.ts pitcher_full_name mapping fix.
 4. Finish park_code (fill + park-factor re-derive on park_code for neutral sites + records/outings re-key on game_string).
 5. Assemble the ordered prod runbook. (Do NOT push — Trevor drives.)
+## ★★★ PHASING REFINEMENT (Trevor 2026-08-20) — Phase 1 = FINALIZE + WIRE everything + SHIP; Phase 2 = edge-fn CLEANUP only
+Correction to the earlier "WIRE C stashed to Phase 2": Trevor wants ALL the new/correct/improved data WIRED everywhere it's needed
+and SHIPPED (stored + used) IN THIS PUSH — not left as unwired tables. Then a FRESH branch ONLY for the edge-function cleanup/unification.
+
+### PHASE 1 (current branch) — finalize data calcs + WIRE the improvements into every read/display + ship stored properly
+- team_season_stats + refresh routine (done) + WIRE C BACK IN (repoint Compare cards to team_season_stats era-fallback + hitter-WAR
+  pivot + relabel) + descriptive WAR columns on Masters + position-of-need (#5) + park/records/rates displayed. App SHOWS correct improved data.
+- ⚠ ONE SEAM: WIRE C's CURRENT-BUILD hitter cell needs total_hitter_war in the player_snapshot (edge-fn-written). Phase 1 does a
+  MINIMAL TARGETED addition: add total_hitter_war to the hitter snapshot (process-precompute-jobs index.ts:1672 select + :1729/:1753
+  snapshot) + re-precompute — NOT the structural refactor. Then WIRE C fully lands (both sides o+d+bsr).
+- Data do-items: DRS ra9 rollup, reg-window pitch-log rates, ingest pitcher_full_name fix, park_code finish (+ park factors on
+  park_code for neutral sites + records/outings re-key on game_string). Assemble ordered prod runbook. Trevor drives staging→main PR. DO NOT push.
+
+### PHASE 2 (fresh branch off new main) — ONLY the edge-function structural cleanup/unification
+Collapse the copies into ONE shared engine (edge fn + app import the same lib → drift impossible), #6 transfer-sync structurally,
+DEAD-CODE audit, Track B one-process (upload → collect/store all incl team_season_stats → run returner+transfer projections), clean
+transfer re-run (6b) + A/B. The risky architectural refactor — isolated, verified, cleaned up, then merged.
