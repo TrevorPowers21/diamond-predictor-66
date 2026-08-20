@@ -148,3 +148,19 @@ Ran in order (Trevor: apply 1-3, verify stores properly, THEN build Step 4):
 - `baPlus/obpPlus/isoPlus` = the per-stat ratings (now `from_*_plus`, populated by Step 3)
 
 **The `recalculate-prediction` EDGE fn just carries the WRONG multiplicative copy of `recalc`.** So STEP 4 = **PORT `predictionEngine.recalc` (the correct SD-blend) into the edge fn** + wire it to READ `model_config` `r_*` (fix the `model_type='returner'`→0-rows + bare-key bugs; predictionEngine's hardcoded defaults happen to match the stored r_* so its MATH is right regardless — but the edge must read the DB per store-everything). Then delete dead `bulkRecalc`/`fetchAllPredictionsForReturnerMode`. Verify by hand-computing the SD-blend for a real player vs the ported edge recalc (dry-run). Pitchers: `precompute-returner-pitchers.ts` already correct (SD-based) — fold into the edge fn later. D1 only.
+
+---
+
+## STEP 4 — post-build findings + 4 flags (2026-08-20)
+
+**Built + VERIFIED:** edge `recalc()` = SD-blend port of `predictionEngine.recalcReturner`, reads `model_config` `r_*` (admin_ui, season 2026). Hand-vs-ported MATCH exact on 3 real players; returner wRC+ shifts DOWN ~2-4 pts off the wrong multiplicative (100→97, 92→90, 73→69) — modest.
+
+**A — LIVE returner path is DEAD.** `recalcReturner ← calculatePrediction`, and `calculatePrediction` has NO callers (bulkRecalc now a stub → edge fn; PlayerProfile/TeamBuilder retired `recalculatePredictionById` → read stored; TB sim uses the *transfer* `t_obp_std_pr`). **KEPT as the canonical SD-blend reference (marked reference-not-runtime, `predictionEngine.ts:659`)** — Trevor "might be worth saving." Git has it regardless.
+
+**B — pitcher bulk NOT in the edge fn.** Returner pitchers = `precompute-returner-pitchers.ts` (correct, SD-based `computePitcherProjection`) — a script. Fix = port it into the edge fn's `bulk_recalculate` (real Deno port of computePitcherProjection: SD-blend rates + D1-FIP/pRV+/pWAR + market + role transition + depth-role IP). For the RUN now the script works; port is the consolidation.
+
+**C — `isoStdPower`:** only `t_iso_std_power`=45.423 exists (both seasons), no `r_` variant. Fix = add `r_iso_std_power` + point returner at it (edge fn currently falls back to `t_iso_std_power`).
+
+**D — ⭐ CRITICAL: `std_pr` constants are STALE post-recalibration.** Step 2b recomputed all power ratings on the new pitch-log Masters → the SD constants no longer match: `r_ba_std_pr` 31.297 vs actual **29.99**; `r_obp_std_pr` 28.889 vs actual **31.89** (~10% off); `iso` 45.42 vs 44.91. The edge-fn returner SD-blend reads `r_obp_std_pr=28.889` → **mis-scaled power adjustment**. **MUST re-measure ALL `std_pr` (hitter ba/obp/iso + pitcher era/fip/whip/k9/bb9/hr9 incl. the whip 24.59→~37 fix) on the CURRENT ratings and update model_config (`r_*`, `t_*`) + code defaults BEFORE running Step 4.** This is the SD-fix thread finalized on the post-recalibration ratings.
+
+**ORDER before Step 4 run:** (D) re-measure + store std_pr → (C) add r_iso_std_power → (B) pitcher port (or run script) → run returner recompute. Deploy edge fn to staging to run it.
