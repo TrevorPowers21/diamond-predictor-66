@@ -448,3 +448,26 @@ Weight config: src/lib/transferWeightDefaults.ts + model_config. Equation core: 
 transferProjection.ts (hitter). OPEN (confirm w/ Trevor before touching): SD populations/filters; oWAR-reconcile target = depth-role.
 
 ### PHASE 2 = edge-function STRUCTURAL cleanup ALONE (unify copies → one shared lib, dead-code). Outputs unchanged.
+## ★★★ SD AUDIT — METHODOLOGY FOUND + PLAN (Trevor 2026-08-20). DO NOT restructure env+ (100-avg scale is fine); ONLY audit the SD that scales each lever's weight.
+### env+ formula IS in the code (src/lib/powerRatings.ts) — no reconstruction needed:
+- eraPrPlus = (eraRaw/50)*100  (:320) — direct scale to 100-average
+- hr9PrPlus/k9PrPlus/bb9PrPlus = (raw/50)*100  (:350 etc.)
+- fipPrPlus = WEIGHTED COMPOSITE of hr9PrPlus+bb9PrPlus+k9PrPlus (FIP_WEIGHTS) (:352-359) — different spread BY CONSTRUCTION (composite, not a single /50*100)
+- overallPrPlus = (eraPrPlus+fipPrPlus)/2  (:361). Hitter: baPlus/obpPlus/isoPlus/overallPlus (:145-151).
+### WHY SD grew (Trevor): we REMOVED the old ×20 pitching consistency scale to make ONE consistent equation for hitter AND pitcher
+(didn't have that before). So the pitching env+ now sits on a wider scale → cross-conf SD legitimately LARGER than the stored 2026-05
+values (era+ 9.4/fip+ 6.2/etc). REAL change, not a formula mismatch. It's on THIS push-to-prod, so the equation change is already in.
+### THE WEIGHT MECHANISM (transferWeightDefaults.ts + model_config): conference_weight = 0.025 × D1_cross-conf_SD (≈2.5%/SD);
+competition_weight = 0.05 × HTP_SD (≈5%/SD, HTP dominant). Stored SDs (now stale): era+ 9.4·fip+ 6.2·whip+ 5.3·k9+ 7.9·bb9+ 8.6·hr9+ 17.3·HTP 14.1.
+### DRIFT CHECK (D1 cross-conf, current): HTP SD 14.3 (≈ stored 14.1 → the DOMINANT competition lever is STABLE). Pitching env+ SDs grew
+(from the ×20 removal). ⚠ FILTER: D1 only — the 40-vs-30 conf gap likely includes JUCO; audit must exclude JUCO. Full-season values (not reg regulars).
+### DELIVERABLE (Trevor confirmed format): one table BOTH hitting + pitching, D1-only —
+| Stat | env+ SD (now) | % impact (now) | old weight | recommended weight |
+Compute cross-conf SD of the CURRENT env+ (per powerRatings.ts formula) → recommended weight = 0.025×SD (conf) / 0.05×SD (competition/HTP).
+Trevor approves before any weight changes. Config lives in transferWeightDefaults.ts (JUCO) + model_config (D1). ⚠ Trevor will point to
+the EXACT weight/SD from the equation — confirm which projectLower/projectHigher SD arg (era_pr_sd vs era_plus_ncaa_sd vs conf-delta SD) is the target.
+
+### ALSO (this session, for the record): oWAR reconcile = drop 260-PA, use DEPTH-ROLE PA (auto-filled) + defensive IP by role +
+pitching IP by role; scale WAR by role PA/IP in BOTH storage + display; 1-for-1 but live-reactive to toggle/role changes (belongs in the
+projection engine). PVF already stripped (e5fe955; dead constant @ index.ts:533). #5 position-of-need → moved to WIRING stage (later).
+Re-priority: correct values (transfer #6 + SD audit + input mapping) → store → display → then wiring-stage functions.
