@@ -1045,3 +1045,12 @@ score-pair heuristic. Records unchanged (Georgia 53-14 (23-7), Arkansas 41-22, a
 game_string is available for any per-pitcher outing analysis → the Ohman(502)/Beaty(345) merge artifacts resolve when keyed on game_string.
 REMAINING PHASE-1 DB batch: DRS ra9 rollup, reg-window pitch-log rates, ingest_pitch_log.ts pitcher_full_name fix.
 REMAINING PHASE-1 FRONTEND: #5 position-of-need wiring (positionNeed.ts built, wire stored-not-live), WIRE C (Compare cards + hitter-WAR pivot + total_hitter_war snapshot touch).
+## PHASE-1 DB BATCH (staging 2026-08-20)
+1. DRS ra9 + reg-window pitching — DONE. refresh step 4c: ra9_total/ra9_reg/fip_ra9_total/fip_ra9_reg from Master desc_ra9/_reg
+   (IP-weighted; DRS-accurate run prevention). avg RA9 6.36 > ERA 6.16 (unearned). Covers reg-window PITCHING (+ WAR already reg-split).
+2. Reg-window RATE SET (avg/obp/slg/era/k9 etc) — pitch_log_*_totals are 'all'-dimension only, so the full reg-window rate set needs
+   a 'reg' dimension added to aggregate_pitch_log_dimensions.ts (+ re-run) OR a raw date-filtered pitch_log aggregation. SEPARATE
+   follow-on (heavier). Delivered so far: WAR reg/total + RA9 reg/total.
+3. INGEST pitcher_full_name — RE-DIAGNOSED: DRS CSVs have fullName=PITCHER (correct); ingest mapping is fine for that format. Original
+   corruption = a different/older source. ROBUST FIX = standard post-ingest resolve pitcher_full_name from pitcher_id (fix_pnames).
+   ⚠ VERIFIED via proper quote-aware parse (112-col CSV with comma-fields breaks naive comma-split — always use a quote-aware parser).

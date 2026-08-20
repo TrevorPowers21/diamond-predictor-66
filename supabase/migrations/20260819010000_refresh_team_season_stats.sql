@@ -135,6 +135,21 @@ BEGIN
     fip_total = (13*ts.phr_total + 3*(ts.pbb_total+ts.phbp_total) - 2*ts.pk_total)/nullif(ip.ip,0) + 3.157
   FROM ip WHERE ts.source_id=ip.sid AND ts.season=p_season;
 
+  -- 4c) DRS-accurate RA9 (run prevention), both windows — from Master desc_ra9/_reg (the careful earned+unearned + inherited-runner
+  --      attribution the DRS engine does). This is the accurate pitch-log run-prevention rate; ERA stays Master (earned). IP-weighted.
+  WITH a AS (
+    SELECT tt.source_id sid,
+      sum(pm.desc_ra9*pm."IP")/nullif(sum(pm."IP"),0)                          ra9_t,
+      sum(pm.desc_ra9_reg*pm.regular_season_ip)/nullif(sum(pm.regular_season_ip),0)     ra9_r,
+      sum(pm.desc_fip_ra9*pm."IP")/nullif(sum(pm."IP"),0)                      fra9_t,
+      sum(pm.desc_fip_ra9_reg*pm.regular_season_ip)/nullif(sum(pm.regular_season_ip),0) fra9_r
+    FROM "Pitching Master" pm JOIN "Teams Table" tt ON tt.id=pm."TeamID"
+    WHERE pm."Season"=p_season AND pm.division='D1' AND pm."IP">0 GROUP BY tt.source_id
+  )
+  UPDATE public.team_season_stats ts SET
+    ra9_total=a.ra9_t, ra9_reg=a.ra9_r, fip_ra9_total=a.fra9_t, fip_ra9_reg=a.fra9_r
+  FROM a WHERE ts.source_id=a.sid AND ts.season=p_season;
+
   -- 5) records (pitch_log game outcomes; game key = game_string = EXACT game id, doubleheader-safe; boundary v_reg_end).
   --     game_string (cs-<park><date8><game#>) uniquely identifies a game → no score-pair heuristic, DH games split correctly.
   WITH games AS (

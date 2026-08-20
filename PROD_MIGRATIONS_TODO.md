@@ -294,3 +294,14 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
 - [x] team_season_stats records re-key on game_string (refresh_team_season_stats step 5) — now keys games on game_string (exact,
   doubleheader-safe) instead of the (team_id,date,venue,score-pair) heuristic. APPLIED STAGING 2026-08-20 (function re-created):
   308 teams, Georgia 53-14 (23-7), avg 55 games — consistent + now exact. Requires park_code/game_string backfill applied first. PROD: same.
+
+- [x] team_season_stats DRS ra9 + reg-window pitching (refresh step 4c) — ALTER ADD ra9_total/ra9_reg/fip_ra9_total/fip_ra9_reg +
+  populate from Master desc_ra9/desc_ra9_reg/desc_fip_ra9/desc_fip_ra9_reg (IP-weighted; reg by regular_season_ip). DRS-accurate
+  run-prevention (careful earned+unearned attribution); ERA stays Master (earned). APPLIED STAGING 2026-08-20: 308/308, avg RA9 6.36
+  > ERA 6.16 (unearned incl), Arkansas RA9 5.58/reg 5.52 vs ERA 4.74. PROD: same. (reg-window WAR + RA9 now covered; full reg-window
+  avg/era/k9 rate-set needs a 'reg' dimension in aggregate_pitch_log_dimensions.ts — separate follow-on.)
+- [ ] INGEST pitcher_full_name — RE-DIAGNOSED 2026-08-20: the DRS-format CSVs (docs/drs-reference) have fullName=the PITCHER
+  (Nathan Taylor = pitcherAbbrev N. Taylor), so ingest_pitch_log.ts:328 fullName→pitcher_full_name is CORRECT for that format. The
+  original DB corruption came from a DIFFERENT/older source export (fullName=batter), already fixed by the backfill. ROBUST FIX =
+  make the pitcher_full_name-from-pitcher_id resolution (fix_pnames / _pitcher_name_fix) a STANDARD post-ingest step so it's correct
+  regardless of the source's fullName meaning. No mapping change needed for DRS CSVs.
