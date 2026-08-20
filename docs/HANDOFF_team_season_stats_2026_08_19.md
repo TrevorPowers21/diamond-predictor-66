@@ -303,3 +303,29 @@ Master-reconcile fill (step 2b) fills hitting from Master where pitch-log absent
 6. RESUME THE MAIN GOAL — the ONE edge fn / projection pipeline. team_season_stats is a store stage of it. Pre-edge-fn punch list
    remaining: #5 position-of-need, #6 transfer-engine sync (3 copies), #7 dead-code audit → edge fn 6b projections → 7c snapshots
    (fixes TB oWAR regression) → NIL wiring. See docs/HANDOFF_STUFF_PLUS_2026_08_16 + transfer-engine audit.
+## ★ WIRE C (team_season_stats frontend repoint) — STASHED INTO THE EDGE-FN / LIVE-COMPUTE-REPOINT PHASE (Trevor 2026-08-19)
+Do NOT do a partial repoint now — the current-build side needs a snapshot/edge-fn change, so the whole pivot goes with the
+"repoint all live-compute display spots" work (§LIVE-COMPUTE ELIMINATION / edge-fn phase). Full spec + findings (so that phase doesn't re-investigate):
+
+### 4 files to change
+- src/hooks/useTeamWarSnapshots.ts — hooks useTeamWarSnapshot(L63), useWarBenchmarks(L129), useNationalSeedBenchmark(L161),
+  useAllTeamSnapshots(L211). FEDERATE BY ERA: season>=2026 read team_season_stats; season<2026 keep team_war_snapshots (2025 unrecomputable).
+- src/gm/pages/GMAnalytics.tsx — current-build calc L65 (lineupOwar=hitters.slice(0,9).war), rotation/bullpen L63-64, deltas L214/223, label L185.
+- src/pages/team-builder/tabs/AnalyticsTab.tsx — hero strip "Starting Lineup oWAR" L827-838 (starterTotalOwar/priorYearLineupDelta),
+  benchmark "Lineup oWAR"/"Δ Lineup" L337/369, prorated_starting_lineup_owar reads L386/781, slice(0,9) L185.
+- src/integrations/supabase/types.ts — add team_season_stats Row type (~L2499 near team_war_snapshots).
+
+### Field mapping (REG-season basis, NO proration)
+prior raw/prorated_starting_lineup_owar → hitter_war_reg ; rotation_pwar → rotation_pwar_reg ; bullpen_pwar → bullpen_pwar_reg ;
+total → total_war_reg ; carry is_national_champ/is_conference_champ/national_seed_rank. Drop proration (use _reg directly).
+
+### Hitter-WAR pivot (RELABEL "Lineup oWAR"/"Starting Lineup oWAR"/"Δ Lineup" → "Hitter WAR"/"Δ Hitter")
+- Prior-season side = team_season_stats.hitter_war_reg (full-team o+d+bsr).
+- ⚠ CURRENT-BUILD side BLOCKER: gm roster row.war = the player_snapshot's o_war (oWAR ONLY) — snapshot at process-precompute-jobs/
+  index.ts:1729/1753 stores {..., o_war, ...}; the hPred query L1672 selects o_war but NOT d_war/bsr_war/total_hitter_war. player_predictions
+  HAS o_war/d_war/bsr_war/total_hitter_war/p_war (composite via refresh_composite_war L1885). ⇒ to make the current build = full-team
+  hitter WAR (o+d+bsr), PLUMB total_hitter_war INTO the hitter snapshot (add to L1672 select + L1729/1753 snapshot) + RE-PRECOMPUTE, and
+  change useGmRoster to read total_hitter_war (or the AnalyticsTab build calc). Then both sides = o+d+bsr, consistent. Pitching keeps rotation/bullpen split.
+- Until then: current-build stays oWAR — which is WHY we don't do a partial repoint (would show o+d+bsr prior vs oWAR current = mismatch).
+
+### Verify: tsc -p tsconfig.app.json (no NEW errors in touched files) + PAGE-LOAD both Compare cards (Trevor can view). NO table retire (federate by era).

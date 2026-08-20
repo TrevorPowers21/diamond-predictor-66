@@ -285,3 +285,8 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   UPDATE pitch_log SET game_string, park_code FROM _park_code_fix by uniq_pitch_id. PROD: same (load CSVs → _park_code_fix →
   raised-timeout UPDATE). CLEANUP: drop _park_code_fix + fix_parkcode after. FOLLOW-ON: rebuild pitch-log park factors keyed by
   park_code+team_id; re-key records/outings on game_string (fixes doubleheader merges + the 2 pitch-count artifacts). RESTORE role timeout to 2min after.
+
+- [ ] WIRE C — team_season_stats frontend repoint — STASHED into the edge-fn/live-compute-repoint phase (Trevor 2026-08-19). Full spec
+  in handoff/agent §WIRE C STASHED. Repoint 4 readers (useTeamWarSnapshots/GMAnalytics/AnalyticsTab/types) to team_season_stats (era
+  fallback, _reg basis); pivot Lineup oWAR→full-team Hitter WAR (needs total_hitter_war plumbed into the hitter player_snapshot + re-precompute);
+  relabel. Frontend-only (no prod migration) but noted here so it's not lost. Page-load verify.
