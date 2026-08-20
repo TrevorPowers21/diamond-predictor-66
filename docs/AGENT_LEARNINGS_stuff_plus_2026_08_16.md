@@ -954,3 +954,35 @@ total → total_war_reg ; carry is_national_champ/is_conference_champ/national_s
 - Until then: current-build stays oWAR — which is WHY we don't do a partial repoint (would show o+d+bsr prior vs oWAR current = mismatch).
 
 ### Verify: tsc -p tsconfig.app.json (no NEW errors in touched files) + PAGE-LOAD both Compare cards (Trevor can view). NO table retire (federate by era).
+## ★★★ NEXT-PHASE PLAN + CLARIFICATIONS (Trevor 2026-08-20)
+### park_code / neutral sites — NOT just polish (Trevor correction)
+The team_id home/away park-factor method does NOT pick up NEUTRAL-SITE games (a neutral game is "home" for neither team → the
+home/away filter misses it entirely). park_code keys by the ACTUAL STADIUM regardless of home/away, so it's REQUIRED to capture
+neutral-site park effects (regionals, MLB-park showcases, tournaments). ⇒ after park_code fills, re-derive pitch-log park factors
+keyed by park_code (+ team for the batting context) so neutral sites are attributed to the right park. Also re-key records/outings on game_string.
+
+### PROD PUSH — LOG EVERYTHING, do NOT push yet (Trevor)
+We are NOT pushing to prod yet. Keep logging EVERY schema/SQL/backfill change to PROD_MIGRATIONS_TODO.md (the whole team_season_stats
+system + name/park_code backfills + queued park/conf/is_conf/HTP/Bucket-A migrations). The push happens later via Trevor's PR/paste flow.
+
+### DO THESE NOW (Trevor: "yes do this")
+1. DRS-accurate ra9 rollup — team ra9 from Master desc_ra9 (IP-weighted) = the accurate pitch-log run-prevention rate (ERA stays Master).
+2. Reg-window pitch-log rates — add _reg variants of the pitch-log rates (currently total-season only).
+3. ingest_pitch_log.ts pitcher_full_name mapping fix — it maps CSV 'fullName' (= the batter) into pitcher_full_name; fix so new ingests are correct.
+
+### #5 POSITION-OF-NEED — SETTLED ("I like it", handoff L461-516). is_position_of_need = true/false flag: read the ACTIVE build →
+per-player, if the p70 at that position isn't a starter (a need exists) → true. STORED next to dev_aggressiveness (build player meta);
+re-run the check + update the flag on EVERY SAVE (roster-reactive, NOT live). transfer_snapshot→player_snapshot. Automatic+stored+roster-reactive now; coach questionnaire later. Design is done — just needs building.
+
+### #6 TRANSFER-ENGINE SYNC — the transfer PROJECTION engine exists in 3 DRIFTED copies: canonical src/lib/*, the Deno edge fn
+(process-precompute-jobs, a hand-mirror), and the TB live hook. They've diverged. Confirmed bugs: edge fn still applies pitcher PVF
+(weekend-SP premium, index.ts:672) while canonical DROPPED it (→ SP transfer market ~20% high); triple-oWAR leftover (delete). #6 =
+sync all 3 to canonical (strip edge-fn PVF, delete triple-oWAR, align rate-index/lgRA9). [[project_transfer_engine_audit]]. It's a CODE-consistency fix.
+
+### #6 vs 6b vs #7 vs "finalize the edge fn" (Trevor's question)
+- #6 = FIX/sync the transfer engine CODE (3 copies → canonical). #7 = DEAD-CODE AUDIT (Savant clear, dead park_factors drop, V1 conf
+  retire, corrupted-col DROP, scratch drops). 6b = RUN the transfer projections (deploy the synced edge fn + FIRE transfers + A/B verify BOTH sides).
+- So: #6 fixes the code → #7 removes dead code → 6b actually runs the transfer projections → 7c snapshots (fixes TB oWAR regression) → NIL.
+- "Finalize the WHOLE edge function" = the Track B UNIFIED on-upload edge fn that collapses the 3 copies into ONE process (upload →
+  collect/derive/store all data incl team_season_stats → run returner + transfer projections). That's the end state; 6b is a step toward it.
+- WIRE C (team_season_stats frontend repoint + total_hitter_war snapshot plumbing) rides with 6b/7c.
