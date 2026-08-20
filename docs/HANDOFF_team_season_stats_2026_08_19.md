@@ -414,3 +414,9 @@ transfer re-run (6b) + A/B. The risky architectural refactor — isolated, verif
   for RECORDS/OUTINGS (fixes doubleheader merges + the 2 pitch-count artifacts). That's the substantive DB-batch win.
 - FRONTEND WORKFLOW (Trevor's "what do I need to do"): agent writes ALL code + tsc-checks, then hands Trevor a per-page CHECKLIST
   (open page X → confirm card/number Y). Trevor just page-loads + eyeballs. That IS the whole page-load gate.
+## park_code PAYOFF DELIVERED — records on game_string (staging 2026-08-20)
+refresh_team_season_stats step 5 now keys games on game_string (cs-<park><date8><game#> = exact game id, DH-safe) instead of the
+score-pair heuristic. Records unchanged (Georgia 53-14 (23-7), Arkansas 41-22, avg 55 games = consistent) but now EXACT. Same
+game_string is available for any per-pitcher outing analysis → the Ohman(502)/Beaty(345) merge artifacts resolve when keyed on game_string.
+REMAINING PHASE-1 DB batch: DRS ra9 rollup, reg-window pitch-log rates, ingest_pitch_log.ts pitcher_full_name fix.
+REMAINING PHASE-1 FRONTEND: #5 position-of-need wiring (positionNeed.ts built, wire stored-not-live), WIRE C (Compare cards + hitter-WAR pivot + total_hitter_war snapshot touch).

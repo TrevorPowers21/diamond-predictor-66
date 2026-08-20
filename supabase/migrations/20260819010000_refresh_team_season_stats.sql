@@ -135,10 +135,14 @@ BEGIN
     fip_total = (13*ts.phr_total + 3*(ts.pbb_total+ts.phbp_total) - 2*ts.pk_total)/nullif(ip.ip,0) + 3.157
   FROM ip WHERE ts.source_id=ip.sid AND ts.season=p_season;
 
-  -- 5) records (pitch_log game outcomes; game key = distinct score-pair; boundary v_reg_end)
+  -- 5) records (pitch_log game outcomes; game key = game_string = EXACT game id, doubleheader-safe; boundary v_reg_end).
+  --     game_string (cs-<park><date8><game#>) uniquely identifies a game → no score-pair heuristic, DH games split correctly.
   WITH games AS (
-    SELECT DISTINCT team_id, date::date d, game_venue_id, total_runs, opponent_runs, is_conference_game
-    FROM pitch_log WHERE season=p_season AND team_id IS NOT NULL AND total_runs IS NOT NULL AND opponent_runs IS NOT NULL
+    SELECT team_id, max(date::date) d, max(total_runs) total_runs, max(opponent_runs) opponent_runs,
+           bool_or(is_conference_game) is_conference_game
+    FROM pitch_log WHERE season=p_season AND team_id IS NOT NULL AND game_string IS NOT NULL
+      AND total_runs IS NOT NULL AND opponent_runs IS NOT NULL
+    GROUP BY team_id, game_string
   ),
   rec AS (
     SELECT team_id sid,

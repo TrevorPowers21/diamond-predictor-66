@@ -290,3 +290,7 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   in handoff/agent §WIRE C STASHED. Repoint 4 readers (useTeamWarSnapshots/GMAnalytics/AnalyticsTab/types) to team_season_stats (era
   fallback, _reg basis); pivot Lineup oWAR→full-team Hitter WAR (needs total_hitter_war plumbed into the hitter player_snapshot + re-precompute);
   relabel. Frontend-only (no prod migration) but noted here so it's not lost. Page-load verify.
+
+- [x] team_season_stats records re-key on game_string (refresh_team_season_stats step 5) — now keys games on game_string (exact,
+  doubleheader-safe) instead of the (team_id,date,venue,score-pair) heuristic. APPLIED STAGING 2026-08-20 (function re-created):
+  308 teams, Georgia 53-14 (23-7), avg 55 games — consistent + now exact. Requires park_code/game_string backfill applied first. PROD: same.
