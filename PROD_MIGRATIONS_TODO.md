@@ -300,7 +300,9 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   run-prevention (careful earned+unearned attribution); ERA stays Master (earned). APPLIED STAGING 2026-08-20: 308/308, avg RA9 6.36
   > ERA 6.16 (unearned incl), Arkansas RA9 5.58/reg 5.52 vs ERA 4.74. PROD: same. (reg-window WAR + RA9 now covered; full reg-window
   avg/era/k9 rate-set needs a 'reg' dimension in aggregate_pitch_log_dimensions.ts — separate follow-on.)
-- [ ] INGEST pitcher_full_name — RE-DIAGNOSED 2026-08-20: the DRS-format CSVs (docs/drs-reference) have fullName=the PITCHER
+- [x] INGEST pitcher_full_name — FIXED 2026-08-20 (code): ingest_pitch_log.ts now loads a pitcher_id→"First Last" map from players
+  in main() and sets pitcher_full_name from it (fallback to CSV fullName only when unmapped) — self-fills correctly on EVERY ingest,
+  source-independent. tsc clean. Ships with the branch (no migration). Original diagnosis retained:  the DRS-format CSVs (docs/drs-reference) have fullName=the PITCHER
   (Nathan Taylor = pitcherAbbrev N. Taylor), so ingest_pitch_log.ts:328 fullName→pitcher_full_name is CORRECT for that format. The
   original DB corruption came from a DIFFERENT/older source export (fullName=batter), already fixed by the backfill. ROBUST FIX =
   make the pitcher_full_name-from-pitcher_id resolution (fix_pnames / _pitcher_name_fix) a STANDARD post-ingest step so it's correct

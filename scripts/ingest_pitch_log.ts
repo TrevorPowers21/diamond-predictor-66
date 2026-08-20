@@ -293,6 +293,12 @@ function get(row: string[], cols: ColPositions, field: FieldName): string {
   return pos == null ? "" : cell(row, pos);
 }
 
+// pitcher_id (source_player_id) → real "First Last" from the players table, loaded
+// once in main(). Used to set pitcher_full_name RELIABLY at ingest time — the CSV
+// `fullName` column is source-dependent (some exports put the batter there), so we
+// resolve from the stable pitcher_id and fall back to fullName only when unmapped.
+const pitcherNameMap = new Map<string, string>();
+
 function buildRecord(row: string[], cols: ColPositions, csvSource: string): PitchLogRow | { skip: string } {
   const uniqId = textOrNull(get(row, cols, "uniqPitchId"));
   if (!uniqId) return { skip: "missing uniq_pitch_id" };
@@ -325,7 +331,7 @@ function buildRecord(row: string[], cols: ColPositions, csvSource: string): Pitc
     pitcher_id: pitcherId,
     batter_id: batterId,
     catcher_id: textOrNull(get(row, cols, "catcherId")),
-    pitcher_full_name: textOrNull(get(row, cols, "fullName")),
+    pitcher_full_name: pitcherNameMap.get(pitcherId) ?? textOrNull(get(row, cols, "fullName")),
     pitcher_abbrev_name: textOrNull(get(row, cols, "pitcherAbbrevName")),
     batter_abbrev_name: textOrNull(get(row, cols, "batterAbbrevName")),
     catcher_abbrev_name: textOrNull(get(row, cols, "catcherAbbrevName")),
@@ -392,6 +398,28 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  // ─── Load pitcher name map (source_player_id → "First Last") ──────────────
+  // Resolves pitcher_full_name reliably from the stable pitcher_id, independent of
+  // the CSV `fullName` column's source-dependent meaning.
+  {
+    let from = 0;
+    for (;;) {
+      const { data, error } = await (supabase as any)
+        .from("players")
+        .select("source_player_id, first_name, last_name")
+        .not("source_player_id", "is", null)
+        .range(from, from + 999);
+      if (error) { console.warn(`  players name-map load warning: ${error.message}`); break; }
+      for (const p of data ?? []) {
+        const full = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
+        if (full) pitcherNameMap.set(String(p.source_player_id), full);
+      }
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
+    console.log(`Pitcher name-map: ${pitcherNameMap.size} players`);
+  }
 
   // ─── Read + parse ────────────────────────────────────────────────────────
   const csvSource = basename(csvPath);
