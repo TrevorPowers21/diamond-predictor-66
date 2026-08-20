@@ -271,3 +271,17 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   pitch-log counts×9/IP; WHIP=(BB+H)/IP; FIP=(13HR+3(BB+HBP)−2K)/IP+3.157 (cFIP D1 2026). ERA = Master IP-weighted (SOURCE-OF-TRUTH;
   pitch-log ERA noisy 0.825 due to earned-run attribution). APPLIED STAGING 2026-08-19: 308/308, Arkansas IP 532/K9 10.7/FIP 4.48/ERA 4.74;
   D1 avg K9 8.33/FIP 5.03/ERA 6.16. PROD: same (re-run from prod pitch_log). ⚠ ERA-source decision (Master) is overridable if pitch-log ERA preferred.
+
+- [x] pitcher_full_name BACKFILL — APPLIED STAGING 2026-08-19. Mapping public._pitcher_name_fix (source_player_id→first||last from
+  players, 15561 rows) + RPC public.fix_pnames(after,limit) keyset-looped over pitch_log 2026 (19 batches × 150k). Sets pitcher_full_name
+  = real pitcher via pitcher_id. VERIFIED: each pitcher_id now 1 full_name matching pitcher_abbrev_name (was 28-29 = batters). PROD:
+  build _pitcher_name_fix from prod players + run fix_pnames loop over prod pitch_log. CLEANUP: drop _pitcher_name_fix + fix_pnames after.
+  ALSO fix the INGEST (scripts/ingest_pitch_log.ts:319 maps CSV 'fullName' → pitcher_full_name, which is the batter) so new rows are correct.
+
+- [~] park_code / game_string BACKFILL — RUNNING STAGING 2026-08-19 (saved big-write process: raised role statement_timeout +
+  single UPDATE in background). Source: docs/drs-reference/*DRS Pitch Log.csv (2.63M rows, uniqPitchId+gameString). Loader
+  scripts/backfill_park_code_load.ts → temp public._park_code_fix (uniq_pitch_id, game_string, park_code); park_code =
+  gameString stripped of trailing 9 digits + 'cs-' (e.g. cs-ark01202603050 → ark01). 2,576,230 mapped (99.9%), 310 parks.
+  UPDATE pitch_log SET game_string, park_code FROM _park_code_fix by uniq_pitch_id. PROD: same (load CSVs → _park_code_fix →
+  raised-timeout UPDATE). CLEANUP: drop _park_code_fix + fix_parkcode after. FOLLOW-ON: rebuild pitch-log park factors keyed by
+  park_code+team_id; re-key records/outings on game_string (fixes doubleheader merges + the 2 pitch-count artifacts). RESTORE role timeout to 2min after.

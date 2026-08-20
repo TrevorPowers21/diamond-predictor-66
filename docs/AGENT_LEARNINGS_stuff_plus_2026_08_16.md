@@ -900,3 +900,31 @@ rates. refresh_team_season_stats() step 4a/4b:
 VERIFIED: 308/308, 0 null; Arkansas IP 532/K9 10.7/FIP 4.48/ERA 4.74; D1 avg IP 465 (smaller programs)/K9 8.33/FIP 5.03/ERA 6.16.
 ERA-source (Master) is the documented recommendation; overridable to pitch-log ERA if Trevor prefers. Hitting already pitch-log (step 2);
 Master-reconcile fill (step 2b) fills hitting from Master where pitch-log absent (no-op 2026 D1). FOLLOW-ON remaining: reg-window pitch-log rates; park_code backfill.
+## ★★★ SESSION STATE + WHAT'S-NEXT PLAN (2026-08-19)
+### DONE this session (staging, all verified + committed)
+- team_season_stats table (117+ cols) + refresh_team_season_stats(season) — ONE idempotent routine, the descriptive STORE stage of
+  the unified upload edge fn. Rebuilds: WAR matrix (Σ Masters desc_*), hitter_war (o+d+bsr) + rotation/bullpen split, hitting
+  rates+counting (pitch-log-primary), pitching counting (pitch-log), pitching rates (outs-tracking IP + K9/BB9/HR9/WHIP/FIP
+  pitch-log; ERA=Master source-of-truth), records (pitch-log outcomes), conf context, faced_stuff_plus/htp, park snapshot,
+  snapshot/champion carry, Master-reconcile fill. 308 D1 teams; every block A/B-verified.
+- Decisions locked: pitch-log-primary rates (Master=occasional source-of-truth fill); federate-by-era (team_war_snapshots KEPT for
+  2025 — unrecomputable; team_season_stats canonical 2026+); hitter-WAR pivot (Lineup oWAR→full-team Hitter WAR everywhere); ERA=Master.
+- pitcher_full_name CORRUPTION fixed (was = batter name): backfilled from pitcher_id→players real name (each pitcher_id now 1 name). Ingest fix pending.
+- park_code/game_string backfill RUNNING (from DRS CSVs; saved big-write process).
+
+### IN FLIGHT
+- park_code UPDATE (background, saved process) → verify + RESTORE role timeout to 2min.
+- WIRE C frontend repoint (agent) → review diff + tsc + PAGE-LOAD verify the 2 Compare cards.
+
+### WHAT'S NEXT (ordered)
+1. FINISH park_code: verify ~2.58M populated; RESTORE role statement_timeout='2min'; rebuild pitch-log park factors keyed by
+   park_code+team_id; re-key records/outings on game_string (fixes DH merges + the 2 pitch-count artifacts). Drop _park_code_fix + fix_parkcode.
+2. FINISH WIRE C: review agent diff, tsc clean, PAGE-LOAD both Compare cards (TB Analytics + GM Analytics), commit. NO retire (federate by era).
+3. team_season_stats finish (optional): DRS-accurate ra9 rollup (desc_ra9), reg-window pitch-log rates.
+4. INGEST FIXES: ingest_pitch_log.ts pitcher_full_name mapping (maps CSV 'fullName'=batter → wrong); park_code ingest logic already correct.
+5. PROD PUSH — the team_season_stats system (per PROD_MIGRATIONS_TODO §team_season_stats): CREATE table + refresh fn + call per season;
+   pitcher_full_name backfill (build _pitcher_name_fix from prod + fix_pnames loop); park_code backfill (load CSVs → _park_code_fix →
+   raised-timeout UPDATE); + the queued park/conf/is_conf/HTP/Bucket-A migrations. Via Trevor's PR/paste flow (staging→main).
+6. RESUME THE MAIN GOAL — the ONE edge fn / projection pipeline. team_season_stats is a store stage of it. Pre-edge-fn punch list
+   remaining: #5 position-of-need, #6 transfer-engine sync (3 copies), #7 dead-code audit → edge fn 6b projections → 7c snapshots
+   (fixes TB oWAR regression) → NIL wiring. See docs/HANDOFF_STUFF_PLUS_2026_08_16 + transfer-engine audit.
