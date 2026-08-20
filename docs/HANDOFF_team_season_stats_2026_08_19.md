@@ -564,3 +564,15 @@ NO WEIGHT RE-TUNE NEEDED — levers as designed (conf 1-3%, HTP dominant ~7%, St
 admin display) so the audit is traceable; HTP IS derivable on prod from stored OPR/Stuff+/WRC+ (hitter_talent_plus column added this session).
 Then transfer correctness (oWAR depth-role reconcile + input mapping) → the run.
 ### KEY LESSON: conference env+ = calcPitchingPlus scale-20 on the CONFERENCE RATE, NOT the player pr_plus (/50×100). Don't conflate the two.
+
+---
+
+## ➡️ 2026-08-20 — COMPREHENSIVE BRANCH AUDIT + GO-FORWARD PLAN (supersedes the "next steps" above)
+An 8-stream audit (6 code/logic + staging↔prod DB delta + prod-doc accuracy) was run. Full record in:
+- **`docs/AUDIT_war_recalibration_state.md`** — every change classified clean / possibly-touched / limitation.
+- **`docs/PROD_PUSH_RUNBOOK_war_recalibration.md`** — the authoritative execution-ordered prod manifest + DB ledger + the **13-step** modeling/edge-fn plan.
+- **`docs/AGENT_LEARNINGS_war_recalibration_audit_2026_08_20.md`** — the non-obvious learnings (edge-fn model_config triple-break, returner-model bug, whip/obp SD staleness, store-everything two-mode rule).
+
+**Headline:** production-driving canonical values are CLEAN (WAR exact, power ratings match, team_season_stats exact, 269 tests pass). The work is: fix `whip_pr_sd`→37.13 + `obp_std_pr`→32.41; put **conference env+ pitcher on the ratio** (only the player power ratings got the /50×100 rebuild — the conference lever was MISSED, ties to the KEY LESSON above); **rewrite the edge-fn returner-hitter model to the SD-blend + make it read model_config** (the returner equation is fully stored as `r_*` under `admin_ui`); remove a NaN fallback + a dead-code ReferenceError. **Run RETURNERS only; transfer equation not settled. JUCO out of scope.**
+
+**PIPELINE STEP 1 BUILT (pitch-log-primary):** `scripts/derive_masters_from_pitchlog.ts` derives the full stat line from `pitch_log_*_totals` and writes into BOTH Masters (TruMedia = sporadic fill/override). Pitcher IP solved via per-PA out-attribution (added `pitch_log_pitcher_totals.ip`; corr 0.9995 vs Master; K9/BB9/WHIP 0.996+). Descriptive classic FIP for the Master (NOT `computeProjFip` = projection/pWAR FIP). Unique constraints added on both Masters. Dry-run verified, NOT applied. Full detail + SQL: `docs/AGENT_LEARNINGS_war_recalibration_audit_2026_08_20.md` + runbook Part F. NEXT: `ncaa_averages` → `compute_scores` → `create_predictions` → recompute.

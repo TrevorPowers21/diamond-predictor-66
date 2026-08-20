@@ -14,6 +14,17 @@
 > when a value is per-env). A change that touches the DB but is NOT written here is a bug.
 > The prod push reads ONLY this file — if it's not here, it doesn't happen on prod. [[feedback_claude_runs_backfills_dry_run]]
 
+> ## ★ WAR RECALIBRATION PUSH — AUTHORITATIVE RUNBOOK (2026-08-20) ★
+> For the **WAR recalibration + pitch-log migration** push, the execution-ordered,
+> gap-closed manifest is **`docs/PROD_PUSH_RUNBOOK_war_recalibration.md`** (DB-change ledger,
+> dependency order, the 13 modeling/edge-fn steps, limitations register). Companion audit:
+> **`docs/AUDIT_war_recalibration_state.md`**. The WAR-recalibration sections below are
+> reconciled to that runbook — where they disagree, **the runbook wins.**
+> **CORRECTIONS (2026-08-20):**
+> - **`team_war_snapshots` is NOT dropped** — federate-by-era keeps it for pre-2026 (2025 champions). Any "DROP TABLE team_war_snapshots" below is CANCELLED.
+> - **park_code/game_string backfill IS DONE on staging** (the earlier "NOT DONE" line is stale).
+> - **SD-audit outcome:** `whip_pr_sd`→37.13 and `obp_std_pr`→32.41 (returner+transfer) ARE re-tuned — see runbook Part C steps 1–2.
+
 Every schema change on this branch that is **not yet on prod**, in apply order. Run
 these against prod at push time (staging already has them). Most use
 `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, so re-running is safe —
@@ -196,16 +207,15 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   (HR/2B/3B/BB/HBP/SB/CS/SF) from pitch_log later. APPLIED STAGING 2026-08-19 (308 teams, 0 null; team .277/.381/.434 wRC+~100 = D1 baselines). Script scripts/sql/team_season_stats_rates.sql. PROD: re-agg from prod Masters.
 - [ ] Team RECORDS run (NEW) — derive overall + conference W-L per team-season from pitch_log game outcomes (runs/game →
   win/loss; is_conference_game → conf record). Not a player rollup. Stores into team_season_stats; enables wins-over-projection (future). STAGING+PROD.
-- [ ] CONSOLIDATION (build-check-then-clear, LAST) — **subsume `team_war_snapshots`, FEDERATE `Park Factors` (Trevor 2026-08-19):**
-  - `team_war_snapshots` is the SAME grain (team×season) → **MIGRATE every existing row first (don't scrub)**: staging = 2026 (308
-    rows); prod = +2025 champion seed. season is a key → each row becomes a team_season_stats row (champion flags/seed/proration
-    carried). After team_season_stats WAR cols A/B-match, repoint readers (useTeamWarSnapshot/useWarBenchmarks/CLAUDE.md TB
-    Compare) → then `DROP TABLE team_war_snapshots`. ⚠ NOT until history migrated + cols verify on staging+prod.
+- [ ] CONSOLIDATION (build-check-then-clear, LAST) — **subsume `team_war_snapshots` FOR 2026+, FEDERATE `Park Factors` (Trevor 2026-08-19):**
+  - ⚠️ **DROP CANCELLED (federate-by-era, 2026-08-20): DO NOT DROP `team_war_snapshots`.** It stays as the authoritative store for
+    **pre-2026** (2025 champions can't be recomputed — no 2025 pitch_log). team_season_stats is canonical for **2026+**. Migrate/carry the
+    2026 rows into team_season_stats and repoint 2026+ readers, but the table remains for historical seasons. **No `DROP TABLE`.**
   - `"Park Factors"` is a DIFFERENT grain (park-data INPUT store: raw single-season + rolling, ALL history) → **KEEP IT, do NOT retire.**
     It's always needed as the historical park source + projection ingredient (we are NOT backfilling full park history into team rows).
     team_season_stats stores a DERIVED SNAPSHOT of the values USED for that team-season: the 3-yr rolling (projection input) + the
     single-season, both stamped by the edge fn from `"Park Factors"` each run. Single writer = no drift; `"Park Factors"` stays source-of-truth.
-  - Every step (CREATE, each ADD COLUMN, the team_war_snapshots DROP, the repoint) gets its own line logged when applied — per the banner at top.
+  - Every step (CREATE, each ADD COLUMN, the 2026-row migrate, the repoint) gets its own line logged when applied — per the banner at top. (NO drop — see cancellation above.)
 - [x] team_season_stats RECORDS (step 4) — scripts/sql/team_season_stats_records.sql. Derived from pitch_log game outcomes
   (team_id=source_id; game key = DISTINCT team_id/date/game_venue_id/total_runs/opponent_runs → splits doubleheaders by final;
   ⚠ game_string/park_code are 0% populated so unavailable as a game id — the park_code ingest backfill is still pending). W/L from
@@ -226,10 +236,10 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   pitchers faced (team_id=T, metric on opponent_id conf). Reproduces proven OSU 100.2/104.5. Park = snapshot of USED rolling+single
   from "Park Factors" (which STAYS historical source). APPLIED STAGING 2026-08-19: 308/308 all three. PROD: re-run from prod pitch_log/Conference Stats/Park Factors.
 
-- [ ] ⚠ park_code/game_string BACKFILL — NOT DONE (confirmed 2026-08-19: 0 of 2,579,655 staging pitch_log rows populated). The
-  ingest logic exists (scripts/ingest_pitch_log.ts) but existing rows were never backfilled. Park factors were validated via clean
-  team_id home/away (corr 0.996), NOT park_code — so nothing downstream currently depends on park_code. Backfill from source files
-  (by uniq_pitch_id/game) when doing the pitch-log finalize; would let records key on game_string (game#) instead of the score-pair heuristic. STAGING+PROD.
+- [x] park_code/game_string BACKFILL — **DONE on staging** (superseded the 2026-08-19 "NOT DONE" note; see the later "RUNNING STAGING"
+  entry which completed). Audit 2026-08-20 confirmed ~100% populated on sampled teams + records now key on game_string (DH-safe,
+  Georgia 53-14 / 23-7 SEC). ⚠ Before prod push, run a server-side full-table `count(*) FILTER (WHERE park_code IS NULL)` to confirm
+  globally (audit used per-team sampling). PROD pending — backfill from source on prod. STAGING done / PROD pending.
 - [ ] team_season_stats RATE/COUNTING re-source (wiring step) — rebuild from pitch_log_hitter_totals/pitcher_totals (frequent primary;
   TruMedia = cross-check). Hitting: Σ raw counts (pa/ab/singles/doubles/triples/hr/bb/hbp/sac) → derive rates + store splits. Pitching:
   needs IP(=outs/3)/ER derivation (conf-stats ERA-via-DRS). Cross-check vs Master (corr 0.996, ~16 AB/team gap = TruMedia reconcile). STAGING+PROD.
@@ -308,9 +318,23 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   make the pitcher_full_name-from-pitcher_id resolution (fix_pnames / _pitcher_name_fix) a STANDARD post-ingest step so it's correct
   regardless of the source's fullName meaning. No mapping change needed for DRS CSVs.
 
-- [ ] SD AUDIT + conference env+ storage (feature/war-recalibration) — D1 ONLY. (a) ADD Conference Stats columns for per-conf PITCHER
-  env+ (era_pr_plus/fip_pr_plus/whip_pr_plus/k9_pr_plus/bb9_pr_plus/hr9_pr_plus, /50*100) + hitting offensive_power_rating; compute +
-  store for 30 D1 confs; edge-fn updates on upload (stored-not-live). (b) STORE cross-conf SDs (config + admin display). (c) Re-derive
-  transfer conference/competition weights off CURRENT D1 SDs (30 confs, JUCO excluded): conference_weight=0.025×SD, competition_weight=
-  0.05×SD; % impact = weight×SD/100. HTP SD stable (14.31 vs 14.1) → competition lever unchanged; pitcher env+ SDs pending compute.
-  Update model_config + transferWeightDefaults.ts weights AFTER Trevor approves the table. STAGING→PROD.
+- [ ] SD AUDIT + modeling fixes (feature/war-recalibration) — **D1 ONLY. SUPERSEDED BY `docs/PROD_PUSH_RUNBOOK_war_recalibration.md` Part C (the 13 steps).**
+  **OUTCOME (2026-08-20, confirmed on latest staging ratings):**
+  - **`whip_pr_sd` 24.59 → 37.13** (`pitchingEquations.ts:210` + model_config). Stale after the whip⁺ composite refit — 34% under-scaled.
+  - **`obp_std_pr` 28.89 → 32.41** (model_config `r_obp_std_pr` + `t_obp_std_pr`) — returner AND transfer (it's StdDevOBPPowerRating).
+  - **Conference env+ pitcher → ratio** `(conf/ncaa)×100` to match hitters (was z×20; only the player power ratings got the /50×100 rebuild — the conference lever was missed).
+  - era/fip/k9/bb9/hr9 + ba/iso SDs verified consistent — leave. (b) Store all SDs/weights in model_config + admin (read-source for edge fns).
+  - **⚠ TRANSFER weights/SD NOT settled** — do NOT re-run transfer projections until the transfer equation is finished + verified (runbook step 13b). Run RETURNERS only for now (step 13a). STAGING→PROD.
+
+- [ ] **UNLOGGED MIGRATIONS discovered by audit 2026-08-20 (add to prod plan) — verify prod state for each:**
+  - `20260805_player_season_defense_baserunning.sql` — CREATE `player_season_defense` (+ baserunning). **⚠ Header says staging-only; NEEDS A PROD PATH** — composite d/bsr-WAR depends on it. Populated by `scripts/load-drs-wsb-staging.ts`.
+  - `20260806_pitch_log_widen_attribution.sql` — ALTER pitch_log add attribution cols (`atbat_desc`, event cols) + additive backfill from DRS CSVs. dRS/bsrWAR consume these.
+  - `20260806_composite_war_and_refresh.sql` — composite cols + `refresh_composite_war()` v1 (÷10, **superseded** by `20260810_composite_war_d1_rescale` at ÷13.1 — fire the rescale version).
+  - `20260724120000_target_board_twp_two_row.sql` — ALTER target_board add `position_slot` + swap UNIQUE constraint.
+  - `20260724130000_neutral_snapshot.sql` — ALTER team_build_players + target_board add `neutral_snapshot jsonb` + backfill.
+  - `20260630000000_player_slot_values_uniq.sql` — dedupe + UNIQUE index on player_slot_values (prod deduped by hand first).
+  - Also LIST the Push-1 DB layer (default_build + pitch_log base migrations 20260619–20260629 + parks_dimensions + hitter_ball_flight_rv) as **"✅ already on prod (Push 1 2026-08-07) — verify"** so the manifest is complete.
+
+- [ ] **ncaa_averages fill (2026-08-20):** `pitcher_exit_velo` / `pitcher_ev90` / `pitcher_in_zone_pct` are NULL on staging → set **= the hitter averages 1-for-1** (same batted-ball population), stored both sides via a function. STAGING+PROD.
+- [ ] **Conference Stats legacy cols (2026-08-20):** prod has `iso_power_rating`/`obp_power_rating` (conference-level); staging restructured to `obp_plus`/`iso_plus` + `offensive_power_rating`. **RECONCILE display before any drop — these ARE read by ConferenceStatsPage; do NOT blind-drop.**
+- [ ] **KNOWN LIMITATION (deferred):** `pitch_log.vaa` 0% + `classification_version` ~65% — upload miss, left as-is for now.
