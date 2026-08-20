@@ -1174,3 +1174,18 @@ BEFORE re-tuning weights. Prod-read method: supabase-js paginate Conference Stat
 Master(pr_plus IP-weighted per conf); prod lacks hitter_talent_plus/pitching-env+ cols (added this session → prod = pre-change baseline).
 ### DELIVERABLE for Trevor: the old→new %impact table above + Stuff+/HTP rows. Decisions pending: (a) verify whip+ SD; (b) re-tune weights
 (equalize hit/pit conference impact? restore old %impact?); (c) then store per-conf pitcher env+ + cross-conf SDs (traceable) + make the run.
+## ★★★ SD AUDIT — DEFINITIVE RESULT (Trevor 2026-08-20). SUPERSEDES the earlier "whip+ tripled / k9 9%" finding (that was a METHOD BUG).
+### THE BUG: I computed pitcher env+ SD from PLAYER pr_plus (IP-weighted, /50×100, wide spread) → inflated (era+ 16, k9+ 23.63 → k9 9% impact).
+### THE FIX: the CONFERENCE env+ (fromEraPlus/fromK9Plus) the equation uses = calcPitchingPlus(conf_rate, ncaa_avg, ncaa_sd, SCALE=20)
+  = 100 + z×20 (buildTransferPitcherInputs.ts:269; params pitchingEquations.ts:200-235: era avg6.21/sd1.5879, fip 5.08/1.000, whip 1.64/0.2521,
+  k9 8.21/1.990, bb9 4.82/1.3407, hr9 1.12/0.4677, ALL scale=20). ⇒ env+ cross-conf SD = conf_rate_SD × 20/ncaa_sd. (Trevor's "×20" = this scale, STILL in the code.)
+### FINAL SDs + %impact (weight×SD/100), D1 30 confs, OLD(prod)→NEW(staging), correct method:
+  era+ 7.45→7.30 (2.24%→2.19%, wt .3) · fip+ 6.73→6.78 (2.02→2.03, .3) · whip+ 7.36→7.69 (2.21→2.31, .3) · k9+ 7.25→7.35 (2.90→2.94, .4) ·
+  bb9+ 6.90→7.28 (2.07→2.18, .3) · hr9+ 9.84→10.14 (2.95→3.04, .3) · HTP 14.1→14.31 (7.05→7.16, .5) · ba+ 3.99→3.91 (1.20→1.17, .3) ·
+  obp+ 3.49→3.47 (1.05→1.04, .3) · iso+ 12.35→12.47 (1.85→1.87, .15) · Stuff+ 3.69→3.48 (3.69→3.48, ba wt 1.0).
+### CONCLUSION: ALL SDs STABLE (within ~6%); every %impact moved <0.2pt. End-of-season reruns did NOT materially change the SDs.
+NO WEIGHT RE-TUNE NEEDED — levers as designed (conf 1-3%, HTP dominant ~7%, Stuff+ ~3.5%). Trevor's instinct correct on every count.
+### STILL TO DO (storage/traceability, not re-tune): store per-conf env+ (pitcher via calcPitchingPlus scale-20) + cross-conf SDs (config +
+admin display) so the audit is traceable; HTP IS derivable on prod from stored OPR/Stuff+/WRC+ (hitter_talent_plus column added this session).
+Then transfer correctness (oWAR depth-role reconcile + input mapping) → the run.
+### KEY LESSON: conference env+ = calcPitchingPlus scale-20 on the CONFERENCE RATE, NOT the player pr_plus (/50×100). Don't conflate the two.
