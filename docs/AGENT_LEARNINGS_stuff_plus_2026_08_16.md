@@ -986,3 +986,28 @@ sync all 3 to canonical (strip edge-fn PVF, delete triple-oWAR, align rate-index
 - "Finalize the WHOLE edge function" = the Track B UNIFIED on-upload edge fn that collapses the 3 copies into ONE process (upload →
   collect/derive/store all data incl team_season_stats → run returner + transfer projections). That's the end state; 6b is a step toward it.
 - WIRE C (team_season_stats frontend repoint + total_hitter_war snapshot plumbing) rides with 6b/7c.
+## ★★★ BRANCH STRATEGY (Trevor 2026-08-20) — prod-push improvements FIRST, then edge-fn rework on a fresh branch
+### "canonical" = the main SOURCE-OF-TRUTH version of the code (the reference impl the others match). Currently src/lib/* is canonical;
+the edge fn is a hand-written Deno MIRROR that drifted. ⇒ "sync to canonical" = make the edge fn match the correct src/lib.
+### TB live hook = TEMPORARY UI PREVIEW that reverts to the stored DB value on save (Trevor: "really important to remember"). NOT a
+persistent engine → #6 is really only TWO persistent things (canonical src/lib + edge fn), and the edge fn is THE one that runs.
+END STATE = ONE engine: the edge fn + app IMPORT THE SAME SHARED LOGIC so drift is impossible (Track B unification makes #6 mostly disappear).
+
+### PHASE 1 — get ALL data+code improvements into PROD (current feature/war-recalibration branch)
+Self-contained, verified, doesn't destabilize (team_season_stats is a store stage nothing reads yet; data fixes are pure quality).
+Includes: team_season_stats + refresh_team_season_stats() + name backfill + park_code backfill + pitch-log pitching rates + park
+factors + conf-stats/HTP + is_conf + BUILD #5 position-of-need + the 3 do-items (ra9, reg-window, ingest pitcher_full_name fix).
+⚠ LARGE push = the whole war-recalibration accumulation (desc_* cols → model_config → pitch_log_totals → Conference Stats →
+team_season_stats). DEPENDENCY ORDER MATTERS — assemble the ordered prod runbook from PROD_MIGRATIONS_TODO.md. Trevor drives staging→main PR.
+
+### PHASE 2 — edge-fn rework on a FRESH branch off the new main
+Unify the engine (edge fn imports the shared lib → no drift), plumb total_hitter_war into the snapshot, run transfer projections (6b)
++ A/B BOTH sides, land WIRE C (frontend repoint + hitter-WAR pivot), snapshots (7c, fixes TB oWAR regression), NIL. Verify in
+isolation, clean up, then merge. The risky part — isolated on its own branch.
+
+### NEXT ACTIONS (Phase 1 build order)
+1. Build #5 position-of-need (is_position_of_need flag + storage + save-hook re-check) + verify functionality.
+2. DRS ra9 rollup + reg-window pitch-log rates (refresh_team_season_stats additions).
+3. ingest_pitch_log.ts pitcher_full_name mapping fix.
+4. Finish park_code (fill + park-factor re-derive on park_code for neutral sites + records/outings re-key on game_string).
+5. Assemble the ordered prod runbook. (Do NOT push — Trevor drives.)
