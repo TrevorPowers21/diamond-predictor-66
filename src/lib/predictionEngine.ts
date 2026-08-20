@@ -325,9 +325,9 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     ncaaAvg: 0.28,
     ncaaObp: 0.385,
     ncaaIso: 0.162,
-    baStdPower: 31.297,
+    baStdPower: 29.99699,   // std_pr on 2026 pitch-log ratings (PA≥60); was 31.297
     baStdNcaa: 0.043455,
-    obpStdPower: 28.889,
+    obpStdPower: 31.89504,  // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
     obpStdNcaa: 0.046781,
     ncaaPR: 100,
     powerWeight: 0.7,
@@ -340,7 +340,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     },
     devCoeffs: { avg: 0.06, obp: 0.06, iso: 0.08 },
     isoStdNcaa: 0.07849797197,
-    isoStdPower: 45.423,
+    isoStdPower: 44.91252,  // std_pr on 2026 pitch-log ratings (PA≥60); was 45.423
     wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
     defaultDevAgg: 0,
     baDampTier1Max: 0.35,
@@ -426,9 +426,9 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     baNcaaAvg: 0.28,
     obpNcaaAvg: 0.385,
     isoNcaaAvg: 0.162,
-    baStdPower: 31.297,
+    baStdPower: 29.99699,   // std_pr on 2026 pitch-log ratings (PA≥60); was 31.297
     baStdNcaa: 0.043455,
-    obpStdPower: 28.889,
+    obpStdPower: 31.89504,  // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
     obpStdNcaa: 0.046781,
     baPowerWeight: 0.7,
     obpPowerWeight: 0.7,
@@ -442,7 +442,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     obpParkWeight: TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight,
     isoParkWeight: TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight,
     isoStdNcaa: 0.07849797197,
-    isoStdPower: 45.423,
+    isoStdPower: 44.91252,  // std_pr on 2026 pitch-log ratings (PA≥60); was 45.423
     wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
     ncaaWrc: 0.3782,
   };
@@ -656,17 +656,18 @@ function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
   };
 }
 
-// ⚠ REFERENCE, NOT RUNTIME (2026-08-20): `calculatePrediction` + `recalcReturner`
-// are no longer called at runtime — `bulkRecalculatePredictionsLocal` is now a
-// stub that invokes the `recalculate-prediction` edge fn, and PlayerProfile /
-// TeamBuilder retired the live per-row recompute (they read stored predictions).
-// `recalcReturner` is kept intentionally as the canonical SD-blend reference: the
-// edge fn's `recalc()` is a verbatim port of it. Its hardcoded config defaults are
-// 2025-era; the live math is now the edge fn reading model_config `r_*` (2026).
-function calculatePrediction(pred: PredictionRow, config: EngineConfig, overrides?: UpdateFields) {
-  if (pred.model_type === "transfer") return recalcTransfer(pred, config.transfer);
-  return recalcReturner(pred, config.returner, undefined, overrides);
-}
+// ⚠ REFERENCE, NOT RUNTIME (2026-08-20): `recalcReturner` is no longer called by
+// the app runtime — `bulkRecalculatePredictionsLocal` is a stub that invokes the
+// `recalculate-prediction` edge fn, and PlayerProfile / TeamBuilder retired the
+// live per-row recompute (they read stored predictions). It is kept as (a) the
+// canonical SD-blend reference — the edge fn's `recalc()` is a verbatim port — and
+// (b) a live dependency of scripts/backfill-2027-hitter-returners.ts, which calls
+// it directly to seed 2027 returner rows. So it is NOT dead and is retained.
+// Its hardcoded config defaults were refreshed to the 2026 pitch-log std_pr above.
+//
+// The former `calculatePrediction(pred, config, overrides)` wrapper was DELETED
+// (2026-08-20): it had no callers (dead), only routed transfer→recalcTransfer /
+// returner→recalcReturner. Call those directly if a router is ever needed again.
 
 // ── Pitcher path ───────────────────────────────────────────────────────────
 

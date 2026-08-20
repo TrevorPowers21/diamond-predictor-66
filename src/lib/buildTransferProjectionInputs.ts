@@ -239,9 +239,9 @@ export function buildHitterTransferInputs(
   const ncaaAvgOBP = toRate(readEquationValue("t_obp_ncaa_avg", 0.385, remoteEquationValues));
   const ncaaAvgISO = toRate(readEquationValue("t_iso_ncaa_avg", 0.162, remoteEquationValues));
   const ncaaAvgWrc = toRate(readEquationValue("t_wrc_ncaa_avg", 0.3782, remoteEquationValues));
-  const baStdPower = readEquationValue("t_ba_std_pr", 31.297, remoteEquationValues);
+  const baStdPower = readEquationValue("t_ba_std_pr", 29.99699, remoteEquationValues);   // std_pr on 2026 pitch-log ratings (PA≥60); was 31.297
   const baStdNcaa = toRate(readEquationValue("t_ba_std_ncaa", 0.043455, remoteEquationValues));
-  const obpStdPower = readEquationValue("t_obp_std_pr", 28.889, remoteEquationValues);
+  const obpStdPower = readEquationValue("t_obp_std_pr", 31.89504, remoteEquationValues); // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
   const obpStdNcaa = toRate(readEquationValue("t_obp_std_ncaa", 0.046781, remoteEquationValues));
 
   const srcW = transferWeightsForSource(player.division || undefined);
@@ -258,7 +258,7 @@ export function buildHitterTransferInputs(
   const obpParkWeight = toWeight(jucoWeight("t_obp_park_weight", readEquationValue("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues)));
   const isoParkWeight = toWeight(jucoWeight("t_iso_park_weight", readEquationValue("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues)));
 
-  const isoStdPower = readEquationValue("t_iso_std_power", 45.423, remoteEquationValues);
+  const isoStdPower = readEquationValue("t_iso_std_power", 44.91252, remoteEquationValues); // std_pr on 2026 pitch-log ratings (PA≥60); was 45.423
   const isoStdNcaa = toRate(readEquationValue("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
 
   const wObp = toRate(readEquationValue("r_w_obp", 0.691, remoteEquationValues));

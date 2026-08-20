@@ -199,27 +199,27 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   hr9_plus_weight: 0.05,
   era_plus_ncaa_avg: 6.21,
   era_plus_ncaa_sd: 1.587898316,
-  era_pr_sd: 29.48780404,
+  era_pr_sd: 28.11694,       // std_pr on 2026 pitch-log ratings (IP≥40); was 29.48780404
   era_plus_scale: 20,
   fip_plus_ncaa_avg: 5.08,
   fip_plus_ncaa_sd: 1.000197585,
-  fip_pr_sd: 22.20492306,
+  fip_pr_sd: 22.88228,       // std_pr on 2026 pitch-log ratings (IP≥40); was 22.20492306
   fip_plus_scale: 20,
   whip_plus_ncaa_avg: 1.64,
   whip_plus_ncaa_sd: 0.2521159606,
-  whip_pr_sd: 24.58561805,
+  whip_pr_sd: 37.19844,      // std_pr on 2026 pitch-log ratings (IP≥40); was 24.58561805 (composite refit widened it)
   whip_plus_scale: 20,
   k9_plus_ncaa_avg: 8.21,
   k9_plus_ncaa_sd: 1.990147058,
-  k9_pr_sd: 43.76562188,
+  k9_pr_sd: 45.47741,        // std_pr on 2026 pitch-log ratings (IP≥40); was 43.76562188
   k9_plus_scale: 20,
   bb9_plus_ncaa_avg: 4.82,
   bb9_plus_ncaa_sd: 1.340745984,
-  bb9_pr_sd: 42.89490618,
+  bb9_pr_sd: 42.91711,       // std_pr on 2026 pitch-log ratings (IP≥40); was 42.89490618
   bb9_plus_scale: 20,
   hr9_plus_ncaa_avg: 1.12,
   hr9_plus_ncaa_sd: 0.4677282102,
-  hr9_pr_sd: 34.13833398,
+  hr9_pr_sd: 32.25982,       // std_pr on 2026 pitch-log ratings (IP≥40); was 34.13833398
   hr9_plus_scale: 20,
   era_damp_thresholds: [2.5, 3.5, 4.5, 5.5, 7.0, 8.0, 9.0],
   era_damp_impacts: [0.45, 0.65, 0.8, 0.9, 1.0, 0.9, 0.75, 0.6],
@@ -474,10 +474,10 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
     // This prevents stale local edits from drifting projected pK/9, pBB/9, and pHR/9 role transitions.
     merged.k9_plus_ncaa_avg = 8.21;
     merged.k9_plus_ncaa_sd = 1.990147058;
-    merged.k9_pr_sd = 43.76562188;
+    merged.k9_pr_sd = 45.47741;   // std_pr refreshed on 2026 pitch-log ratings (IP≥40); was 43.76562188
     merged.bb9_plus_ncaa_avg = 4.82;
     merged.bb9_plus_ncaa_sd = 1.340745984;
-    merged.bb9_pr_sd = 42.89490618;
+    merged.bb9_pr_sd = 42.91711;  // std_pr refreshed on 2026 pitch-log ratings (IP≥40); was 42.89490618
     merged.sp_to_rp_reg_hr9_pct = 8;
     return merged;
   } catch {

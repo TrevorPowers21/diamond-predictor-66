@@ -8,10 +8,11 @@
  *   1. addMissingPlayers
  *   2. computeAndStoreNcaaAverages
  *   3. computeAndStoreAllScores
- *   4. createPredictionsFromMaster
- *   5. calculateConferenceStuffPlus
- *   6. computeConferenceEnvRates
- *   7. bulkRecalculatePredictionsLocal
+ *   4. computeAndStoreStdPr        (power-rating SDs, on the fresh ratings)
+ *   5. createPredictionsFromMaster
+ *   6. calculateConferenceStuffPlus
+ *   7. computeConferenceEnvRates
+ *   8. bulkRecalculatePredictionsLocal
  *
  * Usage:
  *   npx tsx scripts/recompute-cascade.ts          # staging
@@ -20,6 +21,7 @@
 import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
+import { computeAndStoreStdPr } from "@/lib/computeStdPr";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
 import { computeConferenceEnvRates } from "@/lib/importConferenceStats";
@@ -54,6 +56,10 @@ async function main() {
   await step("addMissingPlayers", () => addMissingPlayers(DATA_SEASON));
   await step("computeAndStoreNcaaAverages", () => computeAndStoreNcaaAverages(DATA_SEASON));
   await step("computeAndStoreAllScores", () => computeAndStoreAllScores(DATA_SEASON));
+  // std_pr = power-rating SDs. MUST run after computeAndStoreAllScores (needs the
+  // freshly-recomputed *_power_rating / *_pr_plus columns) and before any
+  // projection recompute so the SD-blend denominator is never stale.
+  await step("computeAndStoreStdPr", () => computeAndStoreStdPr(DATA_SEASON));
   await step("createPredictionsFromMaster", () => createPredictionsFromMaster(DATA_SEASON, PROJ_SEASON));
   await step("calculateConferenceStuffPlus", () => calculateConferenceStuffPlus(DATA_SEASON));
   await step("computeConferenceEnvRates", () => computeConferenceEnvRates(DATA_SEASON));
