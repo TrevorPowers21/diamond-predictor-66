@@ -1111,3 +1111,16 @@ SDs (hit+pitch, D1-only JUCO-excluded, full-season) as tracked config replacing 
 now|old weight|recommended weight → weights = 0.025×SD (conference) / 0.05×HTP_SD (competition). Trevor approves before weight changes.
 ### OPEN (confirm w/ Trevor): where to STORE the SDs (model_config vs dedicated SD config table); pitching env+ as new Conference Stats columns.
 ### SAMPLE (SEC, D1): HTP 130.3, iso_plus 119.3, ba_plus 94.3, Overall_Power_Rating(pitch) 119.4, offensive_power_rating NULL (also a gap — hitting overall PR not stored at conf level).
+## ★★★ CONFERENCE STATS STORAGE AUDIT (Trevor 2026-08-20) — more gaps than just pitching env+
+Coverage (D1, 40 conference rows): Stuff+ 40/40 · Overall_Power_Rating(pitch) 40/40 · ba_plus 40/40 ✓. GAPS:
+- HTP (hitter_talent_plus) 30/40 · WRC_plus 30/40 · run_env_factor(park) 30/40 → 10 conferences MISSING these.
+- offensive_power_rating (hitting OPR) 0/40 → NEVER stored.
+- pitching per-stat env+ (era+/fip+/whip+/k9+/bb9+/hr9+) → NO COLUMNS (live-computed only).
+- Park per conf = only run_env_factor.
+⇒ 40-vs-30 SD-POPULATION ISSUE: 40 D1 rows but only 30 fully populated → the 10 partial confs drag the cross-conf SD. MUST resolve
+(fill the 10 or exclude from D1) before the SD numbers are trustworthy. OPEN — Trevor to decide: fill the 10 or exclude.
+STORAGE BUILD (all Trevor-confirmed): (1) fill EVERY per-conf gap — pitching env+ (new Conference Stats columns, /50*100), hitting OPR,
++ the 10 missing HTP/WRC/park; (2) store cross-conf SD per metric in model_config + admin display (informational; the 0.025×SD WEIGHT is
+what's used + is saved/displayed in multiple spots — store SDs "for consistency"); (3) LOG the edge fn to UPDATE all of these ON UPLOAD
+(stored-not-live); (4) the audit table (Stat|env+ SD now|% impact|old weight|recommended weight, both hit+pitch) after population is clean.
+Trevor: "make sure HTP, Stuff+, Park factor, OPR, and the other metrics per conference are stored in Conference Stats."
