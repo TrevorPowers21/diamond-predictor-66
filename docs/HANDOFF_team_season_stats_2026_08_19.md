@@ -471,3 +471,18 @@ the EXACT weight/SD from the equation — confirm which projectLower/projectHigh
 pitching IP by role; scale WAR by role PA/IP in BOTH storage + display; 1-for-1 but live-reactive to toggle/role changes (belongs in the
 projection engine). PVF already stripped (e5fe955; dead constant @ index.ts:533). #5 position-of-need → moved to WIRING stage (later).
 Re-priority: correct values (transfer #6 + SD audit + input mapping) → store → display → then wiring-stage functions.
+## ★★★ SD AUDIT — STORAGE GAPS (Trevor 2026-08-20): env+ scale CONFIRMED consistent; 2 things must be STORED not live/hardcoded
+### CONFIRMED: env+ all on the /50*100 100-average scale (powerRatings.ts). FIP+ = weighted avg of hr9+/bb9+/k9+ (each /50*100) → lands
+on 100-scale. 132 = 32% above avg, real. ×20 pitching multiplier REMOVED → one consistent equation hit+pitch → pitching env+ now wider
+scale → cross-conf SD legitimately larger than the stored 2026-05 values. DO NOT touch env+.
+### GAP 1 — per-conference PITCHING env+ NOT stored. Conference Stats stores HITTER env+ (ba_plus/obp_plus/iso_plus/slg_plus/
+hitter_talent_plus/Stuff_plus) + Overall_Power_Rating (SEC 119.4) but NOT the individual era+/fip+/whip+/k9+/bb9+/hr9+ per conference —
+those are LIVE-computed in the projection. Trevor: they SHOULD BE STORED (Conference Stats columns + conference-page display), stored-not-live.
+### GAP 2 — the SDs themselves (the audit target) are HARDCODED in a transferWeightDefaults.ts COMMENT (era+ 9.4·fip+ 6.2·whip+ 5.3·
+k9+ 7.9·bb9+ 8.6·hr9+ 17.3·HTP 14.1). Must be TRACKED/STORED (a real config row) so weights derive from a stored auditable source, not a
+stale comment. SD = CONFERENCE-to-conference (cross-conf) SD (Trevor: "conference to conference impact so it is conference SD").
+### AUDIT = 3 pieces: (1) compute+store per-conf pitching env+ (/50*100) in Conference Stats + display; (2) compute+store the cross-conf
+SDs (hit+pitch, D1-only JUCO-excluded, full-season) as tracked config replacing the hardcoded comment; (3) table Stat|env+ SD now|% impact
+now|old weight|recommended weight → weights = 0.025×SD (conference) / 0.05×HTP_SD (competition). Trevor approves before weight changes.
+### OPEN (confirm w/ Trevor): where to STORE the SDs (model_config vs dedicated SD config table); pitching env+ as new Conference Stats columns.
+### SAMPLE (SEC, D1): HTP 130.3, iso_plus 119.3, ba_plus 94.3, Overall_Power_Rating(pitch) 119.4, offensive_power_rating NULL (also a gap — hitting overall PR not stored at conf level).
