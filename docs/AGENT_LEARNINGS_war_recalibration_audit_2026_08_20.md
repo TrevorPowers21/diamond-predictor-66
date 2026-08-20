@@ -120,3 +120,31 @@ Companion to `docs/AUDIT_war_recalibration_state.md` (findings) and `docs/PROD_P
 **SHORTCOMINGS:** (1) wrong returner-hitter model — multiplicative, no SD, no intercept, divisor damp not tiered, overall not per-stat; (2) reads model_config wrong (returner filter → 0 rows → hardcoded); (3) 3 drifted math copies; (4) returner pitchers = script, not autonomous-on-upload; (5) dead `bulkRecalc`/`fetchAllPredictionsForReturnerMode` ReferenceError; (6) edge pitcher IP drift (transfer); (7) no true run-on-upload.
 
 **⭐ NORTH STAR (Trevor): ONE edge function**, autonomous on upload: ingest → derive both Masters (Step 1) → ncaa_averages+model_config (Step 2a) → compute_scores (Step 2b) → create_predictions (Step 3) → recompute returner H+P on SD-blend reading model_config (Step 4) → [transfer once settled]. Every fixed step is a module that folds into that single function — kills fragmentation, script/edge split, dead code, model ambiguity. THIS is the best learning-data build; keep logging comprehensively.
+
+---
+
+## STEPS 1–3 APPLIED TO STAGING + VERIFIED (2026-08-20)
+
+Ran in order (Trevor: apply 1-3, verify stores properly, THEN build Step 4):
+- **Step 1** `derive_masters_from_pitchlog.ts --apply --no-newrows` — Masters pitch-log-fed. 4374 hitters / 4772 pitchers. **Bug hit + fixed:** batch upsert "ON CONFLICT cannot affect row a second time" → added dedupe by (source_player_id, Season) + null-id skip in `upsertBatch`. Re-ran clean (no dups dropped — first failure was a partial-state fluke). Verified: Gidley AVG 0.325→0.326, O'Harran K9 7.65, in_zone_pct populated, ERA untouched (TruMedia).
+- **Stuff+**: confirmed current (audited v1-anchor); `Master.stuff_plus` already = totals' pitch-weighted per-pitch Stuff+ (verified to 0.01). Logged as explicit rollup step (runbook G0) before compute_scores.
+- **2a** `computeAndStoreNcaaAverages(2026)` — exit_velo 86.22 = pitcher_exit_velo (1-for-1), ev90 101.45 = pitcher_ev90 (1-for-1), pitcher_in_zone_pct 48.33 (was null). model_config mirror: p_sd_avg_ev 4.19 / p_ncaa_avg_avg_ev 86.22 written, **unique per (admin_ui,2026,key)** (the "two values" seen were 2025-vs-2026 seasons, not dups).
+- **2b** `computeAndStoreAllScores(2026)` — 8246 hitters / 8072 pitchers scored (1 hitter error). `*_power_rating` refreshed on the pitch-log Masters + new baselines.
+- **3** `createPredictionsFromMaster(2026→2027)` — 9600 predictions, 0 errors, 6:20 runtime. **from_obp_plus now populated on 5127 returner rows** (was NULL — the SD-blend input).
+
+**⚠ SHORTCOMING (log for the unified edge fn):** `createPredictions` applies the ~8195 stub updates **one row at a time** (`for (const u of predsToUpdate) await supabase.update(...)`, `:343`) → 6+ min, silent (no per-row log — an output-gap watchdog false-alarms). BATCH this in the unified fn.
+
+**STATE:** Steps 1-3 clean on staging. Ready to BUILD Step 4 (edge-fn returner rebuild) — all its inputs now correct (from_obp_plus populated, model_config r_*/p_sd_* current, scores refreshed).
+
+---
+
+## STEP 4 BUILD — the correct SD-blend ALREADY EXISTS in code (2026-08-20)
+
+**⭐ The canonical `predictionEngine.ts:528-575` `recalc()` IS the correct SD-blend** (Trevor's intended returner-hitter model), fully done:
+- `pAvg`: `scaledBa = ncaaAvg + ((baPlus−ncaaPR)/baStdPower)×baStdNcaa` → `blend(fromAvg, PRw)` → `×(1 + bases.avg + devAgg·devCoeffs.avg)`
+- `pObp`: same with obp params (= Trevor's ScaledOBP)
+- `pIso`: `lastIso = fromSlg−fromAvg` → `scaledIso via isoStdPower/isoStdNcaa` → blend → `×(1+bases.iso+…)` ⇒ **SLG = pAvg + pIso** (resolves "no r_slg_std" — SLG rides ISO)
+- `pWrc = 0.011 + 0.691·pObp + 0.235·pSlg` (intercept present); `pWrcPlus = pWrc/ncaaWrc·100`
+- `baPlus/obpPlus/isoPlus` = the per-stat ratings (now `from_*_plus`, populated by Step 3)
+
+**The `recalculate-prediction` EDGE fn just carries the WRONG multiplicative copy of `recalc`.** So STEP 4 = **PORT `predictionEngine.recalc` (the correct SD-blend) into the edge fn** + wire it to READ `model_config` `r_*` (fix the `model_type='returner'`→0-rows + bare-key bugs; predictionEngine's hardcoded defaults happen to match the stored r_* so its MATH is right regardless — but the edge must read the DB per store-everything). Then delete dead `bulkRecalc`/`fetchAllPredictionsForReturnerMode`. Verify by hand-computing the SD-blend for a real player vs the ported edge recalc (dry-run). Pitchers: `precompute-returner-pitchers.ts` already correct (SD-based) — fold into the edge fn later. D1 only.
