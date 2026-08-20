@@ -1144,3 +1144,20 @@ districts (JUCO) mislabeled division='D1' — EXCLUDE from D1 SD (leave JUCO unt
 (2) compute+store the cross-conf SDs (config, e.g. model_config, + admin display — informational; the derived WEIGHT is used + saved
 in multiple spots); (3) table Stat | SD now | % impact (=weight×SD/100) | old weight | recommended weight (=0.025×SD conf / 0.05×SD comp)
 for Trevor approval before any weight change. Config: model_config (D1 weights) + transferWeightDefaults.ts.
+## ★★★ SD TRACEABILITY (Trevor 2026-08-20) — what's stored vs the gap
+### STORED + TRACEABLE (model_config, displayed on admin PitchingEquationsTab / AdminDashboard):
+- t_*_std_ncaa = raw-stat PLAYER SD (t_ba 0.043455, t_obp 0.046781, t_iso 0.078498) + r_* returner variants.
+- t_*_std_pr / std_power = POWER-RATING PLAYER SD (t_ba 31.297, t_obp 28.889, t_iso 45.423).
+These feed the POWER term: powerAdj = ncaaAvg ∓ ((prPlus−100)/std_pr)×std_ncaa. TRACEABLE. ✓
+### NOT STORED (the gap Trevor flagged): the CROSS-CONFERENCE env+ SD (ba+ 3.91/obp+ 3.47/iso+ 12.47/era+ 9.4/…/HTP 14.1) — only
+in a transferWeightDefaults.ts COMMENT, never a config value. ⇒ STORE IT (model_config config rows + admin display) as part of this work
+so every lever's % impact is auditable from stored numbers, not a comment.
+### KEY CLARIFICATION: the D1 CONFERENCE weight is a FIXED coefficient (t_ba_conference_weight=0.3), NOT 0.025×SD — that formula is
+JUCO-PITCHING-ONLY. So for the D1 equation the cross-conf SD was never an INPUT (nothing to have stored); it's the DIAGNOSTIC that gives
+each lever's % impact = weight × (cross-conf SD/100). Storing it makes the impact traceable + lets us re-tune weights to a target % impact if the SD shifts.
+### CONFIRMED STABLE (measured off current end-of-season Conference Stats, 30 D1 confs): HTP 14.31 (vs 14.1 stored), and the hitter env+
+SDs (ba+/obp+/iso+) are current live values (no stored old to diff, but env+ formula unchanged for hitting → Trevor: "tight SDs, wouldn't
+change a ton"). The one that MOVED = pitcher env+ SD (×20 removal). 
+### PLAN unchanged + expanded: (a) compute+store per-conf PITCHER env+ + hitting OPR in Conference Stats (edge-fn on upload); (b) STORE
+the cross-conf SDs (model_config + admin display) — fixes traceability; (c) audit table Stat | cross-conf SD now | % impact (=weight×SD/100)
+| old weight | recommended weight, both hit+pitch, D1-only; Trevor approves before weight changes. Admin UI: PitchingEquationsTab.tsx / AdminDashboard.tsx already display equation SDs → add cross-conf SD there.
