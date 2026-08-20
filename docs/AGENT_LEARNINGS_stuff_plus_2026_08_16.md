@@ -1028,3 +1028,14 @@ and SHIPPED (stored + used) IN THIS PUSH — not left as unwired tables. Then a 
 Collapse the copies into ONE shared engine (edge fn + app import the same lib → drift impossible), #6 transfer-sync structurally,
 DEAD-CODE audit, Track B one-process (upload → collect/store all incl team_season_stats → run returner+transfer projections), clean
 transfer re-run (6b) + A/B. The risky architectural refactor — isolated, verified, cleaned up, then merged.
+## PHASING CONFIRMED + PARK-FACTOR FINDING (Trevor 2026-08-20)
+- PHASE 2 = the EDGE FUNCTION ALONE (structural cleanup/unification). EVERYTHING ELSE = PHASE 1: all display + wiring — WIRE C,
+  #5 position-of-need, the minimal total_hitter_war snapshot touch, descriptive WAR columns, records re-key. (#5 is display+wire → Phase 1.)
+- PARK FACTORS were derived off the HOME FLAG (scripts/sql/park_home_2026.sql: "a team's park = all its home games", keyed team_id) —
+  NOT park_code (was null). But home-flag IS effectively park-based: a team's home games = games at their park → the factor = the
+  park factor. All 308 HOME parks already correct. GAP = true NEUTRAL sites only: 310 park_codes vs 308 teams = ~2 dedicated neutral
+  venues → a handful of tournament games not attributed to any park factor. MINOR. ⇒ re-deriving on park_code is nice-to-have
+  (nudges the ~2-park neutral delta + proper keying), NOT urgent. THE REAL park_code PAYOFF = game_string → exact game identification
+  for RECORDS/OUTINGS (fixes doubleheader merges + the 2 pitch-count artifacts). That's the substantive DB-batch win.
+- FRONTEND WORKFLOW (Trevor's "what do I need to do"): agent writes ALL code + tsc-checks, then hands Trevor a per-page CHECKLIST
+  (open page X → confirm card/number Y). Trevor just page-loads + eyeballs. That IS the whole page-load gate.
