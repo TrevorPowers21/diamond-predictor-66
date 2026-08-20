@@ -157,3 +157,15 @@ ALTER TABLE "Pitching Master" ADD CONSTRAINT pitching_master_src_season_uniq UNI
 ```
 
 **F3. Run the derive (script, --apply).** NOT YET RUN. Writes: hitters full line; pitchers scouting + K9/BB9/HR9/WHIP/FIP (**descriptive classic FIP** `(13·HR+3·(BB+HBP)−2·K)/IP+3.157`, NOT `computeProjFip` which is the projection/pWAR FIP). Never writes ERA/IP/G/GS/Role (TruMedia). Fill/override: null/thin → keep Master. Creates new rows for pitch-log-only players (2027). Dry-run: 4,374 hitters / 4,772 pitchers change.
+
+---
+
+## PART G — PIPELINE PIVOT (Steps 2–4, toward ONE edge fn). CODE ships with branch; the RUNS below execute on prod after the code merges.
+
+**G1. `computeNcaaAverages.ts` (Step 2a) — CODE.** commit `f3c231d`. (a) `pitcher_exit_velo`/`pitcher_ev90` (mean+sd) pinned = hitter `exit_velo`/`ev90` 1-for-1 (was NULL / wrong `90th_vel`=fastball-velo). (b) `pitcher_in_zone_pct` added to map. (c) **Dual-writes mean+SD to BOTH `ncaa_averages` AND `model_config`** (`buildModelConfigRows`, keys `p_ncaa_avg_*`/`p_sd_*`/`r_*`/`t_*`). **PROD RUN:** re-run `computeAndStoreNcaaAverages(season)` on prod after Masters are pitch-log-fed → refreshes both stores. `wrc_sd` intentionally null.
+
+**G2. `createPredictionsFromMaster.ts` (Step 3) — CODE.** commit `1ff06b7`. Writes per-stat `from_avg_plus/from_obp_plus/from_slg_plus` (= `ba/obp/iso_power_rating`) on insert+update; guard also fires on `from_obp_plus==null` so existing rows backfill. **PROD RUN:** re-run create_predictions so `from_obp_plus` (returner SD-blend input) populates.
+
+**G3. Edge-fn returner rebuild (Step 4) — CODE, NOT YET BUILT.** Rewrite `recalculate-prediction` `recalc()` to the SD-blend (per-stat `from_obp_plus`, `+0.011` wRC intercept, tiered damp), READ `model_config` `r_*`/`p_sd_*` (fix the `model_type='returner'`→0-rows + bare-key bugs), delete dead `bulkRecalc`/`fetchAllPredictionsForReturnerMode`. **PROD RUN:** recompute returners (H+P) once after code merges. Transfer deferred.
+
+**G4. Execution order (prod, pipeline pivot):** F1/F2 (ip col + constraints) → F3 (derive → Masters) → G1 (ncaa_averages+model_config) → compute_scores → G2 (create_predictions) → G3 (recompute returners). North star: fold all into ONE edge fn, autonomous on upload.

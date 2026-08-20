@@ -100,3 +100,23 @@ Companion to `docs/AUDIT_war_recalibration_state.md` (findings) and `docs/PROD_P
 **🔴 BUG (fixed):** the per-stat `from_avg_plus`/`from_obp_plus`/`from_slg_plus` were **read** (`ba/obp/iso_power_rating`, lines 151-153) but **never written** — only the *overall* `power_rating_plus`. The only writer of `from_*_plus` was the legacy `google-sheets-sync`. So in the Master→predictions pipeline `from_obp_plus` was **NULL** — yet the returner **SD-blend reads `from_obp_plus`** (`predictionEngine.ts:584`, edge `recalculate-prediction:125`). Returner could only fall back to the overall rating for every stat (the exact defect flagged in the edge-fn rebuild). **FIX:** write `from_avg_plus=ba_power_rating, from_obp_plus=obp_power_rating, from_slg_plus=iso_power_rating` on BOTH new-insert and update paths; broadened the update guard to `|| existing.from_obp_plus == null` so existing (non-blended) rows backfill on re-run. Blend-safe: those ratings are already blend-aware (compute_scores uses `blended_*` for `combined_used`).
 
 **Trevor:** overall power rating is NOT used in projections (only OPR/offensive + `_pr_plus` matter) → projection now correctly keyed on the **per-stat** `from_*_plus`. Pitchers read `era_pr_plus` etc. from the Master directly (no player_predictions per-stat column — no gap there). JUCO out of scope.
+
+---
+
+## STEP 4 — RECOMPUTE (the projection engine) — comprehensive (2026-08-20)
+
+**Runs today across 3 FRAGMENTED paths (different models, different places):**
+- **Returner HITTERS** → `recalc()` in `recalculate-prediction` edge fn (`action:'bulk_recalculate'`) — **multiplicative, SD-FREE model. WRONG.**
+- **Returner PITCHERS** → `computePitcherProjection` in `precompute-returner-pitchers.ts` (SCRIPT) — **SD-blend, CORRECT** (reads pitchingEquations incl. whip_pr_sd), but it's a script not the edge fn.
+- **Transfer (H+P)** → `recalcTransfer` / `process-precompute-jobs` edge fn — deferred (equation unsettled).
+→ The two returner sides run DIFFERENT models in DIFFERENT places. That asymmetry is the headline.
+
+**The loop:** trigger (admin button/cascade) → fetch all active returner+transfer preds → batches of 50 → `recalc`(returner)|`recalcTransfer`(transfer) → unlock→update `p_*`→re-lock.
+
+**Returner-hitter: current vs target** (player from_obp 0.415 prPlus 88 JS → stored p_obp 0.407, p_wrc 0.380, p_wrc+ 100):
+- Current `recalc` (multiplicative, NO intercept) → wRC+ **98**, AVG/SLG off.
+- Target SD-blend `ScaledOBP=r_ncaa_avg_obp + ((from_obp_plus−100)/r_obp_std_pr)×r_obp_std_ncaa` → blend → `×(1+ClassAdj+DevAgg·0.06)`, wRC `+0.011` → wRC+ **100**. NOW RUNNABLE (Step 3 wired from_obp_plus; Step 2 stored r_obp_std_pr/r_obp_std_ncaa in model_config).
+
+**SHORTCOMINGS:** (1) wrong returner-hitter model — multiplicative, no SD, no intercept, divisor damp not tiered, overall not per-stat; (2) reads model_config wrong (returner filter → 0 rows → hardcoded); (3) 3 drifted math copies; (4) returner pitchers = script, not autonomous-on-upload; (5) dead `bulkRecalc`/`fetchAllPredictionsForReturnerMode` ReferenceError; (6) edge pitcher IP drift (transfer); (7) no true run-on-upload.
+
+**⭐ NORTH STAR (Trevor): ONE edge function**, autonomous on upload: ingest → derive both Masters (Step 1) → ncaa_averages+model_config (Step 2a) → compute_scores (Step 2b) → create_predictions (Step 3) → recompute returner H+P on SD-blend reading model_config (Step 4) → [transfer once settled]. Every fixed step is a module that folds into that single function — kills fragmentation, script/edge split, dead code, model ambiguity. THIS is the best learning-data build; keep logging comprehensively.
