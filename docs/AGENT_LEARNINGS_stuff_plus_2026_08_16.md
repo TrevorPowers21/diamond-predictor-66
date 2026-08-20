@@ -1161,3 +1161,16 @@ change a ton"). The one that MOVED = pitcher env+ SD (×20 removal).
 ### PLAN unchanged + expanded: (a) compute+store per-conf PITCHER env+ + hitting OPR in Conference Stats (edge-fn on upload); (b) STORE
 the cross-conf SDs (model_config + admin display) — fixes traceability; (c) audit table Stat | cross-conf SD now | % impact (=weight×SD/100)
 | old weight | recommended weight, both hit+pitch, D1-only; Trevor approves before weight changes. Admin UI: PitchingEquationsTab.tsx / AdminDashboard.tsx already display equation SDs → add cross-conf SD there.
+## ★★★ SD AUDIT — OLD(prod) vs NEW(staging) % IMPACT COMPARISON (Trevor 2026-08-20). Both on the /50×100 100-avg scale
+(prod pr_plus already on it — the comment's era+ 9.4 was an OLDER ×20-era measurement, NOT prod; the "×20 grew everything" story was WRONG).
+Weights (pitchingEquations.ts D1 defaults): conf era/fip/whip/bb9/hr9=0.3, k9=0.4 ; competition era=0.5. Hitter (model_config): conf ba/obp=0.3, iso=0.15 ; competition(vs Stuff+) ba=1.0/obp=0.85/iso=0.75. %impact = weight × SD/100.
+### PITCH conf %impact old→new: whip+ 8.99→22.62 SD ⇒ 2.70%→6.79% ⚠ (SD TRIPLED, the one big mover) · k9+ 23.10→23.63 9.24→9.45 ·
+era+ 16.34→16.05 4.90→4.82 · bb9+ 13.18→15.11 3.95→4.53 · fip+ 11.79→10.87 3.54→3.26 · hr9+ 6.51→9.51 1.95→2.85.
+### HIT conf %impact old→new: ba+ 3.99→3.91 1.20→1.17 · obp+ 3.49→3.47 1.05→1.04 · iso+ 12.35→12.47 1.85→1.87 (all STABLE).
+### COMPETITION: Stuff+ (hitter comp) 3.69→3.48 (ba 3.69%→3.48%); HTP (pitcher comp) 14.1→14.31 (era 7.05%→7.16%). STABLE.
+### FINDING: Trevor's instinct right — nearly everything STABLE. ONE real mover = whip+ (SD ~tripled 8.99→22.62 from this session's
+power-rating recompute) → WHIP conf impact 2.70%→6.79%; hr9+/bb9+ moderate. ⚠ CONFIRM whip+ jump is intended, not a recompute artifact,
+BEFORE re-tuning weights. Prod-read method: supabase-js paginate Conference Stats(ba/obp/iso_plus,Stuff_plus D1 excl NJCAA) + Pitching
+Master(pr_plus IP-weighted per conf); prod lacks hitter_talent_plus/pitching-env+ cols (added this session → prod = pre-change baseline).
+### DELIVERABLE for Trevor: the old→new %impact table above + Stuff+/HTP rows. Decisions pending: (a) verify whip+ SD; (b) re-tune weights
+(equalize hit/pit conference impact? restore old %impact?); (c) then store per-conf pitcher env+ + cross-conf SDs (traceable) + make the run.
