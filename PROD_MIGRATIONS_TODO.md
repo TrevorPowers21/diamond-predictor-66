@@ -307,3 +307,10 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
   original DB corruption came from a DIFFERENT/older source export (fullName=batter), already fixed by the backfill. ROBUST FIX =
   make the pitcher_full_name-from-pitcher_id resolution (fix_pnames / _pitcher_name_fix) a STANDARD post-ingest step so it's correct
   regardless of the source's fullName meaning. No mapping change needed for DRS CSVs.
+
+- [ ] SD AUDIT + conference env+ storage (feature/war-recalibration) — D1 ONLY. (a) ADD Conference Stats columns for per-conf PITCHER
+  env+ (era_pr_plus/fip_pr_plus/whip_pr_plus/k9_pr_plus/bb9_pr_plus/hr9_pr_plus, /50*100) + hitting offensive_power_rating; compute +
+  store for 30 D1 confs; edge-fn updates on upload (stored-not-live). (b) STORE cross-conf SDs (config + admin display). (c) Re-derive
+  transfer conference/competition weights off CURRENT D1 SDs (30 confs, JUCO excluded): conference_weight=0.025×SD, competition_weight=
+  0.05×SD; % impact = weight×SD/100. HTP SD stable (14.31 vs 14.1) → competition lever unchanged; pitcher env+ SDs pending compute.
+  Update model_config + transferWeightDefaults.ts weights AFTER Trevor approves the table. STAGING→PROD.

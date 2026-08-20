@@ -1124,3 +1124,23 @@ STORAGE BUILD (all Trevor-confirmed): (1) fill EVERY per-conf gap — pitching e
 what's used + is saved/displayed in multiple spots — store SDs "for consistency"); (3) LOG the edge fn to UPDATE all of these ON UPLOAD
 (stored-not-live); (4) the audit table (Stat|env+ SD now|% impact|old weight|recommended weight, both hit+pitch) after population is clean.
 Trevor: "make sure HTP, Stuff+, Park factor, OPR, and the other metrics per conference are stored in Conference Stats."
+## ★★★ % IMPACT FORMULA (transferPitcherProjection.ts projectLower/projectHigher) — CALCULATE, don't assume (Trevor 2026-08-20)
+projected = blended × (1 − confTerm + compTerm + parkTerm), where:
+  confTerm = confWeight × ((toConfEnv+ − fromConfEnv+)/100)   [conference lever]
+  compTerm = compWeight × ((toHTP − fromHTP)/100)             [competition/HTP lever]
+  parkTerm = parkWeight × ((toPark − fromPark)/100)           [park lever]
+  (powerAdj = ncaaAvg ∓ ((prPlus−100)/prSd)×ncaaSd ; blended = last×(1−powerWeight)+powerAdj×powerWeight)
+⇒ A lever's % IMPACT for a 1-SD conference difference = weight × (SD/100). (For HTP: compWeight × SD_HTP/100 — CALCULATE with the
+real D1 compWeight + real SD, do NOT assume "5%".) Recommended weight per methodology: conference = 0.025 × SD ; competition = 0.05 × SD.
+D1 EQUATION ONLY — ignore all JUCO weights (JUCO_PITCHING_TRANSFER_WEIGHTS etc.). D1 weights live in model_config (DB).
+
+## D1 cross-conf SDs (30 real D1 confs, JUCO NJCAA-D1 excluded) measured 2026-08-20:
+HTP 14.31 (stored 14.1 → STABLE) · Stuff+ 3.48 · ba+ 3.91 · obp+ 3.47 · iso+ 12.47 · slg+ 5.94 · wRC+ 3.41 · OPR(pitch) 7.99.
+Pitcher per-stat env+ (era+/fip+/whip+/k9+/bb9+/hr9+) NOT stored → COMPUTE (/50*100 on conf pitcher scores) + STORE in Conference Stats
+(new columns) + display + edge-fn updates on upload. Also fill offensive_power_rating (hitting OPR, 0/40). The 40-vs-30 = the 10 NJCAA-D1
+districts (JUCO) mislabeled division='D1' — EXCLUDE from D1 SD (leave JUCO untouched, not needed now).
+
+## PLAN (all D1, stored-not-live): (1) compute+store per-conf pitcher env+ + hitting OPR in Conference Stats + edge-fn-on-upload;
+(2) compute+store the cross-conf SDs (config, e.g. model_config, + admin display — informational; the derived WEIGHT is used + saved
+in multiple spots); (3) table Stat | SD now | % impact (=weight×SD/100) | old weight | recommended weight (=0.025×SD conf / 0.05×SD comp)
+for Trevor approval before any weight change. Config: model_config (D1 weights) + transferWeightDefaults.ts.
