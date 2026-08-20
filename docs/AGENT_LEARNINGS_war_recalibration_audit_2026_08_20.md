@@ -90,3 +90,13 @@ Companion to `docs/AUDIT_war_recalibration_state.md` (findings) and `docs/PROD_P
 - **Decision 2 — "one metric":** Trevor's point = pitching + hitting share ONE ncaa exit-velo average (the pin), not a population-math change. Pitch log = source of truth (Masters pitch-log-fed). No re-scoring shift needed.
 - **Step 2b compute_scores VERIFIED live:** Brett Ott `ba_power_rating` 124.1/124.12, Grayson Ashe 143.3/143.25 — `scoreFromNormal → *_score → composite/50·100 → *_power_rating` reproduces stored to ~0.02.
 - **STEP 2 COMPLETE.** NEXT: Step 3 `create_predictions` (Masters → `player_predictions` `from_*`/`from_*_plus`) → Step 4 recompute (edge-fn returner rebuild, 13 steps).
+
+---
+
+## STEP 3 — create_predictions (2026-08-20) — REAL BUG FOUND + FIXED
+
+**Source→dest:** `createPredictionsFromMaster.ts` reads Hitter/Pitching Master (rates + `*_power_rating`/`*_pr_plus` + `blended_*`), writes `player_predictions` `model_type='returner' variant='regular'` **`season = PROJECTION_SEASON` (2027)** — 2026 actuals → 2027 returner predictions.
+
+**🔴 BUG (fixed):** the per-stat `from_avg_plus`/`from_obp_plus`/`from_slg_plus` were **read** (`ba/obp/iso_power_rating`, lines 151-153) but **never written** — only the *overall* `power_rating_plus`. The only writer of `from_*_plus` was the legacy `google-sheets-sync`. So in the Master→predictions pipeline `from_obp_plus` was **NULL** — yet the returner **SD-blend reads `from_obp_plus`** (`predictionEngine.ts:584`, edge `recalculate-prediction:125`). Returner could only fall back to the overall rating for every stat (the exact defect flagged in the edge-fn rebuild). **FIX:** write `from_avg_plus=ba_power_rating, from_obp_plus=obp_power_rating, from_slg_plus=iso_power_rating` on BOTH new-insert and update paths; broadened the update guard to `|| existing.from_obp_plus == null` so existing (non-blended) rows backfill on re-run. Blend-safe: those ratings are already blend-aware (compute_scores uses `blended_*` for `combined_used`).
+
+**Trevor:** overall power rating is NOT used in projections (only OPR/offensive + `_pr_plus` matter) → projection now correctly keyed on the **per-stat** `from_*_plus`. Pitchers read `era_pr_plus` etc. from the Master directly (no player_predictions per-stat column — no gap there). JUCO out of scope.

@@ -54,19 +54,19 @@ export async function createPredictionsFromMaster(
   // ─── Load existing 2025 predictions (returner + transfer), indexed by player_id ───
   console.time("[CreatePreds] 2. load existing predictions");
   // We need the prediction id (to update), not just whether one exists.
-  const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null; from_era: number | null }>();
+  const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null; from_era: number | null; from_obp_plus: number | null }>();
   from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("player_predictions")
-      .select("id, player_id, from_avg, from_era")
+      .select("id, player_id, from_avg, from_era, from_obp_plus")
       .eq("season", season)
       .in("model_type", ["returner", "transfer"])
       .eq("variant", "regular")
       .range(from, from + 999);
     if (error) break;
     for (const r of data || []) {
-      if ((r as any).player_id) existingPredByPlayerId.set((r as any).player_id, { id: (r as any).id, from_avg: (r as any).from_avg ?? null, from_era: (r as any).from_era ?? null });
+      if ((r as any).player_id) existingPredByPlayerId.set((r as any).player_id, { id: (r as any).id, from_avg: (r as any).from_avg ?? null, from_era: (r as any).from_era ?? null, from_obp_plus: (r as any).from_obp_plus ?? null });
     }
     if (!data || data.length < 1000) break;
     from += 1000;
@@ -176,12 +176,21 @@ export async function createPredictionsFromMaster(
 
       // Update from_avg/from_obp/from_slg if missing OR if blended stats differ from stored.
       // JUCO always refreshes so stale from_* from prior blended runs gets overwritten.
-      const needsStatUpdate = isJuco || existing.from_avg == null || useBlended;
+      // Also fire when from_obp_plus is null so the newly-wired per-stat power
+      // ratings backfill onto existing (non-blended) rows on a re-run.
+      const needsStatUpdate = isJuco || existing.from_avg == null || existing.from_obp_plus == null || useBlended;
       if (needsStatUpdate) {
         const patch: any = {
           from_avg: targetAvg,
           from_obp: targetObp,
           from_slg: targetSlg,
+          // Per-stat power ratings — the returner SD-blend reads these
+          // (from_obp_plus = OBPPowerRating+). ba/obp/iso_power_rating are
+          // already blend-aware (compute_scores uses blended_* for combined
+          // players), so the useBlended path is handled by construction.
+          from_avg_plus: baPlus,
+          from_obp_plus: obpPlus,
+          from_slg_plus: isoPlus,
           power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
           locked: false,
         };
@@ -202,6 +211,10 @@ export async function createPredictionsFromMaster(
         from_avg: useBlended ? ((hitter as any).blended_avg ?? hitter.AVG) : hitter.AVG,
         from_obp: useBlended ? ((hitter as any).blended_obp ?? hitter.OBP) : hitter.OBP,
         from_slg: useBlended ? ((hitter as any).blended_slg ?? hitter.SLG) : hitter.SLG,
+        // Per-stat power ratings the returner SD-blend consumes (see update path).
+        from_avg_plus: baPlus,
+        from_obp_plus: obpPlus,
+        from_slg_plus: isoPlus,
         power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
       };
       predsToInsert.push(newPred);
