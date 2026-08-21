@@ -48,3 +48,12 @@ Everything else out-of-band manual: raw-rate assembly SQL, Overall_PR, pitcher e
 4. run_env_factor → BUILD (conf-avg rg_factor).
 5. Raw-rate producer → un-comment/commit the pitch-log assembly (single source; retire CSV/UI writers).
 6. Reconcile duplicate env+ + V1/V2 Stuff+ + conference-abbreviation-vs-conference_id keying.
+
+---
+## RESOLVED (2026-08-21) — OPR/park/HTP defined + committed producer `scripts/derive_conf_opr_htp.ts`
+- **OPR clarified (Trevor):** the OPR for HTP is the **PA-weighted average of hitters' `overall_power_rating`** = `Overall_Power_Rating` (populated 30/30) — NOT the `0.15·ba+/0.4·obp+/0.45·iso+` composite. That composite (`offensive_power_rating`) is a redundant/display metric; **reconciled by setting `offensive_power_rating = Overall_Power_Rating`** so one OPR shows everywhere.
+- **`run_env_factor` VERIFIED = simple avg of member teams' `rg_factor`** (Park Factors, by conference_id): SEC 94.20, Ivy 98.92, NEC 112.35 — exact match to stored. Committed producer added (was previously unbuilt/no-writer).
+- **Canonical HTP = `Overall_Power_Rating + 1.25·(Stuff+−100) + 0.75·(100 − run_env_factor)`** (park swap). **The stored `hitter_talent_plus` ALREADY matched this 30/30** (0/30 matched pre-swap `100−wRC+`) — Trevor hand-stored the park-swap version. The BUG was the readers COMPUTED HTP live (pre-swap): `precompute-pitchers`, edge fn (which even used `Overall_Power_Rating` alone!), TeamBuilder, TransferPortal, ConferenceStatsPage. **All now READ stored `hitter_talent_plus`; live compute removed.** Pitcher transfers re-run on stored HTP.
+- **Order correction (log the truth):** raw counting stats (PA/AB) + rates (AVG/OBP/…) are produced FIRST (pitch-log intra-conf assembly), THEN env+ (which divides rates by ncaa), THEN OPR/Stuff+/park, THEN HTP LAST (needs OPR+Stuff++park).
+- **team_season_stats is part of this feature-branch build too** — `refresh_team_season_stats(season)` (mig 20260819010000) rolls up Σ Masters desc WAR + conf context (conf_stuff_plus/conf_htp/conf_opr from Conference Stats) + faced-competition + park + records; 308 D1 rows populated; descriptive (2026 actual), separate from projections. Verify/refresh it in the same pass.
+- **Producer:** `scripts/derive_conf_opr_htp.ts --apply` (idempotent) — the committed, reproducible version of run_env_factor + OPR + canonical HTP. Folds into the edge-fn conf-stats-derive step (after Stuff+ + park, computes HTP last).
