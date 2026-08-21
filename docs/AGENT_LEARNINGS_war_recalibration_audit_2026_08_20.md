@@ -232,3 +232,7 @@ After ANY projection change, saved-build + target snapshots must refresh WITHOUT
 - **VERIFIED:** 40/40 Georgia build players matched this-team-precompute-or-global-regular WAR (≤0.03), zero cross-team leakage.
 
 **Consistency mandate (Trevor):** wherever a value is displayed it must be accurate + consistent. Every display reads the STORED snapshot/prediction (no live compute) → same number everywhere. The unified edge fn (Track B) MUST replicate these exact selection protections when it refreshes snapshots on upload.
+
+---
+## CONFERENCE STATS BUILD PROCESS — mapped (2026-08-21) — see `docs/CONFERENCE_STATS_BUILD_PROCESS_2026_08_21.md`
+Conference Stats (feeds transfers) is filled by ~6 disconnected producers; **several populated columns have NO committed producer** (hand-run SQL → won't reproduce on prod): WRC_plus (commented assembly SQL only), hitter_talent_plus/HTP (no committed writer), run_env_factor (no writer at all), offensive_power_rating/OPR (0/30, dead Savant caller), raw rates (canonical pitch-log assembly UPDATE commented out). ⚠ PROD-PUSH RISK — must codify. Canonical HTP (decided): `OPR + 1.25(Stuff+−100) + 0.75(100−run_env_factor)` (park swap), OPR=`offensive_power_rating` (0.15ba+/0.4obp+/0.45iso+), STORED + read (no live compute). Full producer map + edge-fn conf-stats-derive spec in the dedicated doc.
