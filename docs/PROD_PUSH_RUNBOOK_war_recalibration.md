@@ -203,10 +203,10 @@ After the prod transfer/returner re-run, refresh saved-build + target snapshots 
 **DO NOT PUSH TO PROD WITHOUT THIS.** Several `"Conference Stats"` columns that FEED THE TRANSFER PROJECTIONS + team_season_stats + Program Analytics are populated on staging ONLY by **uncommitted hand-run SQL / direct-connection writes**. If we push without codifying committed producers, these columns will be **EMPTY on prod → transfers + HTP + Program Analytics break silently.** Full map: `docs/CONFERENCE_STATS_BUILD_PROCESS_2026_08_21.md`.
 
 **Must have a committed, reproducible producer for EACH before prod (verify each runs on prod, in this order):**
-1. **Raw rates** (AVG/OBP/ISO/SLG/ERA/FIP/WHIP/K9/BB9/HR9) — un-comment/commit the pitch-log Bucket-A assembly (`scripts/sql/conf_stats_unified_assembly.sql`, UPDATE currently commented). Intra-conf (`is_conference_game=true`).
-2. **WRC_plus** — only writer is that commented assembly SQL. Commit it.
+1. **Raw rates** (AVG/OBP/ISO/SLG/ERA/FIP/WHIP/K9/BB9/HR9) — ✅ NOW committed (GAP 3, a960334): `scripts/sql/conf_stats_bucketA_assembly.sql` (runnable, idempotent, txn-wrapped; inlines `_team_conf`). Intra-conf (`is_conference_game=true`).
+2. **WRC_plus** — ✅ NOW committed: same file (C1 `(0.011+0.691·OBP+0.235·SLG)/0.3782×100`).
 3. **Stuff_plus / Overall_Power_Rating / env+** — mostly have producers (V1 cascade / `populate-conference-stats-env-plus.ts` / `compute_conf_pitcher_env_plus.ts`), but reconcile V1↔V2 + the duplicate env+.
 4. **run_env_factor** (conf park) — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (conf-avg member `rg_factor`).
 5. **offensive_power_rating (OPR)** — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (= Overall_Power_Rating).
 6. **hitter_talent_plus (HTP)** — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (canonical park-swap, stored + read-only).
-**Still TODO to commit: raw-rate assembly (#1) + WRC_plus (#2).** These are the remaining hand-run pieces. The end state is ONE edge-fn conf-stats-derive step (Track B) running all of it automatically on upload; until then every piece needs a committed script the prod push can run.
+**All 6 producers now committed. REMAINING before prod:** (a) staging idempotent re-run of `conf_stats_bucketA_assembly.sql` vs backup `_confstats_backup_preassembly` to confirm the inlined `team_conf` reproduces the original helper (couldn't run 2026-08-21: no staging conn — `supabase --linked` is PROD); (b) reconcile #3 V1↔V2 + dup env+. End state = ONE edge-fn conf-stats-derive step (Track B) running all of it on upload.
