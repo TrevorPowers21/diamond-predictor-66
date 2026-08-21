@@ -154,14 +154,9 @@ function flatten(r: ConfRow, ncaaWrc: number | null, ncaa: any) {
     opr: r.offensive_power_rating,
     stuff_plus: r.Stuff_plus,
     wrc_plus: wrcPlus,
-    // Hitter Talent+ = OPR + 1.25·(Stuff+ − 100) + 0.75·(100 − wRC+)
-    // Requires all three inputs; null if any missing.
-    hitter_talent_plus:
-      r.offensive_power_rating != null && r.Stuff_plus != null && wrcPlus != null
-        ? Math.round(
-            (r.offensive_power_rating + 1.25 * (r.Stuff_plus - 100) + 0.75 * (100 - wrcPlus)) * 10,
-          ) / 10
-        : null,
+    // 2026-08-21: HTP = STORED canonical value (OPR + 1.25(Stuff+−100) + 0.75(100−park),
+    // park swap; computed by scripts/derive_conf_opr_htp.ts). No live compute — read stored.
+    hitter_talent_plus: (r as any).hitter_talent_plus != null ? Number((r as any).hitter_talent_plus) : null,
     // Pitching +s and pRV+ (auto-derived against NCAA mean/sd)
     era_plus: eraPlus != null ? Math.round(eraPlus) : null,
     fip_plus: fipPlus != null ? Math.round(fipPlus) : null,

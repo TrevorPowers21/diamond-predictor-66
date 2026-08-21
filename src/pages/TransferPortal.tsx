@@ -477,22 +477,8 @@ const toPitchingClassAdj = (
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
-const calcHitterTalentPlusFromConference = (
-  overallHitterPowerRatingPlus: number | null | undefined,
-  stuffPlus: number | null | undefined,
-  wrcPlus: number | null | undefined,
-) => {
-  if (
-    overallHitterPowerRatingPlus == null ||
-    !Number.isFinite(overallHitterPowerRatingPlus) ||
-    stuffPlus == null ||
-    !Number.isFinite(stuffPlus) ||
-    wrcPlus == null ||
-    !Number.isFinite(wrcPlus)
-  ) return null;
-  const value = overallHitterPowerRatingPlus + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
-  return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
-};
+// calcHitterTalentPlusFromConference (live HTP compute) removed 2026-08-21 —
+// HTP is now STORED (Conference Stats hitter_talent_plus, park swap), read directly.
 
 function readLocalNum(key: string, fallback: number, remoteValues?: Record<string, number>): number {
   // 1) Supabase model_config is the authority
@@ -1083,11 +1069,8 @@ export default function TransferPortal() {
       const k9Plus = row.k9_plus != null ? Number(row.k9_plus) : null;
       const bb9Plus = row.bb9_plus != null ? Number(row.bb9_plus) : null;
       const hr9Plus = row.hr9_plus != null ? Number(row.hr9_plus) : null;
-      const hitterTalentPlus = calcHitterTalentPlusFromConference(
-        row.overall_power_rating,
-        row.stuff_plus,
-        row.wrc_plus,
-      );
+      // 2026-08-21: HTP = STORED canonical value (park swap), no live compute.
+      const hitterTalentPlus = row.hitter_talent_plus != null ? Number(row.hitter_talent_plus) : null;
       const entry = {
         conference: row.conference,
         era_plus: eraPlus,

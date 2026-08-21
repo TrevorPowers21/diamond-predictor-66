@@ -163,14 +163,11 @@ async function main() {
   // (conference env+ z×20 live-compute removed 2026-08-21 — env+ is now STORED,
   //  read directly below; no live compute path remains.)
   for (const r of confRows) {
-    const stuffPlus = (r as any).Stuff_plus ?? 100;
-    const wrcPlus = (r as any).WRC_plus ?? 100;
-    const overallPowerRating = (r as any).Overall_Power_Rating ?? 100;
-    // 1d (2026-08-21): conference env+ = STORED value only (Conference Stats
-    // era_plus…hr9_plus, ratio scale (conf/ncaa)*100). NO live compute, NO fallback —
-    // one stored source. JUCO districts have NULL stored env+ (separate equation /
-    // separate function) → they resolve null here and are naturally blocked from the
-    // D1 ratio path. Nothing computes env+ live anymore.
+    // 1d + HTP (2026-08-21): conference env+ AND HTP = STORED values only. NO live
+    // compute, NO fallback — one stored source. env+ = era_plus…hr9_plus (ratio);
+    // HTP = hitter_talent_plus (canonical = OPR + 1.25(Stuff+−100) + 0.75(100−park),
+    // the park swap, computed by scripts/derive_conf_opr_htp.ts). JUCO districts have
+    // NULL stored values → resolve null, blocked from the D1 path.
     const eraPlus = (r as any).era_plus != null ? Number((r as any).era_plus) : null;
     const fipPlus = (r as any).fip_plus != null ? Number((r as any).fip_plus) : null;
     const whipPlus = (r as any).whip_plus != null ? Number((r as any).whip_plus) : null;
@@ -178,7 +175,8 @@ async function main() {
     const bb9Plus = (r as any).bb9_plus != null ? Number((r as any).bb9_plus) : null;
     const hr9Plus = (r as any).hr9_plus != null ? Number((r as any).hr9_plus) : null;
     if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
-    const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
+    const hitterTalentPlus = (r as any).hitter_talent_plus != null ? Number((r as any).hitter_talent_plus) : null;
+    if (hitterTalentPlus == null) continue;
     const entry: PitchingConfStats = {
       conference: (r as any)["conference abbreviation"],
       era_plus: Math.round(eraPlus),

@@ -816,10 +816,9 @@ export default function TeamBuilder() {
       const bb9Plus = cs.bb9_plus != null ? Number(cs.bb9_plus) : null;
       const hr9Plus = cs.hr9_plus != null ? Number(cs.hr9_plus) : null;
       if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
-      const stuffPlus = cs.stuff_plus ?? 100;
-      const wrcPlus = cs.wrc_plus ?? 100;
-      const overallPowerRating = cs.overall_power_rating ?? 100;
-      const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
+      // 2026-08-21: HTP = STORED canonical value (park swap), no live compute.
+      const hitterTalentPlus = cs.hitter_talent_plus != null ? Number(cs.hitter_talent_plus) : null;
+      if (hitterTalentPlus == null) continue;
       const entry = {
         conference: cs.conference,
         era_plus: Math.round(eraPlus),

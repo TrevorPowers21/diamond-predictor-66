@@ -26,6 +26,8 @@ export type NormalizedConferenceStats = {
   k9_plus: number | null;
   bb9_plus: number | null;
   hr9_plus: number | null;
+  // Stored canonical HTP (OPR + 1.25(Stuff+−100) + 0.75(100−run_env_factor), park swap). 2026-08-21.
+  hitter_talent_plus: number | null;
 };
 
 const normalize = (v: string | null | undefined) =>
@@ -54,6 +56,7 @@ function rowToNormalized(row: ConferenceStatsRow): NormalizedConferenceStats {
     k9_plus: (row as any).k9_plus ?? null,
     bb9_plus: (row as any).bb9_plus ?? null,
     hr9_plus: (row as any).hr9_plus ?? null,
+    hitter_talent_plus: (row as any).hitter_talent_plus ?? null,
   };
 }
 

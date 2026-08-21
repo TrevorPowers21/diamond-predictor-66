@@ -1305,7 +1305,8 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
       k9_plus: r.k9_plus != null ? Number(r.k9_plus) : null,
       bb9_plus: r.bb9_plus != null ? Number(r.bb9_plus) : null,
       hr9_plus: r.hr9_plus != null ? Number(r.hr9_plus) : null,
-      hitter_talent_plus: r.Overall_Power_Rating != null ? Number(r.Overall_Power_Rating) : null,
+      // 2026-08-21: STORED canonical HTP (OPR + 1.25(Stuff+−100) + 0.75(100−park), park swap). No live compute.
+      hitter_talent_plus: r.hitter_talent_plus != null ? Number(r.hitter_talent_plus) : null,
     };
     const k = normalizeKey(r["conference abbreviation"]);
     if (k) confByKey.set(k, row);
