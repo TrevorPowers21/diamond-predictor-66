@@ -57,3 +57,10 @@ Verified walkthrough of the transfer projection engine (hitter + pitcher): every
 
 ## FOR THE EDGE FN (Track B, unified)
 One process reads: pitch-log-derived Masters + stored Conference Stats env+ (era_plus…hr9_plus + ba_plus/obp_plus/iso_plus once hitter is converted) + Stuff+/HTP/park + model_config weights (both sides), resolves teams id-first (fix hitter name-key), applies handedness for hitter park, runs the 8 steps, writes player_predictions. Kills the 3-copy drift + the hitter/pitcher provenance mismatch.
+
+---
+## RESOLVED (2026-08-21, dry-run verified)
+- **#1 hitter env+ → STORED.** `precompute-transfer-projections.ts` now reads `ba_plus/obp_plus/iso_plus` (removed the `AVG/0.280` live compute). Verified stored ≈ old live (Δ ≤1 ba/obp, ≤3 iso) — same model, now single-source. Matches pitcher.
+- **#2 hitter from-team → ID-first.** Added `teamById`/`teamBySourceId`; resolve `players.team_id → source_team_id → name`. Added `team_id` to the players select. Dry-run: 96% computed.
+- **#3 pitcher weights → model_config.** `precompute-pitchers.ts` overlays model_config `transfer_*` onto code defaults ("overlaid 16 …"); the empty legacy "Equation Weights" table is retired (not filled — everything in model_config). Hitter already read model_config.
+- **Still open (future):** NCAA anchors (`*_plus_ncaa_avg/_sd`, `t_*_ncaa_avg`) live in code/model_config, not `ncaa_averages` table; hitter park still omits source_team_id; browser weight loader (`readPitchingWeights` async cache) still points at the empty Equation Weights table — repoint to model_config when unifying the edge fn.
