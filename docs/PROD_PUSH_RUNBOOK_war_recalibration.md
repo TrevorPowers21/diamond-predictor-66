@@ -197,3 +197,16 @@ ALTER TABLE "Pitching Master" ADD CONSTRAINT pitching_master_src_season_uniq UNI
 ---
 ## PART I — SNAPSHOT REFRESH (Step 6) — MUST run on prod after the transfer re-run + protections
 After the prod transfer/returner re-run, refresh saved-build + target snapshots (toggle-preserving) or builds show stale numbers. Two-step (prod): `backfill-neutral-snapshot.ts --prod --apply` then `heal-stale-snapshots.ts --prod --apply --yes`. Covers ALL builds incl. default rosters + target_board. **Protections (verified staging 2026-08-21, 40/40, zero cross-team leakage):** selection filters to `customer_team_id null|this-team` BEFORE picking (never another team's precompute), precedence this-team-precomputed → global-regular → bounded fallback; toggles (`production_notes`) untouched; runtime reads RLS program-scoped by `customer_team_id`. Accuracy mandate: every displayed value reads the stored team-scoped snapshot — consistent everywhere.
+
+---
+## ★★★★ CRITICAL PROD-PUSH BLOCKER — CONFERENCE STATS PRODUCERS MUST BE CODIFIED (2026-08-21) ★★★★
+**DO NOT PUSH TO PROD WITHOUT THIS.** Several `"Conference Stats"` columns that FEED THE TRANSFER PROJECTIONS + team_season_stats + Program Analytics are populated on staging ONLY by **uncommitted hand-run SQL / direct-connection writes**. If we push without codifying committed producers, these columns will be **EMPTY on prod → transfers + HTP + Program Analytics break silently.** Full map: `docs/CONFERENCE_STATS_BUILD_PROCESS_2026_08_21.md`.
+
+**Must have a committed, reproducible producer for EACH before prod (verify each runs on prod, in this order):**
+1. **Raw rates** (AVG/OBP/ISO/SLG/ERA/FIP/WHIP/K9/BB9/HR9) — un-comment/commit the pitch-log Bucket-A assembly (`scripts/sql/conf_stats_unified_assembly.sql`, UPDATE currently commented). Intra-conf (`is_conference_game=true`).
+2. **WRC_plus** — only writer is that commented assembly SQL. Commit it.
+3. **Stuff_plus / Overall_Power_Rating / env+** — mostly have producers (V1 cascade / `populate-conference-stats-env-plus.ts` / `compute_conf_pitcher_env_plus.ts`), but reconcile V1↔V2 + the duplicate env+.
+4. **run_env_factor** (conf park) — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (conf-avg member `rg_factor`).
+5. **offensive_power_rating (OPR)** — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (= Overall_Power_Rating).
+6. **hitter_talent_plus (HTP)** — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (canonical park-swap, stored + read-only).
+**Still TODO to commit: raw-rate assembly (#1) + WRC_plus (#2).** These are the remaining hand-run pieces. The end state is ONE edge-fn conf-stats-derive step (Track B) running all of it automatically on upload; until then every piece needs a committed script the prod push can run.
