@@ -655,7 +655,7 @@ Park mapping DECIDED (Trevor): ERA&FIP→RG, WHIP→OBP, HR9→ISO, K9/BB9→non
 1. **Decide, store & PIPE the transfer WEIGHTS + SD** (incl. the pitcher env+ z×20→ratio CODE change, not just values).
 2. **Confirm conference stats are PULLABLE from pitch-log data** (built + mapped on this branch) — confirm works + LOG process.
 3. **Confirm the per-TEAM row is filled** from pitch log (`team_season_stats`: records, rates, WAR rollups, faced-competition, conf context).
-4. **Confirm STORAGE to run every conference stat:** env+ (incl. new pitcher env+ cols), Stuff+, OPR, conference park factor, HTP+ — confirm works + log. Incl. HTP `(100−wRC+)`→conf-park-factor swap.
+4. **Confirm STORAGE to run every conference stat:** env+ (incl. new pitcher env+ cols), Stuff+, OPR, conference park factor, HTP+ — confirm works + log. **⚠ BUILD the HTP `(100−wRC+)`→conf-park-factor swap FIRST (verified NOT applied 2026-08-21; ~8 duplicated sites) — centralize to one fn + recompute BEFORE storing HTP, else the old formula bakes into stored values.** See §HTP PARK-FACTOR SWAP.
 5. **DRY-RUN transfer portal projections COMPLETELY** — pull/use ALL correct data (player Masters + Conference Stats + team stats for independents) → calculates properly.
 6. **REFRESH team-build data + player/transfer snapshots WITHOUT changing toggles;** wire proper data to DISPLAY everywhere piped (incl. team snapshots on Program Analytics + all memory items at the piping stage).
 7. **COMPLETE the prod-migration doc** so the push is seamless off the built process.
@@ -663,3 +663,12 @@ Park mapping DECIDED (Trevor): ERA&FIP→RG, WHIP→OBP, HR9→ISO, K9/BB9→non
 9. **THEN new feature branch: unify the ONE edge function** (this exact work, married together, autonomous-on-upload).
 
 **Logged todos NOT explicit above (fold in / confirm deferred):** Bucket-2 dead-code (triple-oWAR 260-PA, simulateTransferProjection, retire V1 conf Stuff+); Bucket-4 depth-role regular-season PA/IP ranges + defensive depth tiers (d/bsr scale under toggles, returner AND transfer); TWP redirect oWAR→total_hitter_war; NIL allocation (downstream of step-6 snapshots). Deferred: market calibration (PVM/PTM), JUCO, per-player park rework.
+
+---
+
+## ★★★ HTP PARK-FACTOR SWAP — NOT APPLIED (verified in code 2026-08-21) — MUST build before storing HTP
+**Status: the 08-13 modeled+validated swap `(100−wRC+)` → conference-average PARK FACTOR was NEVER implemented.** Every compute site still uses the OLD formula `HTP = OPR + 1.25·(Stuff+−100) + 0.75·(100−wRC+)`. No `wrc_park` exists anywhere in the code.
+- **Duplicated across ~8 sites (the "built over top" smell — collapse to ONE canonical fn when swapping):** `scripts/precompute-pitchers.ts:174` (⚠ feeds projections), `src/pages/TeamBuilder.tsx:826`, `src/pages/TransferPortal.tsx:504`, `src/pages/PitcherProfile.tsx:1749/1929/2343`, `src/savant/pages/PitcherPage.tsx:282`, `src/savant/pages/ConferenceStatsPage.tsx:162`, `src/components/PitchingConferenceStatsTable.tsx:82`, `src/lib/playerRisk.ts:875`.
+- **Stored `hitter_talent_plus`** (Conference Stats, 30/42) therefore reflects `(100−wRC+)` too — so storing HTP as-is would bake in the old formula everywhere.
+- **The swap (08-13):** replace the `0.75·(100−wRC+)` run-environment term with the conference-average park factor `wrc_park = 0.72·obp_f + 0.28·slg_f` (`slg_f = 0.675·avg_f + 0.325·iso_f`), conference = member avg by `conference_id`. Validated direction: Ivy 104.7→98.4, Patriot 100→93.7, top power confs ~flat. Ties directly to the conference park factor (`run_env_factor`) we're already storing in the park work.
+- **ACTION (belongs in Step 4, BEFORE storing HTP):** centralize the HTP formula to ONE fn, apply the park-factor swap, recompute + store `hitter_talent_plus`, update all ~8 sites. Trevor: "It needs to be updated if we are storing it."
