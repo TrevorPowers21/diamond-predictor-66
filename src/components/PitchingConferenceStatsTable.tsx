@@ -364,6 +364,9 @@ export default function PitchingConferenceStatsTable() {
                   const isEditing = editingConference === r.conference;
                   const canonical = canonicalConferenceName(r.conference);
                   const csRow = statsByCanonical.get(canonical);
+                  const overallPr = csRow?.overall_power_rating ?? null;
+                  const stuff = csRow?.stuff_plus ?? null;
+                  const wrc = csRow?.wrc_plus ?? null;
                   // 2026-08-21: display the STORED canonical HTP (park swap); no live compute.
                   const hitterTalent = (csRow as any)?.hitter_talent_plus ?? r.hitter_talent_plus ?? null;
                   return (
