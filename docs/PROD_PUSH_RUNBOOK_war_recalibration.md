@@ -183,3 +183,13 @@ ALTER TABLE "Pitching Master" ADD CONSTRAINT pitching_master_src_season_uniq UNI
 **G0. Stuff+ rollup → `Pitching Master.stuff_plus` (MUST precede compute_scores).** Stuff+ is an INPUT to the pitcher power ratings (k9⁺/era⁺/whip⁺). Pipeline: `runBreakingBallReclassification` → `runStuffPlusPipeline` (per-pitch Stuff+) → `rollupStuffPlusToMaster` (`scripts/recompute-stuff-plus.ts`). Stuff+ was fully audited + is current (v1-anchor 2026-08-17); the Step-1 derive already set `Master.stuff_plus` from the totals' pitch-weighted per-pitch Stuff+ (verified matches to 0.01). **For the unified process this rollup must be an explicit step before compute_scores** — currently satisfied because the derive populated it. If pitch data/baselines change, run the full recompute first.
 
 **G4. Execution order (prod, pipeline pivot):** F1/F2 (ip col + constraints) → F3 (derive → Masters, incl. stuff_plus) → **G0 Stuff+ rollup (if not current)** → G1 (ncaa_averages+model_config) → compute_scores → G2 (create_predictions) → G3 (recompute returners). North star: fold all into ONE edge fn, autonomous on upload — with Stuff+ as a wired step.
+
+---
+
+## PART H — NEW-TEAM PRECOMPUTE PATH (edge fn) — MUST DEPLOY (2026-08-21)
+⚠️ **Do NOT miss this on the prod push.** When a customer team is added, an AFTER INSERT trigger on `customer_teams` enqueues a `precompute_jobs` row → the **`process-precompute-jobs` edge fn** (`runPrecomputeForTeam`) computes that team's transfer projections. This is a SEPARATE path from the batch scripts and had drifted. It was updated (2026-08-21) to mimic the settled transfer logic:
+- **Hitter env+** → STORED `ba/obp/iso_plus` (was live `AVG/0.280`).
+- **From-team resolution** → id-first via `source_team_id` (hitter + pitcher; was name-only).
+- **D1 pitcher eq** → overlays `model_config` `transfer_*` (was hardcoded defaults). Hitter weights + pitcher env+ were already model_config/stored.
+
+**PROD ACTION (Trevor deploys):** redeploy `supabase/functions/process-precompute-jobs` to prod AFTER the prod DB has: (1) Conference Stats `era_plus…hr9_plus` + `ba/obp/iso_plus` populated, (2) model_config `transfer_*`/`t_*` weights stored. Otherwise a team added on prod gets OLD-logic projections. Pre-existing Deno literal-type warnings are non-blocking. Deploy staging first, add a test team, confirm its projections match the batch.
