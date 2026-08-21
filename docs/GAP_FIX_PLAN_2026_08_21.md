@@ -2,7 +2,7 @@
 
 Fixing the 5 audit gaps IN ORDER. Each = status + exact approach so we can resume if cut off. Context: the transfer/HTP/conf-stats/snapshot chain is settled + re-run on staging; these are the remaining correctness gaps before display-wiring + prod. Full audit: this session; pipeline: `FULL_PIPELINE_WALKTHROUGH_2026_08_21.md`.
 
-## GAP 1 — Faced-competition for independents [✅ BATCH DONE f733986; edge-fn mirror + re-run pending]
+## GAP 1 — Faced-competition for independents [✅ FULLY DONE — batch f733986, re-run done, edge-fn mirror 1c7603a]
 **Problem:** transfer competition term for an INDEPENDENT from-program uses that program's OWN conference HTP/Stuff+ (Oregon State 124.6/109.4) instead of the SCHEDULE-FACED value (104.47/100.22). `team_season_stats.faced_htp`/`faced_stuff_plus` are computed + stored (verified 308/308) but read by ZERO consumers.
 **Verified:** faced computed in `scripts/sql/team_season_stats_faced_park.sql` (faced_htp(T)=pitch-weighted conf HTP of hitters T's pitchers faced; faced_stuff_plus(T)=conf Stuff+ of pitchers T's hitters faced). Oregon State (src=3111) faced_htp 104.47 / faced_stuff 100.22. Only 1 independent in 2026, but wire generally.
 **Fix (approach):**
@@ -16,8 +16,9 @@ Fixing the 5 audit gaps IN ORDER. Each = status + exact approach so we can resum
 5. Re-run transfers (only independents' players change materially).
 **Test:** an Oregon State pitcher → SEC should project on faced HTP 104.47 (competition delta smaller than with 124.6).
 
-## GAP 2 — Edge fn `?? 100` fallbacks → block/null [TODO]
-`process-precompute-jobs/index.ts:455 (safePR), 1475-1480 (env+), 1499/1501 (HTP)` default missing conf data to league-average 100; the batch uses `?? null` + `requireNum` block. On prod (if conf cols empty) → silent league-average projections. **Fix:** change `?? 100` → `?? null` for env+/HTP/PR and block the player when null (match `buildTransferPitcherInputs` behavior). Deno edge fn → Trevor deploys.
+## GAP 2 — Edge fn `?? 100` fallbacks → block/null [✅ DONE — bf69bd1]
+**Resolution:** the ONLY live risk was the PITCHER env+/HTP `?? 100` (empty conf cols → silent league-average). Added a D1-only block guard right after the raw-stats guard: if any of `fromPC/toPC.{era,fip,whip,k9,bb9,hr9}_plus` or `.hitter_talent_plus` is null → `blocked++` (reason `missing_conf_stats`), matching the batch's `requireNum`. JUCO/D2 keep their override path (env+ null by design).
+The HITTER side already blocked correctly pre-existing: env+ (`fromAvgPlus`…`toStuff`) via `missingInputs` push at :397-404, and hitter PR via :372-374. `safePR:455` only ever fires for JUCO (D1 PR already blocked) → moot for D1, left as-is. Deno edge fn → Trevor deploys.
 
 ## GAP 3 — Codify 9a raw-rate assembly + 9f WRC_plus [TODO — ★★★★ prod blocker]
 `scripts/sql/conf_stats_unified_assembly.sql:24-30` has the whole `UPDATE "Conference Stats"` (raw rates + `WRC_plus`) COMMENTED OUT. **Fix:** commit a runnable producer (un-comment into a `--file` migration or a tsx script) so rates + WRC_plus reproduce on prod. Without it, prod conf cols are empty → env+/HTP/transfers/Program Analytics break. Verify on staging (idempotent) then it joins the conf-stats-derive step.
@@ -32,7 +33,9 @@ Fixing the 5 audit gaps IN ORDER. Each = status + exact approach so we can resum
 ## THEN: display-wiring audit (player eval + front office) → market-value re-eval → deploy edge fn → unify (Track B) → prod.
 
 ## PROGRESS (2026-08-21)
-- GAP 1 ✅ batch (f733986): faced_htp/faced_stuff wired into both builders + callers; dry-run 308 faced rows loaded, hitter 4986 / pitcher 5059. Independents use faced. **PENDING: edge-fn mirror + re-run.**
+- GAP 1 ✅ FULLY DONE. batch (f733986): faced wired into both builders + callers. Re-run of all 17 teams complete (`_run_step2_all.sh` → hitter ~4988 / pitcher ~5064 computed per team; runner greps output so the "faced_htp rows" log line isn't captured — code path confirmed present + executed). Edge-fn mirror (1c7603a): faced map loaded in BOTH the hitter-scope and pitcher-scope handlers (they're separate fns each with own teams map), `source_id` added to both team-map rows, hitter `fromStuff` + pitcher `fromHitterTalent` override when `/independ/i` matches from-conf.
+- GAP 2 ✅ DONE (bf69bd1): pitcher env+/HTP D1 block guard. Hitter side already blocked (missingInputs); safePR JUCO-only.
 - GAP 4 ✅ done (display HTP).
 - GAP 5 DEFERRED (minor): needs the `resolveParkFactor` callback signature to accept sourceTeamId + fromTeam to carry source_id. UUID→name path works today. Low urgency.
-- NEXT: re-run transfers (GAP 1) → edge fn GAP 2 (?? 100 → block) + GAP 1 mirror → GAP 3 (codify 9a/9f).
+- deno check on the edge fn = 2 PRE-EXISTING errors only (`:659` pwar_runs_per_win===0 literal cmp; `:1276` JUCO spread literal-type) — NOT from these edits.
+- **NEXT: GAP 3 (codify 9a raw-rate assembly + 9f WRC_plus) — ★★★★ prod blocker. Then: display-wiring audit (player eval + front office) → market-value re-eval → deploy edge fn (Trevor) → unify (Track B) → prod.**

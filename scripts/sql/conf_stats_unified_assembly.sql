@@ -21,6 +21,9 @@ select a.cid,
   (13.0*a.hr+3.0*(a.bb+a.hbp)-2.0*a.k)/nullif(a.ip,0) + 3.157 fip, r.er*9/nullif(a.ip,0) era
 from agg a join runs r on r.cid=a.cid;
 
+-- ⚠️ SUPERSEDED (2026-08-21, GAP 3): the write below is now a committed, runnable, idempotent
+-- producer → scripts/sql/conf_stats_bucketA_assembly.sql (inlines _team_conf, wraps in a txn).
+-- Run THAT file, not this scratch. Kept here for lineage only.
 -- ── Then write Bucket-A fields to Conference Stats (run separately; direct connection) ──
 -- update "Conference Stats" cs set
 --   "AVG"=a.avg, "OBP"=a.obp, "ISO"=a.iso, "SLG"=a.slg, "OPS"=a.obp+a.slg,
