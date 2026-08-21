@@ -285,27 +285,30 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   class_hr9_js: 1.5,
   class_hr9_gr: 1.0,
   transfer_era_power_weight: 0.7,
-  transfer_era_conference_weight: 0.3,
-  transfer_era_competition_weight: 0.5,
-  transfer_era_park_weight: 0.075,
+  // Transfer lever weights re-tuned 2026-08-21 to target %impact (weight = target ÷ ratio-env+/park SD).
+  // Conference ~1% (background), competition (HTP) the main lever, park metric-weighted. Ratio env+ SDs
+  // (era 9.46/fip 7.28/whip 5.72/k9 8.72/bb9 10.29/hr9 23.38); park SDs (era/fip RG 12.95/whip OBP 4.63/hr9 ISO 17.97).
+  transfer_era_conference_weight: 0.106,   // →1.0%
+  transfer_era_competition_weight: 0.262,  // →3.75% (lowered "average")
+  transfer_era_park_weight: 0.135,         // →1.75% sizeable (RG)
   transfer_fip_power_weight: 0.7,
-  transfer_fip_conference_weight: 0.3,
-  transfer_fip_competition_weight: 0.5,
-  transfer_fip_park_weight: 0.075,
+  transfer_fip_conference_weight: 0.137,   // →1.0%
+  transfer_fip_competition_weight: 0.262,  // →3.75%
+  transfer_fip_park_weight: 0.135,         // →1.75% sizeable (RG)
   transfer_whip_power_weight: 0.7,
-  transfer_whip_conference_weight: 0.3,
-  transfer_whip_competition_weight: 0.5,
-  transfer_whip_park_weight: 0.15,
+  transfer_whip_conference_weight: 0.175,  // →1.0%
+  transfer_whip_competition_weight: 0.238, // →3.4% (= OBP, same stat)
+  transfer_whip_park_weight: 0.324,        // →1.5% (= OBP park)
   transfer_k9_power_weight: 0.7,
-  transfer_k9_conference_weight: 0.4,
-  transfer_k9_competition_weight: 0.5,
+  transfer_k9_conference_weight: 0.115,    // →1.0%
+  transfer_k9_competition_weight: 0.297,   // →4.25% talent-driven
   transfer_bb9_power_weight: 0.7,
-  transfer_bb9_conference_weight: 0.3,
-  transfer_bb9_competition_weight: 0.5,
+  transfer_bb9_conference_weight: 0.097,   // →1.0%
+  transfer_bb9_competition_weight: 0.297,  // →4.25% talent-driven
   transfer_hr9_power_weight: 0.7,
-  transfer_hr9_conference_weight: 0.3,
-  transfer_hr9_competition_weight: 0.5,
-  transfer_hr9_park_weight: 0.05,
+  transfer_hr9_conference_weight: 0.043,   // →1.0%
+  transfer_hr9_competition_weight: 0.297,  // →4.25%
+  transfer_hr9_park_weight: 0.111,         // →2.0% (= ISO park)
 };
 
 export const readPitchingWeights = (): PitchingEquationWeights => {
