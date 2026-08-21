@@ -1457,6 +1457,13 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     // Validate raw stats + PR+
     const required = [pm.ERA, pm.FIP, pm.WHIP, pm.K9, pm.BB9, pm.HR9, pm.era_pr_plus, pm.fip_pr_plus, pm.whip_pr_plus, pm.k9_pr_plus, pm.bb9_pr_plus, pm.hr9_pr_plus];
     if (required.some((v) => v == null)) { blocked++; blockReasons.set("missing_stats_or_pr", (blockReasons.get("missing_stats_or_pr") || 0) + 1); continue; }
+    // 2026-08-21 (GAP 2): D1 sources MUST have STORED conf env+/HTP (both sides) — BLOCK, don't
+    // neutral-fill with 100 (matches the batch's requireNum). Guards against empty conf columns.
+    // JUCO/D2 keep their override path (env+ may be null by design).
+    if (!isSubNcaaSource) {
+      const confReq = [fromPC.era_plus, fromPC.fip_plus, fromPC.whip_plus, fromPC.k9_plus, fromPC.bb9_plus, fromPC.hr9_plus, fromPC.hitter_talent_plus, toPC.era_plus, toPC.fip_plus, toPC.whip_plus, toPC.k9_plus, toPC.bb9_plus, toPC.hr9_plus, toPC.hitter_talent_plus];
+      if (confReq.some((v) => v == null)) { blocked++; blockReasons.set("missing_conf_stats", (blockReasons.get("missing_conf_stats") || 0) + 1); continue; }
+    }
 
     // Derive base role
     const roleRaw = toPitchingRole(pm.Role);
