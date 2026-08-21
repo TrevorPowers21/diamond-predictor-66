@@ -193,3 +193,7 @@ ALTER TABLE "Pitching Master" ADD CONSTRAINT pitching_master_src_season_uniq UNI
 - **D1 pitcher eq** → overlays `model_config` `transfer_*` (was hardcoded defaults). Hitter weights + pitcher env+ were already model_config/stored.
 
 **PROD ACTION (Trevor deploys):** redeploy `supabase/functions/process-precompute-jobs` to prod AFTER the prod DB has: (1) Conference Stats `era_plus…hr9_plus` + `ba/obp/iso_plus` populated, (2) model_config `transfer_*`/`t_*` weights stored. Otherwise a team added on prod gets OLD-logic projections. Pre-existing Deno literal-type warnings are non-blocking. Deploy staging first, add a test team, confirm its projections match the batch.
+
+---
+## PART I — SNAPSHOT REFRESH (Step 6) — MUST run on prod after the transfer re-run + protections
+After the prod transfer/returner re-run, refresh saved-build + target snapshots (toggle-preserving) or builds show stale numbers. Two-step (prod): `backfill-neutral-snapshot.ts --prod --apply` then `heal-stale-snapshots.ts --prod --apply --yes`. Covers ALL builds incl. default rosters + target_board. **Protections (verified staging 2026-08-21, 40/40, zero cross-team leakage):** selection filters to `customer_team_id null|this-team` BEFORE picking (never another team's precompute), precedence this-team-precomputed → global-regular → bounded fallback; toggles (`production_notes`) untouched; runtime reads RLS program-scoped by `customer_team_id`. Accuracy mandate: every displayed value reads the stored team-scoped snapshot — consistent everywhere.

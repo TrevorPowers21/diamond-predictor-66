@@ -219,3 +219,16 @@ Full spec: `docs/TRANSFER_EQUATION_LINEAGE_2026_08_21.md`. Non-obvious:
 ## NEW-TEAM PRECOMPUTE PATH = the edge fn (2026-08-21) — don't forget on prod
 When a customer team is added: AFTER INSERT trigger on `customer_teams` → `precompute_jobs` row → `process-precompute-jobs` edge fn (`runPrecomputeForTeam`). This is a THIRD copy of the transfer math (batch / edge fn / TB), and it silently drifts. It had: hitter env+ live (`AVG/0.280`), name-only from-team, hardcoded D1 pitcher weights — all now fixed to match the batch (stored `ba/obp/iso_plus`; id-first via `source_team_id`; model_config `transfer_*` overlay onto `eqD1`). Hitter weights already used model_config (readEquationValue + remoteEquationValues load at index.ts:961); pitcher env+ already read stored `era_plus`.
 **Lesson:** any transfer-logic change must be mirrored in ALL THREE copies (batch scripts, `process-precompute-jobs` edge fn, TB live hook) until the unified edge fn (Track B) collapses them. The edge fn is the NEW-TEAM path — a change that only touches the batch leaves new teams on old logic. Prod push MUST redeploy the edge fn (runbook Part H).
+
+---
+## SNAPSHOT REFRESH — the "automatic function" + its DATA-INTEGRITY protections (2026-08-21)
+After ANY projection change, saved-build + target snapshots must refresh WITHOUT changing toggles, and MUST pull the correct team-scoped line. Two-step: (1) `backfill-neutral-snapshot.ts` refreshes `neutral_snapshot` from current predictions; (2) `heal-stale-snapshots.ts` re-derives `player_snapshot`/`transfer_snapshot = projectEffectiveWar(new neutral, production_notes)`. Toggles (`production_notes`) never written.
+
+**⭐ THE PREDICTION-SELECTION PROTECTIONS (why it never pulls the wrong data):**
+- **Team-scope filter FIRST:** `pick()` filters `preds` to `customer_team_id == null || === ctid` — **other teams' predictions are excluded BEFORE selection**, so even the last-resort fallback can only land on a global or this-team row. NEVER another team's precompute (the historical "returner-snapshot blend bug" = grabbing whichever team's precompute sorted first; killed by this filter).
+- **Precedence:** this-team `precomputed` (transfer) → global `regular` (returner) → safe-bounded fallback. A returner has no same-team precompute → correctly falls to the global regular line. `backfill-build-snapshots` mirrors this via `predRank` (this-team-precomputed=3 > global-regular=2 > other=1).
+- **Season + status gates:** `season=2027`, `variant in (regular, precomputed)`, `status in (active, departed)`.
+- **RLS (runtime):** reads are program-scoped by `customer_team_id` (team_builds → team_build_players; player_predictions) per [[reference_rls_scoping]] — a coach only ever reads their own team's snapshot/predictions. Scripts run service-role (bypass RLS) but select team-scoped in code; the DISPLAY path is RLS-enforced.
+- **VERIFIED:** 40/40 Georgia build players matched this-team-precompute-or-global-regular WAR (≤0.03), zero cross-team leakage.
+
+**Consistency mandate (Trevor):** wherever a value is displayed it must be accurate + consistent. Every display reads the STORED snapshot/prediction (no live compute) → same number everywhere. The unified edge fn (Track B) MUST replicate these exact selection protections when it refreshes snapshots on upload.

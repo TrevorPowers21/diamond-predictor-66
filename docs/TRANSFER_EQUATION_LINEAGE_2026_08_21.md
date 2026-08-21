@@ -71,3 +71,17 @@ One process reads: pitch-log-derived Masters + stored Conference Stats env+ (era
 - **⚠️ SOURCE-ID RISK (Trevor):** resolution currently leans on `source_id`/`source_team_id`, which *could change / be re-id'd* by the data provider in the future → a potential resolution roadblock. Filled + consistent today, so acceptable for now; logged as a known risk. Prefer internal `team_id` once backfilled.
 - **Env+ divisor correction:** the stored `ba/obp/iso_plus` use the ACTUAL ncaa means (implied divisors 0.2777/0.3823/0.1588), NOT the old hardcoded live divisors (0.280/0.385/0.162). Switching to stored is a small (~1%) but REAL change — stored is MORE correct. (Earlier "essentially identical" was imprecise.)
 - **Behavioral verification (controlled lever tests, both sides):** power rating ↑ → output ↑ (hitter) / rates better (pitcher); competition ↑ → output ↓ (hitter wRC+ 106→93 at Stuff+ +12) / rates worse (pitcher pRV+ 113→109 at HTP +15); conference small (~1%); park directional. All correct, magnitudes match the tuned weights.
+
+---
+## SNAPSHOT REFRESH — part of the unified edge fn (Track B master plan) + protections
+The ONE edge fn, after recomputing projections on upload, MUST also refresh the saved-build + target snapshots (else builds show stale numbers). Two-step, toggle-preserving:
+1. `neutral_snapshot` ← current predictions (precomputed-transfer for this team > global-regular > safe fallback). Scripts: `backfill-neutral-snapshot.ts` (build + target).
+2. `player_snapshot`/`transfer_snapshot` ← `projectEffectiveWar(neutral, production_notes)` (applies role transition + dev-agg from the coach's toggles). Script: `heal-stale-snapshots.ts`. `production_notes` NEVER written.
+
+**MANDATORY data-integrity protections the edge fn must carry (accuracy + consistency across the whole UX):**
+- **Team-scope filter before selection:** only `customer_team_id == null` (global) or `=== this build's customer_team_id` — NEVER another team's precompute. Prevents the "returner-snapshot blend" bug.
+- **Precedence:** this-team precomputed → global regular → bounded fallback.
+- **RLS:** all runtime reads program-scoped by `customer_team_id` ([[reference_rls_scoping]]); the display always reads the STORED snapshot (no live compute) so every surface shows the same value.
+- Verified 2026-08-21: 40/40 sample build players pulled the correct team-scoped line, zero cross-team leakage.
+
+Covers ALL builds incl. default rosters + target_board. Wherever a value is displayed (Team Builder, GM roster/hub, Program Analytics team snapshots, target board), it must resolve to this same stored, team-scoped snapshot.
