@@ -331,6 +331,7 @@ function buildHitterTransferInputs(args: {
   resolveConferenceHitting: (name: string | null, id: string | null) => any;
   resolveParkFactor: (teamId: string | null, teamName: string | null, metric: "avg" | "obp" | "iso", hand: any) => number | null;
   remoteEquationValues: Record<string, number>;
+  fromFacedStuff?: number | null; // 2026-08-21: faced Stuff+ for INDEPENDENT from-programs
 }) {
   const { player, fromTeam, toTeam, toConference, toConferenceId, masterPR,
     resolveConferenceHitting, resolveParkFactor, remoteEquationValues } = args;
@@ -383,7 +384,11 @@ function buildHitterTransferInputs(args: {
   const toObpPlus = toConfStats?.obp_plus ?? null;
   const fromIsoPlus = fromConfStats?.iso_plus ?? null;
   const toIsoPlus = toConfStats?.iso_plus ?? null;
-  const fromStuff = fromConfStats?.stuff_plus ?? null;
+  // 2026-08-21: INDEPENDENT from-program uses schedule-FACED Stuff+, not its own conf row.
+  const isIndependentFrom = /independ/i.test(fromTeam?.conference ?? "");
+  const fromStuff = (isIndependentFrom && args.fromFacedStuff != null)
+    ? Number(args.fromFacedStuff)
+    : (fromConfStats?.stuff_plus ?? null);
   const toStuff = toConfStats?.stuff_plus ?? null;
 
   const playerHand = batsHandToHandedness(player.bats_hand);
@@ -1051,12 +1056,26 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
   for (const t of allTeams) {
     const row = {
       id: t.id, name: (t.full_name || t.abbreviation || "") as string,
+      source_id: t.source_id ?? null, // 2026-08-21: carry for faced-competition lookup
       conference: t.conference ?? null, conference_id: t.conference_id ?? null,
     };
     if (t.source_id) teamBySourceId.set(String(t.source_id), row);
     for (const k of [t.full_name, t.abbreviation, t.source_id]) {
       const nk = normalizeKey(k);
       if (nk) teamByName.set(nk, row);
+    }
+  }
+
+  // 2026-08-21 (GAP 1 mirror): schedule-FACED competition for INDEPENDENT from-programs.
+  // team_season_stats.faced_htp / faced_stuff_plus by source_id — used in place of the
+  // from-CONFERENCE HTP/Stuff+ when the from-program has no real conference (Oregon State
+  // faced 104.47/100.22 vs its own conf row 124.6/109.4). Mirrors the batch callers.
+  const facedBySourceId = new Map<string, { htp: number | null; stuff: number | null }>();
+  {
+    const { data: facedRows } = await (supabase as any)
+      .from("team_season_stats").select("source_id, faced_htp, faced_stuff_plus").eq("season", CURRENT_SEASON);
+    for (const fr of (facedRows || [])) {
+      if (fr.source_id != null) facedBySourceId.set(String(fr.source_id), { htp: fr.faced_htp != null ? Number(fr.faced_htp) : null, stuff: fr.faced_stuff_plus != null ? Number(fr.faced_stuff_plus) : null });
     }
   }
 
@@ -1160,6 +1179,8 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
       masterPR,
       resolveConferenceHitting, resolveParkFactor,
       remoteEquationValues,
+      // 2026-08-21: faced Stuff+ for independents (by the from-team's stable source_id)
+      fromFacedStuff: fromTeamRow?.source_id ? (facedBySourceId.get(String(fromTeamRow.source_id))?.stuff ?? null) : null,
     });
     if (result.blocked) {
       blocked++;
@@ -1357,11 +1378,21 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
   const teamByName = new Map<string, any>();
   const teamBySourceId = new Map<string, any>(); // 2026-08-21: id-first resolution
   for (const t of allTeams) {
-    const row = { id: t.id as string, name: (t.full_name || t.abbreviation) as string, conference: t.conference ?? null, conference_id: t.conference_id ?? null };
+    const row = { id: t.id as string, name: (t.full_name || t.abbreviation) as string, source_id: t.source_id ?? null, conference: t.conference ?? null, conference_id: t.conference_id ?? null };
     if (t.source_id) teamBySourceId.set(String(t.source_id), row);
     for (const k of [t.full_name, t.abbreviation, t.source_id]) {
       const nk = normalizeKey(k);
       if (nk) teamByName.set(nk, row);
+    }
+  }
+
+  // 2026-08-21 (GAP 1 mirror): schedule-FACED HTP for INDEPENDENT from-programs, by source_id.
+  const facedBySourceId = new Map<string, { htp: number | null; stuff: number | null }>();
+  {
+    const { data: facedRows } = await (supabase as any)
+      .from("team_season_stats").select("source_id, faced_htp, faced_stuff_plus").eq("season", CURRENT_SEASON);
+    for (const fr of (facedRows || [])) {
+      if (fr.source_id != null) facedBySourceId.set(String(fr.source_id), { htp: fr.faced_htp != null ? Number(fr.faced_htp) : null, stuff: fr.faced_stuff_plus != null ? Number(fr.faced_stuff_plus) : null });
     }
   }
 
@@ -1502,6 +1533,11 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
           const confKey = String(p.conference || "").trim();
           const override = confKey ? JUCO_DISTRICT_HTP_OVERRIDE[confKey] : undefined;
           if (override != null) return override;
+        }
+        // 2026-08-21: INDEPENDENT from-program uses schedule-FACED HTP, not its own conf row.
+        if (/independ/i.test(fromConference ?? "") && fromTeamRow?.source_id) {
+          const faced = facedBySourceId.get(String(fromTeamRow.source_id))?.htp;
+          if (faced != null) return Number(faced);
         }
         return Number(fromPC.hitter_talent_plus ?? 100);
       })(),
