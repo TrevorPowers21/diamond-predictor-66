@@ -1,9 +1,10 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Activity } from "lucide-react";
+import PlayerAccountBlocked from "@/components/PlayerAccountBlocked";
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, loading, devBypassed, isRecoveringPassword } = useAuth();
+  const { session, loading, devBypassed, isRecoveringPassword, hasCoachAccess } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -24,6 +25,11 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     const dest = location.pathname + location.search;
     return <Navigate to={`/auth?redirect=${encodeURIComponent(dest)}`} replace />;
   }
+
+  // A session with no coach access (no superadmin/team role) has nothing to
+  // do in the coach app — most notably, this is what a player.rstriq.com
+  // account looks like, since it shares this same auth.users table.
+  if (session && !hasCoachAccess && !devBypassed) return <PlayerAccountBlocked />;
 
   return <>{children}</>;
 }

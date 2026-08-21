@@ -1,0 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Oswald:wght@400..700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light, landing-page-aligned palette (rstriq.com) — deliberately NOT the
+   coach/portal app's dark-only theme. The player app is athlete/parent
+   facing, closer in audience to the marketing site than to the internal
+   coach tool, so it mirrors that: light background, navy headings/buttons,
+   gold reserved for small accents — measured directly off the live
+   landing page (background #F4F5F7, headings #0D1B3E, primary CTA
+   #070E1F/white, body copy Tailwind gray-700 #374151), not guessed. */
+@layer base {
+  :root {
+    --background: 220 14% 96%;
+    --foreground: 223 65% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 223 65% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 223 65% 15%;
+
+    --primary: 223 63% 7%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 15% 92%;
+    --secondary-foreground: 223 65% 15%;
+
+    --muted: 220 15% 92%;
+    --muted-foreground: 217 19% 27%;
+
+    --accent: 43 65% 52%;
+    --accent-foreground: 223 65% 15%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 87%;
+    --input: 220 13% 87%;
+    --ring: 43 65% 52%;
+
+    --radius: 0.5rem;
+  }
+}
+
+/* The logo asset itself is gold-on-transparent (made for the dark portal
+   app) — the landing page recolors the exact same file to navy for its
+   light navbar via this filter rather than shipping a second asset. Same
+   trick, same values, so it matches precisely. */
+.logo-navy {
+  filter: brightness(0) saturate(1) invert(0.04) sepia(0.98) saturate(11.67) hue-rotate(207deg);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}

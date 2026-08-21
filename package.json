@@ -15,6 +15,7 @@
     "import:dry": "tsx --env-file-if-exists=.env.local scripts/import-csvs/cli.ts --dry-run",
     "import:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-csvs/cli.ts --prod",
     "import:prod:dry": "tsx --env-file-if-exists=.env.production.local scripts/import-csvs/cli.ts --prod --dry-run",
+    "invite-player": "tsx --env-file-if-exists=.env.local scripts/invite-player.ts",
     "lock-season": "tsx --env-file-if-exists=.env.local scripts/lock-season-cli.ts",
     "lock-season:prod": "tsx --env-file-if-exists=.env.production.local scripts/lock-season-cli.ts --prod",
     "recompute-stuff": "tsx --env-file-if-exists=.env.local scripts/recompute-stuff-plus.ts",

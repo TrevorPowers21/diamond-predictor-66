@@ -40,6 +40,13 @@ interface AuthContextType {
   hasRole: (role: AppRole) => boolean;
   isSuperadmin: boolean;
 
+  // True if this session has any reason to be in the coach/scout app at all
+  // (superadmin, or a team role). A session with neither — e.g. a
+  // player.rstriq.com account, which shares this same auth.users table —
+  // is not: ProtectedRoute uses this to keep such sessions off /dashboard
+  // routes that aren't otherwise RoleGuard-gated.
+  hasCoachAccess: boolean;
+
   // Team membership
   userTeamId: string | null;
   userTeamRole: TeamRole | null;
@@ -86,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isDevBypassAllowed = import.meta.env.DEV;
   const isSuperadmin = roles.includes("superadmin");
+  const hasCoachAccess = isSuperadmin || !!userTeamRole;
 
   const fetchUserContext = async (userId: string) => {
     // Queries 1 + 2 are independent — run in parallel to save one round trip.
@@ -296,6 +304,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         roles,
         hasRole,
         isSuperadmin,
+        hasCoachAccess,
         userTeamId,
         userTeamRole,
         availableTeams,
