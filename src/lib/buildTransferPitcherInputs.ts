@@ -96,6 +96,10 @@ export type BuildPitcherInputsArgs = {
   fromConferenceId?: string | null;
   toConference: string | null;
   toConferenceId?: string | null;
+  // 2026-08-21: schedule-FACED competition (team_season_stats.faced_htp) for INDEPENDENT
+  // from-programs (Oregon State: 0 conf games → its own conf HTP is wrong). When the
+  // from-program is independent, use this instead of the conference HTP. Null otherwise.
+  fromFacedHtp?: number | null;
 
   pitchingStats: PitcherStatsRow | null;
   pitcherPowerRatings: PitcherPowerRow;
@@ -195,9 +199,14 @@ export function buildTransferPitcherInputs(args: BuildPitcherInputsArgs): BuildP
   const jucoDistrict = isJucoSource
     ? (fromConference ?? "").replace(/^NJCAA D1 /, "").replace(/ District$/, "")
     : null;
+  // 2026-08-21: INDEPENDENT from-program → use schedule-FACED HTP (its own conference
+  // HTP reflects its own hitters, not who its pitchers faced). Falls back to conf HTP.
+  const isIndependentFrom = /independ/i.test(fromConference ?? "");
   const effFromHitterTalent = isJucoSource
     ? (JUCO_DISTRICT_HTP_OVERRIDE[jucoDistrict ?? ""] ?? null)
-    : (fromPC.hitter_talent_plus ?? null);
+    : (isIndependentFrom && args.fromFacedHtp != null
+        ? Number(args.fromFacedHtp)
+        : (fromPC.hitter_talent_plus ?? null));
 
   const input: TransferPitcherInput = {
     era: pitchingStats.era ?? null,
@@ -215,6 +224,9 @@ export function buildTransferPitcherInputs(args: BuildPitcherInputsArgs): BuildP
       hr9: pitcherPowerRatings?.hr9PrPlus ?? null,
     },
     baseRole,
+    // input.ip drives only the FIRST (discarded) pWAR; the stored pWAR comes from the
+    // canonical rewrite (regular_season_ip → depth role). null = current behavior. 2026-08-21.
+    ip: (pitchingStats as any)?.ip ?? null,
     fromEraPlus: fromPC.era_plus ?? null,
     toEraPlus: toPC.era_plus ?? null,
     fromFipPlus: fromPC.fip_plus ?? null,

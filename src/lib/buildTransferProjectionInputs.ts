@@ -87,6 +87,9 @@ export type BuildHitterTransferInputsArgs = {
   fromConferenceId?: string | null;
   toConference: string | null;
   toConferenceId?: string | null;
+  // 2026-08-21: schedule-FACED Stuff+ (team_season_stats.faced_stuff_plus) for INDEPENDENT
+  // from-programs — the pitchers this program's hitters actually faced, not its own conf Stuff+.
+  fromFacedStuff?: number | null;
 
   // COLLAPSE (2026-08-12): stored Master PR by source_player_id (single source, fresh),
   // NOT the retired player_prediction_internals copy. seedPower live-compute removed (dead — never passed here).
@@ -196,7 +199,12 @@ export function buildHitterTransferInputs(
   const toObpPlus = toConfStats?.obp_plus ?? null;
   const fromIsoPlus = fromConfStats?.iso_plus ?? null;
   const toIsoPlus = toConfStats?.iso_plus ?? null;
-  const fromStuff = fromConfStats?.stuff_plus ?? null;
+  // 2026-08-21: INDEPENDENT from-program → schedule-FACED Stuff+ (its own conf Stuff+
+  // reflects its own pitchers, not who its hitters faced). Falls back to conf Stuff+.
+  const isIndependentFrom = /independ/i.test(fromConference ?? "");
+  const fromStuff = (isIndependentFrom && args.fromFacedStuff != null)
+    ? Number(args.fromFacedStuff)
+    : (fromConfStats?.stuff_plus ?? null);
   const toStuff = toConfStats?.stuff_plus ?? null;
 
   const playerHand = batsHandToHandedness(player.bats_hand);

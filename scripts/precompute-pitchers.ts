@@ -259,6 +259,16 @@ async function main() {
   }
   console.log(`  ${allTeams.length} Teams Table rows`);
 
+  // 2026-08-21: schedule-FACED competition for INDEPENDENT from-programs (Oregon State etc.).
+  // team_season_stats.faced_htp by source_id — used in place of the from-conference HTP.
+  const facedHtpBySourceId = new Map<string, number>();
+  {
+    const { data: facedRows } = await (supabase as any)
+      .from("team_season_stats").select("source_id, faced_htp").eq("season", CURRENT_SEASON);
+    for (const fr of (facedRows || [])) if (fr.source_id != null && fr.faced_htp != null) facedHtpBySourceId.set(String(fr.source_id), Number(fr.faced_htp));
+    console.log(`  ${facedHtpBySourceId.size} team_season_stats faced_htp rows`);
+  }
+
   // 2d. Players — pitchers, excluding the customer team's own roster
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
@@ -461,6 +471,8 @@ async function main() {
         dev_aggressiveness: Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : null,
       },
       fromTeam: fromTeamRow,
+      // faced HTP for independents (resolved by the from-team's stable source_id)
+      fromFacedHtp: (fromTeamRow as any)?.source_id ? (facedHtpBySourceId.get(String((fromTeamRow as any).source_id)) ?? null) : null,
       toTeam,
       fromConference,
       fromConferenceId,

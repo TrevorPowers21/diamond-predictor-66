@@ -191,7 +191,7 @@ async function main() {
   const allTeams = await loadAllPaged<any>(() =>
     (supabase as any).from("Teams Table").select("id, full_name, abbreviation, source_id, conference, conference_id, Season").eq("Season", CURRENT_SEASON),
   );
-  type TeamRow = { id: string; name: string; conference: string | null; conference_id: string | null };
+  type TeamRow = { id: string; name: string; conference: string | null; conference_id: string | null; source_id: string | null };
   const teamByName = new Map<string, TeamRow>();
   const teamById = new Map<string, TeamRow>();       // 2026-08-21: id-first resolution (Teams Table.id)
   const teamBySourceId = new Map<string, TeamRow>(); // stable program id (Teams Table.source_id)
@@ -202,6 +202,7 @@ async function main() {
       name,
       conference: (t.conference as string | null) ?? null,
       conference_id: (t.conference_id as string | null) ?? null,
+      source_id: (t.source_id as string | null) ?? null,
     };
     if (t.id) teamById.set(String(t.id), row);
     if (t.source_id) teamBySourceId.set(String(t.source_id), row);
@@ -211,6 +212,15 @@ async function main() {
     }
   }
   console.log(`  ${allTeams.length} Teams Table rows`);
+
+  // 2026-08-21: schedule-FACED Stuff+ for INDEPENDENT from-programs (team_season_stats.faced_stuff_plus by source_id).
+  const facedStuffBySourceId = new Map<string, number>();
+  {
+    const { data: facedRows } = await (supabase as any)
+      .from("team_season_stats").select("source_id, faced_stuff_plus").eq("season", CURRENT_SEASON);
+    for (const fr of (facedRows || [])) if (fr.source_id != null && fr.faced_stuff_plus != null) facedStuffBySourceId.set(String(fr.source_id), Number(fr.faced_stuff_plus));
+    console.log(`  ${facedStuffBySourceId.size} team_season_stats faced_stuff_plus rows`);
+  }
 
   // 2e. Players — ALL hitters, excluding the customer team's own roster
   // (transfer math doesn't make sense for a player staying put; their
@@ -355,6 +365,8 @@ async function main() {
         from_slg: pred?.from_slg ?? null,
       },
       fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name } : { id: null, name: fromTeamName },
+      // faced Stuff+ for independents (by the from-team's stable source_id)
+      fromFacedStuff: fromTeamRow?.source_id ? (facedStuffBySourceId.get(String(fromTeamRow.source_id)) ?? null) : null,
       toTeam,
       fromConference,
       fromConferenceId,
