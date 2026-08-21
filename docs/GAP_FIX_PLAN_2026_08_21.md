@@ -28,8 +28,10 @@ The HITTER side already blocked correctly pre-existing: env+ (`fromAvgPlus`…`t
 ## GAP 4 — Stale HTP display sites [✅ DONE 2026-08-21]
 `PitcherPage.tsx:282` + `PitchingConferenceStatsTable.tsx:370` now read STORED `hitter_talent_plus` (were live pre-swap `100−wrc_plus`). Committed f39e50e.
 
-## GAP 5 — Hitter transfer park omits source_team_id [DEFERRED — minor]
-`buildTransferProjectionInputs.ts` park resolver passes `teamId` but not `sourceTeamId` → uses per-season UUID→name instead of the stable-program path (pitcher side already threads source_team_id). **Fix:** pass `fromTeam.source_id`/`toTeam.source_id` as `sourceTeamId` to `resolveMetricParkFactor`.
+## GAP 5 — Transfer park omits source_team_id [✅ DONE 2026-08-21 — 6544d4a — BOTH sides]
+**Correction:** the note claimed "pitcher side already threads source_team_id" — WRONG. Audit showed BOTH hitter (`buildTransferProjectionInputs`) AND pitcher (`buildTransferPitcherInputs`) only passed `teamId`→`byTeamId`, never `sourceTeamId`. Fixed both (codebase drift rule — don't fix one, leave the other).
+**Fix:** threaded a `sourceTeamId` arg through both builders' `resolveParkFactor` signatures + all call sites + both batch callers (`precompute-transfer-projections`, `precompute-pitchers`) + BOTH edge-fn scopes (hitter ~1043, pitcher ~1366) → `resolveMetricParkFactor` position-6 `sourceTeamId` → `parkBySourceId` FIRST (preferred stable path), per-season `team_id` fallback. Added `source_id` to `PitcherTeamRow`, the hitter builder team type, and every `toTeam`/`fromTeam` object.
+**VALUE-NEUTRAL for 2026 (verified):** read-only check of 1848 team×metric park-resolution pairs — `source_id` vs `team_id` resolve identically (0 mismatches; Park Factors populates team_id + source_team_id from the same row). So NO re-run needed — stored projections already correct; this only future-proofs against UUID drift across seasons. tsc clean both builders; edge-fn deno = 2 pre-existing errors only.
 
 ## ORDER: 1 → 2 → 5 → 3 (3 is a bigger codify task; do the code gaps 1/2/5 first, then 3). Display HTP (4) done.
 ## THEN: display-wiring audit (player eval + front office) → market-value re-eval → deploy edge fn → unify (Track B) → prod.
