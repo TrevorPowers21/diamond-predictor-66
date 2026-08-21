@@ -164,3 +164,30 @@ Ran in order (Trevor: apply 1-3, verify stores properly, THEN build Step 4):
 **D — ⭐ CRITICAL: `std_pr` constants are STALE post-recalibration.** Step 2b recomputed all power ratings on the new pitch-log Masters → the SD constants no longer match: `r_ba_std_pr` 31.297 vs actual **29.99**; `r_obp_std_pr` 28.889 vs actual **31.89** (~10% off); `iso` 45.42 vs 44.91. The edge-fn returner SD-blend reads `r_obp_std_pr=28.889` → **mis-scaled power adjustment**. **MUST re-measure ALL `std_pr` (hitter ba/obp/iso + pitcher era/fip/whip/k9/bb9/hr9 incl. the whip 24.59→~37 fix) on the CURRENT ratings and update model_config (`r_*`, `t_*`) + code defaults BEFORE running Step 4.** This is the SD-fix thread finalized on the post-recalibration ratings.
 
 **ORDER before Step 4 run:** (D) re-measure + store std_pr → (C) add r_iso_std_power → (B) pitcher port (or run script) → run returner recompute. Deploy edge fn to staging to run it.
+
+---
+
+## STEP 4 RUN + SPOT-CHECK (2026-08-20) — full pipeline applied on staging
+
+**Applied:** D (std_pr → model_config + code defaults, committed) → returner-hitter recompute (`precompute-returner-hitters` = recalcReturner SD-blend, 8234 updated, 1 error) → returner-pitcher recompute (`precompute-returner-pitchers`, done). Batch runs via the SCRIPTS (both use the correct SD-blend + D's SDs) — **no edge-fn deploy needed for the batch.** recalcReturner CONFIRMED NOT DEAD (it IS `precompute-returner-hitters`); only `calculatePrediction` deleted.
+
+**Spot-check staging (recalibrated) vs PROD (current), 2027 returner, keyed by source_player_id** (player_id is per-env UUID — DON'T join on it):
+- Shift is BIMODAL: median wRC+ ~5, oWAR ~0.29, pWAR ~0.08, hitter market ~$4.5k (D1-only); dWAR/bsrWAR ~0.001 (destination-invariant, from Master). Most players barely move.
+- **⭐ The big movers are the SMALL-SAMPLE BLEND, not the SD impact.** Traced Cael Boever wRC+ 37→107: 9-PA player, `combined_used`=false on prod (projected off 0/0/0 actuals → garbage 37) vs true on staging (blended prior-year .35/.45/.40 + from_*_plus populated → sensible 107). So the recalibration FIXED tiny-sample garbage projections. To see the PURE SD/power-rating impact, filter `combined_used=false` + PA≥75 (drops the blend churn). The SD-blend itself is the modest-median tier.
+- Full WAR/market chain confirmed FILLED (stats → o/d/bsr → total_hitter_war → market).
+- Trevor's JUCO guess: mostly D1 (only Ryan Piekutoski of the samples was NJCAA_D1); the big wRC+/AVG/market movers are D1 small-sample blends.
+
+**Full pipeline handoff:** `docs/HANDOFF_war_recalibration_pipeline_2026_08_20.md` — every step in run order + findings + next steps + deferred.
+
+---
+
+## TRANSFER LEVER FINALIZATION + GO-FORWARD PLAN (2026-08-20) — pointer
+Full tables + analysis: `docs/HANDOFF_team_season_stats_2026_08_19.md` §"TRANSFER LEVER FINALIZATION" and §"TRANSFER LEVER DISPLAY + GO-FORWARD PLAN". Memory: [[project_war_pitchlog_to_prod_plan]], [[project_transfer_lever_finalization]].
+
+**Non-obvious learnings:**
+- **JUCO contamination trap:** `Conference Stats` 2026 has 42 rows; 10 `NJCAA D1 … District` rows are mislabeled `division='D1'` (FIP 6.4–8.0). Filtering `division='D1'` gives 40 → inflated SDs (I hit this: fip+ 20.94 instead of 6.78). Clean D1 = 30 (exclude `conference abbreviation LIKE 'NJCAA%'`). Applies on BOTH prod + staging. Cross-check any conf SD against the definitive audit (era+ 7.30 z×20) to catch it.
+- **Pitcher conf weights ARE 0.025×SD** (era .235=.025×9.4, hr9 .433=.025×17.3 from OLD comment SDs) — so updating the SD auto-updates the weight; the methodology amplifies high-SD metrics (impact ∝ SD² when weight=0.025·SD). This is why hr9 balloons on the ratio.
+- **Ratio inflates small-denominator rates:** hr9 ratio SD 23.38 vs z×20 10.14 (avg only 1.12). But it's REAL spread (winsorized 18.57), and it DOUBLE-COUNTS HTP (high-HR9 confs = power confs = better hitters, which HTP already prices). Same "Ivy double-count" as the HTP→park-factor work.
+- **Run chain gates which levers matter:** only OBP+SLG→wRC+ (hitter) and K9/BB9/HR9→pRV+ (pitcher) create runs. ERA/FIP/WHIP conf + park levers move DISPLAYED rates but 0 runs/WAR. So HR9 is the only pitcher park lever that touches WAR.
+- **Park is per-TEAM per-metric** (`Park Factors`, 308 D1), `whip_factor`==`obp_factor`, `hr9_factor`==`iso_factor`; pitcher park OFF (weight 0). Mapping DECIDED: ERA/FIP→RG, WHIP→OBP, HR9→ISO, none K9/BB9; add `era_factor`/`fip_factor`=`rg_factor`.
+- **Method discipline that worked:** validate any new SD computation by reproducing the prior-audit number on the same scale before trusting the new-scale number.

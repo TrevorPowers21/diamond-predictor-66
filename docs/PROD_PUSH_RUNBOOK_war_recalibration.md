@@ -47,6 +47,18 @@
 `pitcher_full_name` (corruption fix, 1 name/pitcher_id) · `park_code`/`game_string` (~99%) · descriptive WAR (desc_*) · composite WAR · team_season_stats.
 ⚠️ Confirm globally with server-side `count(*) FILTER (WHERE park_code IS NULL)` + `HAVING count(DISTINCT pitcher_full_name)>1` before push (audit used sampling).
 
+### A7. TRANSFER LEVER STORAGE ⚠️ PENDING Trevor's weight decisions (2026-08-20) — see `HANDOFF_team_season_stats_2026_08_19.md` §TRANSFER LEVER
+Not yet built on staging; queued once the weight/HR9/park decisions land. Applies to BOTH envs.
+| Object | Change | Note |
+|---|---|---|
+| Conference Stats | ADD `era_plus, fip_plus, whip_plus, k9_plus, bb9_plus, hr9_plus` (pitcher env+, **ratio scale** `(conf/ncaa)×100`) | compute+store on upload (stored-not-live); columns don't exist today |
+| Conference Stats | ADD/FILL `offensive_power_rating` (OPR — wire calc `conferenceScoutingAverages.ts:432` to store; 0/42 today) | + fill the 10 gaps in `hitter_talent_plus`/`WRC_plus`/`run_env_factor` |
+| Conference Stats | ⚠️ **Re-tag/exclude 10 `NJCAA D1 … District` rows** mislabeled `division='D1'` | clean D1 = 30; contaminates any stored SD |
+| Park Factors | ADD `era_factor`, `fip_factor` (= `rg_factor`) | `whip_factor`(=obp)/`hr9_factor`(=iso) already stored; enable pitcher park (weights currently 0) |
+| model_config | store cross-conf env+ SDs (mirror) + updated transfer weights | **settled values also written in CODE** (`src/lib/transferWeightDefaults.ts`); DB = mirror |
+| CODE | pitcher env+ **z×20 → ratio** conversion (`buildTransferPitcherInputs.ts`/`transferPitcherProjection.ts`) | the ratio decision — a code change, not just weight values |
+Then re-run TRANSFER projections (deferred until this lands).
+
 ---
 
 ## PART B — EXECUTION ORDER (the dependency chain)

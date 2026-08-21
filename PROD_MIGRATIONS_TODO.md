@@ -24,6 +24,7 @@
 > - **`team_war_snapshots` is NOT dropped** — federate-by-era keeps it for pre-2026 (2025 champions). Any "DROP TABLE team_war_snapshots" below is CANCELLED.
 > - **park_code/game_string backfill IS DONE on staging** (the earlier "NOT DONE" line is stale).
 > - **SD-audit outcome:** `whip_pr_sd`→37.13 and `obp_std_pr`→32.41 (returner+transfer) ARE re-tuned — see runbook Part C steps 1–2.
+> - **TRANSFER LEVER STORAGE (pending Trevor's weight decisions, 2026-08-20):** new Conference Stats pitcher env+ cols (era_plus…hr9_plus, ratio scale) + `offensive_power_rating` fill + re-tag 10 NJCAA-D1 districts; Park Factors `era_factor`/`fip_factor` (=rg); cross-conf env+ SDs stored (model_config mirror, values also in code); pitcher env+ z×20→ratio code change. **NOT yet on staging** — see runbook **Part A7**. Transfer projections re-run deferred until this lands.
 
 Every schema change on this branch that is **not yet on prod**, in apply order. Run
 these against prod at push time (staging already has them). Most use

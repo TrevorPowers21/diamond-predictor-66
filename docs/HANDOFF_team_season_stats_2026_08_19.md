@@ -578,3 +578,88 @@ An 8-stream audit (6 code/logic + staging↔prod DB delta + prod-doc accuracy) w
 **PIPELINE STEP 1 BUILT (pitch-log-primary):** `scripts/derive_masters_from_pitchlog.ts` derives the full stat line from `pitch_log_*_totals` and writes into BOTH Masters (TruMedia = sporadic fill/override). Pitcher IP solved via per-PA out-attribution (added `pitch_log_pitcher_totals.ip`; corr 0.9995 vs Master; K9/BB9/WHIP 0.996+). Descriptive classic FIP for the Master (NOT `computeProjFip` = projection/pWAR FIP). Unique constraints added on both Masters. Dry-run verified, NOT applied. Full detail + SQL: `docs/AGENT_LEARNINGS_war_recalibration_audit_2026_08_20.md` + runbook Part F. NEXT: `ncaa_averages` → `compute_scores` → `create_predictions` → recompute.
 
 **STEP 2 (ncaa_averages + compute_scores) — walked + fixes coded (2026-08-20):** pitcher exit-velo/ev90 pinned = hitter 1-for-1 in `computeNcaaAverages.ts` (was NULL / wrong `90th_vel`=fastball-velo mapping); `pitcher_in_zone_pct` added to map (from pitch-log `Pitching Master.in_zone_pct`). `*_pr_plus`/`*_power_rating` cols already exist on Masters (not created). TWO OPEN DECISIONS: (1) NCAA avgs live in BOTH `ncaa_averages` table AND `model_config` (`p_ncaa_avg_*`) — fix must sync both; (2) Trevor wants every tracked metric computed ONCE from the raw pitch-log population (except Stuff+) — pop exit velo 86.61 vs Master 85.93 → re-scores (recalibration). Detail in agent learnings.
+---
+
+## ★★★ TRANSFER LEVER FINALIZATION — analysis for Trevor's decision (2026-08-20, cont. of SD AUDIT)
+Continuation of the SD-audit thread. Goal: finalize the transfer equation's env+ / competition / park levers, the ratio switch, and the weights. **Trevor is deciding FRESH tomorrow** — nothing below is locked; these are the data views he asked to see.
+
+### VERIFIED IN DB (staging + prod), not docs
+- **Per-conf PITCHER env+ (era_plus…hr9_plus): columns DO NOT EXIST** in `Conference Stats` — 100% live-computed. **Cross-conf SD: NOT stored** anywhere (no `_sd` cols; 0 model_config keys). So the earlier "should already be stored" belief is FALSE — it's unbuilt. `offensive_power_rating` (OPR) = **0/42 never stored**; HTP 30/42, park(run_env) 30/42, WRC 31/42 (the 10 gaps = mislabeled NJCAA districts).
+- **JUCO contamination CONFIRMED both envs:** `Conference Stats` 2026 = 42 rows; 40 tagged `division='D1'` but 10 are `NJCAA D1 … District` (FIP 6.4–8.0 vs real D1 4.2–5.6) → **clean D1 = 30.** MUST exclude/re-tag before any stored SD. (I fell into this trap once — got 40 → wrong SDs — caught by cross-check vs the definitive audit.)
+- **OPR calc location:** `src/savant/lib/conferenceScoutingAverages.ts:432` computes it (PA-weighted conf avg of hitter process PR), displayed on ConferenceStatsPage (`HTP=(OPR+1.25·(Stuff+−100)+0.75·(100−wRC+))·10` live) — just needs wiring to STORE into `Conference Stats.offensive_power_rating`.
+
+### THE RATIO DECISION (Trevor CONFIRMED): pitcher conference env+ → ratio `(conf/ncaa)×100` to match hitters (currently z×20 `calcPitchingPlus scale=20`). Switching scale changes the cross-conf SD → changes weights → why this all had to be re-measured.
+
+### CROSS-CONF env+ SD, clean 30 D1 (method VALIDATED: z×20 col reproduces the definitive audit exactly)
+| metric | prod z×20 SD (current) | staging **ratio** SD (new) |
+|---|---|---|
+| era+ | 7.45 | 9.46 |
+| fip+ | 6.73 | 7.28 |
+| whip+ | 7.36 | 5.74 |
+| k9+ | 7.25 | 8.72 |
+| bb9+ | 6.90 | 10.29 |
+| hr9+ | 9.84 | **23.38** |
+| ba+/obp+/iso+ (hitter, already ratio) | 3.99/3.49/12.35 | 3.91/3.47/12.47 |
+| Stuff+ (hitter comp) / HTP (pitcher comp) | 3.69 / 14.1 | 3.48 / 14.31 |
+Ratio means used: ncaa_averages 2026 (era 6.0802, fip 5.0013, k9 8.3933, bb9 4.7945, hr9 1.1178); **whip absent in ncaa_averages → used eq 1.64 (must add a canonical whip mean before storing).** z×20 uses eq-config avgs/sds (`pitchingEquations.ts:200-223`, era 6.21/1.588 …).
+
+### PER-METRIC PARK SD (cross-TEAM, 308 D1 teams, `Park Factors`, index~100)
+avg 5.56 · obp 4.63 · iso 17.97 · rg 12.95 · whip 4.63(=obp) · hr9 17.97(=iso). **`whip_factor`==`obp_factor`, `hr9_factor`==`iso_factor`** (pitcher park derived from hitter park).
+- **PITCHER PARK MAPPING (Trevor DECIDED 2026-08-20):** ERA & FIP → RG park; WHIP → OBP park; HR9 → ISO park; **K9 & BB9 → NO park** (not park-impacted). **All to be SAVED in `Park Factors`** — `whip_factor`/`hr9_factor` already store the mapped values; **`era_factor`/`fip_factor` DON'T EXIST → add them = `rg_factor`.** Pitcher park is currently **OFF** (all `transfer_*_park_weight=0`) → Trevor wants it ENABLED.
+- Run-chain caveat: only **HR9 park (ISO)** moves runs/WAR (hr9 feeds pRV+); ERA/FIP/WHIP park change displayed rates only.
+
+### CURRENT WEIGHTS (transferWeightDefaults.ts): pitcher conf were set as 0.025×(OLD stale comment SDs): era .235/fip .155/whip .133/k9 .198/bb9 .215/hr9 .433. Pitcher comp(HTP): era 1.0/fip 1.0/whip .706/k9 .40/bb9 .30/hr9 .40. Hitter conf .30/.30/.15; comp(Stuff+) 1.0/.85/.75; park .24/.26/.11.
+
+### RUN-IMPACT SIM (per +1 SD, isolated; hitter PA=245, SP IP=85; only OBP+SLG→wRC+ and K9/BB9/HR9→pRV+ create runs)
+HITTER: Competition Stuff+ −2.84 runs · Park −1.23 · Conference −1.08. (orderly — supports "keep hitter as-is".)
+PITCHER conference (ratio, current wt) −2.75 runs, **of which HR9 = −1.81 (66%)**, BB9 −0.58, K9 −0.36. Competition HTP −3.34 runs.
+**⭐ HR9 finding:** the 23.38 ratio SD is REAL spread (not outliers: winsorized 18.57, capped[75,125] 17.01; SEC HR9 1.62 → Ivy 0.70), BUT the high-HR9 confs = power confs (SEC/ACC/Big12) because **SEC HITTERS hit more HR — which HTP ALREADY counts.** So HR9 conf largely DOUBLE-COUNTS the competition lever. Damping it avoids double-count, not just artifact.
+
+### SUGGESTED WEIGHTS (proposal — Trevor NOT yet decided, sleeping on it)
+- Pitcher conference = **equalize each lever to ~2% impact** on ratio scale (wt = 2/SD): era .211/fip .275/whip .348/k9 .229/bb9 .194/**hr9 .086**. Drops conf run impact −2.75→−1.30, hr9 share 66%→27%.
+- Pitcher park (proposed enable): ERA/FIP(rg) ~0.12→1.55%; WHIP(obp) 0.26→1.20%; HR9(iso) 0.11→1.98%; K9/BB9 none.
+- Competition (HTP/Stuff+): keep (intended dominant lever). Hitter: keep (run impacts sane).
+
+### OPEN DECISIONS (Trevor deciding tomorrow, fresh)
+1. Pitcher conference weights — equalize ~2% vs keep vs another target. **NOT READY.**
+2. HR9 — accept damped weight vs damp the SD itself (cap/winsorize the ratio). "100% needs improvement," wants more data (provided: distribution above).
+3. Hitter — leans keep; open to a deeper wRC+-style per-weight impact tuning (run-impact sim provided; can go finer).
+4. Canonical ncaa mean per metric for the ratio (ncaa_averages vs eq-config; add whip mean).
+
+### THEN (build, after decisions): add `era_plus…hr9_plus` + `offensive_power_rating` + `era_factor`/`fip_factor` columns; wire OPR + ratio env+ + park mapping to compute-and-store on upload; store cross-conf SDs (model_config mirror) but **settled values live in CODE**; lock weights in `transferWeightDefaults.ts`; rerun transfers. Then prod-readiness audit suite (verify-all, precompute_coverage/staleness, staging_vs_prod, audit_phase_f) before push.
+
+---
+
+## ★★★ TRANSFER LEVER DISPLAY (the table Trevor is deciding off) + GO-FORWARD PLAN (2026-08-20)
+This is the pickup point. Below = the lever impact table (per 1-SD move) with the necessary park factors filled + a suggested-weight column; then Trevor's ordered plan.
+
+### HITTER — impact per 1-SD move (park corrected to per-metric)
+| Stat | Conference env+ | Competition (Stuff+ faced) | Park (per-metric) | Suggested wt |
+|---|---|---|---|---|
+| AVG | 0.30 · 3.91 → 1.17% | 1.00 · 3.48 → 3.48% | 0.24 · 5.56 → 1.33% | keep (pending data) |
+| OBP | 0.30 · 3.47 → 1.04% | 0.85 · 3.48 → 2.96% | 0.26 · 4.63 → 1.20% | keep |
+| ISO | 0.15 · 12.47 → 1.87% | 0.75 · 3.48 → 2.61% | 0.11 · 17.97 → 1.98% | keep |
+
+### PITCHER — impact per 1-SD move (conference env+ on the ratio; park now filled per Trevor's mapping)
+| Stat | Conference (current) | Conference (suggested = equalize 2%) | Competition (HTP faced) | Park (proposed — now off) |
+|---|---|---|---|---|
+| ERA | 0.235 · 9.46 → 2.22% | 0.211 → 2.00% | 1.00 · 14.31 → 14.31% | RG: 0.12 · 12.95 → 1.55% |
+| FIP | 0.155 · 7.28 → 1.13% | 0.275 → 2.00% | 1.00 · 14.31 → 14.31% | RG: 0.12 · 12.95 → 1.55% |
+| WHIP | 0.133 · 5.74 → 0.76% | 0.348 → 2.00% | 0.706 · 14.31 → 10.10% | OBP: 0.26 · 4.63 → 1.20% |
+| K9 | 0.198 · 8.72 → 1.73% | 0.229 → 2.00% | 0.40 · 14.31 → 5.72% | — (not park-impacted) |
+| BB9 | 0.215 · 10.29 → 2.21% | 0.194 → 2.00% | 0.30 · 14.31 → 4.29% | — (not park-impacted) |
+| HR9 | 0.433 · 23.38 → 10.12% | 0.086 → 2.00% | 0.40 · 14.31 → 5.72% | ISO: 0.11 · 17.97 → 1.98% |
+Park mapping DECIDED (Trevor): ERA&FIP→RG, WHIP→OBP, HR9→ISO, K9/BB9→none; save `era_factor`/`fip_factor`=`rg_factor` (whip/hr9 already stored). Pitcher park currently OFF → enable. Only HR9 park moves runs (feeds pRV+). Suggested conference = equalize-2% PROPOSAL, NOT locked.
+
+### GO-FORWARD PLAN (Trevor's ordered sequence)
+1. **Decide, store & PIPE the transfer WEIGHTS + SD** (incl. the pitcher env+ z×20→ratio CODE change, not just values).
+2. **Confirm conference stats are PULLABLE from pitch-log data** (built + mapped on this branch) — confirm works + LOG process.
+3. **Confirm the per-TEAM row is filled** from pitch log (`team_season_stats`: records, rates, WAR rollups, faced-competition, conf context).
+4. **Confirm STORAGE to run every conference stat:** env+ (incl. new pitcher env+ cols), Stuff+, OPR, conference park factor, HTP+ — confirm works + log. Incl. HTP `(100−wRC+)`→conf-park-factor swap.
+5. **DRY-RUN transfer portal projections COMPLETELY** — pull/use ALL correct data (player Masters + Conference Stats + team stats for independents) → calculates properly.
+6. **REFRESH team-build data + player/transfer snapshots WITHOUT changing toggles;** wire proper data to DISPLAY everywhere piped (incl. team snapshots on Program Analytics + all memory items at the piping stage).
+7. **COMPLETE the prod-migration doc** so the push is seamless off the built process.
+8. **Push + confirm all code + data on PROD.**
+9. **THEN new feature branch: unify the ONE edge function** (this exact work, married together, autonomous-on-upload).
+
+**Logged todos NOT explicit above (fold in / confirm deferred):** Bucket-2 dead-code (triple-oWAR 260-PA, simulateTransferProjection, retire V1 conf Stuff+); Bucket-4 depth-role regular-season PA/IP ranges + defensive depth tiers (d/bsr scale under toggles, returner AND transfer); TWP redirect oWAR→total_hitter_war; NIL allocation (downstream of step-6 snapshots). Deferred: market calibration (PVM/PTM), JUCO, per-player park rework.
