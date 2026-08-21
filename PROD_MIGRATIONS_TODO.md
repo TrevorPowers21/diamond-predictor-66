@@ -360,3 +360,10 @@ Building the transfer equation lever finalization. Each DB change logged here as
 > ## ★★★★ VERY IMPORTANT — CONF-STATS PRODUCERS (2026-08-21) ★★★★
 > Conference Stats columns feeding transfers were partly hand-run SQL on staging. **Committed producers exist now for run_env_factor / OPR / HTP (`derive_conf_opr_htp.ts`). STILL MUST commit: the raw-rate pitch-log assembly + WRC_plus** (currently a commented-out SQL) or they'll be EMPTY on prod and break transfers/HTP/Program Analytics. See runbook "CRITICAL PROD-PUSH BLOCKER" + `docs/CONFERENCE_STATS_BUILD_PROCESS_2026_08_21.md`.
 > **✅ UPDATE 2026-08-21 (GAP 3, a960334): raw-rate assembly + WRC_plus NOW committed** → `scripts/sql/conf_stats_bucketA_assembly.sql` (runnable, idempotent, txn-wrapped, inlines `_team_conf`). ALL 6 conf-stats producers now committed. **Remaining gate:** staging idempotent re-run of that file vs backup `_confstats_backup_preassembly` (couldn't run 2026-08-21 — no staging conn; `supabase --linked` = PROD). **PROD run order:** the 6 conf-stats producers (incl. `conf_stats_bucketA_assembly.sql`, PASTE — do NOT `--linked` blindly, that's prod) → transfer re-run → snapshot refresh → redeploy `process-precompute-jobs` edge fn (now has faced-competition mirror + D1 conf-stats block guard, commits bf69bd1/1c7603a).
+
+- [ ] **⚠️ PROD DATA FIX — NJCAA-D1 division re-tag (2026-08-21)** — 10 `"Conference Stats"` rows named `NJCAA D1 … District` carry `division='D1'` (should be `NJCAA_D1`, matching JUCO players). Makes `division='D1'` a clean 30 so any conf-SD consumer doesn't need a name filter (prevents JUCO contamination of conf-level SDs, e.g. inflated fip+). **APPLIED STAGING 2026-08-21 (Trevor, 10 rows).** **PROD: run this SQL:**
+  ```sql
+  update "Conference Stats"
+  set division = 'NJCAA_D1'
+  where season = 2026 and "conference abbreviation" like 'NJCAA%' and division = 'D1';
+  ```
