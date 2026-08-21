@@ -2,7 +2,7 @@
 
 Fixing the 5 audit gaps IN ORDER. Each = status + exact approach so we can resume if cut off. Context: the transfer/HTP/conf-stats/snapshot chain is settled + re-run on staging; these are the remaining correctness gaps before display-wiring + prod. Full audit: this session; pipeline: `FULL_PIPELINE_WALKTHROUGH_2026_08_21.md`.
 
-## GAP 1 — Faced-competition for independents (Oregon State bug) [IN PROGRESS]
+## GAP 1 — Faced-competition for independents [✅ BATCH DONE f733986; edge-fn mirror + re-run pending]
 **Problem:** transfer competition term for an INDEPENDENT from-program uses that program's OWN conference HTP/Stuff+ (Oregon State 124.6/109.4) instead of the SCHEDULE-FACED value (104.47/100.22). `team_season_stats.faced_htp`/`faced_stuff_plus` are computed + stored (verified 308/308) but read by ZERO consumers.
 **Verified:** faced computed in `scripts/sql/team_season_stats_faced_park.sql` (faced_htp(T)=pitch-weighted conf HTP of hitters T's pitchers faced; faced_stuff_plus(T)=conf Stuff+ of pitchers T's hitters faced). Oregon State (src=3111) faced_htp 104.47 / faced_stuff 100.22. Only 1 independent in 2026, but wire generally.
 **Fix (approach):**
@@ -25,8 +25,14 @@ Fixing the 5 audit gaps IN ORDER. Each = status + exact approach so we can resum
 ## GAP 4 — Stale HTP display sites [✅ DONE 2026-08-21]
 `PitcherPage.tsx:282` + `PitchingConferenceStatsTable.tsx:370` now read STORED `hitter_talent_plus` (were live pre-swap `100−wrc_plus`). Committed f39e50e.
 
-## GAP 5 — Hitter transfer park omits source_team_id [TODO]
+## GAP 5 — Hitter transfer park omits source_team_id [DEFERRED — minor]
 `buildTransferProjectionInputs.ts` park resolver passes `teamId` but not `sourceTeamId` → uses per-season UUID→name instead of the stable-program path (pitcher side already threads source_team_id). **Fix:** pass `fromTeam.source_id`/`toTeam.source_id` as `sourceTeamId` to `resolveMetricParkFactor`.
 
 ## ORDER: 1 → 2 → 5 → 3 (3 is a bigger codify task; do the code gaps 1/2/5 first, then 3). Display HTP (4) done.
 ## THEN: display-wiring audit (player eval + front office) → market-value re-eval → deploy edge fn → unify (Track B) → prod.
+
+## PROGRESS (2026-08-21)
+- GAP 1 ✅ batch (f733986): faced_htp/faced_stuff wired into both builders + callers; dry-run 308 faced rows loaded, hitter 4986 / pitcher 5059. Independents use faced. **PENDING: edge-fn mirror + re-run.**
+- GAP 4 ✅ done (display HTP).
+- GAP 5 DEFERRED (minor): needs the `resolveParkFactor` callback signature to accept sourceTeamId + fromTeam to carry source_id. UUID→name path works today. Low urgency.
+- NEXT: re-run transfers (GAP 1) → edge fn GAP 2 (?? 100 → block) + GAP 1 mirror → GAP 3 (codify 9a/9f).
