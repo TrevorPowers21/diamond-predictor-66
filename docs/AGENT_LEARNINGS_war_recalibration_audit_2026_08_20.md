@@ -206,3 +206,11 @@ Detail: `HANDOFF_team_season_stats_2026_08_19.md` §STEP 1. Memory: [[project_tr
 - **%impact math:** displayed % = weight × SD (since env+ is /100 and 1 SD = SD index points). So weight = target% ÷ SD. Used to set every lever to a target.
 - **Dead-code discipline (Trevor):** displays read stored values; any live-compute/fallback for a stored quantity is dead code → remove. Verified dead via grep-zero-refs + `npm run build` (not just tsc), and confirmed the *other* same-named helper (TB hitter `/50*100` toPlus) was untouched.
 - **JUCO isolation:** D1 env+ reads stored ratio; JUCO districts have NULL stored env+ → resolve null and are skipped (blocked). JUCO gets its own function later (Trevor: "separate the 2 functions").
+
+---
+## TRANSFER EQUATION LINEAGE — verified findings (2026-08-21)
+Full spec: `docs/TRANSFER_EQUATION_LINEAGE_2026_08_21.md`. Non-obvious:
+- **Hitter env+ ≠ pitcher env+ provenance.** Pitcher reads STORED `era_plus…hr9_plus` (ratio); hitter computes env+ LIVE from hardcoded divisors `AVG/0.280 · OBP/0.385 · ISO/0.162` (`precompute-transfer-projections.ts:155-157`), ignoring the stored `ba_plus/obp_plus/iso_plus`. The 1a–1d stored-conversion was pitcher-only. Fix hitter to read stored before re-run.
+- **`readPitchingWeights` (pitcher batch) reads code DEFAULT_PITCHING_WEIGHTS**, NOT model_config — via `loadEquationWeightsMap(2025)` ("Equation Weights" table, verified **EMPTY**) + localStorage (undefined in Node). So pitcher code weight edits DO take effect; the model_config `transfer_*` mirror is consumed only by the Deno edge fn. Hitter batch DOES read model_config (`t_*`) — hence the earlier "must update model_config" catch was hitter-specific.
+- **Hitter from-team = NAME-only key** (`:329`), pitcher = id-first (PM TeamID→players.team_id→name). Hitter blocks when the name doesn't normalize even with a team_id present — an IDs-over-names bug ([[feedback_id_over_name]]).
+- Conference resolve (both): conference_id → JUCO district-id map → name alias. Handedness: hitter park lhb/rhb splits (avg/obp/iso); pitcher combined only. Depth role: hitter PA tier (stored projected_pa = tier, not raw); pitcher regular_season_ip→depth role→pitcherExpectedIp (canonical rewrite overwrites coarse first pass).

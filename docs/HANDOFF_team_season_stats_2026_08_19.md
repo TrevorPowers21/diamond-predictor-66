@@ -701,3 +701,12 @@ Weights in CODE (`transferWeightDefaults.ts` hitter, `pitchingEquations.ts` pitc
 - **Hitter t_* weights EXIST in model_config and OVERRIDE code** → code change alone is inert; must UPDATE model_config (pitcher transfer_* were absent → code default used).
 
 ### NEXT (Step 1 → 2): re-run the transfer projections with the new env+/weights (batch `precompute-transfer-projections` hitter + `precompute-pitchers` pitcher), dry-run/verify, then the pipeline steps 2–6 (confirm conf stats + team rows, dry-run transfers, refresh snapshots, displays, prod doc). Edge fn transfer weights still hardcoded (index.ts) — consolidation item; batch uses readPitchingWeights (reads model_config).
+
+---
+
+## ★★★ TRANSFER EQUATION LINEAGE (2026-08-21) — full walkthrough before re-run
+Complete verified data-lineage + edge-fn spec: **`docs/TRANSFER_EQUATION_LINEAGE_2026_08_21.md`** (every source table/column/key, id-vs-name joins, handedness, conf-stat inputs, 8 equation steps, null handling — hitter + pitcher).
+**⚠️ Two inconsistencies found that should be fixed BEFORE re-running transfers:**
+1. **Hitter env+ is still LIVE-computed** from hardcoded divisors (`AVG/0.280`, `OBP/0.385`, `ISO/0.162`; `precompute-transfer-projections.ts:155-157`) — does NOT read stored `ba_plus/obp_plus/iso_plus`. The pitcher 1a–1d stored-ratio conversion was NOT done for hitters. Violates "no live compute"; risks divergence from stored ba_plus.
+2. **Hitter from-team resolves by NAME only** (`:329`) — blocks if the name doesn't normalize even when team_id exists. Pitcher is id-first. IDs-over-names fix needed.
+Also: dual weight paths (hitter reads model_config, pitcher batch reads code defaults — Equation Weights table empty; edge fn reads model_config); hitter park omits source_team_id; NCAA anchors from model_config not ncaa_averages.
