@@ -672,3 +672,32 @@ Park mapping DECIDED (Trevor): ERA&FIP→RG, WHIP→OBP, HR9→ISO, K9/BB9→non
 - **Stored `hitter_talent_plus`** (Conference Stats, 30/42) therefore reflects `(100−wRC+)` too — so storing HTP as-is would bake in the old formula everywhere.
 - **The swap (08-13):** replace the `0.75·(100−wRC+)` run-environment term with the conference-average park factor `wrc_park = 0.72·obp_f + 0.28·slg_f` (`slg_f = 0.675·avg_f + 0.325·iso_f`), conference = member avg by `conference_id`. Validated direction: Ivy 104.7→98.4, Patriot 100→93.7, top power confs ~flat. Ties directly to the conference park factor (`run_env_factor`) we're already storing in the park work.
 - **ACTION (belongs in Step 4, BEFORE storing HTP):** centralize the HTP formula to ONE fn, apply the park-factor swap, recompute + store `hitter_talent_plus`, update all ~8 sites. Trevor: "It needs to be updated if we are storing it."
+
+---
+
+## ★★★ STEP 1 (env+ ratio + weights) — BUILT + APPLIED ON STAGING (2026-08-21)
+The transfer conference env+ ratio pipeline + the re-tuned lever weights are done on staging. Commits e0ccc8d…47450b1.
+
+### 1a–1d: conference env+ = stored ratio, one source, no live compute
+- **1a** clean D1=30 filter (`division='D1'` AND name NOT LIKE 'NJCAA%'); no existing code contaminated.
+- **1b** ratio formula `(conf/ncaa)*100` (ncaa_averages means + IP-weighted WHIP 1.635); dry-run verified vs z×20.
+- **1c** migration `20260821000000_conf_pitcher_env_plus.sql` (ADD era_plus…hr9_plus) APPLIED STAGING; populated clean 30 via `scripts/compute_conf_pitcher_env_plus.ts --apply` (30/30, SDs off DB: era 9.46/fip 7.28/whip 5.72/k9 8.72/bb9 10.29/hr9 23.38; NJCAA untouched).
+- **1d** ALL conf env+ resolvers now READ the stored column, **no live compute, no fallback** (Trevor: displays = stored, live-compute = dead code). `precompute-pitchers`, TB `pitchingConfLookup`, TransferPortal, shared `useConferenceStats` (added the 6 cols). Edge fn already read stored. Dead z×20 `toPlus`/`calcPitchingPlus` REMOVED (verified dead: grep zero refs + full `npm run build` passes; hitter `/50*100` toPlus untouched). JUCO reads null → blocked (separate function later — Trevor: "JUCO uses a completely different equation").
+
+### 1e: transfer lever weights re-tuned to TARGET %IMPACT (Trevor 2026-08-21)
+Target %impact per lever (weight = target ÷ SD). **Consistent across both sides**: conference ~1% (background), competition the main lever, park raised above conference (metric-weighted).
+| | Conference | Competition | Park |
+|---|---|---|---|
+| Hitter AVG/OBP/ISO | 1.0/1.0/1.0% | 4.0/3.4/3.0% (Stuff+) | 1.5/1.5/2.0% |
+| Pitcher ERA/FIP | 1.0% | 3.75% (HTP) | 1.75% (RG, sizeable) |
+| Pitcher WHIP | 1.0% | 3.4% (=OBP) | 1.5% (=OBP) |
+| Pitcher K9/BB9 | 1.0% | 4.25% (talent) | none |
+| Pitcher HR9 | 1.0% | 4.25% | 2.0% (=ISO) |
+Weights in CODE (`transferWeightDefaults.ts` hitter, `pitchingEquations.ts` pitcher DEFAULT_PITCHING_WEIGHTS) + **model_config mirror** (`store_transfer_weights_and_sds.ts`). Park ALREADY WIRED (era/fip→rg_factor, whip→whip_factor, hr9→hr9_factor; k9/bb9 no park) — no migration needed.
+
+### GOTCHAS (cost real time — see agent learnings)
+- **JUCO vs D1 weights:** the `transfer_*` weights in `transferWeightDefaults.ts` are the **JUCO** block. D1 pitcher weights = `pitchingEquations.ts DEFAULT_PITCHING_WEIGHTS`; D1 hitter = `TRANSFER_WEIGHT_DEFAULTS`. Don't conflate.
+- **model_config columns are `config_key`/`config_value`** (not key/value), model_type='admin_ui'. Earlier "0 transfer keys" was a wrong-column query.
+- **Hitter t_* weights EXIST in model_config and OVERRIDE code** → code change alone is inert; must UPDATE model_config (pitcher transfer_* were absent → code default used).
+
+### NEXT (Step 1 → 2): re-run the transfer projections with the new env+/weights (batch `precompute-transfer-projections` hitter + `precompute-pitchers` pitcher), dry-run/verify, then the pipeline steps 2–6 (confirm conf stats + team rows, dry-run transfers, refresh snapshots, displays, prod doc). Edge fn transfer weights still hardcoded (index.ts) — consolidation item; batch uses readPitchingWeights (reads model_config).
