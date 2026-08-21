@@ -339,3 +339,8 @@ Consolidate (Masters philosophy): ONE canonical table; retire team_war_snapshots
 - [ ] **ncaa_averages fill (2026-08-20):** `pitcher_exit_velo` / `pitcher_ev90` / `pitcher_in_zone_pct` are NULL on staging → set **= the hitter averages 1-for-1** (same batted-ball population), stored both sides via a function. STAGING+PROD.
 - [ ] **Conference Stats legacy cols (2026-08-20):** prod has `iso_power_rating`/`obp_power_rating` (conference-level); staging restructured to `obp_plus`/`iso_plus` + `offensive_power_rating`. **RECONCILE display before any drop — these ARE read by ConferenceStatsPage; do NOT blind-drop.**
 - [ ] **KNOWN LIMITATION (deferred):** `pitch_log.vaa` 0% + `classification_version` ~65% — upload miss, left as-is for now.
+
+## TRANSFER LEVER BUILD (feature/war-recalibration, 2026-08-21+) — step-by-step
+Building the transfer equation lever finalization. Each DB change logged here as it lands on staging. Detail: `docs/HANDOFF_team_season_stats_2026_08_19.md` §TRANSFER LEVER; `docs/PROD_PUSH_RUNBOOK_war_recalibration.md` Part A7.
+
+- [ ] **`20260821000000_conf_pitcher_env_plus.sql`** — ADD `era_plus,fip_plus,whip_plus,k9_plus,bb9_plus,hr9_plus` (numeric) to `"Conference Stats"`. Per-conf pitcher env+ on the **ratio scale** `(conf/ncaa)*100` (was live-computed z×20 in 3 drifted resolvers). **APPLIED STAGING: pending.** Populate: `scripts/compute_conf_pitcher_env_plus.ts --apply` (clean 30 D1, NJCAA excluded; ncaa_averages means + IP-weighted WHIP mean 1.635; all 6 stored raw ratio — HR9 handled on the weight side). PROD: re-run populate on prod (regenerate, don't copy).
