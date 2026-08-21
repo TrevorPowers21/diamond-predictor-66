@@ -278,9 +278,8 @@ export default function PitcherPage() {
               const risk = assessPitcherRisk({
                 conference: player.Conference,
                 projectedPrvPlus: playerPrv,
-                confHitterTalentPlus: confRow?.overall_power_rating != null && confRow?.stuff_plus != null && confRow?.wrc_plus != null
-                  ? confRow.overall_power_rating + (1.25 * (confRow.stuff_plus - 100)) + (0.75 * (100 - confRow.wrc_plus))
-                  : null,
+                // 2026-08-21: STORED canonical HTP (park swap), no live compute.
+                confHitterTalentPlus: (confRow as any)?.hitter_talent_plus != null ? Number((confRow as any).hitter_talent_plus) : null,
                 careerSeasons: careerRows,
                 ip: player.IP, classYear: undefined,
                 stuffPlus: player.stuff_plus,
