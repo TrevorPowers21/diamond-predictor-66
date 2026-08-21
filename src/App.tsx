@@ -10,17 +10,6 @@ import { lazyWithReload } from "@/lib/lazyWithReload";
 import { capturePageView, capturePageLeave } from "@/lib/posthog";
 import Index from "./pages/Index";
 
-// Savant — internal-only, gated, lazy-loaded so RSTR IQ users never download it.
-// Do not link to /savant/* from any RSTR IQ nav.
-const SavantRoute = lazyWithReload(() => import("@/savant/components/SavantRoute"));
-const SavantLayout = lazyWithReload(() => import("@/savant/components/SavantLayout"));
-const SavantHome = lazyWithReload(() => import("@/savant/pages/SavantHome"));
-const SavantLeaderboards = lazyWithReload(() => import("@/savant/pages/LeaderboardsPage"));
-const SavantConferenceStats = lazyWithReload(() => import("@/savant/pages/ConferenceStatsPage"));
-const SavantTeamsList = lazyWithReload(() => import("@/savant/pages/TeamsListPage"));
-const SavantTeamProfile = lazyWithReload(() => import("@/savant/pages/TeamProfilePage"));
-const SavantHitterPage = lazyWithReload(() => import("@/savant/pages/HitterPage"));
-const SavantPitcherPage = lazyWithReload(() => import("@/savant/pages/PitcherPage"));
 
 // GM (front office) — gated + lazy-loaded so Player Evaluation users never
 // download it. Do not link to /gm/* from Player Evaluation nav except the toggle.
@@ -146,26 +135,6 @@ const router = createBrowserRouter([
         ),
       },
       { path: "/dashboard/*", element: <ProtectedRoute><Dashboard /></ProtectedRoute> },
-      // Savant — internal only. Gated by SavantRoute (auth + email allowlist).
-      {
-        path: "/savant",
-        element: (
-          <ProtectedRoute>
-            <Suspense fallback={null}>
-              <SavantRoute><SavantLayout /></SavantRoute>
-            </Suspense>
-          </ProtectedRoute>
-        ),
-        children: [
-          { index: true, element: <Suspense fallback={null}><SavantHome /></Suspense> },
-          { path: "leaderboards", element: <Suspense fallback={null}><SavantLeaderboards /></Suspense> },
-          { path: "conferences", element: <Suspense fallback={null}><SavantConferenceStats /></Suspense> },
-          { path: "teams", element: <Suspense fallback={null}><SavantTeamsList /></Suspense> },
-          { path: "team/:id", element: <Suspense fallback={null}><SavantTeamProfile /></Suspense> },
-          { path: "hitter/:id", element: <Suspense fallback={null}><SavantHitterPage /></Suspense> },
-          { path: "pitcher/:id", element: <Suspense fallback={null}><SavantPitcherPage /></Suspense> },
-        ],
-      },
       // GM (front office) — gated by GMRoute (auth + superadmin/team_admin).
       {
         path: "/gm",
