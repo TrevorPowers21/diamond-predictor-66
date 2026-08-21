@@ -804,26 +804,17 @@ export default function TeamBuilder() {
   // Derive pitching conference plus-stats lookup from Supabase conference stats
   const pitchingConfLookup = useMemo(() => {
     const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-    const eq = pitchingEq;
     const map = new Map<string, { conference: string; era_plus: number; fip_plus: number; whip_plus: number; k9_plus: number; bb9_plus: number; hr9_plus: number; hitter_talent_plus: number }>();
     for (const cs of newConfStats) {
-      const toPlus = (value: number | null, ncaaAvg: number, ncaaSd: number, scale: number, higherIsBetter: boolean): number | null => {
-        if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
-        const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
-        const raw = 100 + (core * scale);
-        return Number.isFinite(raw) ? raw : null;
-      };
-      // 1d (2026-08-21): D1 reads the STORED conference env+ (ratio scale); JUCO
-      // districts have NULL stored env+ and use a separate equation → fall back to
-      // the legacy z×20 compute (isolated, blocks JUCO from the D1 ratio).
-      const storedOr = (stored: number | null | undefined, fn: () => number | null): number | null =>
-        stored != null && Number.isFinite(Number(stored)) ? Number(stored) : fn();
-      const eraPlus = storedOr(cs.era_plus, () => toPlus(cs.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false));
-      const fipPlus = storedOr(cs.fip_plus, () => toPlus(cs.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false));
-      const whipPlus = storedOr(cs.whip_plus, () => toPlus(cs.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false));
-      const k9Plus = storedOr(cs.k9_plus, () => toPlus(cs.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true));
-      const bb9Plus = storedOr(cs.bb9_plus, () => toPlus(cs.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false));
-      const hr9Plus = storedOr(cs.hr9_plus, () => toPlus(cs.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false));
+      // 1d (2026-08-21): conference env+ = STORED value only (ratio scale). NO live
+      // compute, NO fallback. JUCO districts have NULL stored env+ (separate equation)
+      // → resolve null and are skipped (naturally blocked from the D1 ratio path).
+      const eraPlus = cs.era_plus != null ? Number(cs.era_plus) : null;
+      const fipPlus = cs.fip_plus != null ? Number(cs.fip_plus) : null;
+      const whipPlus = cs.whip_plus != null ? Number(cs.whip_plus) : null;
+      const k9Plus = cs.k9_plus != null ? Number(cs.k9_plus) : null;
+      const bb9Plus = cs.bb9_plus != null ? Number(cs.bb9_plus) : null;
+      const hr9Plus = cs.hr9_plus != null ? Number(cs.hr9_plus) : null;
       if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
       const stuffPlus = cs.stuff_plus ?? 100;
       const wrcPlus = cs.wrc_plus ?? 100;

@@ -142,41 +142,23 @@ async function main() {
   const confRows = await fetchConferenceStats(CURRENT_SEASON);
   const pitchingConfByKey = new Map<string, PitchingConfStats>();
   const pitchingConfById = new Map<string, PitchingConfStats>();
-  const toPlus = (
-    value: number | null,
-    ncaaAvg: number,
-    ncaaSd: number,
-    scale: number,
-    higherIsBetter: boolean,
-  ): number | null => {
-    if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
-    const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
-    const raw = 100 + (core * scale);
-    return Number.isFinite(raw) ? raw : null;
-  };
+  // (conference env+ z×20 live-compute removed 2026-08-21 — env+ is now STORED,
+  //  read directly below; no live compute path remains.)
   for (const r of confRows) {
-    const era = (r as any).ERA;
-    const fip = (r as any).FIP;
-    const whip = (r as any).WHIP;
-    const k9 = (r as any).K9;
-    const bb9 = (r as any).BB9;
-    const hr9 = (r as any).HR9;
     const stuffPlus = (r as any).Stuff_plus ?? 100;
     const wrcPlus = (r as any).WRC_plus ?? 100;
     const overallPowerRating = (r as any).Overall_Power_Rating ?? 100;
-    // 1d (2026-08-21): D1 reads the STORED conference env+ (Conference Stats
-    // era_plus…hr9_plus, ratio scale (conf/ncaa)*100 — stored-not-live, one source,
-    // collapses the 3 drifted resolvers). JUCO districts have NULL stored env+ and use
-    // a COMPLETELY DIFFERENT equation — they fall back to the legacy z×20 compute here,
-    // to be extracted to a separate JUCO function. This blocks JUCO from the D1 ratio.
-    const storedOr = (stored: any, fn: () => number | null): number | null =>
-      stored != null && Number.isFinite(Number(stored)) ? Number(stored) : fn();
-    const eraPlus = storedOr((r as any).era_plus, () => toPlus(era, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false));
-    const fipPlus = storedOr((r as any).fip_plus, () => toPlus(fip, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false));
-    const whipPlus = storedOr((r as any).whip_plus, () => toPlus(whip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false));
-    const k9Plus = storedOr((r as any).k9_plus, () => toPlus(k9, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true));
-    const bb9Plus = storedOr((r as any).bb9_plus, () => toPlus(bb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false));
-    const hr9Plus = storedOr((r as any).hr9_plus, () => toPlus(hr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false));
+    // 1d (2026-08-21): conference env+ = STORED value only (Conference Stats
+    // era_plus…hr9_plus, ratio scale (conf/ncaa)*100). NO live compute, NO fallback —
+    // one stored source. JUCO districts have NULL stored env+ (separate equation /
+    // separate function) → they resolve null here and are naturally blocked from the
+    // D1 ratio path. Nothing computes env+ live anymore.
+    const eraPlus = (r as any).era_plus != null ? Number((r as any).era_plus) : null;
+    const fipPlus = (r as any).fip_plus != null ? Number((r as any).fip_plus) : null;
+    const whipPlus = (r as any).whip_plus != null ? Number((r as any).whip_plus) : null;
+    const k9Plus = (r as any).k9_plus != null ? Number((r as any).k9_plus) : null;
+    const bb9Plus = (r as any).bb9_plus != null ? Number((r as any).bb9_plus) : null;
+    const hr9Plus = (r as any).hr9_plus != null ? Number((r as any).hr9_plus) : null;
     if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
     const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
     const entry: PitchingConfStats = {

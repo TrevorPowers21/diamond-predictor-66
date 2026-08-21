@@ -463,19 +463,8 @@ const resolveTeamRowFromCandidates = (
   return best;
 };
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
-const calcPitchingPlus = (
-  statValue: number | null,
-  ncaaAvg: number,
-  ncaaSd: number,
-  scale: number,
-  higherIsBetter = false,
-) => {
-  if (statValue == null || !Number.isFinite(statValue) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
-  const z = higherIsBetter
-    ? ((statValue - ncaaAvg) / ncaaSd)
-    : ((ncaaAvg - statValue) / ncaaSd);
-  return round3(100 + (z * scale));
-};
+// calcPitchingPlus (conference env+ z×20 live-compute) removed 2026-08-21 —
+// conference env+ is now STORED (Conference Stats era_plus…hr9_plus), read directly.
 
 const toPitchingClassAdj = (
   classTransition: "FS" | "SJ" | "JS" | "GR",
@@ -1081,22 +1070,19 @@ export default function TransferPortal() {
     // Also index by conference_id for UUID-based lookups
     const byId = new Map<string, typeof map extends Map<string, infer V> ? V : never>();
     if (newConfStats.length === 0) return map;
-    const eq = readPitchingWeights();
     for (const row of newConfStats) {
       const directKey = normalizeKey(row.conference);
       const canonicalKey = canonicalConferencePitching(row.conference);
       if (!directKey) continue;
-      // 1d (2026-08-21): D1 reads the STORED conference env+ (ratio scale); JUCO
-      // districts have NULL stored env+ and use a separate equation → fall back to
-      // the legacy z×20 compute (isolated, blocks JUCO from the D1 ratio).
-      const storedOr = (stored: number | null | undefined, fn: () => number | null): number | null =>
-        stored != null && Number.isFinite(Number(stored)) ? Number(stored) : fn();
-      const eraPlus = storedOr(row.era_plus, () => calcPitchingPlus(row.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false));
-      const fipPlus = storedOr(row.fip_plus, () => calcPitchingPlus(row.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false));
-      const whipPlus = storedOr(row.whip_plus, () => calcPitchingPlus(row.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false));
-      const k9Plus = storedOr(row.k9_plus, () => calcPitchingPlus(row.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true));
-      const bb9Plus = storedOr(row.bb9_plus, () => calcPitchingPlus(row.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false));
-      const hr9Plus = storedOr(row.hr9_plus, () => calcPitchingPlus(row.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false));
+      // 1d (2026-08-21): conference env+ = STORED value only (ratio scale). NO live
+      // compute, NO fallback. JUCO districts have NULL stored env+ (separate equation)
+      // → resolve null (naturally blocked from the D1 ratio path).
+      const eraPlus = row.era_plus != null ? Number(row.era_plus) : null;
+      const fipPlus = row.fip_plus != null ? Number(row.fip_plus) : null;
+      const whipPlus = row.whip_plus != null ? Number(row.whip_plus) : null;
+      const k9Plus = row.k9_plus != null ? Number(row.k9_plus) : null;
+      const bb9Plus = row.bb9_plus != null ? Number(row.bb9_plus) : null;
+      const hr9Plus = row.hr9_plus != null ? Number(row.hr9_plus) : null;
       const hitterTalentPlus = calcHitterTalentPlusFromConference(
         row.overall_power_rating,
         row.stuff_plus,
