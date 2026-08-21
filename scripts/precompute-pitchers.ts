@@ -128,6 +128,7 @@ async function main() {
     name: (toTeamRow.full_name || toTeamRow.abbreviation) as string,
     conference: (toTeamRow.conference as string | null) ?? null,
     conference_id: (toTeamRow.conference_id as string | null) ?? null,
+    source_id: (toTeamRow.source_id as string | null) ?? null,
   };
   const toConference = toTeam.conference;
   const toConferenceId = toTeam.conference_id;
@@ -221,7 +222,12 @@ async function main() {
     teamIdArg: string | null | undefined,
     names: Array<string | null | undefined>,
     metric: "era" | "whip" | "hr9",
+    sourceTeamId?: string | null, // 2026-08-21 (GAP 5): stable-program park path (preferred)
   ): number | null => {
+    if (sourceTeamId != null) {
+      const v = resolveMetricParkFactor(null, metric as any, parkMap, null, undefined, String(sourceTeamId));
+      if (v != null && Number.isFinite(v)) return v;
+    }
     if (teamIdArg) {
       const v = resolveMetricParkFactor(teamIdArg, metric as any, parkMap);
       if (v != null && Number.isFinite(v)) return v;

@@ -116,7 +116,7 @@ async function main() {
     console.error(`${C.red}✗ no Teams Table row for source_id ${ct.school_team_id} season ${CURRENT_SEASON}${C.reset}`);
     process.exit(1);
   }
-  const toTeam = { id: toTeamRow.id as string, name: (toTeamRow.full_name || toTeamRow.abbreviation) as string };
+  const toTeam = { id: toTeamRow.id as string, name: (toTeamRow.full_name || toTeamRow.abbreviation) as string, source_id: (toTeamRow.source_id as string | null) ?? null };
   const toConference = toTeamRow.conference as string | null;
   const toConferenceId = (toTeamRow.conference_id as string | null) ?? null;
   const toSourceId = (toTeamRow.source_id as string | null) ?? null;
@@ -185,7 +185,8 @@ async function main() {
     teamName: string | null | undefined,
     metric: "avg" | "obp" | "iso",
     handedness: string | null,
-  ) => resolveMetricParkFactor(teamIdArg as any, metric as any, parkMap, teamName as any, undefined, undefined, handedness as any);
+    sourceTeamId?: string | null, // 2026-08-21 (GAP 5): stable-program park path (preferred)
+  ) => resolveMetricParkFactor(teamIdArg as any, metric as any, parkMap, teamName as any, undefined, sourceTeamId as any, handedness as any);
 
   // 2d. Teams Table — for resolving each player's from_team
   const allTeams = await loadAllPaged<any>(() =>
@@ -364,7 +365,7 @@ async function main() {
         from_obp: pred?.from_obp ?? null,
         from_slg: pred?.from_slg ?? null,
       },
-      fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name } : { id: null, name: fromTeamName },
+      fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name, source_id: fromTeamRow.source_id } : { id: null, name: fromTeamName, source_id: null },
       // faced Stuff+ for independents (by the from-team's stable source_id)
       fromFacedStuff: fromTeamRow?.source_id ? (facedStuffBySourceId.get(String(fromTeamRow.source_id)) ?? null) : null,
       toTeam,

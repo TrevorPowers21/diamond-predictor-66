@@ -81,8 +81,8 @@ export type SeedPowerInputs = {
 export type BuildHitterTransferInputsArgs = {
   player: HitterTransferPlayer;
 
-  fromTeam: { id?: string | null; name?: string | null } | null;
-  toTeam: { id?: string | null; name?: string | null } | null;
+  fromTeam: { id?: string | null; name?: string | null; source_id?: string | null } | null;
+  toTeam: { id?: string | null; name?: string | null; source_id?: string | null } | null;
   fromConference: string | null;
   fromConferenceId?: string | null;
   toConference: string | null;
@@ -110,6 +110,7 @@ export type BuildHitterTransferInputsArgs = {
     teamName: string | null | undefined,
     metric: "avg" | "obp" | "iso",
     handedness: string | null,
+    sourceTeamId?: string | null, // 2026-08-21 (GAP 5): stable-program park path (preferred)
   ) => number | null;
 
   // Equation values from Supabase (model_config + equation_weights, already
@@ -208,12 +209,12 @@ export function buildHitterTransferInputs(
   const toStuff = toConfStats?.stuff_plus ?? null;
 
   const playerHand = batsHandToHandedness(player.bats_hand);
-  const fromParkAvgRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "avg", playerHand);
-  const toParkAvgRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "avg", playerHand);
-  const fromParkObpRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "obp", playerHand);
-  const toParkObpRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "obp", playerHand);
-  const fromParkIsoRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "iso", playerHand);
-  const toParkIsoRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "iso", playerHand);
+  const fromParkAvgRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "avg", playerHand, fromTeam?.source_id);
+  const toParkAvgRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "avg", playerHand, toTeam?.source_id);
+  const fromParkObpRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "obp", playerHand, fromTeam?.source_id);
+  const toParkObpRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "obp", playerHand, toTeam?.source_id);
+  const fromParkIsoRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "iso", playerHand, fromTeam?.source_id);
+  const toParkIsoRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "iso", playerHand, toTeam?.source_id);
 
   if (fromAvgPlus == null) missingInputs.push("From AVG+");
   if (toAvgPlus == null) missingInputs.push("To AVG+");

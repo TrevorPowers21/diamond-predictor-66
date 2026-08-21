@@ -323,13 +323,13 @@ function readEquationValue(key: string, fallback: number, remoteValues: Record<s
 
 function buildHitterTransferInputs(args: {
   player: any;
-  fromTeam: { id: string | null; name: string | null; conference: string | null; conference_id: string | null } | null;
-  toTeam: { id: string; name: string };
+  fromTeam: { id: string | null; name: string | null; conference: string | null; conference_id: string | null; source_id?: string | null } | null;
+  toTeam: { id: string; name: string; source_id?: string | null };
   toConference: string | null;
   toConferenceId: string | null;
   masterPR: { ba_power_rating: number | null; obp_power_rating: number | null; iso_power_rating: number | null } | null;
   resolveConferenceHitting: (name: string | null, id: string | null) => any;
-  resolveParkFactor: (teamId: string | null, teamName: string | null, metric: "avg" | "obp" | "iso", hand: any) => number | null;
+  resolveParkFactor: (teamId: string | null, teamName: string | null, metric: "avg" | "obp" | "iso", hand: any, sourceTeamId?: string | null) => number | null;
   remoteEquationValues: Record<string, number>;
   fromFacedStuff?: number | null; // 2026-08-21: faced Stuff+ for INDEPENDENT from-programs
 }) {
@@ -392,12 +392,12 @@ function buildHitterTransferInputs(args: {
   const toStuff = toConfStats?.stuff_plus ?? null;
 
   const playerHand = batsHandToHandedness(player.bats_hand);
-  const fromParkAvgRaw = resolveParkFactor(fromTeam?.id ?? null, fromTeam?.name ?? null, "avg", playerHand);
-  const toParkAvgRaw = resolveParkFactor(toTeam.id, toTeam.name, "avg", playerHand);
-  const fromParkObpRaw = resolveParkFactor(fromTeam?.id ?? null, fromTeam?.name ?? null, "obp", playerHand);
-  const toParkObpRaw = resolveParkFactor(toTeam.id, toTeam.name, "obp", playerHand);
-  const fromParkIsoRaw = resolveParkFactor(fromTeam?.id ?? null, fromTeam?.name ?? null, "iso", playerHand);
-  const toParkIsoRaw = resolveParkFactor(toTeam.id, toTeam.name, "iso", playerHand);
+  const fromParkAvgRaw = resolveParkFactor(fromTeam?.id ?? null, fromTeam?.name ?? null, "avg", playerHand, fromTeam?.source_id ?? null);
+  const toParkAvgRaw = resolveParkFactor(toTeam.id, toTeam.name, "avg", playerHand, toTeam.source_id ?? null);
+  const fromParkObpRaw = resolveParkFactor(fromTeam?.id ?? null, fromTeam?.name ?? null, "obp", playerHand, fromTeam?.source_id ?? null);
+  const toParkObpRaw = resolveParkFactor(toTeam.id, toTeam.name, "obp", playerHand, toTeam.source_id ?? null);
+  const fromParkIsoRaw = resolveParkFactor(fromTeam?.id ?? null, fromTeam?.name ?? null, "iso", playerHand, fromTeam?.source_id ?? null);
+  const toParkIsoRaw = resolveParkFactor(toTeam.id, toTeam.name, "iso", playerHand, toTeam.source_id ?? null);
 
   if (fromAvgPlus == null) missingInputs.push("From AVG+");
   if (toAvgPlus == null) missingInputs.push("To AVG+");
@@ -958,7 +958,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
   if (ttErr) throw ttErr;
   if (!toTeamRow) throw new Error(`no Teams Table row for school_team_id ${ct.school_team_id}`);
 
-  const toTeam = { id: toTeamRow.id, name: toTeamRow.full_name || toTeamRow.abbreviation };
+  const toTeam = { id: toTeamRow.id, name: toTeamRow.full_name || toTeamRow.abbreviation, source_id: toTeamRow.source_id ?? null };
   const toConference = toTeamRow.conference;
   const toConferenceId = toTeamRow.conference_id;
   const toSourceId = toTeamRow.source_id;
@@ -1040,9 +1040,9 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     if (r.team_id) parkByTeamId.set(r.team_id, comp);
     if (r.source_team_id) parkBySourceId.set(String(r.source_team_id), comp);
   }
-  const resolveParkFactor = (teamId: string | null, _teamName: string | null, metric: "avg" | "obp" | "iso", hand: any) => {
-    if (!teamId) return null;
-    const row = parkByTeamId.get(teamId);
+  const resolveParkFactor = (teamId: string | null, _teamName: string | null, metric: "avg" | "obp" | "iso", hand: any, sourceTeamId?: string | null) => {
+    // 2026-08-21 (GAP 5): stable source_team_id first (preferred), then per-season team_id.
+    const row = (sourceTeamId != null ? parkBySourceId.get(String(sourceTeamId)) : undefined) ?? (teamId ? parkByTeamId.get(teamId) : undefined);
     if (!row) return null;
     return pickParkFactor(row, metric, hand);
   };
@@ -1174,7 +1174,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
         dev_aggressiveness: Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : null,
         from_avg: pred?.from_avg ?? null, from_obp: pred?.from_obp ?? null, from_slg: pred?.from_slg ?? null,
       },
-      fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name, conference: fromTeamRow.conference, conference_id: fromTeamRow.conference_id } : { id: null, name: fromTeamName, conference: p.conference ?? null, conference_id: null },
+      fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name, conference: fromTeamRow.conference, conference_id: fromTeamRow.conference_id, source_id: fromTeamRow.source_id ?? null } : { id: null, name: fromTeamName, conference: p.conference ?? null, conference_id: null, source_id: null },
       toTeam, toConference, toConferenceId,
       masterPR,
       resolveConferenceHitting, resolveParkFactor,
@@ -1308,7 +1308,7 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     .eq("id", ct.school_team_id).maybeSingle();
   if (!toTeamRow) throw new Error(`no Teams Table row for school_team_id ${ct.school_team_id}`);
 
-  const toTeam = { id: toTeamRow.id as string, name: (toTeamRow.full_name || toTeamRow.abbreviation) as string };
+  const toTeam = { id: toTeamRow.id as string, name: (toTeamRow.full_name || toTeamRow.abbreviation) as string, source_id: (toTeamRow.source_id as string | null) ?? null };
   const toConference: string | null = toTeamRow.conference;
   const toConferenceId: string | null = toTeamRow.conference_id;
   const toSourceId: string | null = toTeamRow.source_id;
@@ -1363,9 +1363,9 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     if (r.team_id) parkByTeamId.set(r.team_id, comp);
     if (r.source_team_id) parkBySourceId.set(String(r.source_team_id), comp);
   }
-  const resolveParkFactor = (teamId: string | null | undefined, _names: any, metric: "era" | "whip" | "hr9") => {
-    if (!teamId) return null;
-    const row = parkByTeamId.get(teamId);
+  const resolveParkFactor = (teamId: string | null | undefined, _names: any, metric: "era" | "whip" | "hr9", sourceTeamId?: string | null) => {
+    // 2026-08-21 (GAP 5): stable source_team_id first (preferred), then per-season team_id.
+    const row = (sourceTeamId != null ? parkBySourceId.get(String(sourceTeamId)) : undefined) ?? (teamId ? parkByTeamId.get(teamId) : undefined);
     if (!row) return null;
     const v = row[metric];
     return v != null && Number.isFinite(v) ? v : null;
@@ -1542,12 +1542,12 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
         return Number(fromPC.hitter_talent_plus ?? 100);
       })(),
       toHitterTalent: Number(toPC.hitter_talent_plus ?? 100),
-      fromEraParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "era"),
-      toEraParkRaw: resolveParkFactor(toTeam.id, null, "era"),
-      fromWhipParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "whip"),
-      toWhipParkRaw: resolveParkFactor(toTeam.id, null, "whip"),
-      fromHr9ParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "hr9"),
-      toHr9ParkRaw: resolveParkFactor(toTeam.id, null, "hr9"),
+      fromEraParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "era", fromTeamRow?.source_id ?? null),
+      toEraParkRaw: resolveParkFactor(toTeam.id, null, "era", toTeam.source_id ?? null),
+      fromWhipParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "whip", fromTeamRow?.source_id ?? null),
+      toWhipParkRaw: resolveParkFactor(toTeam.id, null, "whip", toTeam.source_id ?? null),
+      fromHr9ParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "hr9", fromTeamRow?.source_id ?? null),
+      toHr9ParkRaw: resolveParkFactor(toTeam.id, null, "hr9", toTeam.source_id ?? null),
       toTeam: toTeam.name, toConference,
     };
 

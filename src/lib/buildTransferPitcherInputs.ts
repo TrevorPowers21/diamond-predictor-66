@@ -49,6 +49,7 @@ export type PitcherTeamRow = {
   name: string;
   conference?: string | null;
   conference_id?: string | null;
+  source_id?: string | null; // 2026-08-21 (GAP 5): stable-program park path
 };
 
 // Stats expected from Pitching Master (post-blend per usePitchingSeedData)
@@ -111,6 +112,7 @@ export type BuildPitcherInputsArgs = {
     teamId: string | null | undefined,
     names: Array<string | null | undefined>,
     metric: "era" | "whip" | "hr9",
+    sourceTeamId?: string | null, // 2026-08-21 (GAP 5): stable-program park path (preferred)
   ) => number | null;
 
   pitchingEq: PitchingEquationWeights;
@@ -241,12 +243,12 @@ export function buildTransferPitcherInputs(args: BuildPitcherInputsArgs): BuildP
     toHr9Plus: toPC.hr9_plus ?? null,
     fromHitterTalent: effFromHitterTalent,
     toHitterTalent: toPC.hitter_talent_plus ?? null,
-    fromEraParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "era"),
-    toEraParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "era"),
-    fromWhipParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "whip"),
-    toWhipParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "whip"),
-    fromHr9ParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "hr9"),
-    toHr9ParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "hr9"),
+    fromEraParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "era", fromTeam?.source_id),
+    toEraParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "era", toTeam.source_id),
+    fromWhipParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "whip", fromTeam?.source_id),
+    toWhipParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "whip", toTeam.source_id),
+    fromHr9ParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "hr9", fromTeam?.source_id),
+    toHr9ParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "hr9", toTeam.source_id),
     toTeam: toTeam.name,
     toConference,
   };
