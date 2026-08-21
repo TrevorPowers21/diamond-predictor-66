@@ -982,9 +982,10 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
   const confById = new Map<string, any>();
   for (const r of confRows || []) {
     const row = {
-      avg_plus: r.AVG != null ? Math.round((Number(r.AVG) / 0.280) * 100) : null,
-      obp_plus: r.OBP != null ? Math.round((Number(r.OBP) / 0.385) * 100) : null,
-      iso_plus: r.ISO != null ? Math.round((Number(r.ISO) / 0.162) * 100) : null,
+      // 2026-08-21: STORED conference env+ (ratio), no live compute — matches the batch.
+      avg_plus: r.ba_plus != null ? Number(r.ba_plus) : null,
+      obp_plus: r.obp_plus != null ? Number(r.obp_plus) : null,
+      iso_plus: r.iso_plus != null ? Number(r.iso_plus) : null,
       stuff_plus: r.Stuff_plus != null ? Number(r.Stuff_plus) : null,
     };
     const confName = r["conference abbreviation"];
@@ -1046,11 +1047,13 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     supabase.from("Teams Table").select("id, full_name, abbreviation, source_id, conference, conference_id, Season").eq("Season", CURRENT_SEASON),
   );
   const teamByName = new Map<string, any>();
+  const teamBySourceId = new Map<string, any>(); // 2026-08-21: id-first resolution
   for (const t of allTeams) {
     const row = {
       id: t.id, name: (t.full_name || t.abbreviation || "") as string,
       conference: t.conference ?? null, conference_id: t.conference_id ?? null,
     };
+    if (t.source_id) teamBySourceId.set(String(t.source_id), row);
     for (const k of [t.full_name, t.abbreviation, t.source_id]) {
       const nk = normalizeKey(k);
       if (nk) teamByName.set(nk, row);
@@ -1137,8 +1140,11 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
   for (const p of hitters) {
     const pred = bestPredByPlayer.get(p.id);
     const masterPR = p.source_player_id ? (masterPRBySourceId.get(String(p.source_player_id)) ?? null) : null;
+    // 2026-08-21: id-first (source_team_id), name last resort.
     const fromTeamName = (p.from_team || p.team || "") as string;
-    const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
+    const fromTeamRow =
+      (p.source_team_id && teamBySourceId.get(String(p.source_team_id))) ||
+      teamByName.get(normalizeKey(fromTeamName)) || null;
 
     const result = buildHitterTransferInputs({
       player: {
@@ -1255,7 +1261,18 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
   // that mixed scope, D1 sources use D1 defaults but D2 sources need JUCO
   // weights (zero power, zero park) since they have no power-rating data.
   // Mirrors the hitter path which has done this per-player since day one.
-  const eqD1: typeof PITCHING_EQ_DEFAULTS = PITCHING_EQ_DEFAULTS;
+  // 2026-08-21: overlay model_config transfer_*/*_plus_ncaa_* onto the D1 pitcher eq
+  // (single source — matches the batch's model_config overlay). Falls back to defaults.
+  const { data: mcPitch } = await supabase.from("model_config")
+    .select("config_key, config_value").eq("model_type", "admin_ui").eq("season", CURRENT_SEASON);
+  const eqD1: any = { ...PITCHING_EQ_DEFAULTS };
+  for (const r of mcPitch || []) {
+    const k = String(r.config_key);
+    if ((k.startsWith("transfer_") || k.includes("_plus_ncaa_")) && k in eqD1) {
+      const v = Number(r.config_value);
+      if (Number.isFinite(v)) eqD1[k] = v;
+    }
+  }
   const eqJucoOrD2: typeof PITCHING_EQ_DEFAULTS = { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS };
 
   // Resolve customer team → destination
@@ -1337,8 +1354,10 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     supabase.from("Teams Table").select("id, full_name, abbreviation, source_id, conference, conference_id").eq("Season", CURRENT_SEASON),
   );
   const teamByName = new Map<string, any>();
+  const teamBySourceId = new Map<string, any>(); // 2026-08-21: id-first resolution
   for (const t of allTeams) {
     const row = { id: t.id as string, name: (t.full_name || t.abbreviation) as string, conference: t.conference ?? null, conference_id: t.conference_id ?? null };
+    if (t.source_id) teamBySourceId.set(String(t.source_id), row);
     for (const k of [t.full_name, t.abbreviation, t.source_id]) {
       const nk = normalizeKey(k);
       if (nk) teamByName.set(nk, row);
@@ -1421,8 +1440,11 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     const eq: typeof PITCHING_EQ_DEFAULTS = isSubNcaaSource ? eqJucoOrD2 : eqD1;
 
     const pred = predByPlayer.get(p.id);
+    // 2026-08-21: id-first (source_team_id), name last resort.
     const fromTeamName = (p.from_team || p.team || "") as string;
-    const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
+    const fromTeamRow =
+      (p.source_team_id && teamBySourceId.get(String(p.source_team_id))) ||
+      teamByName.get(normalizeKey(fromTeamName)) || null;
     const fromConference = fromTeamRow?.conference || p.conference || null;
     const fromConferenceId = fromTeamRow?.conference_id || null;
 
