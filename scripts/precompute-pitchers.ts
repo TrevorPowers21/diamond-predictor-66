@@ -137,6 +137,24 @@ async function main() {
   // 2. Lookups
   console.log(`${C.cyan}→${C.reset} loading lookups...`);
   const pitchingEq = readPitchingWeights();
+  // 2026-08-21: overlay model_config transfer_*/*_plus_* weights (single source of
+  // truth — the legacy "Equation Weights" table is empty/retired; store everything in
+  // model_config). readPitchingWeights() is code-default in Node; this makes the batch
+  // read the DB. Only numeric transfer_* / *_plus_* keys are overlaid.
+  {
+    const { data: mc } = await (supabase as any)
+      .from("model_config").select("config_key, config_value")
+      .eq("model_type", "admin_ui").eq("season", CURRENT_SEASON);
+    let overlaid = 0;
+    for (const r of (mc || [])) {
+      const k = String(r.config_key);
+      if ((k.startsWith("transfer_") || k.includes("_plus_ncaa_")) && k in (pitchingEq as any)) {
+        const v = Number(r.config_value);
+        if (Number.isFinite(v)) { (pitchingEq as any)[k] = v; overlaid++; }
+      }
+    }
+    console.log(`  overlaid ${overlaid} pitching weights from model_config`);
+  }
 
   // 2a. Conference stats → pitching plus stats per conference
   const confRows = await fetchConferenceStats(CURRENT_SEASON);

@@ -147,14 +147,15 @@ async function main() {
   const confByKey = new Map<string, ConferenceHittingStats>();
   const confById = new Map<string, ConferenceHittingStats>();
   for (const r of confRows) {
-    const avg = (r as any).AVG;
-    const obp = (r as any).OBP;
-    const iso = (r as any).ISO;
+    // 2026-08-21: conference env+ = STORED value only (Conference Stats ba_plus/
+    // obp_plus/iso_plus, ratio scale). NO live compute, NO fallback (matches the
+    // pitcher era_plus…hr9_plus pattern). JUCO districts with NULL stored env+
+    // resolve null → blocked from the D1 ratio path.
     const stuff = (r as any).Stuff_plus;
     const row: ConferenceHittingStats = {
-      avg_plus: avg != null ? Math.round((Number(avg) / 0.280) * 100) : null,
-      obp_plus: obp != null ? Math.round((Number(obp) / 0.385) * 100) : null,
-      iso_plus: iso != null ? Math.round((Number(iso) / 0.162) * 100) : null,
+      avg_plus: (r as any).ba_plus != null ? Number((r as any).ba_plus) : null,
+      obp_plus: (r as any).obp_plus != null ? Number((r as any).obp_plus) : null,
+      iso_plus: (r as any).iso_plus != null ? Number((r as any).iso_plus) : null,
       stuff_plus: stuff != null ? Number(stuff) : null,
     };
     const confName = (r as any)["conference abbreviation"] as string | null;
@@ -192,6 +193,8 @@ async function main() {
   );
   type TeamRow = { id: string; name: string; conference: string | null; conference_id: string | null };
   const teamByName = new Map<string, TeamRow>();
+  const teamById = new Map<string, TeamRow>();       // 2026-08-21: id-first resolution (Teams Table.id)
+  const teamBySourceId = new Map<string, TeamRow>(); // stable program id (Teams Table.source_id)
   for (const t of allTeams) {
     const name = (t.full_name || t.abbreviation || "") as string;
     const row: TeamRow = {
@@ -200,6 +203,8 @@ async function main() {
       conference: (t.conference as string | null) ?? null,
       conference_id: (t.conference_id as string | null) ?? null,
     };
+    if (t.id) teamById.set(String(t.id), row);
+    if (t.source_id) teamBySourceId.set(String(t.source_id), row);
     for (const k of [t.full_name, t.abbreviation, t.source_id]) {
       const nk = normalizeKey(k);
       if (nk) teamByName.set(nk, row);
@@ -213,7 +218,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, source_player_id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa, class_year"),
+      .select("id, source_player_id, first_name, last_name, position, team, from_team, conference, division, bats_hand, team_id, source_team_id, portal_status, is_twp, pa, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
@@ -325,8 +330,14 @@ async function main() {
     const resolvedCt = resolveClassTransition((p as any).class_year, pred); // class_year-authoritative (see eligibility-and-class.md)
     const masterPR = (p as any).source_player_id ? (masterPRBySourceId.get(String((p as any).source_player_id)) ?? null) : null;
 
-    const fromTeamName = (p.from_team || p.team || "") as string;
-    const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
+    // 2026-08-21: resolve from-team by ID first (Teams Table.id via players.team_id,
+    // then source_team_id), name only as last resort. Team data is by ID, not name.
+    const fromTeamName = (p.from_team || p.team || "") as string; // display / last-resort key
+    const fromTeamRow =
+      ((p as any).team_id && teamById.get(String((p as any).team_id))) ||
+      ((p as any).source_team_id && teamBySourceId.get(String((p as any).source_team_id))) ||
+      teamByName.get(normalizeKey((p.from_team || p.team || "") as string)) ||
+      null;
     const fromConference = fromTeamRow?.conference ?? (p.conference as string | null) ?? null;
     const fromConferenceId = fromTeamRow?.conference_id ?? null;
 
