@@ -813,12 +813,17 @@ export default function TeamBuilder() {
         const raw = 100 + (core * scale);
         return Number.isFinite(raw) ? raw : null;
       };
-      const eraPlus = toPlus(cs.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-      const fipPlus = toPlus(cs.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-      const whipPlus = toPlus(cs.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-      const k9Plus = toPlus(cs.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-      const bb9Plus = toPlus(cs.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-      const hr9Plus = toPlus(cs.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+      // 1d (2026-08-21): D1 reads the STORED conference env+ (ratio scale); JUCO
+      // districts have NULL stored env+ and use a separate equation → fall back to
+      // the legacy z×20 compute (isolated, blocks JUCO from the D1 ratio).
+      const storedOr = (stored: number | null | undefined, fn: () => number | null): number | null =>
+        stored != null && Number.isFinite(Number(stored)) ? Number(stored) : fn();
+      const eraPlus = storedOr(cs.era_plus, () => toPlus(cs.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false));
+      const fipPlus = storedOr(cs.fip_plus, () => toPlus(cs.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false));
+      const whipPlus = storedOr(cs.whip_plus, () => toPlus(cs.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false));
+      const k9Plus = storedOr(cs.k9_plus, () => toPlus(cs.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true));
+      const bb9Plus = storedOr(cs.bb9_plus, () => toPlus(cs.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false));
+      const hr9Plus = storedOr(cs.hr9_plus, () => toPlus(cs.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false));
       if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
       const stuffPlus = cs.stuff_plus ?? 100;
       const wrcPlus = cs.wrc_plus ?? 100;

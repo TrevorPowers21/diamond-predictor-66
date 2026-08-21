@@ -1086,12 +1086,17 @@ export default function TransferPortal() {
       const directKey = normalizeKey(row.conference);
       const canonicalKey = canonicalConferencePitching(row.conference);
       if (!directKey) continue;
-      const eraPlus = calcPitchingPlus(row.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-      const fipPlus = calcPitchingPlus(row.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-      const whipPlus = calcPitchingPlus(row.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-      const k9Plus = calcPitchingPlus(row.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-      const bb9Plus = calcPitchingPlus(row.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-      const hr9Plus = calcPitchingPlus(row.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+      // 1d (2026-08-21): D1 reads the STORED conference env+ (ratio scale); JUCO
+      // districts have NULL stored env+ and use a separate equation → fall back to
+      // the legacy z×20 compute (isolated, blocks JUCO from the D1 ratio).
+      const storedOr = (stored: number | null | undefined, fn: () => number | null): number | null =>
+        stored != null && Number.isFinite(Number(stored)) ? Number(stored) : fn();
+      const eraPlus = storedOr(row.era_plus, () => calcPitchingPlus(row.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false));
+      const fipPlus = storedOr(row.fip_plus, () => calcPitchingPlus(row.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false));
+      const whipPlus = storedOr(row.whip_plus, () => calcPitchingPlus(row.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false));
+      const k9Plus = storedOr(row.k9_plus, () => calcPitchingPlus(row.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true));
+      const bb9Plus = storedOr(row.bb9_plus, () => calcPitchingPlus(row.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false));
+      const hr9Plus = storedOr(row.hr9_plus, () => calcPitchingPlus(row.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false));
       const hitterTalentPlus = calcHitterTalentPlusFromConference(
         row.overall_power_rating,
         row.stuff_plus,

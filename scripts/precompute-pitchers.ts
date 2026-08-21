@@ -164,12 +164,19 @@ async function main() {
     const stuffPlus = (r as any).Stuff_plus ?? 100;
     const wrcPlus = (r as any).WRC_plus ?? 100;
     const overallPowerRating = (r as any).Overall_Power_Rating ?? 100;
-    const eraPlus = toPlus(era, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false);
-    const fipPlus = toPlus(fip, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false);
-    const whipPlus = toPlus(whip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
-    const k9Plus = toPlus(k9, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true);
-    const bb9Plus = toPlus(bb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
-    const hr9Plus = toPlus(hr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
+    // 1d (2026-08-21): D1 reads the STORED conference env+ (Conference Stats
+    // era_plus…hr9_plus, ratio scale (conf/ncaa)*100 — stored-not-live, one source,
+    // collapses the 3 drifted resolvers). JUCO districts have NULL stored env+ and use
+    // a COMPLETELY DIFFERENT equation — they fall back to the legacy z×20 compute here,
+    // to be extracted to a separate JUCO function. This blocks JUCO from the D1 ratio.
+    const storedOr = (stored: any, fn: () => number | null): number | null =>
+      stored != null && Number.isFinite(Number(stored)) ? Number(stored) : fn();
+    const eraPlus = storedOr((r as any).era_plus, () => toPlus(era, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false));
+    const fipPlus = storedOr((r as any).fip_plus, () => toPlus(fip, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false));
+    const whipPlus = storedOr((r as any).whip_plus, () => toPlus(whip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false));
+    const k9Plus = storedOr((r as any).k9_plus, () => toPlus(k9, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true));
+    const bb9Plus = storedOr((r as any).bb9_plus, () => toPlus(bb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false));
+    const hr9Plus = storedOr((r as any).hr9_plus, () => toPlus(hr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false));
     if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
     const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
     const entry: PitchingConfStats = {

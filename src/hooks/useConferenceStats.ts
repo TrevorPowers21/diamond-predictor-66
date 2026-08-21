@@ -18,6 +18,14 @@ export type NormalizedConferenceStats = {
   stuff_plus: number | null;
   wrc_plus: number | null;
   overall_power_rating: number | null;
+  // Stored pitcher conference env+ (ratio scale (conf/ncaa)*100, D1 clean-30 only;
+  // NULL for JUCO districts → callers fall back to their own equation). 2026-08-21.
+  era_plus: number | null;
+  fip_plus: number | null;
+  whip_plus: number | null;
+  k9_plus: number | null;
+  bb9_plus: number | null;
+  hr9_plus: number | null;
 };
 
 const normalize = (v: string | null | undefined) =>
@@ -40,6 +48,12 @@ function rowToNormalized(row: ConferenceStatsRow): NormalizedConferenceStats {
     stuff_plus: row.Stuff_plus,
     wrc_plus: row.WRC_plus,
     overall_power_rating: row.Overall_Power_Rating,
+    era_plus: (row as any).era_plus ?? null,
+    fip_plus: (row as any).fip_plus ?? null,
+    whip_plus: (row as any).whip_plus ?? null,
+    k9_plus: (row as any).k9_plus ?? null,
+    bb9_plus: (row as any).bb9_plus ?? null,
+    hr9_plus: (row as any).hr9_plus ?? null,
   };
 }
 
