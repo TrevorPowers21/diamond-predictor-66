@@ -89,7 +89,22 @@ median starter (0.96 WAR) **$125k**, p95 (2.01) **$261k**, p99 (2.75) **$358k**,
 weekend ace median (2.03) **$203k**, max (4.13) **$413k**. If the MEDIAN feels too high, the fix is a
 CONVEX per-player curve (compress the middle, stretch the elite) ON TOP of the tier PTM — decide next.
 
-## Status
-P4 PTMs decided (SEC 4.0 / ACC 1.5 / Big12 1.2 / BigTen 1.0). NEXT: confirm mid/low tiers unchanged +
-resolve convex-vs-linear (median inflation) → then apply (model_config + code, both hitter DEFAULT_NIL_TIER_MULTIPLIERS
-+ pitcher market_tier_* eq) → re-run market. Do NOT write until convex decision made.
+## ★ CONVEX REJECTED — model stays LINEAR (Trevor 2026-08-21)
+"Curve becomes too complex and I don't love it even if that is how the market reacts sometimes." → NO
+per-player convex curve. Keep `market = WAR × $25k × PTM × PVM`, flat. Accepted consequence: the median
+SEC starter lands ~$125k — defensible because we anchor on STARTERS (SEC pays starters) and low-WAR
+bench/utility already floor near $0 via `max(0, …)`, so the whole-roster "average" isn't over-paid.
+
+## ✅ FINAL MODEL (LOCKED 2026-08-21) — linear, base $25k/WAR
+| SEC | ACC | Big12 | BigTen | strongMid | low-major | JUCO |
+|---|---|---|---|---|---|---|
+| **4.0** | **1.5** | 1.2 (unch) | 1.0 (unch) | 0.8 (unch) | 0.5 (unch) | 0.35 (unch) |
+- ONLY changes vs today: **SEC 1.5 → 4.0**, **ACC 1.2 → 1.5**. Everything else (Big12/BigTen/mid/low/JUCO, base $25k, PVM, linear) UNCHANGED.
+- PVM unchanged: C/SS/CF 1.3 · 2B/3B/corner-OF 1.1 · 1B/DH/UT 1.0 · bench 0.8.
+
+## Apply plan (pending Trevor's GO)
+1. Code: `DEFAULT_NIL_TIER_MULTIPLIERS` (nilProgramSpecific.ts) sec 1.5→4.0, p4 1.2→1.5. NB `p4` key covers ACC+Big12 TOGETHER today → must SPLIT (ACC 1.5 vs Big12 1.2) or Big12 rides up to 1.5 unintentionally. Verify the tier resolver.
+2. Pitcher eq `market_tier_*` (pitchingEquations.ts DEFAULT + model_config) — mirror sec/acc.
+3. model_config overlay (edge fn reads it) — store the new tiers.
+4. Re-run market for all 17 teams (market rides stored WAR; only the multiplier changes → fast).
+5. Log to PROD_MIGRATIONS_TODO + this doc.
