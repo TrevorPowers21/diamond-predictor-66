@@ -102,9 +102,43 @@ bench/utility already floor near $0 via `max(0, …)`, so the whole-roster "aver
 - ONLY changes vs today: **SEC 1.5 → 4.0**, **ACC 1.2 → 1.5**. Everything else (Big12/BigTen/mid/low/JUCO, base $25k, PVM, linear) UNCHANGED.
 - PVM unchanged: C/SS/CF 1.3 · 2B/3B/corner-OF 1.1 · 1B/DH/UT 1.0 · bench 0.8.
 
-## Apply plan (pending Trevor's GO)
-1. Code: `DEFAULT_NIL_TIER_MULTIPLIERS` (nilProgramSpecific.ts) sec 1.5→4.0, p4 1.2→1.5. NB `p4` key covers ACC+Big12 TOGETHER today → must SPLIT (ACC 1.5 vs Big12 1.2) or Big12 rides up to 1.5 unintentionally. Verify the tier resolver.
-2. Pitcher eq `market_tier_*` (pitchingEquations.ts DEFAULT + model_config) — mirror sec/acc.
-3. model_config overlay (edge fn reads it) — store the new tiers.
-4. Re-run market for all 17 teams (market rides stored WAR; only the multiplier changes → fast).
-5. Log to PROD_MIGRATIONS_TODO + this doc.
+## ★★★ FULL MARKET-VALUE AUDIT (2026-08-21, 3 code agents + DB) — READ BEFORE CHANGING
+### Two SEPARATE PTM systems (hitter ≠ pitcher storage)
+- **HITTER PTM = code const** `DEFAULT_NIL_TIER_MULTIPLIERS` (nilProgramSpecific.ts) — NOT model_config. `computeHitterMarketValue` never receives an `opts.tiers` override → always the const.
+- **PITCHER PTM = DB `model_config.market_tier_*`** (via `readPitchingWeights`; code `DEFAULT_PITCHING_WEIGHTS.market_tier_*` is only the fallback).
+- ⇒ a coherent change edits BOTH: hitter code const (canonical + edge-fn copy) AND pitcher model_config row (+ 2 code fallbacks).
+
+### ⚠️ CRITICAL INCONSISTENCY — hitter market rides DIFFERENT WAR by path
+- **Edge fn** `process-precompute-jobs` (new-team WRITE): hitter market = **total_hitter_war** (o+d+bsr) (:1204). Matches the STEP-7 intent.
+- **Everything else** — `predictionEngine.ts:79` (shared batch WRITE), JUCO returner, AND all LIVE display (`PlayerProfile:985`, `useTeamBuilderSimulation:695`): hitter market = **o_war (offense only)**.
+- ⇒ stored market (batch = o_war) and the new-team path (total) DISAGREE, and live display recomputes on o_war. **DECISION NEEDED: reconcile to total_hitter_war (intent) or o_war — before/with the PTM re-price.** Pitcher market = **p_war** in ALL paths (consistent).
+
+### Change surface (edit in lockstep or paths diverge)
+1. `src/lib/nilProgramSpecific.ts` — `DEFAULT_NIL_TIER_MULTIPLIERS` sec 1.5→4.0; ADD `acc:1.5`; branch ACC before big12 in the resolver (:38-44). Big12 stays `p4:1.2`.
+2. `src/lib/pitchingEquations.ts` — `market_tier_sec` 1.5→4.0; ADD `market_tier_acc` (type :62 + default :254 + localStorage merge :390).
+3. **4 pitcher tier-assembly sites** add `acc`: `depthRoles.ts:253`, `pitcherProjection.ts:484`, `transferPitcherProjection.ts:423`, `useTeamBuilderSimulation.ts:1125`.
+4. **`supabase/functions/process-precompute-jobs/index.ts` — 4 DUPLICATED blocks:** pitcher default (:536), pitcher resolver (:630, matches `"big 12"` w/ space), pitcher assembly (:675); hitter default `NIL_TIER_MULTIPLIERS` (:835, **missing juco key**), hitter resolver (:843). All need sec→4.0 + acc split.
+5. **model_config** — pitcher tiers currently NOT seeded there (only `nil_base_per_owar`=25000). To drive pitchers via model_config on prod, INSERT `market_tier_sec/acc/…` rows (edge fn overlays them). Else the hardcoded :536 default serves. DECIDE: store in model_config (preferred, edge-fn reads it) or rely on code default.
+6. `scripts/fix-pitcher-market-pvf.ts:26` (derived, only if re-run); `nilProgramSpecific.test.ts:70` ACC→p4 assertion MUST update; `NilValuations.tsx:281` label cosmetic.
+7. **Dormant 4th copy (hygiene, not live):** `platformDefaults.ts:20` + `platform_config` rows — unwired (`usePlatformConfig` never called). Update to avoid a future landmine.
+
+### Gotchas / dead controls
+- **AdminDashboard "nil_tiers" editor** (`:875,:1887`) writes `model_config.nil_tier_*` but NO hitter path reads it → DEAD control for the market calc.
+- **GM marketability** (`gm/lib/marketability.ts`) = a 0–100 score with its own 1–5 hand-set programTier → UNRELATED to NIL PTM. Unaffected.
+- Pitcher `canShowPitchingMarketValue` nulls non-Independent... (Independent → null market except faced Oregon State).
+
+### Stored columns + refresh cascade (DB audit)
+- Computed-market columns: `player_predictions.{market_value, twp_hitter_market_value, twp_pitcher_market_value}` + 4 snapshot jsonb (`team_build_players.player_snapshot/neutral_snapshot`, `target_board.transfer_snapshot/neutral_snapshot`) — all BAKE market.
+- `team_market_pay_log` / `nil_valuations` = coach-entered, NOT PTM-derived. `team_season_stats`/`team_war_snapshots`/GM finance = no computed market.
+- **Snapshots BAKE market → refresh REQUIRED** after re-price: `resync-build-snapshot-markets.ts` + `resync-target-snapshots.ts` (or `heal-stale-snapshots.ts --market`) — re-bake market from each snapshot's OWN stored WAR (WAR untouched, fast).
+- **NIL:** GM roster `allocateNil` uses RAW WAR + budget → does NOT move with PTM. `calcPlayerScore = WAR × PTM` DOES → NilValuations page + TeamBuilder score column shift.
+- Reader bug (pre-existing, not blocking): `HighFollowList.tsx:343` raw `market_value`, no TWP fallback.
+
+## Ordered apply plan (pending Trevor's GO + the WAR-basis decision)
+0. **DECIDE**: hitter market WAR = total_hitter_war (intent) or o_war? + model_config-vs-code for pitcher tiers.
+1. Edit the change surface (1–4 above) in lockstep; update the test (6).
+2. (If model_config chosen) paste `market_tier_*` INSERT to staging model_config.
+3. Re-price market: market-only re-bake preferred (recompute market_value from stored WAR × new PTM, WAR untouched) for all 17 teams, hitter + pitcher, TWP columns.
+4. Refresh snapshots: `resync-build-snapshot-markets` + `resync-target-snapshots` (dry-run first).
+5. Verify: SEC top roster ≈ $4.4M, ACC ≈ $1.7M, Big12 ≈ $1M, BigTen ≈ $900k; spot-check TWP + Independent nulls.
+6. Log to PROD_MIGRATIONS_TODO (code + the model_config INSERT + the re-price/refresh order) + this doc.
