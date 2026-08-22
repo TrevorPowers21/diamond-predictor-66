@@ -134,11 +134,42 @@ bench/utility already floor near $0 via `max(0, …)`, so the whole-roster "aver
 - **NIL:** GM roster `allocateNil` uses RAW WAR + budget → does NOT move with PTM. `calcPlayerScore = WAR × PTM` DOES → NilValuations page + TeamBuilder score column shift.
 - Reader bug (pre-existing, not blocking): `HighFollowList.tsx:343` raw `market_value`, no TWP fallback.
 
-## Ordered apply plan (pending Trevor's GO + the WAR-basis decision)
-0. **DECIDE**: hitter market WAR = total_hitter_war (intent) or o_war? + model_config-vs-code for pitcher tiers.
-1. Edit the change surface (1–4 above) in lockstep; update the test (6).
-2. (If model_config chosen) paste `market_tier_*` INSERT to staging model_config.
-3. Re-price market: market-only re-bake preferred (recompute market_value from stored WAR × new PTM, WAR untouched) for all 17 teams, hitter + pitcher, TWP columns.
-4. Refresh snapshots: `resync-build-snapshot-markets` + `resync-target-snapshots` (dry-run first).
-5. Verify: SEC top roster ≈ $4.4M, ACC ≈ $1.7M, Big12 ≈ $1M, BigTen ≈ $900k; spot-check TWP + Independent nulls.
-6. Log to PROD_MIGRATIONS_TODO (code + the model_config INSERT + the re-price/refresh order) + this doc.
+## ★★★ TREVOR'S DECISIONS ON THE AUDIT (2026-08-21) — this is now a CONSISTENCY REFACTOR
+1. **ONE PTM source, hitter == pitcher.** "Can't have separate functions." Unify to a SINGLE source of truth
+   read by BOTH sides + batch + edge fn, consistent with the existing model_config pattern (transfer weights,
+   nil_base_per_owar already live there). Kill the hitter code-const-vs-pitcher-model_config split.
+2. **Market STORED for every projection row — NO live compute, NO fallback anywhere.** "The run job's only job is
+   calculate + store; once stored it's stable." ⇒ ALSO repoint every LIVE-display market compute (PlayerProfile:985,
+   useTeamBuilderSimulation:695, PitcherProfile:1426) to READ stored `market_value` (like the HTP GAP-4 fix).
+3. **Hitter market rides `total_hitter_war` EVERYWHERE** (not o_war). The o_war confusion = JUCO only has o_war;
+   for JUCO total_hitter_war = o_war (d/bsr = 0), so keying off total naturally covers it.
+4. **Refresh ALL snapshots as part of the data run** — necessary + accepted; wire it into the run, don't leave manual.
+5. **Dead code:** verify truly-dead → clean; if it relates to the consistency point (the tier config), WIRE it to the
+   single source instead of deleting. (AdminDashboard nil_tier_* editor + platformDefaults/platform_config.)
+6. Values LOCKED: SEC 4.0 · ACC 1.5 · Big12 1.2 · BigTen 1.0 · strongMid 0.8 · low 0.5 · JUCO 0.35 · base $25k. PVM unchanged.
+
+## ★★★ UNIFIED REFACTOR DESIGN (LOCKED 2026-08-21) — the plan to implement
+### The mess (grounded): FOUR tier definitions, only 2 live
+| Definition | Read by | Status |
+|---|---|---|
+| `DEFAULT_NIL_TIER_MULTIPLIERS` (nilProgramSpecific.ts const) | hitter calc | LIVE |
+| `market_tier_*` (pitchingEquations.ts code defaults) | pitcher calc | LIVE |
+| `model_config.nil_tier_*` (seeded step8; AdminDashboard writes) | **nobody** | DEAD |
+| `platform_config` `nil.tier.*` + `usePlatformConfig` | **nobody** (hook never called; only ref is a comment in platformDefaults.ts) | DEAD |
+model_config IS already the single-source pattern (batch + edge fn read it for transfer weights + `nil_base_per_owar`).
+
+### Design (6 points)
+1. **Single source = `model_config`** keys `nil_tier_{sec,acc,big12,big_ten,strong_mid,low_major,juco}` + `nil_base_per_owar`. BOTH hitter + pitcher WRITE paths read these via ONE resolver; code consts become fallback-only. Edge fn reads the SAME keys (already overlays model_config) → kills all 4 hardcoded copies + hitter/pitcher divergence.
+2. **Market computed + STORED on every projection row** (WRITE paths only). REMOVE the 3 live-display computes (`PlayerProfile:985`, `useTeamBuilderSimulation:695`, `PitcherProfile:1426`) → read stored `market_value` via the TWP-aware helper. No live compute, no fallback.
+3. **`total_hitter_war` for hitter market EVERYWHERE** (reconcile the o_war split). JUCO naturally = o_war (d/bsr=0).
+4. **Snapshot re-bake WIRED INTO the run** — after the market write, auto-resync the 4 snapshot columns (not manual).
+5. **Kill dead layers:** delete `platformDefaults.ts` + `usePlatformConfig` + `platform_config` tier usage; repoint OR remove the AdminDashboard tier editor so it writes the LIVE `nil_tier_*` keys, not dead ones.
+6. **Seed model_config** (locked values): SEC 4.0 · ACC 1.5 · Big12 1.2 · BigTen 1.0 · strongMid 0.8 · low 0.5 · JUCO 0.35 · base $25k.
+
+### Execution order
+Edit unified resolver + write paths + remove live computes + ACC split (change surface #1–4) → update `nilProgramSpecific.test.ts` → seed model_config on STAGING (paste SQL) → re-price market (17 teams, hitter+pitcher+TWP, total_hitter_war; market-only re-bake from stored WAR preferred) → auto re-bake the 4 snapshot cols (`resync-build-snapshot-markets` + `resync-target-snapshots`, dry-run first) → VERIFY roster totals (SEC ~$4.4M / ACC ~$1.7M / Big12 ~$1M / BigTen ~$900k) + TWP + Independent nulls → log every SQL to PROD_MIGRATIONS_TODO → prod later.
+
+### Files in scope (~8 + edge fn)
+`nilProgramSpecific.ts`, `pitchingEquations.ts`, `depthRoles.ts`, `predictionEngine.ts`, `jucoReturnerProjection.ts`, `jucoReturnerPitcherProjection.ts`, `buildTransferPitcherInputs.ts`, `PlayerProfile.tsx`, `PitcherProfile.tsx`, `useTeamBuilderSimulation.ts`, `pitcherProjection.ts`, `transferPitcherProjection.ts`, `process-precompute-jobs/index.ts` (4 blocks), `AdminDashboard.tsx`, DELETE `platformDefaults.ts`/`usePlatformConfig.ts`, `nilProgramSpecific.test.ts`. Batch callers: `precompute-transfer-projections.ts`, `precompute-pitchers.ts`.
+
+## STATUS: design LOCKED, awaiting Trevor's GO to implement. NOT started.
