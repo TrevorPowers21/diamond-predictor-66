@@ -66,7 +66,30 @@ Using each conference's TOP roster WAR + target spend:
 5. **Curve shape** — still linear per-player. Decide separately whether elite players also need a convex
    premium ON TOP of the tier multiplier (the WAR tail is thin: starter p50 ~1.0, max ~6.9).
 
+## ★ TREVOR'S DECISIONS (2026-08-21) — P4 PTMs LOCKED, anchored on $/win directly
+Trevor set the P4 tier by judgment (data-informed for SEC, guess for others where feedback is thin),
+anchoring on **$/win** rather than the per-conf roster-WAR solve (bypasses open-choice #2/#3):
+- **SEC = 4.0** ("~$100k per win is more accurate"; $3M "safe" but the top feels closer to $4–5M; 4.0 = $100k/win = ~$4.4M top roster, avoids going too high on limited top-roster visibility).
+- **ACC = 1.5** (up from 1.2; top ACC roster likely ~$2–3M but LOW feedback → conservative bump, not the raw-solve 0.87).
+- **Big 12 = 1.2** (unchanged).
+- **Big Ten = 1.0** (unchanged).
+- strongMid / low-major / JUCO: "work down from there" — proposed UNCHANGED (0.8 / 0.5 / 0.35) since Big Ten stays 1.0; confirm.
+
+Base `$25k/WAR` stays; PTM carries the spread. Effective $/win: SEC $100k · ACC $37.5k · Big12 $30k · BigTen $25k.
+
+### Resulting PTM ladder (proposed final)
+| SEC | ACC | Big12 | BigTen | strongMid | low-major | JUCO |
+|---|---|---|---|---|---|---|
+| **4.0** | **1.5** | 1.2 | 1.0 | 0.8 | 0.5 | 0.35 |
+
+### OPEN (still Trevor's call): the flat-PTM median-inflation tension → convex curve?
+Flat PTM 4.0 raises EVERY SEC player 4×, so the MEDIAN SEC starter also jumps — which is the exact thing
+Trevor flagged ("$40k for the average isn't how it works"). Per-player at PTM 4.0 (SS, PVM 1.3):
+median starter (0.96 WAR) **$125k**, p95 (2.01) **$261k**, p99 (2.75) **$358k**, max (6.86) **$892k**;
+weekend ace median (2.03) **$203k**, max (4.13) **$413k**. If the MEDIAN feels too high, the fix is a
+CONVEX per-player curve (compress the middle, stretch the elite) ON TOP of the tier PTM — decide next.
+
 ## Status
-Framework + data captured. NEXT: Trevor confirms target spends + anchor method (#1/#2) → refine with
-positive-WAR roster sums (#3) → propose final PTM table → apply (store in model_config + code) → re-run market.
-Do NOT change the equation until Trevor sets #1–#5.
+P4 PTMs decided (SEC 4.0 / ACC 1.5 / Big12 1.2 / BigTen 1.0). NEXT: confirm mid/low tiers unchanged +
+resolve convex-vs-linear (median inflation) → then apply (model_config + code, both hitter DEFAULT_NIL_TIER_MULTIPLIERS
++ pitcher market_tier_* eq) → re-run market. Do NOT write until convex decision made.
