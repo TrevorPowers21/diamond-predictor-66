@@ -18,6 +18,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import {
   calcPlayerScore,
   DEFAULT_NIL_TIER_MULTIPLIERS,
+  NIL_LOW_MAJOR,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
 import { allocateNil } from "@/lib/nilAllocation";
@@ -278,9 +279,9 @@ export default function NilValuations() {
             </div>
             <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
               <div className="font-medium text-foreground">PTM by Conference</div>
-              <div>SEC: {DEFAULT_NIL_TIER_MULTIPLIERS.sec.toFixed(1)} | ACC/Big12: {DEFAULT_NIL_TIER_MULTIPLIERS.p4.toFixed(1)} | Big Ten: {DEFAULT_NIL_TIER_MULTIPLIERS.bigTen.toFixed(1)}</div>
-              <div>Strong Mid: AAC, Sun Belt, Big West, Mountain West ({DEFAULT_NIL_TIER_MULTIPLIERS.strongMid.toFixed(1)})</div>
-              <div>All other conferences: Low Tier ({DEFAULT_NIL_TIER_MULTIPLIERS.lowMajor.toFixed(1)})</div>
+              <div>SEC: {DEFAULT_NIL_TIER_MULTIPLIERS.sec.toFixed(1)} | ACC: {DEFAULT_NIL_TIER_MULTIPLIERS.acc.toFixed(1)} | Big 12: {DEFAULT_NIL_TIER_MULTIPLIERS.big12.toFixed(1)} | Big Ten: {DEFAULT_NIL_TIER_MULTIPLIERS.bigten.toFixed(1)} | Independent: {DEFAULT_NIL_TIER_MULTIPLIERS.independent.toFixed(1)}</div>
+              <div>Strong Mid: AAC, Sun Belt, Big West, Mountain West ({DEFAULT_NIL_TIER_MULTIPLIERS.aac.toFixed(1)})</div>
+              <div>All other conferences: Low Tier ({NIL_LOW_MAJOR.toFixed(1)})</div>
             </div>
             <div className="md:col-span-4 text-xs text-muted-foreground">
               Sum of Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>

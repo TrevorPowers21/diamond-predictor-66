@@ -4,75 +4,77 @@ import {
   getPositionValueMultiplier,
   calcPlayerScore,
   DEFAULT_NIL_TIER_MULTIPLIERS,
+  NIL_LOW_MAJOR,
+  NIL_JUCO,
 } from "./nilProgramSpecific";
 
-describe("getProgramTierMultiplierByConference", () => {
-  describe("SEC tier", () => {
-    it.each([
-      "SEC",
-      "sec",
-      "Southeastern Conference",
-      "southeastern conference",
-    ])('returns the SEC tier (4.0) for "%s"', (conf) => {
+// EXACT per-conference-code lookup (2026-08-21). Test values = the REAL conference codes that
+// appear in players.conference / Teams Table.conference (a controlled set), NOT fuzzy long-form names.
+describe("getProgramTierMultiplierByConference (exact per-conference code)", () => {
+  describe("SEC tier (4.0)", () => {
+    it.each(["SEC", "sec"])('returns 4.0 for "%s"', (conf) => {
       expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.sec);
     });
   });
 
-  describe("Big Ten tier (1.0)", () => {
-    it.each(["Big Ten", "big ten", "BigTen"])('returns 1.0 for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.bigTen);
-    });
-  });
-
-  // ACC split out of Big12 (2026-08-21): ACC has its own tier, Big12 stays p4.
-  describe("ACC tier (own key, split from Big12)", () => {
-    it.each(["ACC", "Atlantic Coast Conference"])('returns the ACC tier for "%s"', (conf) => {
+  describe("ACC tier (1.5 — split out of Big12)", () => {
+    it.each(["ACC", "acc"])('returns 1.5 for "%s"', (conf) => {
       expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.acc);
     });
   });
 
-  describe("Big 12 tier (p4)", () => {
-    it.each([
-      "Big 12",
-      "big12",
-      "Big12Conference",
-    ])('returns the p4 tier for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.p4);
+  describe("Big 12 tier (1.2)", () => {
+    it.each(["Big 12", "big12"])('returns 1.2 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.big12);
     });
   });
 
-  describe("Strong Mid-Major tier (0.8)", () => {
+  describe("Big Ten tier (1.0)", () => {
+    it.each(["Big Ten", "bigten"])('returns 1.0 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.bigten);
+    });
+  });
+
+  describe("Independent tier (1.0 — Oregon State; own key, NOT low-major)", () => {
+    it.each(["Independent", "independent"])('returns 1.0 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.independent);
+    });
+  });
+
+  describe("Strong mid-major tier (0.8)", () => {
     it.each([
       "American Athletic Conference",
-      "AAC",
-      "Sun Belt Conference",
-      "Sunbelt",
-      "Big West Conference",
-      "BigWest",
-      "Mountain West Conference",
-      "MountainWest",
+      "Sun Belt",
+      "Big West",
+      "Mountain West",
     ])('returns 0.8 for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.strongMid);
+      expect(getProgramTierMultiplierByConference(conf)).toBe(0.8);
     });
   });
 
-  describe("Low Major tier (0.5) — default", () => {
+  describe("Low-major default (0.5)", () => {
     it.each([
-      "Southern Conference",
-      "SOCON",
+      "SoCon",
       "America East",
       "NEC",
       "SWAC",
+      "ASUN",
       "",
       null,
       undefined,
     ])('returns 0.5 for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.lowMajor);
+      expect(getProgramTierMultiplierByConference(conf)).toBe(NIL_LOW_MAJOR);
     });
   });
 
-  it("respects custom multiplier overrides", () => {
-    const custom = { ...DEFAULT_NIL_TIER_MULTIPLIERS, sec: 2.0, acc: 1.8, p4: 1.3 };
+  describe("JUCO (NJCAA districts) → 0.35", () => {
+    it.each(["NJCAA D1 South", "NJCAA D1 East District"])('returns 0.35 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(NIL_JUCO);
+    });
+  });
+
+  it("respects custom per-conference overrides", () => {
+    const custom = { ...DEFAULT_NIL_TIER_MULTIPLIERS, sec: 2.0, acc: 1.8, big12: 1.3 };
     expect(getProgramTierMultiplierByConference("SEC", custom)).toBe(2.0);
     expect(getProgramTierMultiplierByConference("ACC", custom)).toBe(1.8);
     expect(getProgramTierMultiplierByConference("Big 12", custom)).toBe(1.3);
