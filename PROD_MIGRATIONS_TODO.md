@@ -367,3 +367,5 @@ Building the transfer equation lever finalization. Each DB change logged here as
   set division = 'NJCAA_D1'
   where season = 2026 and "conference abbreviation" like 'NJCAA%' and division = 'D1';
   ```
+
+- [ ] **RLS: player_predictions team-scope (2026-08-23)** — `20260823000000_player_predictions_rls_team_scope.sql`. Replaces the `USING(true)` SELECT policy (globally readable) with team-scoped: `customer_team_id IS NULL OR superadmin OR is_team_member(customer_team_id)`. Shared global rows stay readable; per-team precomputed rows become own-team-only. Writes unchanged. No app change (read path already filters null-or-own-team). **DDL — apply on staging + prod (needs a staging connection; CLI-linked=PROD).** Also flagged: `nil_valuations` is likewise `USING(true)` (legacy manual table) — tighten separately if it should be team-confidential.
