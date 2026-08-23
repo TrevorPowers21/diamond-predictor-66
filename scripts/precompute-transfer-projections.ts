@@ -440,6 +440,10 @@ async function main() {
       p_wrc: final.pWrc,
       p_wrc_plus: final.pWrcPlus,
       o_war: oWar,
+      // 2026-08-23: STORE total_hitter_war DIRECTLY (o_war + d_war + bsr_war) so it's ALWAYS fresh +
+      // consistent with o_war — no dependency on the separate refresh_composite_war() job that lagged.
+      // total_hitter_war is the position-player HEADLINE/source; o_war stays as the offensive component.
+      total_hitter_war: totalHitterWar,
       market_value: marketValue,
       projected_pa: projectedPa,
       hitter_depth_role: hitterDepthRole,

@@ -1236,6 +1236,9 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
       p_wrc: final.pWrc,
       p_wrc_plus: final.pWrcPlus,
       o_war: oWar,
+      // 2026-08-23: store total_hitter_war DIRECTLY (o+d+bsr) — always fresh/consistent with o_war,
+      // no separate refresh_composite_war() lag. total_hitter_war = position-player headline source.
+      total_hitter_war: totalHitterWar,
       market_value: isTwpRow ? null : marketValue,
       twp_hitter_market_value: isTwpRow ? marketValue : null,
       projected_pa: projectedPa,
