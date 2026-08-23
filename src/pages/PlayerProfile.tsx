@@ -982,10 +982,21 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
     }
     return resolvedConference || (player as any)?.conference || null;
   })();
-  const computedNilValuation = computeHitterMarketValue(
-    computedOWar,
+  // Market rides TOTAL hitter WAR (o+d+bsr). Derive the fixed d+bsr from the stored prediction so a
+  // toggle PREVIEW recomputes market OFF WAR: new wRC+ → new oWAR → new total → new market — never by
+  // scaling the market $ directly (which would drift returners vs transfers). No toggle change → the
+  // STORED market value (total-based). Toggle moved oWAR → recompute from the new total.
+  const storedTotalHitterWar = (regularPred as any)?.total_hitter_war as number | null | undefined;
+  const dBsrConstant = (storedTotalHitterWar != null && storedOWar != null) ? Number(storedTotalHitterWar) - Number(storedOWar) : 0;
+  const computedTotalHitterWar = computedOWar != null ? computedOWar + dBsrConstant : null;
+  const recomputedMarketFromTotal = computeHitterMarketValue(
+    computedTotalHitterWar,
     { conference: destinationConference, position: effectivePosition },
-  ) ?? (storedMarketValue != null ? Number(storedMarketValue) : null);
+  );
+  const toggleMovedWar = computedOWar != null && storedOWar != null && Math.abs(computedOWar - Number(storedOWar)) > 1e-6;
+  const computedNilValuation = toggleMovedWar
+    ? recomputedMarketFromTotal
+    : (storedMarketValue != null ? Number(storedMarketValue) : recomputedMarketFromTotal);
   void overlayScale;
   // In the program hub, WAR + market come from the LIVE build (effectiveProjection
   // on its snapshot + production_notes) so Projections matches the roster and Team

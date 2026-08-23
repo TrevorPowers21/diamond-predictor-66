@@ -1426,6 +1426,12 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     const overlayMarketValue = computePitcherMarketValue(
       line.pWar, { conference: destinationConference, role: sessionRole, team: displayTeam }, { dollarsPerWar: eq.market_dollars_per_war },
     );
+    // No toggle change → the STORED market value; a toggle (role/dev) that moved pWAR → recompute
+    // from the new pWAR (WAR-based, mirrors the hitter path). Never scale the market $ directly.
+    const storedPWarVal = (stored as any)?.p_war != null ? Number((stored as any).p_war) : null;
+    const pitcherToggled = line.pWar != null && storedPWarVal != null && Math.abs(Number(line.pWar) - storedPWarVal) > 1e-6;
+    const storedPitcherMarket = (stored as any)?.twp_pitcher_market_value ?? (stored as any)?.market_value ?? null;
+    const marketValue = pitcherToggled ? overlayMarketValue : (storedPitcherMarket != null ? Number(storedPitcherMarket) : overlayMarketValue);
 
     return {
       pEra: line.pEra,
@@ -1436,7 +1442,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
       pHr9: line.pHr9,
       pRvPlus: line.pRvPlus,
       pWar: line.pWar,
-      marketValue: overlayMarketValue,
+      marketValue,
       projectedIp: line.projectedIp,
       // Stored scouting scores from the picked prediction row — read the
       // domain-scoped pitcher_*_score columns first (canonical source after
