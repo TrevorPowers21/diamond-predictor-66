@@ -1016,10 +1016,10 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
       la1030: parseNum(powerRatingsRow[29]),
     };
     const scores = {
-      // Stuff+ has no dedicated stored score column in Pitching Master — always
-      // compute from raw stuff+. Guarded on equation constants so a misconfigured
-      // model_config row can't accidentally leak the raw value through.
-      stuff: (() => {
+      // STORED-FIRST (2026-08-23): read the stored stuff score (Pitching Master.stuff_score,
+      // powerRatingsRow[16]) first — same as every other metric here. Fall back to a live compute
+      // (guarded on equation constants) only when the stored score is null.
+      stuff: storedScores.stuff ?? (() => {
         const avg = Number.isFinite(pitchingEq.p_ncaa_avg_stuff_plus) ? pitchingEq.p_ncaa_avg_stuff_plus : 100;
         const sd = Number.isFinite(pitchingEq.p_sd_stuff_plus) && pitchingEq.p_sd_stuff_plus > 0 ? pitchingEq.p_sd_stuff_plus : 3.97;
         return scoreFromMetric(metrics.stuff, avg, sd);

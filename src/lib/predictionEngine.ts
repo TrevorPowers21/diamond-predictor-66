@@ -10,10 +10,6 @@ import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 import {
   computePitcherWar,
   computePitcherMarketValue,
-  computeHitterOWar,
-  computeHitterMarketValue,
-  defaultHitterDepthRoleFromActualPa,
-  paForHitterDepthRole,
   pitcherExpectedIp,
   derivePitcherDepthRole,
 } from "@/lib/depthRoles";
@@ -67,24 +63,9 @@ export function derivePitcherStored(
   return { p_war: pWar, market_value: marketValue, projected_ip: projectedIp, pitcher_depth_role: pitcherDepthRole };
 }
 
-function deriveHitterStored(
-  pWrcPlus: number | null | undefined,
-  meta: { conference: string | null; position: string | null; pa: number | null; is_twp?: boolean },
-) {
-  // Derive depth role from raw PA → tier PA, matching per-team precompute math.
-  // Without this, oWAR is computed against raw PA which produces values that
-  // differ from what TB/PlayerProfile display via the depth-role overlay.
-  const hitterDepthRole = defaultHitterDepthRoleFromActualPa(meta.pa);
-  const projectedPa = paForHitterDepthRole(hitterDepthRole);
-  const oWar = computeHitterOWar(pWrcPlus, projectedPa, hitterDepthRole);
-  const marketValue = computeHitterMarketValue(oWar, { conference: meta.conference, position: meta.position });
-  // For TWPs: route MV to twp_hitter_market_value and NULL the shared
-  // market_value column. Pitcher loop's derive does the same on its side.
-  if (meta.is_twp) {
-    return { o_war: oWar, market_value: null, twp_hitter_market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
-  }
-  return { o_war: oWar, market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
-}
+// deriveHitterStored REMOVED 2026-08-23 — it was dead (0 callers) and the only path that priced
+// hitter market off o_war (not total_hitter_war). The live writers are precompute-transfer-projections
+// (total_hitter_war) + the edge fn; the recalc path doesn't use it. Removed to kill the o_war outlier.
 
 type PredictionRow = {
   id: string;
