@@ -627,16 +627,6 @@ const projectHigherP = (
   return blended * mult;
 };
 
-const programTierMultiplier = (conference: string | null | undefined, tiers: { sec: number; p4: number; bigTen: number; strongMid: number; lowMajor: number }) => {
-  const c = String(conference || "").toLowerCase();
-  if (!c) return tiers.lowMajor;
-  if (c.includes("southeastern") || c === "sec") return tiers.sec;
-  if (c.includes("atlantic coast") || c === "acc" || c.includes("big 12")) return tiers.p4;
-  if (c.includes("big ten")) return tiers.bigTen;
-  if (/(american|sun belt|big west|mountain west|mwc|aac)/.test(c)) return tiers.strongMid;
-  return tiers.lowMajor;
-};
-
 // pvfForRole (weekend-SP 1.2× premium) removed — PVF dropped from pitcher market
 // value to match canonical (double-counts a starter's IP-based WAR). See computePitcherMarketValue below.
 
@@ -669,11 +659,12 @@ const computePitcherWar = (pRvPlus: number | null, projectedIp: number, eq: Pitc
 
 const computePitcherMarketValue = (
   pWar: number | null, ctx: { conference: string | null; role: "SP" | "RP" | "SM"; team: string | null }, eq: PitchingEq,
+  tiersOverride?: Record<string, number>,
 ) => {
   if (pWar == null || !Number.isFinite(pWar)) return null;
   if (!canShowPitcherMarket(ctx.team, ctx.conference)) return null;
-  const tiers = { sec: eq.market_tier_sec, p4: eq.market_tier_acc_big12, bigTen: eq.market_tier_big_ten, strongMid: eq.market_tier_strong_mid, lowMajor: eq.market_tier_low_major };
-  const ptm = programTierMultiplier(ctx.conference, tiers);
+  // UNIFIED: same per-conference resolver as the hitter (model_config nil_tier_<code>), not eq.market_tier_*.
+  const ptm = getProgramTierMultiplierByConference(ctx.conference, tiersOverride ?? NIL_TIERS_BY_CONFERENCE);
   // PVF dropped (mirror canonical src/lib/depthRoles.ts computePitcherMarketValue):
   // a starter's role value is already in WAR through IP (85 vs 35 innings), so a
   // PVF premium on top double-counts. Market = pWAR × $/WAR × tier, matching the
@@ -696,7 +687,7 @@ type TransferPitcherInputDeno = {
   toTeam: string | null; toConference: string | null;
 };
 
-function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: PitchingEq) {
+function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: PitchingEq, nilTiers?: Record<string, number>) {
   const baseRole = input.baseRole;
   const projectedRole: "SP" | "RP" | "SM" = baseRole || "SM";
   const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
@@ -738,13 +729,13 @@ function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: P
   const pRvPlus = prvRaw == null ? null : Math.round(prvRaw);
 
   const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
-  const marketValue = computePitcherMarketValue(pWar, { conference: input.toConference, role: projectedRole, team: input.toTeam }, eq);
+  const marketValue = computePitcherMarketValue(pWar, { conference: input.toConference, role: projectedRole, team: input.toTeam }, eq, nilTiers);
   return { p_era: rEra, p_fip: rFip, p_whip: rWhip, p_k9: rK9, p_bb9: rBb9, p_hr9: rHr9, p_rv_plus: pRvPlus, p_war: pWar, market_value: marketValue, projected_role: projectedRole };
 }
 
 function applyPitcherPostprocess(
   result: ReturnType<typeof computeTransferPitcherProjection>,
-  args: { classTransition: string | null; classYear: string | null; devAggressiveness: number | null; isJucoSource: boolean; eq: PitchingEq; toConference: string | null; toTeam: string | null },
+  args: { classTransition: string | null; classYear: string | null; devAggressiveness: number | null; isJucoSource: boolean; eq: PitchingEq; toConference: string | null; toTeam: string | null; nilTiers?: Record<string, number> },
 ) {
   const eq = args.eq;
   // Prefer pred's class_transition. Derive from class_year (FR→FS / SO→SJ /
@@ -797,7 +788,7 @@ function applyPitcherPostprocess(
   const ipForRole = result.projected_role === "SP" ? eq.pwar_ip_sp : result.projected_role === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
   const recomputedPWar = pRvPlusAdj != null ? computePitcherWar(pRvPlusAdj, ipForRole, eq) : result.p_war;
   const recomputedMarketValue = recomputedPWar != null
-    ? computePitcherMarketValue(recomputedPWar, { conference: args.toConference, role: result.projected_role, team: args.toTeam }, eq)
+    ? computePitcherMarketValue(recomputedPWar, { conference: args.toConference, role: result.projected_role, team: args.toTeam }, eq, args.nilTiers)
     : result.market_value;
 
   return { p_era: aE, p_fip: aF, p_whip: aW, p_k9: aK, p_bb9: aB, p_hr9: aH, p_rv_plus: pRvPlusAdj, p_war: recomputedPWar, market_value: recomputedMarketValue, pitcher_role: result.projected_role, projected_ip: ipForRole };
@@ -830,24 +821,39 @@ const PROJECTION_SEASON = 2027;
 const PRED_ID_BATCH = 200;
 const UPSERT_BATCH = 500;
 
-// ── Hitter oWAR + market value (mirrors src/lib/depthRoles.ts + nilProgramSpecific.ts) ──
+// ── Unified per-conference PTM (mirror src/lib/nilProgramSpecific.ts — EXACT normalized-code
+// lookup, NOT fuzzy name matching). ONE resolver for BOTH hitter + pitcher. Values reverse-
+// engineered 2026-08-21; Independent has its OWN entry (Oregon State, NOT low-major). ──
 const HITTER_DOLLARS_PER_WAR = 25000;
-const NIL_TIER_MULTIPLIERS = { sec: 1.5, p4: 1.2, bigTen: 1.0, strongMid: 0.8, lowMajor: 0.5 };
-const STRONG_MID_KEYS = new Set([
-  "americanathleticconference","aac","sunbeltconference","sunbelt",
-  "bigwestconference","bigwest","mountainwestconference","mountainwest",
-]);
+const NIL_TIERS_BY_CONFERENCE: Record<string, number> = {
+  sec: 4.0, acc: 1.5, big12: 1.2, bigten: 1.0, independent: 1.0,
+  americanathleticconference: 0.8, aac: 0.8, sunbelt: 0.8, bigwest: 0.8, mountainwest: 0.8,
+};
+const NIL_LOW_MAJOR = 0.5;
+const NIL_JUCO = 0.35;
+// Overlay model_config `nil_tier_<code>` onto the const defaults (single source; `nil_tier_default`
+// → low-major, `nil_tier_juco` → NJCAA). Built once per job from the loaded model_config values.
+function buildNilTiers(config: Record<string, number> | null | undefined): Record<string, number> {
+  const merged: Record<string, number> = { ...NIL_TIERS_BY_CONFERENCE, _lowMajor: NIL_LOW_MAJOR, _juco: NIL_JUCO };
+  for (const [k, v] of Object.entries(config || {})) {
+    const m = /^nil_tier_(.+)$/.exec(k); if (!m) continue;
+    const n = Number(v); if (!Number.isFinite(n)) continue;
+    merged[m[1] === "default" ? "_lowMajor" : m[1] === "juco" ? "_juco" : m[1]] = n;
+  }
+  return merged;
+}
 function normalizeConferenceKey(c: string | null | undefined): string {
   return (c || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
-function getProgramTierMultiplierByConference(c: string | null | undefined): number {
+function getProgramTierMultiplierByConference(
+  c: string | null | undefined,
+  tiers: Record<string, number> = NIL_TIERS_BY_CONFERENCE,
+): number {
+  const lowMajor = tiers["_lowMajor"] ?? NIL_LOW_MAJOR;
   const key = normalizeConferenceKey(c);
-  if (!key) return NIL_TIER_MULTIPLIERS.lowMajor;
-  if (key.includes("southeasternconference") || key === "sec") return NIL_TIER_MULTIPLIERS.sec;
-  if (key.includes("bigten")) return NIL_TIER_MULTIPLIERS.bigTen;
-  if (key.includes("atlanticcoastconference") || key === "acc" || key.includes("big12")) return NIL_TIER_MULTIPLIERS.p4;
-  if (STRONG_MID_KEYS.has(key)) return NIL_TIER_MULTIPLIERS.strongMid;
-  return NIL_TIER_MULTIPLIERS.lowMajor;
+  if (!key) return lowMajor;
+  if (key.includes("njcaa")) return tiers["_juco"] ?? NIL_JUCO;
+  return tiers[key] ?? lowMajor;
 }
 function getPositionValueMultiplier(position: string | null | undefined): number {
   const pos = (position || "").trim().toUpperCase();
@@ -928,9 +934,9 @@ function computeHitterOWar(wrcPlus: number | null | undefined, depthRole: Hitter
   const raa = ((wrcPlus - 100) / 100) * pa * 0.3994;
   return (raa + replacementRuns) / 13.1;
 }
-function computeHitterMarketValue(oWar: number | null, conference: string | null | undefined, position: string | null | undefined): number | null {
+function computeHitterMarketValue(oWar: number | null, conference: string | null | undefined, position: string | null | undefined, tiersOverride?: Record<string, number>): number | null {
   if (oWar == null || !Number.isFinite(oWar)) return null;
-  const ptm = getProgramTierMultiplierByConference(conference);
+  const ptm = getProgramTierMultiplierByConference(conference, tiersOverride ?? NIL_TIERS_BY_CONFERENCE);
   const pvm = getPositionValueMultiplier(position);
   return Math.max(0, oWar * HITTER_DOLLARS_PER_WAR * ptm * pvm);
 }
@@ -977,6 +983,8 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     .eq("customer_team_id", customerTeamId)
     .in("model_type", ["transfer", "global", "admin_ui"]);
   for (const r of overrides || []) remoteEquationValues[r.config_key] = Number(r.config_value);
+  // 2026-08-21: PTM tiers from model_config `nil_tier_<code>` (single source; falls back to consts).
+  const nilTiers = buildNilTiers(remoteEquationValues);
 
   // Conference Stats (quoted table)
   const { data: confRows } = await supabase
@@ -1201,7 +1209,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const dWar = masterPR?.d_war != null ? Number(masterPR.d_war) : 0;
     const bsrWar = masterPR?.bsr_war != null ? Number(masterPR.bsr_war) : 0;
     const totalHitterWar = oWar != null ? oWar + dWar + bsrWar : null;
-    const marketValue = totalHitterWar != null ? computeHitterMarketValue(totalHitterWar, toConference, p.position) : null;
+    const marketValue = totalHitterWar != null ? computeHitterMarketValue(totalHitterWar, toConference, p.position, nilTiers) : null;
     // TWP routing: hitter side MV goes to twp_hitter_market_value, raw
     // market_value is NULL'd. Pitcher loop will populate twp_pitcher_market_value
     // separately. Avoids the previous stomp where the pitcher loop's MV
@@ -1295,6 +1303,10 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     }
   }
   const eqJucoOrD2: typeof PITCHING_EQ_DEFAULTS = { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS };
+  // 2026-08-21: PTM tiers from model_config `nil_tier_<code>` (single source; falls back to consts).
+  const mcMapP: Record<string, number> = {};
+  for (const r of mcPitch || []) { const v = Number(r.config_value); if (Number.isFinite(v)) mcMapP[String(r.config_key)] = v; }
+  const nilTiersP = buildNilTiers(mcMapP);
 
   // Resolve customer team → destination
   const { data: ct, error: ctErr } = await supabase
@@ -1551,8 +1563,9 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
       toTeam: toTeam.name, toConference,
     };
 
-    const projected = computeTransferPitcherProjection(input, eq);
+    const projected = computeTransferPitcherProjection(input, eq, nilTiersP);
     const final = applyPitcherPostprocess(projected, {
+      nilTiers: nilTiersP,
       classTransition: pred?.class_transition ?? null,
       classYear: (p as any).class_year ?? null,
       devAggressiveness: pred?.dev_aggressiveness ?? null,
@@ -1578,7 +1591,7 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     const depthIp = ipForPitcherDepthRole(pitcherDepthRole, eq);
     const recomputedPWar = final.p_rv_plus != null ? computePitcherWar(final.p_rv_plus, depthIp, eq) : final.p_war;
     const recomputedMarketValue = recomputedPWar != null
-      ? computePitcherMarketValue(recomputedPWar, { conference: toConference, role: final.pitcher_role, team: toTeam.name }, eq)
+      ? computePitcherMarketValue(recomputedPWar, { conference: toConference, role: final.pitcher_role, team: toTeam.name }, eq, nilTiersP)
       : final.market_value;
     upserts.push({
       player_id: p.id,
