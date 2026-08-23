@@ -3144,11 +3144,12 @@ export default function ReturningPlayers() {
                                   // PlayerProfile scout card). Falls back to
                                   // stored prediction scores when pop or
                                   // pitch_log row is not yet loaded / missing.
+                                  // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                                   const live = livePitchLogHitterScores(p.source_player_id);
-                                  const brl = live?.barrel ?? pred.barrel_score;
-                                  const ev = live?.ev ?? pred.ev_score;
-                                  const con = live?.contact ?? pred.contact_score;
-                                  const chs = live?.chase ?? pred.chase_score;
+                                  const brl = pred.barrel_score ?? live?.barrel;
+                                  const ev = pred.ev_score ?? live?.ev;
+                                  const con = pred.contact_score ?? live?.contact;
+                                  const chs = pred.chase_score ?? live?.chase;
                                   return (
                                     <>
                                       {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
@@ -3484,11 +3485,13 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right text-sm tabular-nums">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
                               {(() => {
+                                // STORED-FIRST (2026-08-23): read the stored *_score first; live
+                                // pitch-log percentile only when the stored value is null.
                                 const live = livePitchLogPitcherScores((r as any).source_player_id);
-                                const stf = live?.stuff ?? r.stuff_score;
-                                const whf = live?.whiff ?? r.whiff_score;
-                                const bb = live?.bb ?? r.bb_score;
-                                const brl = live?.barrel ?? r.barrel_score;
+                                const stf = r.stuff_score ?? live?.stuff;
+                                const whf = r.whiff_score ?? live?.whiff;
+                                const bb = r.bb_score ?? live?.bb;
+                                const brl = r.barrel_score ?? live?.barrel;
                                 const anyValue = stf != null || whf != null || bb != null || brl != null;
                                 return anyValue ? (
                                   <div className="flex gap-1 justify-center flex-wrap">

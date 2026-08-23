@@ -884,32 +884,25 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const plPower = effectiveSeason === 2026 ? pitchLogPowerDerived : null;
   const plRates = effectiveSeason === 2026 && pitchLogRates?.hasData ? pitchLogRates : null;
   const activeSeasonScoutingGrades = activeSeasonRow ? {
-    // Priority chain per metric:
-    //   pitch_log percentile rank (matches Season Stats bars exactly)
-    //   → pitch_log normal-dist score (only when pop is still loading)
-    //   → stored Hitter Master.X_score (computeAndStoreScores output)
-    //   → seedPowerDerived (2025 carry-forward).
-    barrelScore: pitchLogPercentileGrades?.barrelScore ?? pitchLogPowerDerived?.barrelScore ?? activeSeasonRow.barrel_score ?? null,
-    avgEVScore: pitchLogPercentileGrades?.avgEVScore ?? pitchLogPowerDerived?.avgEVScore ?? activeSeasonRow.avg_ev_score ?? null,
-    contactScore: pitchLogPercentileGrades?.contactScore ?? pitchLogPowerDerived?.contactScore ?? activeSeasonRow.contact_score ?? null,
-    chaseScore: pitchLogPercentileGrades?.chaseScore ?? pitchLogPowerDerived?.chaseScore ?? activeSeasonRow.chase_score ?? null,
-    bbScore: pitchLogPercentileGrades?.bbScore ?? pitchLogPowerDerived?.bbScore ?? activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
-    lineDriveScore: pitchLogPercentileGrades?.lineDriveScore ?? pitchLogPowerDerived?.lineDriveScore ?? activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
-    popUpScore: pitchLogPercentileGrades?.popUpScore ?? pitchLogPowerDerived?.popUpScore ?? activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
-    // ev90 + pull now derive from pitch_log (ev_90 + directional pull
-    // columns added 2026-06-26) — pitch_log first, stored HM fallback.
-    ev90Score: plPower?.ev90Score ?? activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
-    pullScore: plPower?.pullScore ?? activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
-    laScore: pitchLogPercentileGrades?.laScore ?? pitchLogPowerDerived?.laScore ?? activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
-    gbScore: pitchLogPercentileGrades?.gbScore ?? pitchLogPowerDerived?.gbScore ?? activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
-    // Overall PR+ roll-ups: pitch_log FIRST for the DISPLAY (mirrors the
-    // pitcher profile). This is display-only — the pWAR / market-value
-    // projection path reads projectionSourceRow.overall_power_rating
-    // (stored) separately, so stored values stay untouched until July.
-    baPlus: plPower?.baPlus ?? activeSeasonRow.ba_power_rating ?? seedPowerDerived?.baPlus ?? null,
-    obpPlus: plPower?.obpPlus ?? activeSeasonRow.obp_power_rating ?? seedPowerDerived?.obpPlus ?? null,
-    isoPlus: plPower?.isoPlus ?? activeSeasonRow.iso_power_rating ?? seedPowerDerived?.isoPlus ?? null,
-    overallPlus: plPower?.overallPlus ?? activeSeasonRow.overall_power_rating ?? seedPowerDerived?.overallPlus ?? null,
+    // STORED-FIRST (2026-08-23): read the STORED Hitter Master / prediction `*_score` and
+    // `*_power_rating` columns FIRST (computeAndStoreScores output). Live pitch_log percentile
+    // (pitchLogPercentileGrades / plPower) is only a FALLBACK when the stored value is null;
+    // 2025 seed last. (Was pitch_log-first — recomputed grades on every render.)
+    barrelScore: activeSeasonRow.barrel_score ?? pitchLogPercentileGrades?.barrelScore ?? pitchLogPowerDerived?.barrelScore ?? null,
+    avgEVScore: activeSeasonRow.avg_ev_score ?? pitchLogPercentileGrades?.avgEVScore ?? pitchLogPowerDerived?.avgEVScore ?? null,
+    contactScore: activeSeasonRow.contact_score ?? pitchLogPercentileGrades?.contactScore ?? pitchLogPowerDerived?.contactScore ?? null,
+    chaseScore: activeSeasonRow.chase_score ?? pitchLogPercentileGrades?.chaseScore ?? pitchLogPowerDerived?.chaseScore ?? null,
+    bbScore: activeSeasonRow.bb_score ?? pitchLogPercentileGrades?.bbScore ?? pitchLogPowerDerived?.bbScore ?? seedPowerDerived?.bbScore ?? null,
+    lineDriveScore: activeSeasonRow.line_drive_score ?? pitchLogPercentileGrades?.lineDriveScore ?? pitchLogPowerDerived?.lineDriveScore ?? seedPowerDerived?.lineDriveScore ?? null,
+    popUpScore: activeSeasonRow.pop_up_score ?? pitchLogPercentileGrades?.popUpScore ?? pitchLogPowerDerived?.popUpScore ?? seedPowerDerived?.popUpScore ?? null,
+    ev90Score: activeSeasonRow.ev90_score ?? plPower?.ev90Score ?? seedPowerDerived?.ev90Score ?? null,
+    pullScore: activeSeasonRow.pull_score ?? plPower?.pullScore ?? seedPowerDerived?.pullScore ?? null,
+    laScore: activeSeasonRow.la_score ?? pitchLogPercentileGrades?.laScore ?? pitchLogPowerDerived?.laScore ?? seedPowerDerived?.laScore ?? null,
+    gbScore: activeSeasonRow.gb_score ?? pitchLogPercentileGrades?.gbScore ?? pitchLogPowerDerived?.gbScore ?? seedPowerDerived?.gbScore ?? null,
+    baPlus: activeSeasonRow.ba_power_rating ?? plPower?.baPlus ?? seedPowerDerived?.baPlus ?? null,
+    obpPlus: activeSeasonRow.obp_power_rating ?? plPower?.obpPlus ?? seedPowerDerived?.obpPlus ?? null,
+    isoPlus: activeSeasonRow.iso_power_rating ?? plPower?.isoPlus ?? seedPowerDerived?.isoPlus ?? null,
+    overallPlus: activeSeasonRow.overall_power_rating ?? plPower?.overallPlus ?? seedPowerDerived?.overallPlus ?? null,
   } : seedPowerDerived;
   // Carry 2025 PA forward as expected 2026 PA so projected WAR scales with
   // actual playing-time history. A fringe starter with 100 PA last year

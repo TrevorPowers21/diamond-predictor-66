@@ -642,11 +642,12 @@ export default function TargetBoardSubtab() {
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
                             {(() => {
+                              // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                               const live = liveHitterScores(r.source_player_id);
-                              const brl = live?.barrel ?? pred?.hitter_barrel_score ?? pred?.barrel_score ?? null;
-                              const ev = live?.ev ?? pred?.ev_score ?? null;
-                              const con = live?.contact ?? pred?.contact_score ?? null;
-                              const chs = live?.chase ?? pred?.chase_score ?? null;
+                              const brl = pred?.hitter_barrel_score ?? pred?.barrel_score ?? live?.barrel ?? null;
+                              const ev = pred?.ev_score ?? live?.ev ?? null;
+                              const con = pred?.contact_score ?? live?.contact ?? null;
+                              const chs = pred?.chase_score ?? live?.chase ?? null;
                               return (
                                 <>
                                   {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
@@ -765,11 +766,12 @@ export default function TargetBoardSubtab() {
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
                             {(() => {
+                              // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                               const live = livePitcherScores(r.source_player_id);
-                              const stf = live?.stuff ?? pred?.stuff_score ?? null;
-                              const whf = live?.whiff ?? pred?.whiff_score ?? null;
-                              const bb = live?.bb ?? pred?.bb_score ?? null;
-                              const brl = live?.barrel ?? pred?.pitcher_barrel_score ?? pred?.barrel_score ?? null;
+                              const stf = pred?.stuff_score ?? live?.stuff ?? null;
+                              const whf = pred?.whiff_score ?? live?.whiff ?? null;
+                              const bb = pred?.bb_score ?? live?.bb ?? null;
+                              const brl = pred?.pitcher_barrel_score ?? pred?.barrel_score ?? live?.barrel ?? null;
                               return (
                                 <>
                                   {stf != null && <ScoutMiniBox label="Stf+" value={stf} />}
