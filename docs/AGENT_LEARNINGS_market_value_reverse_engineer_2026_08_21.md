@@ -194,4 +194,29 @@ Edit unified resolver + write paths + remove live computes + ACC split (change s
   preview) · thread model_config into batch+edge-fn WRITE paths · kill dead layers (platformDefaults/usePlatformConfig)
   · seed model_config `nil_tier_<code>` · re-price 17 teams · auto re-bake snapshots · verify roster totals.
 
-## STATUS: Phase 1 code DONE + green. Rolling into Phase 2+ (edge fn + total_hitter_war + stored display + re-price).
+## ★★★ IMPLEMENTATION LOG (2026-08-21 → 08-23) — code DONE, staging re-price PENDING
+### Phase 1 — unify the PTM source (client/shared-TS) [08c40e2, 9f2dc34]
+- `nilProgramSpecific.ts`: `DEFAULT_NIL_TIER_MULTIPLIERS` is now a **per-conference Record** (exact normalized-code lookup, no fuzzy names) + `resolveNilTiersFromConfig(model_config)` + `resolveNilBasePerWar` + `NIL_LOW_MAJOR`/`NIL_JUCO`/`DEFAULT_NIL_BASE_PER_WAR`. SEC 4.0/ACC 1.5/Big12 1.2/BigTen 1.0/Independent 1.0/AAC+SunBelt+BigWest+MWC 0.8/else 0.5/NJCAA 0.35.
+- `depthRoles.ts`: `computePitcherMarketValue` DROPS `eq.market_tier_*`, takes `opts?.{tiers,dollarsPerWar}` (same source as hitter). 4 pitcher callers + 3 inline assembly sites (pitcherProjection/transferPitcherProjection/useTeamBuilderSimulation) repointed. Test rewritten to real conference codes + Independent/JUCO. 265 tests pass.
+### Phase 2 — edge fn + batch + total_hitter_war + stored display [ce1b289, 228c13a, 5fafad9]
+- Edge fn `process-precompute-jobs`: replaced its 2 divergent bucket resolvers with ONE per-conference resolver + `buildNilTiers(model_config)`; both hitter (`nilTiers`) + pitcher (`nilTiersP` threaded through computeTransferPitcherProjection/applyPitcherPostprocess) read model_config `nil_tier_<code>`; dropped `eq.market_tier_*`.
+- Batch: `precompute-transfer-projections` (hitter, already `total_hitter_war`) + `precompute-pitchers` (via `derivePitcherStored`'s new `nilTiers` param) read `resolveNilTiersFromConfig(model_config)`. model_config is now the LIVE source, const = fallback.
+- `total_hitter_war`: all live writers use it; the o_war outlier `deriveHitterStored` is DEAD (0 callers).
+- Profiles: no-toggle → STORED market; toggle → recompute OFF WAR (hitter via total_hitter_war using d+bsr derived from stored `total_hitter_war - o_war`; pitcher via pWAR). Roster/hub reads snapshot via marketOverride.
+### Stored-first display audit + fixes [c855dc0 (audit doc), 95f22a6 (fixes)]
+- **Projections stored-first everywhere on load** (WAR/market/rates/wRC+/pRV+); coverage 99.6-100%; projected-not-prevseason CLEAN. Full audit: `docs/STORED_FIRST_DISPLAY_AUDIT_2026_08_23.md`.
+- **Scouting grades flipped to stored-first** (`stored *_score ?? live`): ReturningPlayers hitter+pitcher chips, PlayerProfile `activeSeasonScoutingGrades` (+ env+ `*_power_rating`), TargetBoardSubtab chips, usePlayerHubPreview (added stored Pitching Master read; was live-only). Season-stats FILTERED dimension bars left live (per-dimension, no stored equivalent — Trevor OK).
+- **TWP:** `loadGmBuildRoster` market now side-aware (was hitter-first). WARs already side-aware.
+### RLS [6162e7d]
+- `20260823000000_player_predictions_rls_team_scope.sql` — replace `USING(true)` with `customer_team_id IS NULL OR superadmin OR is_team_member(customer_team_id)`. Committed; needs staging+prod apply.
+
+## ★ PROD PUSH — market-value (run IN ORDER; staging first, then prod paste)
+1. **Seed model_config** — `scripts/sql/seed_nil_tiers_model_config.sql` (⚠ MUST run before re-price — clears old `nil_tier_sec=1.5` that would override 4.0 + dead bucket keys).
+2. **Apply RLS migration** — `20260823000000_player_predictions_rls_team_scope.sql`.
+3. **Re-price the 17 teams** — re-run `precompute-transfer-projections` + `precompute-pitchers` per team (`_run_step2_all.sh`) → recomputes market_value/twp_* off the new PTM (WAR unchanged).
+4. **Re-bake snapshots** — `resync-build-snapshot-markets.ts` + `resync-target-snapshots.ts` (or `heal-stale-snapshots.ts --market`) — snapshots bake market.
+5. **Verify** — roster totals SEC ~$4.4M / ACC ~$1.7M / Big12 ~$1M / BigTen ~$900k; TWP + Independent=1.0; spot-check a few players.
+6. **Deploy** the `process-precompute-jobs` edge fn (Trevor) — new-team path.
+7. Log every SQL to PROD_MIGRATIONS_TODO.
+
+## STATUS: all market-value + stored-first CODE done + green (tsc 180, 265 tests). PENDING: seed model_config → re-price → re-bake snapshots (staging, needs Trevor nod) → prod. Phase 3 dead-code cleanup optional.

@@ -369,3 +369,11 @@ Building the transfer equation lever finalization. Each DB change logged here as
   ```
 
 - [ ] **RLS: player_predictions team-scope (2026-08-23)** — `20260823000000_player_predictions_rls_team_scope.sql`. Replaces the `USING(true)` SELECT policy (globally readable) with team-scoped: `customer_team_id IS NULL OR superadmin OR is_team_member(customer_team_id)`. Shared global rows stay readable; per-team precomputed rows become own-team-only. Writes unchanged. No app change (read path already filters null-or-own-team). **DDL — apply on staging + prod (needs a staging connection; CLI-linked=PROD).** Also flagged: `nil_valuations` is likewise `USING(true)` (legacy manual table) — tighten separately if it should be team-confidential.
+
+- [ ] **⭐ MARKET-VALUE re-price (2026-08-23)** — model + PTM finalized (per-conference exact-code, SINGLE model_config source). ORDERED:
+  1. **Seed model_config** — `scripts/sql/seed_nil_tiers_model_config.sql` (PASTE; ⚠ MUST precede re-price — clears old `nil_tier_sec=1.5` that would override the new 4.0 + dead bucket keys). Values: SEC 4.0/ACC 1.5/Big12 1.2/BigTen 1.0/Independent 1.0/AAC+SunBelt+BigWest+MWC 0.8/default 0.5/juco 0.35.
+  2. **Re-price 17 teams** — `precompute-transfer-projections` + `precompute-pitchers` per team (recomputes market_value/twp_* off new PTM; WAR unchanged; hitter market rides total_hitter_war).
+  3. **Re-bake snapshots** — `resync-build-snapshot-markets.ts` + `resync-target-snapshots.ts` (snapshots bake market).
+  4. **Verify** — roster totals SEC ~$4.4M / ACC ~$1.7M / Big12 ~$1M / BigTen ~$900k; TWP + Independent=1.0.
+  5. **Redeploy** `process-precompute-jobs` edge fn (Trevor) — carries the unified per-conference PTM (buildNilTiers reads model_config nil_tier_<code>).
+  Code committed (08c40e2→95f22a6). STAGING re-price NOT yet run (needs Trevor nod). Full: `docs/AGENT_LEARNINGS_market_value_reverse_engineer_2026_08_21.md` + `docs/HANDOFF_MASTER_war_recalibration_2026_08_23.md`.
