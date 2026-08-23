@@ -75,6 +75,19 @@ TransferPortal dead imports, and the broken AdminDashboard 5-bucket `nil_tier` e
 - NEXT: re-bake snapshots (`resync-build-snapshot-markets.ts --all --apply` + `resync-target-snapshots.ts --all --apply`) → verify roster totals + Independent=1.0 + TWP.
 - **PROD:** run seed → apply RLS migration → re-price → re-bake → verify → deploy edge fn (Trevor). Same order as §D above.
 
+## ★ total_hitter_war STORED FIX + STEP 7b DISPLAY SWAP (2026-08-23) — the "rewire before prod"
+Full detail + WHY + exact steps: **`docs/AGENT_LEARNINGS_total_war_display_2026_08_23.md`**.
+- **WHY:** `total_hitter_war` was computed inline only to price market, never stored — it was filled by a SEPARATE
+  `refresh_composite_war()` job that lagged `o_war`. The re-price rewrote `o_war` → ~84k rows had `total_hitter_war ≠ o+d+bsr`.
+- **FIX (Trevor):** all 3 hitter producers (transfer batch `572bd11`, edge fn `572bd11`, returner backfill `2d20a5f`)
+  now WRITE `total_hitter_war = o_war + d_war + bsr_war` directly → always fresh + consistent, no separate job, no
+  ordering guard. `total_hitter_war` = the POSITION-PLAYER headline source; `o_war` stays the offensive component that
+  feeds it. `refresh_composite_war()` is now REDUNDANT for the projection total (keep for descriptive Master cols only).
+- **Re-run status (staging):** transfer hitters re-run ✅ (total consistent), returner backfill re-running.
+- **STEP 7b display swap — NOT STARTED (the rewire):** build TWP-aware `pickHitterWar`/`pickPitcherWar`; swap every
+  hitter HEADLINE across the 6 choke points to stored `total_hitter_war` (relabel "oWAR"→"WAR"); component o_war stays;
+  snapshots carry total + d/bsr; descriptive+gap on card; verify (TWP = 2 lines). Exact steps in the agent-learnings doc.
+
 ## OPEN / PENDING (post-Phase-4)
 - **PROD push** — everything committed + staged; run the ordered §A-F push when ready (Trevor drives prod / paste-SQL).
 - **is_position_of_need** (#5) — designed, not built (Phase 1 scope per team_season_stats handoff).
