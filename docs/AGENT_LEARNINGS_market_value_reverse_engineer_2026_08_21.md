@@ -219,4 +219,14 @@ Edit unified resolver + write paths + remove live computes + ACC split (change s
 6. **Deploy** the `process-precompute-jobs` edge fn (Trevor) — new-team path.
 7. Log every SQL to PROD_MIGRATIONS_TODO.
 
-## STATUS: all market-value + stored-first CODE done + green (tsc 180, 265 tests). PENDING: seed model_config → re-price → re-bake snapshots (staging, needs Trevor nod) → prod. Phase 3 dead-code cleanup optional.
+### Phase 3 — dead-code cleanup [9933454, 65032a3] DONE
+- DELETED dead: `deriveHitterStored` (predictionEngine, 0 callers — the o_war market outlier), `src/lib/config/platformDefaults.ts` + `src/hooks/usePlatformConfig.ts` (dormant 4th tier layer, 0 external refs), TransferPortal dead imports (`computeTransferProjection`/`computeHitterPowerRatings`).
+- REMOVED the AdminDashboard `nil_tiers` 5-bucket PTM editor (wrote stale bucket keys `nil_tier_p4/big_ten/strong_mid/low_major` that don't match the per-conference codes) — PTM is now set via `scripts/sql/seed_nil_tiers_model_config.sql`. Kept `nil_base_per_owar` + the position/PVM editor.
+- STORED-FIRST completions: PitcherProfile Stuff+ reads stored `stuff_score` (was always-live; the "no stored column" comment was stale — `storedScores.stuff` = powerRatingsRow[16]); PitcherProfile pWar/pRV+/rates now no-toggle→stored (guards a stored non-zero dev-agg from double-applying). tsc 180→178, 265 tests pass.
+
+### Phase 4 — STAGING re-price [IN PROGRESS 2026-08-23]
+- ✅ **model_config seeded on staging** (verified before/after): old `nil_tier_sec=1.5` + dead bucket keys (`nil_tier_p4/big_ten/strong_mid/low_major`) CLEARED; now `nil_tier_sec=4.0/acc=1.5/big12=1.2/bigten=1.0/independent=1.0/americanathleticconference+aac+sunbelt+bigwest+mountainwest=0.8/default=0.5/juco=0.35`; `nil_base_per_owar=25000` present.
+- ⏳ **Re-pricing 17 teams** (`_run_step2_all.sh` — precompute-transfer-projections + precompute-pitchers per team; batch reads the model_config nil_tier_* keys).
+- NEXT: re-bake snapshots (`resync-build-snapshot-markets.ts --all --apply` + `resync-target-snapshots.ts --all --apply`, dry-run first) → verify roster totals (SEC ~$4.4M / ACC ~$1.7M / Big12 ~$1M / BigTen ~$900k) + Independent=1.0 + TWP.
+
+## STATUS: CODE complete + green (tsc 178, 265 tests) through Phase 3. Phase 4 = seed ✅ staging, re-price RUNNING, then re-bake + verify. PROD push order in the "PROD PUSH" section above + `docs/HANDOFF_MASTER_war_recalibration_2026_08_23.md`.

@@ -64,13 +64,23 @@ Authoritative DB-change ledger: `PROD_MIGRATIONS_TODO.md`. Runbook: `docs/PROD_P
 **F. Verification gates** (runbook): global NULL-count on pitch_log/Masters; confirm each customer team's precompute ran.
 
 ---
-## OPEN / PENDING
-- **Market-value re-price on STAGING** — needs Trevor's nod (staging data write: seed → re-price → re-bake). Not yet run.
-- **Phase 3 dead-code (optional):** delete dead `deriveHitterStored`, dead tier layers (`platformDefaults.ts`/`usePlatformConfig`/dead AdminDashboard `nil_tier_*` editor), dead imports (TransferPortal `computeTransferProjection`/`computeHitterPowerRatings`). PitcherProfile Stuff+ can now read stored `stuff_score`; add the pWar toggled→stored guard the hitter has.
+## PHASE 3 — dead-code cleanup ✅ DONE [9933454, 65032a3]
+Deleted dead `deriveHitterStored` (o_war outlier), `platformDefaults.ts` + `usePlatformConfig.ts` (dormant tier layer),
+TransferPortal dead imports, and the broken AdminDashboard 5-bucket `nil_tier` editor. PitcherProfile Stuff+ → stored
+`stuff_score`; pWar/pRV+/rates → no-toggle-stored guard. tsc 180→178, 265 tests pass.
+
+## PHASE 4 — market-value re-price ON STAGING [IN PROGRESS 2026-08-23]
+- ✅ **model_config seeded on staging** — old `nil_tier_sec=1.5` + dead bucket keys cleared; new per-conference set live (SEC 4.0…). Verified before/after. Committed artifact: `scripts/sql/seed_nil_tiers_model_config.sql` (for PROD).
+- ⏳ **Re-pricing 17 teams** running (`_run_step2_all.sh`).
+- NEXT: re-bake snapshots (`resync-build-snapshot-markets.ts --all --apply` + `resync-target-snapshots.ts --all --apply`) → verify roster totals + Independent=1.0 + TWP.
+- **PROD:** run seed → apply RLS migration → re-price → re-bake → verify → deploy edge fn (Trevor). Same order as §D above.
+
+## OPEN / PENDING (post-Phase-4)
+- **PROD push** — everything committed + staged; run the ordered §A-F push when ready (Trevor drives prod / paste-SQL).
 - **is_position_of_need** (#5) — designed, not built (Phase 1 scope per team_season_stats handoff).
 - **Track B unification** — fold all producers (conf-stats, stage 3b dimension agg, market re-price) into ONE on-upload edge fn.
 - **RLS `nil_valuations`** also `USING(true)` (legacy manual table) — tighten separately if wanted.
-- **Minor stored-first leftovers:** 2 GM readers still hand-roll TWP pick (read-equivalent); season-stats filtered dimensions live (accepted).
+- **Minor stored-first leftovers:** 2 GM readers still hand-roll TWP pick (read-equivalent); season-stats filtered dimensions live (accepted, Trevor OK).
 
 ## Detail docs
 GAP_FIX_PLAN_2026_08_21 · CONFERENCE_STATS_BUILD_PROCESS_2026_08_21 · PIPELINE_pitch_log_to_projections · AGENT_LEARNINGS_market_value_reverse_engineer_2026_08_21 · STORED_FIRST_DISPLAY_AUDIT_2026_08_23 · HANDOFF_market_value_2026_08_21 · PROD_PUSH_RUNBOOK_war_recalibration · PROD_MIGRATIONS_TODO.
