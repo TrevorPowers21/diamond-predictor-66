@@ -25,6 +25,7 @@ import { fetchConferenceStats } from "@/lib/supabaseQueries";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { resolveClassTransition } from "@/lib/classTransitionUtils";
 import { derivePitcherStored } from "@/lib/predictionEngine";
+import { resolveNilTiersFromConfig } from "@/lib/nilProgramSpecific";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 import {
@@ -142,18 +143,23 @@ async function main() {
   // truth — the legacy "Equation Weights" table is empty/retired; store everything in
   // model_config). readPitchingWeights() is code-default in Node; this makes the batch
   // read the DB. Only numeric transfer_* / *_plus_* keys are overlaid.
+  let nilTiers: Record<string, number> | undefined;
   {
     const { data: mc } = await (supabase as any)
       .from("model_config").select("config_key, config_value")
       .eq("model_type", "admin_ui").eq("season", CURRENT_SEASON);
     let overlaid = 0;
+    const mcMap: Record<string, number> = {};
     for (const r of (mc || [])) {
       const k = String(r.config_key);
+      const v = Number(r.config_value);
+      if (Number.isFinite(v)) mcMap[k] = v;
       if ((k.startsWith("transfer_") || k.includes("_plus_ncaa_")) && k in (pitchingEq as any)) {
-        const v = Number(r.config_value);
         if (Number.isFinite(v)) { (pitchingEq as any)[k] = v; overlaid++; }
       }
     }
+    // 2026-08-21: PTM tiers from model_config nil_tier_<code> (single source; fallback to consts).
+    nilTiers = resolveNilTiersFromConfig(mcMap);
     console.log(`  overlaid ${overlaid} pitching weights from model_config`);
   }
 
@@ -532,6 +538,7 @@ async function main() {
       final.pitcher_role,
       { conference: toConference, team: toTeam.name, is_twp: !!(p as any).is_twp, ip: actualIp },
       pitchingEq,
+      nilTiers,
     );
 
     upserts.push({

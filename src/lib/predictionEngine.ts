@@ -48,6 +48,7 @@ export function derivePitcherStored(
   role: "SP" | "RP" | "SM",
   meta: { conference: string | null; team: string | null; is_twp?: boolean; ip?: number | null },
   eq: ReturnType<typeof readPitchingWeights>,
+  nilTiers?: Record<string, number>, // 2026-08-21: PTM tiers from model_config nil_tier_<code> (single source)
 ) {
   // Derive granular depth role from real IP, then use depth-role-specific
   // projected IP for the pWAR formula. Previously used coarse role IP
@@ -56,7 +57,7 @@ export function derivePitcherStored(
   const pitcherDepthRole = derivePitcherDepthRole(meta.ip, role);
   const projectedIp = pitcherExpectedIp(pitcherDepthRole as any, eq);
   const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
-  const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, { dollarsPerWar: eq.market_dollars_per_war });
+  const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, { dollarsPerWar: eq.market_dollars_per_war, tiers: nilTiers });
   // For TWPs: route MV to twp_pitcher_market_value and NULL out the shared
   // market_value column so the hitter loop's market_value write doesn't get
   // stomped (and so any unconverted read fails loud).

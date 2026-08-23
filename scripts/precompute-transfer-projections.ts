@@ -29,6 +29,7 @@ import {
   type ConferenceHittingStats,
 } from "@/lib/buildTransferProjectionInputs";
 import { computeHitterOWar, computeHitterMarketValue, defaultHitterDepthRoleFromActualPa, paForHitterDepthRole } from "@/lib/depthRoles";
+import { resolveNilTiersFromConfig, resolveNilBasePerWar } from "@/lib/nilProgramSpecific";
 import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
@@ -140,6 +141,9 @@ async function main() {
     .eq("customer_team_id", teamId)
     .in("model_type", ["transfer", "global", "admin_ui"]);
   for (const r of overrides || []) remoteEquationValues[r.config_key] = Number(r.config_value);
+  // 2026-08-21: PTM tiers + $/WAR from model_config `nil_tier_<code>` / `nil_base_per_owar` (single source).
+  const nilTiers = resolveNilTiersFromConfig(remoteEquationValues);
+  const nilBase = resolveNilBasePerWar(remoteEquationValues);
   console.log(`  ${remoteEquationValues && Object.keys(remoteEquationValues).length} equation keys (${(overrides || []).length} per-team overrides applied)`);
 
   // 2b. Conference hitting stats (quoted "Conference Stats" table)
@@ -414,7 +418,7 @@ async function main() {
     const marketValue = totalHitterWar != null ? computeHitterMarketValue(totalHitterWar, {
       conference: toConference,
       position: p.position,
-    }) : null;
+    }, { tiers: nilTiers, dollarsPerWar: nilBase }) : null;
 
     upserts.push({
       player_id: p.id,
