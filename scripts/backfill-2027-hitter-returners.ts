@@ -310,6 +310,9 @@ async function main() {
           p_wrc: result.p_wrc,
           p_wrc_plus: result.p_wrc_plus,
           o_war: oWar,
+          // 2026-08-23: store total_hitter_war DIRECTLY (o+d+bsr) — always fresh/consistent, no
+          // refresh_composite_war() lag. total_hitter_war = position-player headline; o_war = component.
+          total_hitter_war: totalHitterWar,
           market_value: meta.is_twp ? null : marketValue,
           ...(meta.is_twp ? { twp_hitter_market_value: marketValue } : {}),
           projected_pa: projectedPa,
