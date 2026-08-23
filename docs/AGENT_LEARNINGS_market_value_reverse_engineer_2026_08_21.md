@@ -172,4 +172,26 @@ Edit unified resolver + write paths + remove live computes + ACC split (change s
 ### Files in scope (~8 + edge fn)
 `nilProgramSpecific.ts`, `pitchingEquations.ts`, `depthRoles.ts`, `predictionEngine.ts`, `jucoReturnerProjection.ts`, `jucoReturnerPitcherProjection.ts`, `buildTransferPitcherInputs.ts`, `PlayerProfile.tsx`, `PitcherProfile.tsx`, `useTeamBuilderSimulation.ts`, `pitcherProjection.ts`, `transferPitcherProjection.ts`, `process-precompute-jobs/index.ts` (4 blocks), `AdminDashboard.tsx`, DELETE `platformDefaults.ts`/`usePlatformConfig.ts`, `nilProgramSpecific.test.ts`. Batch callers: `precompute-transfer-projections.ts`, `precompute-pitchers.ts`.
 
-## STATUS: design LOCKED, awaiting Trevor's GO to implement. NOT started.
+## ★ RESOLVER DESIGN DECIDED (2026-08-21) — per-conference EXACT CODE (option B) + Independent
+- **Option B chosen:** the PTM resolver does an EXACT normalized-conference-code lookup (no fuzzy name
+  matching), per IDs-over-names. `DEFAULT_NIL_TIER_MULTIPLIERS` is now a per-conference `Record<code,number>`;
+  `resolveNilTiersFromConfig` overlays `model_config nil_tier_<code>`. Only non-low-major confs are listed.
+- **Independent = 1.0** (Oregon State) — its OWN entry, NOT low-major. This was the bug that killed the bucket
+  approach: "Independent" fell through to low-major 0.5, badly underpricing a former Pac-12 power. PTM = spending
+  power (separate from the faced-competition fix, which handles the schedule OSU plays).
+- **Locked map:** SEC 4.0 · ACC 1.5 · Big12 1.2 · BigTen 1.0 · Independent 1.0 · AAC/SunBelt/BigWest/MWC 0.8 ·
+  NJCAA 0.35 · everything else 0.5. model_config keys: `nil_tier_<code>` + `nil_tier_default` + `nil_tier_juco` + `nil_base_per_owar`.
+- **TB live-compute is INTENDED, keep it:** the toggle "what-if" recompute writes to the snapshot on persist, then
+  reads stored — a preview-until-save, not a stored-first violation. Wiring check must confirm clean rows read snapshot.
+
+## PROGRESS (implementation)
+- ✅ Phase 1 + 1b DONE (08c40e2, 9f2dc34): unified source + per-conference exact-code resolver + Independent 1.0.
+  Both computeHitter/PitcherMarketValue read the single source; pitcher dropped `eq.market_tier_*`; 3 inline assembly
+  sites + 4 callers repointed. 265 tests pass, tsc 180 (no new). model_config seed = Option A (const holds correct
+  values as fallback; model_config seeded to match, read by WRITE paths + edge fn).
+- NEXT (Phases 2–4): edge fn (its inlined copies → same per-conf lookup + Independent) · `total_hitter_war` for hitter
+  market at the WRITE callers · stored-only display (remove PlayerProfile/PitcherProfile live computes; KEEP TB toggle
+  preview) · thread model_config into batch+edge-fn WRITE paths · kill dead layers (platformDefaults/usePlatformConfig)
+  · seed model_config `nil_tier_<code>` · re-price 17 teams · auto re-bake snapshots · verify roster totals.
+
+## STATUS: Phase 1 code DONE + green. Rolling into Phase 2+ (edge fn + total_hitter_war + stored display + re-price).
