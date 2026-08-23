@@ -1434,16 +1434,19 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     const marketValue = pitcherToggled ? overlayMarketValue : (storedPitcherMarket != null ? Number(storedPitcherMarket) : overlayMarketValue);
 
     return {
-      pEra: line.pEra,
-      pFip: line.pFip,
-      pWhip: line.pWhip,
-      pK9: line.pK9,
-      pBb9: line.pBb9,
-      pHr9: line.pHr9,
-      pRvPlus: line.pRvPlus,
-      pWar: line.pWar,
+      // STORED-FIRST (2026-08-23): no toggle change → the STORED prediction values; a toggle that
+      // moved pWAR → the recomputed `line`. Guards against a stored non-zero dev_aggressiveness
+      // double-applying on load (the hitter path has the same guard).
+      pEra: pitcherToggled ? line.pEra : ((stored as any)?.p_era ?? line.pEra),
+      pFip: pitcherToggled ? line.pFip : ((stored as any)?.p_fip ?? line.pFip),
+      pWhip: pitcherToggled ? line.pWhip : ((stored as any)?.p_whip ?? line.pWhip),
+      pK9: pitcherToggled ? line.pK9 : ((stored as any)?.p_k9 ?? line.pK9),
+      pBb9: pitcherToggled ? line.pBb9 : ((stored as any)?.p_bb9 ?? line.pBb9),
+      pHr9: pitcherToggled ? line.pHr9 : ((stored as any)?.p_hr9 ?? line.pHr9),
+      pRvPlus: pitcherToggled ? line.pRvPlus : ((stored as any)?.p_rv_plus ?? line.pRvPlus),
+      pWar: pitcherToggled ? line.pWar : ((stored as any)?.p_war ?? line.pWar),
       marketValue,
-      projectedIp: line.projectedIp,
+      projectedIp: pitcherToggled ? line.projectedIp : ((stored as any)?.projected_ip ?? line.projectedIp),
       // Stored scouting scores from the picked prediction row — read the
       // domain-scoped pitcher_*_score columns first (canonical source after
       // 2026-06-03 split migration), fall back to legacy columns for rows

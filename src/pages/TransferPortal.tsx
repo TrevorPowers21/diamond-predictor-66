@@ -20,13 +20,11 @@ import {
   getPositionValueMultiplier,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
-import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjection";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
-import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { readPitchingWeights } from "@/lib/pitchingEquations";

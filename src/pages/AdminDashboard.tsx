@@ -872,11 +872,8 @@ function EquationConstantsTab() {
     t_w_intercept: "0.011",
     t_wrc_plus_ncaa_avg: "1.000",
     nil_base_per_owar: "25000",
-    nil_tier_sec: "1.5",
-    nil_tier_p4: "1.2",
-    nil_tier_big_ten: "1.0",
-    nil_tier_strong_mid: "0.8",
-    nil_tier_low_major: "0.5",
+    // nil_tier_* PTM editor REMOVED 2026-08-23 — PTM is now PER-CONFERENCE (model_config
+    // nil_tier_<code>), set via scripts/sql/seed_nil_tiers_model_config.sql, not this 5-bucket UI.
     nil_pos_group_c_ss_cf: "1.3",
     nil_pos_group_2b_3b_cof: "1.1",
     nil_pos_group_1b_dh: "1.0",
@@ -1884,15 +1881,8 @@ function EquationConstantsTab() {
                 </div>
               </div>
               <div className={sectionPanelClass}>
-                {editableSectionHeader("nil_tiers")}
-                <div className="space-y-1.5">
-                  {editableField("nil_tiers", "nil_tier_sec", "SEC")}
-                  {editableField("nil_tiers", "nil_tier_p4", "ACC/Big12")}
-                  {editableField("nil_tiers", "nil_tier_big_ten", "Big Ten")}
-                  {editableField("nil_tiers", "nil_tier_strong_mid", "Strong Mid Major")}
-                  {editableField("nil_tiers", "nil_tier_low_major", "Low Major")}
-                </div>
-                <div className="my-2 border-t" />
+                {/* nil_tiers PTM editor removed 2026-08-23 — PTM is per-conference
+                    (model_config nil_tier_<code>), set via seed_nil_tiers_model_config.sql. */}
                 {editableSectionHeader("nil_positions")}
                 <div className="space-y-1.5">
                   {editableField("nil_positions", "nil_pos_group_c_ss_cf", "Catcher / Shortstop / Center Field / TWP")}
