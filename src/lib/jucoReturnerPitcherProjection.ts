@@ -156,7 +156,7 @@ export function projectJucoReturnerPitcher(args: {
   const marketValue = computePitcherMarketValue(
     pWar,
     { conference: args.conference ?? null, role, team: args.team ?? null },
-    eq,
+    { dollarsPerWar: eq.market_dollars_per_war },
   );
 
   return {

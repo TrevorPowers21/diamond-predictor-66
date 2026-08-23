@@ -1,6 +1,12 @@
+// PROGRAM TIER MULTIPLIERS (PTM) — market value = WAR × $/WAR × PTM × PVM.
+// SINGLE SOURCE OF TRUTH = model_config `nil_tier_*` keys (read via resolveNilTiersFromConfig);
+// these are the code fallback + the correct current values. Reverse-engineered 2026-08-21 from
+// real roster spend (SEC top roster ~44 WAR × $25k × 4.0 ≈ $4.4M ≈ ~$100k/win). See
+// docs/AGENT_LEARNINGS_market_value_reverse_engineer_2026_08_21.md. ACC split out of Big12.
 export const DEFAULT_NIL_TIER_MULTIPLIERS = {
-  sec: 1.5,
-  p4: 1.2, // ACC + Big12
+  sec: 4.0,
+  acc: 1.5,
+  p4: 1.2, // Big12 (+ any other P4-ish); ACC now has its own `acc` key
   bigTen: 1.0,
   strongMid: 0.8,
   lowMajor: 0.5,
@@ -8,6 +14,38 @@ export const DEFAULT_NIL_TIER_MULTIPLIERS = {
 };
 
 type NilTierMultipliers = typeof DEFAULT_NIL_TIER_MULTIPLIERS;
+
+// The default $/WAR base (model_config key `nil_base_per_owar`).
+export const DEFAULT_NIL_BASE_PER_WAR = 25000;
+
+// SINGLE-SOURCE reader: build the PTM tiers object from model_config values (admin_ui overlay),
+// falling back to the code defaults above. Used by BOTH the hitter and pitcher WRITE paths + the
+// edge fn so there is ONE source and no drift. Pass the flat {config_key: value} map.
+export function resolveNilTiersFromConfig(
+  config: Record<string, number | string | null | undefined> | null | undefined,
+): NilTierMultipliers {
+  const c = config ?? {};
+  const val = (k: string, fallback: number): number => {
+    const n = c[k] == null ? NaN : Number(c[k]);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  return {
+    sec:       val("nil_tier_sec",        DEFAULT_NIL_TIER_MULTIPLIERS.sec),
+    acc:       val("nil_tier_acc",        DEFAULT_NIL_TIER_MULTIPLIERS.acc),
+    p4:        val("nil_tier_p4",         DEFAULT_NIL_TIER_MULTIPLIERS.p4),
+    bigTen:    val("nil_tier_big_ten",    DEFAULT_NIL_TIER_MULTIPLIERS.bigTen),
+    strongMid: val("nil_tier_strong_mid", DEFAULT_NIL_TIER_MULTIPLIERS.strongMid),
+    lowMajor:  val("nil_tier_low_major",  DEFAULT_NIL_TIER_MULTIPLIERS.lowMajor),
+    juco:      val("nil_tier_juco",       DEFAULT_NIL_TIER_MULTIPLIERS.juco),
+  };
+}
+
+export function resolveNilBasePerWar(
+  config: Record<string, number | string | null | undefined> | null | undefined,
+): number {
+  const n = config?.["nil_base_per_owar"] == null ? NaN : Number(config["nil_base_per_owar"]);
+  return Number.isFinite(n) ? n : DEFAULT_NIL_BASE_PER_WAR;
+}
 
 const normalizeConferenceKey = (conference: string | null | undefined): string =>
   (conference || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -35,13 +73,9 @@ export const getProgramTierMultiplierByConference = (
   if (key.includes("njcaa")) return multipliers.juco;
   if (key.includes("southeasternconference") || key === "sec") return multipliers.sec;
   if (key.includes("bigten")) return multipliers.bigTen;
-  if (
-    key.includes("atlanticcoastconference") ||
-    key === "acc" ||
-    key.includes("big12")
-  ) {
-    return multipliers.p4;
-  }
+  // ACC has its own tier (split from Big12, 2026-08-21) — branch BEFORE the big12 check.
+  if (key.includes("atlanticcoastconference") || key === "acc") return multipliers.acc;
+  if (key.includes("big12")) return multipliers.p4;
   if (STRONG_MID_KEYS.has(key)) return multipliers.strongMid;
   return multipliers.lowMajor;
 };

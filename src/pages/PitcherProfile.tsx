@@ -1424,7 +1424,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     // Market = pWAR × $/WAR × conference tier (NO PVF — role value is already in
     // WAR via IP). `role` is passed for call-site parity but no longer affects it.
     const overlayMarketValue = computePitcherMarketValue(
-      line.pWar, { conference: destinationConference, role: sessionRole, team: displayTeam }, eq,
+      line.pWar, { conference: destinationConference, role: sessionRole, team: displayTeam }, { dollarsPerWar: eq.market_dollars_per_war },
     );
 
     return {

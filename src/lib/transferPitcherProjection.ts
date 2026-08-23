@@ -419,15 +419,9 @@ export function computeTransferPitcherProjection(
     ? null
     : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
-  const pitchingTierMultipliers = {
-    sec: eq.market_tier_sec,
-    p4: eq.market_tier_acc_big12,
-    bigTen: eq.market_tier_big_ten,
-    strongMid: eq.market_tier_strong_mid,
-    lowMajor: eq.market_tier_low_major,
-    juco: 0.35, // mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco; no eq.market_tier_juco yet
-  };
-  const ptm = getProgramTierMultiplierByConference(input.toConference, pitchingTierMultipliers);
+  // 2026-08-21 UNIFICATION: PTM from the SINGLE source (DEFAULT_NIL_TIER_MULTIPLIERS /
+  // model_config nil_tier_*), not eq.market_tier_*. Omitting the 2nd arg uses shared defaults.
+  const ptm = getProgramTierMultiplierByConference(input.toConference);
   const marketEligible = canShowPitchingMarketValue(input.toTeam, input.toConference);
   // Market value floors at $0 — negative WAR shouldn't produce a negative dollar
   // projection. PVF dropped — role value is already in WAR via IP (see

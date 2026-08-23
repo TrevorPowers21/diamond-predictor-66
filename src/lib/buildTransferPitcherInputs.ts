@@ -375,7 +375,7 @@ export function applyTransferPitcherPostprocess(
     ? computePitcherMarketValue(
         recomputedPWar,
         { conference: args.toConference, role: result.projected_role, team: args.toTeam },
-        pitchingEq,
+        { dollarsPerWar: pitchingEq.market_dollars_per_war },
       )
     : result.market_value;
 

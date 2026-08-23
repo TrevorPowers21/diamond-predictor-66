@@ -1120,16 +1120,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // order matters here, otherwise TDZ throws on first TB render.
 
   // ── Block L: pitchingTierMultipliers, pitchingPvfForRole ─────────────────────
-  const pitchingTierMultipliers = useMemo(
-    () => ({
-      sec: pitchingEq.market_tier_sec,
-      p4: pitchingEq.market_tier_acc_big12,
-      bigTen: pitchingEq.market_tier_big_ten,
-      strongMid: pitchingEq.market_tier_strong_mid,
-      lowMajor: pitchingEq.market_tier_low_major,
-    }),
-    [pitchingEq],
-  );
+  // 2026-08-21 UNIFICATION: single PTM source (DEFAULT_NIL_TIER_MULTIPLIERS / model_config
+  // nil_tier_*), same as the hitter side (line ~1103) — not eq.market_tier_*.
+  const pitchingTierMultipliers = DEFAULT_NIL_TIER_MULTIPLIERS;
   const pitchingPvfForRole = useCallback((role: "SP" | "RP") => {
     return role === "SP" ? pitchingEq.market_pvf_weekend_sp : pitchingEq.market_pvf_reliever;
   }, [pitchingEq]);

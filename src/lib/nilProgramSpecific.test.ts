@@ -7,13 +7,13 @@ import {
 } from "./nilProgramSpecific";
 
 describe("getProgramTierMultiplierByConference", () => {
-  describe("SEC tier (1.5)", () => {
+  describe("SEC tier", () => {
     it.each([
       "SEC",
       "sec",
       "Southeastern Conference",
       "southeastern conference",
-    ])('returns 1.5 for "%s"', (conf) => {
+    ])('returns the SEC tier (4.0) for "%s"', (conf) => {
       expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.sec);
     });
   });
@@ -24,14 +24,19 @@ describe("getProgramTierMultiplierByConference", () => {
     });
   });
 
-  describe("P4 tier (1.2) — ACC and Big 12", () => {
+  // ACC split out of Big12 (2026-08-21): ACC has its own tier, Big12 stays p4.
+  describe("ACC tier (own key, split from Big12)", () => {
+    it.each(["ACC", "Atlantic Coast Conference"])('returns the ACC tier for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.acc);
+    });
+  });
+
+  describe("Big 12 tier (p4)", () => {
     it.each([
-      "ACC",
-      "Atlantic Coast Conference",
       "Big 12",
       "big12",
       "Big12Conference",
-    ])('returns 1.2 for "%s"', (conf) => {
+    ])('returns the p4 tier for "%s"', (conf) => {
       expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.p4);
     });
   });
@@ -67,9 +72,10 @@ describe("getProgramTierMultiplierByConference", () => {
   });
 
   it("respects custom multiplier overrides", () => {
-    const custom = { ...DEFAULT_NIL_TIER_MULTIPLIERS, sec: 2.0, p4: 1.8 };
+    const custom = { ...DEFAULT_NIL_TIER_MULTIPLIERS, sec: 2.0, acc: 1.8, p4: 1.3 };
     expect(getProgramTierMultiplierByConference("SEC", custom)).toBe(2.0);
     expect(getProgramTierMultiplierByConference("ACC", custom)).toBe(1.8);
+    expect(getProgramTierMultiplierByConference("Big 12", custom)).toBe(1.3);
   });
 });
 

@@ -56,7 +56,7 @@ export function derivePitcherStored(
   const pitcherDepthRole = derivePitcherDepthRole(meta.ip, role);
   const projectedIp = pitcherExpectedIp(pitcherDepthRole as any, eq);
   const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
-  const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, eq);
+  const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, { dollarsPerWar: eq.market_dollars_per_war });
   // For TWPs: route MV to twp_pitcher_market_value and NULL out the shared
   // market_value column so the hitter loop's market_value write doesn't get
   // stomped (and so any unconverted read fails loud).

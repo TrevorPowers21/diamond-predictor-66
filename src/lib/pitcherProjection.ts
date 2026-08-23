@@ -479,17 +479,12 @@ export function computePitcherProjection(
     ? null
     : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
-  // Step 7: market value from pWar + conf tier + PVF + eligibility.
-  const pitchingTierMultipliers = {
-    sec: eq.market_tier_sec,
-    p4: eq.market_tier_acc_big12,
-    bigTen: eq.market_tier_big_ten,
-    strongMid: eq.market_tier_strong_mid,
-    lowMajor: eq.market_tier_low_major,
-    juco: 0.35, // mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco; no eq.market_tier_juco yet
-  };
+  // Step 7: market value from pWar + conf tier + eligibility.
+  // 2026-08-21 UNIFICATION: PTM comes from the SINGLE source (DEFAULT_NIL_TIER_MULTIPLIERS /
+  // model_config nil_tier_*), NOT eq.market_tier_* — same source as the hitter + the canonical
+  // computePitcherMarketValue. Omitting the 2nd arg uses the shared defaults.
   const conferenceForMarket = teamMatch?.name ? (input.conference ?? null) : input.conference;
-  const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
+  const ptm = getProgramTierMultiplierByConference(conferenceForMarket);
   const marketEligible = canShowPitchingMarketValue(input.team, conferenceForMarket);
   // Market value floors at $0 — negative WAR shouldn't produce a negative
   // dollar projection. Null stays null (unknown vs zero are different signals).
