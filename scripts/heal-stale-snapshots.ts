@@ -127,7 +127,12 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
         if (hitterRates.p_wrc_plus != null) s.p_wrc_plus = hitterRates.p_wrc_plus;
       } else for (const k of HIT_FIELDS) if (r.neu[k] !== undefined) s[k] = r.neu[k];
       s[r.warHitKey] = fWar; if (r.warHitKey !== "o_war" && "o_war" in s) s.o_war = fWar; s.hitter_depth_role = depth;
-      newMkt = computeHitterMarketValue(fWar, { conference: conf, position: pos.get(r.pid) });
+      // Headline total_hitter_war = toggled oWAR + neutral d/bsr (destination/toggle-invariant).
+      // Market rides TOTAL WAR (not o_war), consistent with the precompute + the 7b display swap.
+      const dW = num(r.neu.d_war) ?? 0, bsrW = num(r.neu.bsr_war) ?? 0;
+      const totalHit = fWar + dW + bsrW;
+      s.total_hitter_war = totalHit; s.d_war = dW; s.bsr_war = bsrW;
+      newMkt = computeHitterMarketValue(totalHit, { conference: conf, position: pos.get(r.pid) });
       if (isTwp) { s.twp_hitter_market_value = newMkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = newMkt; }
     }
     // Heal if WAR drifted OR the market is broken-to-zero. The market-zero case
