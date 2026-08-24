@@ -101,12 +101,14 @@ Ran a read-only verification of the 2026-08-20 audit's 6 🔴 MUST-FIX items + t
 - **Transfer equation:** LOCKED at the lever (weights/SD/env+ratio/park), stored to model_config, staging-run + dry-run
   verified (hitter 96%/pitcher 97%). NOT prod-run. Sits cleanly on B-recentered Stuff+ (common-mode, deltas stable).
 - **★ Stuff+ fork RESOLVED = B** (pitch-weighted recenter) — empirically confirmed staging is ALREADY B; matches Trevor's
-  instinct; NO re-score. Curveball sign bug already folded-fixed. Leftover: a **display-only min-pitch qualifier** (no recompute) — IN PROGRESS.
+  instinct; NO re-score. Curveball sign bug already folded-fixed. **`trackman_pitches` backfilled** (durable data win —
+  scripts/backfill_trackman_pitches_pitching_master.ts, staging applied). **Display gate DEFERRED** — no coach-facing Stuff+
+  leaderboard exists on this branch, so nothing to gate; revisit if one is built.
 
 ## OPEN / PENDING (post-Phase-4)
 - **PROD push** — everything committed + staged; run the ordered §A-F push when ready (Trevor drives prod / paste-SQL).
-- **Stuff+ display-only min-pitch qualifier** — sample source: `trackman_pitches` is null for ~87% of pitchers, so gate on
-  summed `pitcher_stuff_plus_inputs.pitches` (true count) or Pitching Master `IP` (100% populated). Design pending.
+- **Stuff+ display-only min-pitch qualifier** — DEFERRED (no live leaderboard surface). `trackman_pitches` backfill DONE +
+  committed; the display gate (`>=50`) waits on a real Stuff+ leaderboard being built.
 - **is_position_of_need** (#5) — designed, not built (Phase 1 scope per team_season_stats handoff).
 - **Track B unification** — fold all producers (conf-stats, stage 3b dimension agg, market re-price) into ONE on-upload edge fn.
 - **RLS `nil_valuations`** also `USING(true)` (legacy manual table) — tighten separately if wanted.
