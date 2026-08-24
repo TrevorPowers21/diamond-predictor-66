@@ -56,7 +56,7 @@ import {
 } from "@/components/ScoutingReport";
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { JucoPlayerDashboardPanel } from "@/components/JucoPlayerDashboardPanel";
-import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue, pickHitterWar } from "@/lib/twpMarketValue";
 import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 
 type SortKey =
@@ -485,6 +485,9 @@ interface ReturnerPlayer {
     p_iso: number | null;
     p_wrc_plus: number | null;
     o_war: number | null;
+    total_hitter_war: number | null;
+    d_war: number | null;
+    bsr_war: number | null;
     power_rating_plus: number | null;
     ev_score: number | null;
     barrel_score: number | null;
@@ -1563,6 +1566,9 @@ export default function ReturningPlayers() {
             p_iso: row.p_iso,
             p_wrc_plus: row.p_wrc_plus,
             o_war: row.o_war ?? null,
+            total_hitter_war: row.total_hitter_war ?? null,
+            d_war: row.d_war ?? null,
+            bsr_war: row.bsr_war ?? null,
             power_rating_plus: row.power_rating_plus,
             ev_score: row.hitter_ev_score ?? row.ev_score ?? null,
             barrel_score: row.hitter_barrel_score ?? row.barrel_score ?? null,
@@ -1846,7 +1852,7 @@ export default function ReturningPlayers() {
                 from_avg: null, from_obp: null, from_slg: null,
                 class_transition: null, dev_aggressiveness: null,
                 p_avg: null, p_obp: null, p_slg: null, p_ops: null, p_iso: null,
-                p_wrc_plus: null, o_war: null, power_rating_plus: null,
+                p_wrc_plus: null, o_war: null, total_hitter_war: null, d_war: null, bsr_war: null, power_rating_plus: null,
                 ev_score: null, barrel_score: null, contact_score: null, chase_score: null,
               },
             } as ReturnerPlayer));
@@ -1872,7 +1878,7 @@ export default function ReturningPlayers() {
           if (sortKey === "p_ops") return p.prediction.p_ops ?? -999;
           if (sortKey === "p_iso") return p.prediction.p_iso ?? -999;
           if (sortKey === "p_wrc_plus") return p.prediction.p_wrc_plus ?? -999;
-          if (sortKey === "p_war") return p.prediction.o_war ?? -999;
+          if (sortKey === "p_war") return pickHitterWar(p.prediction) ?? -999; // hitter col: key is "p_war" (legacy), reads total_hitter_war
           if (sortKey === "p_nil") return computeNilFallback({ storedNil: p.nil_value, wrcPlus: p.prediction.p_wrc_plus, conference: p.conference, position: p.position }) ?? -999;
           return -999;
         };
@@ -3017,7 +3023,7 @@ export default function ReturningPlayers() {
                         <TableHead className="text-right text-xs"><SortButton label="OPS" sortKeyVal="p_ops" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="ISO" sortKeyVal="p_iso" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
-                        <TableHead className="text-right text-xs"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="WAR" sortKeyVal="p_war" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="Value" sortKeyVal="p_nil" /></TableHead>
                         <TableHead className="text-center min-w-[140px] text-xs">Scouting</TableHead>
                         <TableHead className="w-[36px] text-center text-xs p-0"><Target className="h-3.5 w-3.5 mx-auto text-muted-foreground" /></TableHead>
@@ -3124,7 +3130,7 @@ export default function ReturningPlayers() {
                               {pctFormat(pred.p_wrc_plus)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
-                              {statFormat(pred.o_war, 2)}
+                              {statFormat(pickHitterWar(pred), 2)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
                               {moneyFormat(
