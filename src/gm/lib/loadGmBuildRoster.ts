@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { parseBuildPlayerMeta, projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import { pitcherSessionRole } from "@/lib/effectiveProjection";
+import { pickHitterWar } from "@/lib/twpMarketValue";
 import type { GmRow } from "@/gm/hooks/useGmRoster";
 
 export const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
@@ -35,7 +36,7 @@ export function deriveGmRows(
     const mv = pitcher
       ? (snap.market_value ?? snap.twp_pitcher_market_value ?? null)
       : (snap.market_value ?? snap.twp_hitter_market_value ?? null);
-    const storedWar = pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null);
+    const storedWar = pitcher ? (snap.p_war ?? null) : pickHitterWar(snap); // hitter headline = total_hitter_war (o_war fallback pre-rebake)
 
     const devAgg = Number.isFinite(Number(meta?.devAggressiveness)) ? Number(meta.devAggressiveness) : 0;
     const classTransition = meta?.classTransition ?? "SJ";

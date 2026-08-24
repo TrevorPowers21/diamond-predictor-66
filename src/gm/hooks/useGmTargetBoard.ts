@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { applyTeamScopeFilter, dedupePreferredPerPlayer } from "@/lib/teamScopedPredictions";
 import { isPitcherPos } from "@/gm/lib/loadGmBuildRoster";
+import { pickHitterWar } from "@/lib/twpMarketValue";
 import { logGmActivity } from "@/gm/lib/logGmActivity";
 import { resolveActiveBuildId } from "@/lib/activeBuild";
 
@@ -166,9 +167,9 @@ export function useGmTargetBoard() {
         const ts: any = (r as any).transfer_snapshot;
         const snap = roster
           ? roster
-          : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
+          : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, total_hitter_war: ts.total_hitter_war ?? ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
         const line: any = snap ?? pred;
-        const war = pitcher ? (line?.p_war ?? null) : (line?.o_war ?? null);
+        const war = pitcher ? (line?.p_war ?? null) : pickHitterWar(line); // hitter headline = total_hitter_war (o_war fallback pre-rebake)
         // Side-aware TWP market: a pitcher target reads twp_pitcher, a hitter
         // reads twp_hitter (raw market_value is NULL for TWPs). Matches the roster.
         const market = pitcher

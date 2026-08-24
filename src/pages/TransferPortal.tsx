@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
-import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue, pickHitterWar } from "@/lib/twpMarketValue";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -848,7 +848,7 @@ export default function TransferPortal() {
       if (!selectedPlayer?.player_id) return [];
       const { data, error } = await supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, variant, model_type, status, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value")
+        .select("id, player_id, customer_team_id, variant, model_type, status, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, total_hitter_war, d_war, bsr_war, market_value, twp_hitter_market_value, twp_pitcher_market_value")
         .eq("player_id", selectedPlayer.player_id)
         .eq("season", PROJECTION_SEASON)
         .in("status", ["active", "departed"])
@@ -1287,7 +1287,7 @@ export default function TransferPortal() {
       pIso: row?.p_iso ?? null,
       pWrc: null,
       pWrcPlus: row?.p_wrc_plus ?? null,
-      owar: row?.o_war ?? null,
+      owar: pickHitterWar(row as any), // headline hitter WAR = total_hitter_war (o_war fallback)
       // TWP-aware: raw market_value is NULL for is_twp=true rows by design;
       // pickHitterMarketValue routes to twp_hitter_market_value for them.
       nilValuation: pickHitterMarketValue(row as any, !!(selectedPlayer as any)?.is_twp),
@@ -1553,7 +1553,7 @@ export default function TransferPortal() {
                 <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{simulation ? whole(simulation.pWrcPlus) : "-"}</div>
               </div>
               <div className={`rounded-lg border-2 p-4 text-center ${simulation?.owar != null ? (simulation.owar > 1.5 ? "border-emerald-500 bg-emerald-500/10" : simulation.owar >= 0.5 ? "border-blue-500 bg-blue-500/10" : "border-rose-500 bg-rose-500/10") : "border-border bg-muted/10"}`}>
-                <div className="text-muted-foreground text-xs uppercase tracking-wide">oWAR</div>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">WAR</div>
                 <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{simulation ? stat(simulation.owar, 2) : "-"}</div>
               </div>
               <div className={`rounded-lg border-2 p-4 text-center ${simulation?.nilValuation != null ? (simulation.nilValuation >= 75000 ? "border-emerald-500 bg-emerald-500/10" : simulation.nilValuation >= 25000 ? "border-blue-500 bg-blue-500/10" : "border-amber-500 bg-amber-500/10") : "border-border bg-muted/10"}`}>

@@ -42,7 +42,7 @@ import {
   pitcherRoleFromSlot,
 } from "../helpers";
 import type { BuildPlayer, TeamRow } from "../types";
-import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue, pickHitterWar } from "@/lib/twpMarketValue";
 
 // ── Module-level pure helpers ────────────────────────────────────────────────
 
@@ -1299,8 +1299,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         if (treatAsPitcher && snap.p_war != null && snap.p_rv_plus != null) {
           return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_rv_plus)), owar: Number(snap.p_war), pwar: Number(snap.p_war) };
         }
-        // transfer_snapshot stores oWAR as `owar`; build snapshot as `o_war`.
-        const hitterWar = snap.o_war ?? snap.owar;
+        // Headline hitter WAR = total_hitter_war (o+d+bsr); pickHitterWar falls back to
+        // o_war/owar until snapshots are re-baked with the total (transfer_snapshot=`owar`, build=`o_war`).
+        const hitterWar = pickHitterWar(snap);
         if (!treatAsPitcher && hitterWar != null && snap.p_wrc_plus != null) {
           return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)), owar: Number(hitterWar), pwar: null };
         }

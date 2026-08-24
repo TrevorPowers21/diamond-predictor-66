@@ -994,7 +994,13 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   // In the program hub, WAR + market come from the LIVE build (effectiveProjection
   // on its snapshot + production_notes) so Projections matches the roster and Team
   // Builder. `undefined` = standalone scouting route → use the computed value.
-  const displayOWar = warOverride !== undefined ? warOverride : computedOWar;
+  // Headline WAR = TOTAL hitter WAR (o+d+bsr). Mirrors the market pattern above: no toggle → stored
+  // total_hitter_war; toggle moved oWAR → recomputed total (computedOWar + stored d+bsr); hub → warOverride.
+  const displayHitterWar = warOverride !== undefined
+    ? warOverride
+    : (toggleMovedWar
+        ? computedTotalHitterWar
+        : (storedTotalHitterWar != null ? Number(storedTotalHitterWar) : computedTotalHitterWar));
   const displayNilValuation = marketOverride !== undefined ? marketOverride : computedNilValuation;
   // Build-pinned = rendered inside the program hub (WAR/market come from the live
   // build). There the depth-role / dev-agg controls are read-only labels — they
@@ -1146,7 +1152,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                       p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                       p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
                       p_wrc_plus: projectedWrcPlus,
-                      owar: displayOWar,
+                      owar: displayHitterWar,
                       nil_value: displayNilValuation,
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       // Stored Hitter Master scores only; no client-side derivation
@@ -1243,7 +1249,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                       conference: resolvedConference || player.conference,
                       p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                       p_wrc_plus: projectedWrcPlus,
-                      owar: displayOWar,
+                      owar: displayHitterWar,
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       coach_notes: notes,
                     };
@@ -1315,7 +1321,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                     p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                     p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
                     p_wrc_plus: projectedWrcPlus,
-                    owar: displayOWar,
+                    owar: displayHitterWar,
                     // Valuation
                     nil_value: displayNilValuation,
                     power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
@@ -1727,8 +1733,8 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
           <div className="lg:col-span-2 space-y-4">
             <div className="grid gap-3 grid-cols-3">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">oWAR{isThinSample ? "*" : ""}</div>
-                <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayOWar)}`}>{displayOWar != null ? displayOWar.toFixed(2) : "—"}</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">WAR{isThinSample ? "*" : ""}</div>
+                <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayHitterWar)}`}>{displayHitterWar != null ? displayHitterWar.toFixed(2) : "—"}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Market Value</div>

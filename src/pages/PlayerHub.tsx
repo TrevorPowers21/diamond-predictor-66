@@ -10,6 +10,7 @@ import { allocateNil } from "@/lib/nilAllocation";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { pickHitterWar } from "@/lib/twpMarketValue";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
 import { pitcherRoleFromDepthRole } from "@/lib/depthRoles";
@@ -258,7 +259,7 @@ export default function PlayerHub() {
   // twp_* field names), passed as overrides so the profile renders DISPLAY-ONLY.
   const isTwp = !!dbPlayer?.is_twp;
   const targetWar: number | null | undefined = targetSnap
-    ? (isPitcher ? (targetSnap.p_war ?? null) : (targetSnap.o_war ?? targetSnap.owar ?? null))
+    ? (isPitcher ? (targetSnap.p_war ?? null) : pickHitterWar(targetSnap)) // hitter headline = total_hitter_war (o_war fallback pre-rebake)
     : undefined;
   const targetMarket: number | null | undefined = targetSnap
     ? (isTwp
