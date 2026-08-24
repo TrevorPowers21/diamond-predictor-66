@@ -62,9 +62,12 @@ const derivePitDepth = (pwar: number, rv: number) => PIT_ROLES.map((r) => [r, Ma
     const isTwp = !!s.is_twp;
     const owar = num(s.owar), pwar = num(s.p_war), wrc = num(s.p_wrc_plus), rv = num(s.p_rv_plus);
     const nd = notesDepth(r.production_notes);
+    // Hitter market rides TOTAL hitter WAR (o+d+bsr), not oWAR — matches the precompute + Dashboard.
+    // Fall back to oWAR only if total isn't on the snapshot yet. owar!=null still gates "is a hitter".
+    const totalHit = num(s.total_hitter_war) ?? owar;
 
-    // --- market (exact f(WAR) at program tier) ---
-    const hMkt = owar != null ? computeHitterMarketValue(owar, { conference: conf, position: pos.get(r.player_id) }) : null;
+    // --- market (exact f(total hitter WAR) at program tier) ---
+    const hMkt = owar != null ? computeHitterMarketValue(totalHit, { conference: conf, position: pos.get(r.player_id) }) : null;
     const pMkt = pwar != null ? computePitcherMarketValue(pwar, { conference: conf, role: pitcherRoleFromDepthRole(nd || (pwar != null && rv != null ? derivePitDepth(pwar, rv) : "workhorse_reliever")), team: name.get(r.player_id) ?? null }, EQ) : null;
     if (isTwp) { s.twp_hitter_market_value = hMkt; s.twp_pitcher_market_value = pMkt; s.nil_valuation = null; }
     else { s.nil_valuation = owar != null ? hMkt : pMkt; s.twp_hitter_market_value = null; s.twp_pitcher_market_value = null; }
