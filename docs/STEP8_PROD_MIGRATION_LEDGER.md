@@ -153,7 +153,7 @@ Three number families, each with a canonical source + all consumers:
 | pRV+ = D1-FIP index (not z-blend) | `WAR_CHANGELOG.md`; `src/lib/pitcherQuality.ts` |
 | Master authoritative (=Baseball Ref); pitch log = engine/cross-check | memory `project_war_pitchlog_migration_master_plan` |
 | Stuff+/HTP + conference PARK-FACTOR swap (replaces 100−wRC+ term) | `TRANSFER_ENGINE_AUDIT_2026_08_13.md`; memory `project_transfer_engine_audit`, `project_park_factor_rework` |
-| Stuff+ weighting fork A/B/C | OPEN — `TRANSFER_ENGINE_AUDIT_2026_08_13.md` §3b |
+| Stuff+ weighting fork A/B/C | ✅ RESOLVED 2026-08-24 = **Option B (pitch-weighted recenter)** + display-only min-pitch qualifier. Empirically confirmed staging is ALREADY B (per-pitch recenter: FA\|R pitch-wt mean 100.12 vs per-pitcher 98.74; SL\|R 100.01 vs 99.48; FA\|L 100.53 vs 98.49) — matches Trevor's instinct, so NO re-score. Curveball-HB sign bug already folded-fixed (`stuffPlusEngine.ts:251`, independent). Docs saying "parked as unweighted" were STALE. Only leftover = a display-only min-pitch qualifier (no recompute). See `TRANSFER_ENGINE_AUDIT_2026_08_13.md` §3b (now closed). |
 | Internals collapse (repoint readers → Master; drop table) | `INTERNALS_COLLAPSE_HANDOFF.md`; ledger item J + §K above |
 | Step-7 display/snapshot execution (o_war→total_hitter_war swap) | `STEP7_EXECUTION_MAP.md`; memory `project_war_display_audit` |
 | NIL allocation curve + budget-flex downscaling | `RSTR_IQ_NIL_Allocation_Spec.md` §2; memory `project_player_score_nil_allocation`. **NOT wired — first NIL code change still pending; gated behind 7b/7c/6b.** |

@@ -106,6 +106,7 @@ Apply in order at push time. All additive/idempotent. Staging dates noted.
 - [ ] A1 descriptive_war_columns.sql — Master desc_* columns. PROD pending.
 - [ ] A2 descriptive_war_reg_columns.sql — Master desc_*_reg columns. PROD pending.
 - [ ] B1 step8_model_config_2026.sql — COMPLETE @2026 model_config mirror (wRC+ C1 + composite refits + replacement 21.22). PROD pending.
+  - ⚠ **REGENERATED 2026-08-24 (125→201 keys)** — the 2026-08-13 snapshot had drifted badly vs staging: 80 keys MISSING (per-conference `nil_tier_<code>` market PTM, pitcher `p_*_pr_sd`/`p_ncaa_avg_*`/`p_sd_*`, `transfer_*` pitcher weights, `conf_*_sd`/`park_sd_*`), 26 STALE VALUES (incl. the SD landmine `r/t_obp_std_pr` 28.889→**31.89504**, `r/t_ba_std_pr` 31.297→**29.99699**, transfer weights re-tuned e.g. `t_ba_conference_weight` 0.3→0.256, ncaa_avg refits), 4 old bucket keys removed (`nil_tier_p4/big_ten/strong_mid/low_major`). Root cause: staging was hand-corrected out-of-band (verified correct in DB); the committed seed prod runs was never back-ported → prod would have gotten stale SDs + weights + missing pitcher SDs. Now a faithful 201-key mirror of verified staging. **The `nil_tier_<code>` keys overlap `seed_nil_tiers_model_config.sql` (values match, both idempotent) — either order converges.**
 - [ ] B2 UPDATE ncaa_averages SET wrc=0.3782 WHERE season=2026. PROD pending.
 - [ ] C1/C2 backfill Hitter Master pull_air + Pitching Master in_zone_pct from prod pitch_log. PROD pending.
 - [ ] D1 store recompute (power ratings) on prod. PROD pending.

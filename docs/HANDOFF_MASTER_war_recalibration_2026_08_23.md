@@ -88,8 +88,25 @@ Full detail + WHY + exact steps: **`docs/AGENT_LEARNINGS_total_war_display_2026_
   hitter HEADLINE across the 6 choke points to stored `total_hitter_war` (relabel "oWAR"→"WAR"); component o_war stays;
   snapshots carry total + d/bsr; descriptive+gap on card; verify (TWP = 2 lines). Exact steps in the agent-learnings doc.
 
+## ★ PRE-PROD VERIFICATION PASS (2026-08-24) — audit 🔴 items + config seed + Stuff+ fork
+Ran a read-only verification of the 2026-08-20 audit's 6 🔴 MUST-FIX items + the transfer-lock + the Stuff+ fork.
+- **🔴 items:** #1 orphaned `fetchAllPredictionsForReturnerMode` ✅ FIXED (bulkRecalc retired to edge-fn stub); #4 NaN
+  fallback ✅ FIXED (reads populated `powerEq`, not empty `eq.p_*`); #5 pitcher conf env+ ✅ ratio `(conf/ncaa)×100`;
+  #6 edge pitcher IP ✅ depth-role rewrite before store; #2 `whip_pr_sd` ✅ de-staled (code 37.19844); #3 `obp_std_pr`
+  staging DB correct (31.89504) — see config-seed finding.
+- **★ CONFIG SEED REGEN (real finding):** `scripts/sql/step8_model_config_2026.sql` had drifted **125→201 keys** vs
+  verified staging (80 missing incl. per-conf `nil_tier_<code>` + pitcher `p_*_pr_sd` + `transfer_*` weights + conf/park SDs;
+  26 stale incl. `obp_std_pr` 28.889→31.89504, transfer weights pre-retune; 4 old bucket keys). Staging was hand-tuned,
+  seed never back-ported → prod would've gotten stale. **REGENERATED as a faithful 201-key mirror.** Logged in PROD_MIGRATIONS_TODO B1.
+- **Transfer equation:** LOCKED at the lever (weights/SD/env+ratio/park), stored to model_config, staging-run + dry-run
+  verified (hitter 96%/pitcher 97%). NOT prod-run. Sits cleanly on B-recentered Stuff+ (common-mode, deltas stable).
+- **★ Stuff+ fork RESOLVED = B** (pitch-weighted recenter) — empirically confirmed staging is ALREADY B; matches Trevor's
+  instinct; NO re-score. Curveball sign bug already folded-fixed. Leftover: a **display-only min-pitch qualifier** (no recompute) — IN PROGRESS.
+
 ## OPEN / PENDING (post-Phase-4)
 - **PROD push** — everything committed + staged; run the ordered §A-F push when ready (Trevor drives prod / paste-SQL).
+- **Stuff+ display-only min-pitch qualifier** — sample source: `trackman_pitches` is null for ~87% of pitchers, so gate on
+  summed `pitcher_stuff_plus_inputs.pitches` (true count) or Pitching Master `IP` (100% populated). Design pending.
 - **is_position_of_need** (#5) — designed, not built (Phase 1 scope per team_season_stats handoff).
 - **Track B unification** — fold all producers (conf-stats, stage 3b dimension agg, market re-price) into ONE on-upload edge fn.
 - **RLS `nil_valuations`** also `USING(true)` (legacy manual table) — tighten separately if wanted.
