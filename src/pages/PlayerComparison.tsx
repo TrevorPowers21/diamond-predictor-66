@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
-import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue, pickHitterWar } from "@/lib/twpMarketValue";
 import { cn } from "@/lib/utils";
 
 const PROJECTION_SEASON = 2027;
@@ -42,6 +42,9 @@ type PredictionRow = {
   p_iso: number | null;
   p_wrc_plus: number | null;
   o_war: number | null;
+  total_hitter_war: number | null;
+  d_war: number | null;
+  bsr_war: number | null;
   p_era: number | null;
   p_fip: number | null;
   p_whip: number | null;
@@ -175,7 +178,7 @@ export default function PlayerComparison() {
       const { data, error } = await supabase
         .from("player_predictions")
         .select(
-          "id, player_id, customer_team_id, variant, model_type, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role",
+          "id, player_id, customer_team_id, variant, model_type, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, total_hitter_war, d_war, bsr_war, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role",
         )
         .in("player_id", ids)
         .eq("season", PROJECTION_SEASON)
@@ -358,9 +361,9 @@ export default function PlayerComparison() {
                   <div className="text-muted-foreground text-[10px] uppercase tracking-wide">pWRC+</div>
                   <div className="text-2xl font-bold tabular-nums">{whole(row.p_wrc_plus)}</div>
                 </div>
-                <div className={`rounded-lg border-2 p-3 text-center ${heroColor(row.o_war, 1.5, 0.5)}`}>
-                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">oWAR</div>
-                  <div className="text-2xl font-bold tabular-nums">{row.o_war?.toFixed(2) ?? "—"}</div>
+                <div className={`rounded-lg border-2 p-3 text-center ${heroColor(pickHitterWar(row), 1.5, 0.5)}`}>
+                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">WAR</div>
+                  <div className="text-2xl font-bold tabular-nums">{pickHitterWar(row)?.toFixed(2) ?? "—"}</div>
                 </div>
                 {(() => {
                   // TWP-aware: raw market_value is NULL for is_twp=true rows;
