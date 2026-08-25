@@ -59,5 +59,40 @@ Two-sided moves HR9 from impossible (−0.01) to 0.14, but real elite is 0.29–
 4. Re-run all precomputes; re-verify the calibration table (actual vs projected across the range).
 5. Add the doctrine + the across-the-range calibration check to the audit doctrine.
 
+## WHERE IT LIVES IN THE EDGE FUNCTION (pipeline placement, per `PIPELINE_pitch_log_to_projections.md`)
+The two-sided SD recompute is a **NEW calibration stage 5.5**, between the Masters/ratings/conference baselines and the projections:
+```
+Track B on-upload chain:  2 derive → 3 Stuff+ → 3b season-stats → 4 power ratings → 5 conf baselines
+                          → 5.5 PROJECTION CALIBRATION (NEW)  → 6 projections → 7 NIL
+```
+- **Stage 5.5 (new):** on the QUALIFIED population (min IP/AB), compute per-stat mean + `sd_good`/`sd_bad` (and `pr_sd` from
+  the Stage-4 ratings). Write to `model_config` (keys per stat, e.g. `hr9_sd_good`/`hr9_sd_bad`/`hr9_ncaa_avg`/`hr9_qual_min_ip`).
+- **Stage 6 (projections)** reads those from `model_config` — identical for returner, transfer, and the edge fn. Directional:
+  use `sd_good` when projecting toward elite, `sd_bad` toward poor.
+- **Run in tandem, front-to-end:** when built, execute the WHOLE chain (2→…→5.5→6→7) on staging in one pass and re-verify the
+  across-the-range calibration table + WAR/market — so the new SD is proven working from ingest through display, not in isolation.
+
+## QUALIFIER SENSITIVITY (2026 data — set the min IP/AB from this, not by guess)
+`sd_good / sd_bad` tighten as the qualifier rises (garbage-removal effect); asymmetry (pitching) persists at every threshold:
+| stat | IP≥25 (n=3401) | IP≥40 (n=1802) | IP≥60 (n=705) |
+|---|---|---|---|
+| ERA | 1.87/2.94 | 1.55/2.27 | 1.20/1.50 |
+| HR9 | 0.55/0.77 | 0.48/0.64 | 0.42/0.49 |
+| WHIP | 0.30/0.42 | 0.26/0.34 | 0.20/0.23 |
+| BB9 | 1.53/2.27 | 1.31/1.73 | 1.02/1.28 |
+| K9 | 2.40/2.05 | 2.31/1.97 | 2.32/1.99 |
+Hitters symmetric at all PA thresholds (AVG/OBP good≈bad; ISO upside-skewed). Leaning IP≥40 (real sample, n=1802) / PA≥100 — **Trevor to confirm.**
+
+## HR9 DIG (2026, IP≥40, n=1802) — why the composite is a weak predictor (corr 0.32)
+Correlation of each HR9-composite INPUT with actual HR9:
+| input | current weight | corr w/ HR9 |
+|---|---|---|
+| barrel_pct | **0.15** | **0.273** (strongest — barrels ARE HRs) |
+| hard_hit_pct | 0.30 | 0.238 |
+| ground_pct | 0.30 | −0.228 (legit — grounders suppress HR, Trevor's intuition confirmed) |
+| h_pull_pct | **0.25** | **0.111** (weakest) |
+| → composite | | **0.32** (barely beats barrel alone) |
+**Finding:** groundball is NOT the culprit (it's a real predictor). The mis-weight is **barrel under-weighted (best signal, smallest weight)** and **pull over-weighted (worst signal, big weight).** Re-weighting toward barrel + away from pull sharpens the rating (tightens the extreme ratings that over-reach). BUT HR9's inputs top out at ~0.27 corr — it's inherently the least-predictable stat, so it will always regress the most, *earned by the data* (not a floor). Composite re-weight is a candidate follow-on; still OPEN whether that alone suffices or HR9 also needs its weak signal reflected in the projection.
+
 ## RELATED
 `project_pitcher_damping_path_b` · `feedback_pause_and_confirm_before_changes` (this was a long collaborative modeling session — propose + prove with data, don't set rules) · `project_power_rating_refits_2026_08_11` (the HR9 composite refit that exposed this).
