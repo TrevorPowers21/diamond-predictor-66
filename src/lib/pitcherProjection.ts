@@ -199,7 +199,10 @@ export const projectPitchingRate = ({
   // toward NCAA average, pull weak projections DOWN toward NCAA average —
   // i.e. damping fights outliers instead of preserving them.
   void thresholds; void impacts; void dampFactorForProjected;
-  return projected;
+  // Physical floor: no pitching rate can be negative (like market value flooring at $0). The two-sided
+  // SD fixes the systematic over-projection; this only clamps thin-sample edge cases (≈1-IP arms whose
+  // last-year 0.00 + a class/dev multiplier drive the blend a hair below 0). Not masking broken math.
+  return Math.max(0, projected);
 };
 
 const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
