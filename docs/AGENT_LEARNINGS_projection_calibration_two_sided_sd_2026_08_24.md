@@ -92,7 +92,22 @@ Correlation of each HR9-composite INPUT with actual HR9:
 | ground_pct | 0.30 | −0.228 (legit — grounders suppress HR, Trevor's intuition confirmed) |
 | h_pull_pct | **0.25** | **0.111** (weakest) |
 | → composite | | **0.32** (barely beats barrel alone) |
-**Finding:** groundball is NOT the culprit (it's a real predictor). The mis-weight is **barrel under-weighted (best signal, smallest weight)** and **pull over-weighted (worst signal, big weight).** Re-weighting toward barrel + away from pull sharpens the rating (tightens the extreme ratings that over-reach). BUT HR9's inputs top out at ~0.27 corr — it's inherently the least-predictable stat, so it will always regress the most, *earned by the data* (not a floor). Composite re-weight is a candidate follow-on; still OPEN whether that alone suffices or HR9 also needs its weak signal reflected in the projection.
+**Finding:** groundball is NOT the culprit (it's a real predictor). The current weights double-count hard contact (barrel ⊂ hard_hit) and over-weight pull. Multiple regression (discounts the double-counting) → optimal weights barrel 0.22 / hard_hit 0.28 / ground 0.35 / pull 0.16.
+
+**★ DECISIVE (2026-08-25): re-weighting HR9 is a DEAD END.** Even with the optimal weights, the composite improves only
+0.32 → **0.335 (multiple R)**. The inputs cannot predict HR9 better than ~0.33 correlation — HR9 is inherently the least
+predictable stat. So HR9 is NOT fixed by weights.
+**HR9 handling (data-earned, not a floor/dial):** because the rating can't identify elite HR9 (a top-*rated* HR9 arm actually
+gives up ~0.78 HR9 on average, vs the 0.29 p95 *outcome*), HR9's projection **regresses toward the mean by its measured signal
+strength (~0.33)** → elite HR9 lands ~0.6–0.8 (= the actual top-rated mean, and Trevor's stated comfort ~0.84). The other 6 stats
+rank players well, so the two-sided SD lands their elite correctly with no extra regression. The regression amount is per-stat and
+earned by the measured predictive power, not a uniform shrink (which over-compressed the good stats) or a floor.
+
+## LOCKED SPEC (2026-08-25)
+- **Qualifier: IP≥40 / PA≥100** (Trevor confirmed — cleans the SD without gutting the sample; see sensitivity table).
+- **Two-sided SD** on the qualified pop for every stat (skew + impossible-value fix).
+- **Per-stat regression by measured predictive power** — ~1.0 for the well-ranked stats (two-sided SD alone), heavier for HR9
+  (~0.33) where the rating genuinely can't rank the stat. All from the data; the edge fn re-derives each season.
 
 ## RELATED
 `project_pitcher_damping_path_b` · `feedback_pause_and_confirm_before_changes` (this was a long collaborative modeling session — propose + prove with data, don't set rules) · `project_power_rating_refits_2026_08_11` (the HR9 composite refit that exposed this).
