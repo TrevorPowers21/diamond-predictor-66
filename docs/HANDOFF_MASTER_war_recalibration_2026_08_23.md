@@ -105,6 +105,22 @@ Ran a read-only verification of the 2026-08-20 audit's 6 🔴 MUST-FIX items + t
   scripts/backfill_trackman_pitches_pitching_master.ts, staging applied). **Display gate DEFERRED** — no coach-facing Stuff+
   leaderboard exists on this branch, so nothing to gate; revisit if one is built.
 
+## ★ PROJECTION CALIBRATION — z-shift over-projects extremes; fix = TWO-SIDED SD (2026-08-24)
+Full detail: **`docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md`**.
+- **Bug:** the projection map (`pitcherProjection.ts:170` + hitter mirror) over-projects the ELITE tier → impossible values
+  (66 pitchers NEGATIVE projected HR9, elite ERA 1.13) → inflated pWAR, mid-major weak-Stuff arms top the board (Yochum).
+- **Cause:** the symmetric-SD z-shift assumes (a) correlation=1 (rating↔stat) and (b) a symmetric stat; pitching rates are
+  right-skewed so the single SD (inflated by the bad tail) over-projects the compressed good side through the physical floor.
+- **Fix (data-proven):** **two-sided/split SD** — `sd_good` (spread below the mean) vs `sd_bad` (above), use the directional
+  one. Lands ERA elite at 2.52, WHIP/BB9/K9/AVG/ISO within ~0.02–0.05 of real elite. NO floor (rejected — "lazy"), NO uniform
+  `r`-shrink (rejected — squashed elite AVG to .318). **"Realistic SD" = qualified pop (min IP/AB) + directional semi-deviation.**
+- **Open before build:** the sample qualifier (test 25/40/60 IP), and HR9 (the one holdout — corr 0.32, rating barely tracks HR9).
+- **Plan:** compute per-stat two-sided SDs → store method+values in model_config → wire into the edge fn (re-derives from each
+  season's actuals) → re-run precomputes → re-verify across the range. **NOT built yet.**
+- **DOCTRINE (verbatim):** "every audit verified code matches spec and constants match the mean and SD, and both were true.
+  Nothing verified that the model's output matched reality across the range, and a bug calibrated perfectly at the mean is
+  invisible to every mean-based check." → add an across-the-range calibration check to every modeling review.
+
 ## OPEN / PENDING (post-Phase-4)
 - **PROD push** — everything committed + staged; run the ordered §A-F push when ready (Trevor drives prod / paste-SQL).
 - **Stuff+ display-only min-pitch qualifier** — DEFERRED (no live leaderboard surface). `trackman_pitches` backfill DONE +

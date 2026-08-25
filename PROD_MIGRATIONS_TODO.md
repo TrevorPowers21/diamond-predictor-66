@@ -116,6 +116,16 @@ Apply in order at push time. All additive/idempotent. Staging dates noted.
 - [ ] H1 reseed team_war_snapshots; H2 fill player/transfer snapshots; H3 total-WAR display swap. PROD pending.
 - [ ] J DROP player_prediction_internals (Track B, AFTER bulkRecalc retired). PROD pending — separate confirmed step.
 
+## ★ PROJECTION CALIBRATION — two-sided SD (feature/war-recalibration) — 2026-08-24 — DESIGNED, NOT BUILT
+- [ ] **Two-sided (split) SD recalibration of the projection map** — the symmetric-SD z-shift over-projects elite (impossible
+  negative HR9, elite ERA 1.13) → inflated pWAR. Fix: per-stat `sd_good`/`sd_bad` (semi-deviation below/above the mean) on a
+  qualified population; scale elite projections by the good-side SD. Full writeup + proof: `docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md`.
+  **When built (staging→prod):** (1) compute per-stat mean + `sd_good`/`sd_bad` + the qualifier on the season's actuals;
+  (2) store the method + values in `model_config` (read by returner/transfer/edge fn); (3) code change in `pitcherProjection.ts`
+  (+ hitter mirror) to use the directional SD; (4) redeploy the edge fn (re-derives SDs each season); (5) re-run ALL precomputes;
+  (6) re-verify the calibration table (actual vs projected across the range) + re-bake snapshots + markets.
+  ⚠ **OPEN before build:** sample qualifier (test 25/40/60 IP); HR9 holdout (corr 0.32). NOT yet implemented — modeling design locked on two-sided SD, awaiting Trevor's go on qualifier + HR9.
+
 ## 7b snapshot total_hitter_war fill (feature/war-recalibration) — 2026-08-24
 - [ ] **Fill total_hitter_war into HITTER snapshots** — `scripts/backfill-snapshot-total-hitter-war.ts` (idempotent-by-value, dry-run default, `--apply`). Snapshots stored `o_war` only, so the 7b display swap made build-player profiles fall back to `o_war` (offense-only) while the Dashboard shows total → misaligned WAR + market. Sets `total_hitter_war = o_war + d_war + bsr_war` on `team_build_players.{player_snapshot,neutral_snapshot}` + `target_board.{transfer_snapshot,neutral_snapshot}` (d/bsr from the player's precompute row; snapshot's own team-scoped/toggled o_war preserved). **APPLIED STAGING 2026-08-24** (verified 1149 build hitters correct, 0 wrong, idempotent). **PROD: run `--apply` after the prod re-price/precompute.** ⚠ Must run AFTER the snapshot writers carry total (below) OR it's a one-time catch-up; re-run any time snapshots are re-baked.
   - ⚠️ **RELIABILITY BUG (unordered `.range()` pagination silently skips rows):** fixed in this script. AUDITED the other batch scripts 2026-08-24 — the CRITICAL ones already order (`precompute-transfer-projections`/`precompute-pitchers`/`heal-stale-snapshots`/`resync-build-snapshot-markets`/`resync-target-snapshots`/`backfill-2027-hitter-returners` — precompute even carries a comment about exactly this), so the re-price/refresh/precompute runs were reliable. **ONLY `backfill-neutral-snapshot.ts` lacked `.order()`** → fixed (add `.order("id")`) as part of the writer update below.
