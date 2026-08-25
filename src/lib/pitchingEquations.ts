@@ -7,26 +7,32 @@ export type PitchingEquationWeights = {
   hr9_plus_weight: number;
   era_plus_ncaa_avg: number;
   era_plus_ncaa_sd: number;
+  era_plus_ncaa_sd_bad: number;
   era_pr_sd: number;
   era_plus_scale: number;
   fip_plus_ncaa_avg: number;
   fip_plus_ncaa_sd: number;
+  fip_plus_ncaa_sd_bad: number;
   fip_pr_sd: number;
   fip_plus_scale: number;
   whip_plus_ncaa_avg: number;
   whip_plus_ncaa_sd: number;
+  whip_plus_ncaa_sd_bad: number;
   whip_pr_sd: number;
   whip_plus_scale: number;
   k9_plus_ncaa_avg: number;
   k9_plus_ncaa_sd: number;
+  k9_plus_ncaa_sd_bad: number;
   k9_pr_sd: number;
   k9_plus_scale: number;
   bb9_plus_ncaa_avg: number;
   bb9_plus_ncaa_sd: number;
+  bb9_plus_ncaa_sd_bad: number;
   bb9_pr_sd: number;
   bb9_plus_scale: number;
   hr9_plus_ncaa_avg: number;
   hr9_plus_ncaa_sd: number;
+  hr9_plus_ncaa_sd_bad: number;
   hr9_pr_sd: number;
   hr9_plus_scale: number;
   era_damp_thresholds: number[];
@@ -199,26 +205,32 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   hr9_plus_weight: 0.05,
   era_plus_ncaa_avg: 6.21,
   era_plus_ncaa_sd: 1.587898316,
+  era_plus_ncaa_sd_bad: 1.587898316,
   era_pr_sd: 28.11694,       // std_pr on 2026 pitch-log ratings (IP≥40); was 29.48780404
   era_plus_scale: 20,
   fip_plus_ncaa_avg: 5.08,
   fip_plus_ncaa_sd: 1.000197585,
+  fip_plus_ncaa_sd_bad: 1.000197585,
   fip_pr_sd: 22.88228,       // std_pr on 2026 pitch-log ratings (IP≥40); was 22.20492306
   fip_plus_scale: 20,
   whip_plus_ncaa_avg: 1.64,
   whip_plus_ncaa_sd: 0.2521159606,
+  whip_plus_ncaa_sd_bad: 0.2521159606,
   whip_pr_sd: 37.19844,      // std_pr on 2026 pitch-log ratings (IP≥40); was 24.58561805 (composite refit widened it)
   whip_plus_scale: 20,
   k9_plus_ncaa_avg: 8.21,
   k9_plus_ncaa_sd: 1.990147058,
+  k9_plus_ncaa_sd_bad: 1.990147058,
   k9_pr_sd: 45.47741,        // std_pr on 2026 pitch-log ratings (IP≥40); was 43.76562188
   k9_plus_scale: 20,
   bb9_plus_ncaa_avg: 4.82,
   bb9_plus_ncaa_sd: 1.340745984,
+  bb9_plus_ncaa_sd_bad: 1.340745984,
   bb9_pr_sd: 42.91711,       // std_pr on 2026 pitch-log ratings (IP≥40); was 42.89490618
   bb9_plus_scale: 20,
   hr9_plus_ncaa_avg: 1.12,
   hr9_plus_ncaa_sd: 0.4677282102,
+  hr9_plus_ncaa_sd_bad: 0.4677282102,
   hr9_pr_sd: 32.25982,       // std_pr on 2026 pitch-log ratings (IP≥40); was 34.13833398
   hr9_plus_scale: 20,
   era_damp_thresholds: [2.5, 3.5, 4.5, 5.5, 7.0, 8.0, 9.0],
@@ -335,26 +347,32 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       hr9_plus_weight: Number.isFinite(parsed.hr9_plus_weight) ? Number(parsed.hr9_plus_weight) : base.hr9_plus_weight,
       era_plus_ncaa_avg: Number.isFinite(parsed.era_plus_ncaa_avg) ? Number(parsed.era_plus_ncaa_avg) : base.era_plus_ncaa_avg,
       era_plus_ncaa_sd: Number.isFinite(parsed.era_plus_ncaa_sd) ? Number(parsed.era_plus_ncaa_sd) : base.era_plus_ncaa_sd,
+      era_plus_ncaa_sd_bad: Number.isFinite(parsed.era_plus_ncaa_sd_bad) ? Number(parsed.era_plus_ncaa_sd_bad) : base.era_plus_ncaa_sd_bad,
       era_pr_sd: Number.isFinite(parsed.era_pr_sd) ? Number(parsed.era_pr_sd) : base.era_pr_sd,
       era_plus_scale: Number.isFinite(parsed.era_plus_scale) ? Number(parsed.era_plus_scale) : base.era_plus_scale,
       fip_plus_ncaa_avg: Number.isFinite(parsed.fip_plus_ncaa_avg) ? Number(parsed.fip_plus_ncaa_avg) : base.fip_plus_ncaa_avg,
       fip_plus_ncaa_sd: Number.isFinite(parsed.fip_plus_ncaa_sd) ? Number(parsed.fip_plus_ncaa_sd) : base.fip_plus_ncaa_sd,
+      fip_plus_ncaa_sd_bad: Number.isFinite(parsed.fip_plus_ncaa_sd_bad) ? Number(parsed.fip_plus_ncaa_sd_bad) : base.fip_plus_ncaa_sd_bad,
       fip_pr_sd: Number.isFinite(parsed.fip_pr_sd) ? Number(parsed.fip_pr_sd) : base.fip_pr_sd,
       fip_plus_scale: Number.isFinite(parsed.fip_plus_scale) ? Number(parsed.fip_plus_scale) : base.fip_plus_scale,
       whip_plus_ncaa_avg: Number.isFinite(parsed.whip_plus_ncaa_avg) ? Number(parsed.whip_plus_ncaa_avg) : base.whip_plus_ncaa_avg,
       whip_plus_ncaa_sd: Number.isFinite(parsed.whip_plus_ncaa_sd) ? Number(parsed.whip_plus_ncaa_sd) : base.whip_plus_ncaa_sd,
+      whip_plus_ncaa_sd_bad: Number.isFinite(parsed.whip_plus_ncaa_sd_bad) ? Number(parsed.whip_plus_ncaa_sd_bad) : base.whip_plus_ncaa_sd_bad,
       whip_pr_sd: Number.isFinite(parsed.whip_pr_sd) ? Number(parsed.whip_pr_sd) : base.whip_pr_sd,
       whip_plus_scale: Number.isFinite(parsed.whip_plus_scale) ? Number(parsed.whip_plus_scale) : base.whip_plus_scale,
       k9_plus_ncaa_avg: Number.isFinite(parsed.k9_plus_ncaa_avg) ? Number(parsed.k9_plus_ncaa_avg) : base.k9_plus_ncaa_avg,
       k9_plus_ncaa_sd: Number.isFinite(parsed.k9_plus_ncaa_sd) ? Number(parsed.k9_plus_ncaa_sd) : base.k9_plus_ncaa_sd,
+      k9_plus_ncaa_sd_bad: Number.isFinite(parsed.k9_plus_ncaa_sd_bad) ? Number(parsed.k9_plus_ncaa_sd_bad) : base.k9_plus_ncaa_sd_bad,
       k9_pr_sd: Number.isFinite(parsed.k9_pr_sd) ? Number(parsed.k9_pr_sd) : base.k9_pr_sd,
       k9_plus_scale: Number.isFinite(parsed.k9_plus_scale) ? Number(parsed.k9_plus_scale) : base.k9_plus_scale,
       bb9_plus_ncaa_avg: Number.isFinite(parsed.bb9_plus_ncaa_avg) ? Number(parsed.bb9_plus_ncaa_avg) : base.bb9_plus_ncaa_avg,
       bb9_plus_ncaa_sd: Number.isFinite(parsed.bb9_plus_ncaa_sd) ? Number(parsed.bb9_plus_ncaa_sd) : base.bb9_plus_ncaa_sd,
+      bb9_plus_ncaa_sd_bad: Number.isFinite(parsed.bb9_plus_ncaa_sd_bad) ? Number(parsed.bb9_plus_ncaa_sd_bad) : base.bb9_plus_ncaa_sd_bad,
       bb9_pr_sd: Number.isFinite(parsed.bb9_pr_sd) ? Number(parsed.bb9_pr_sd) : base.bb9_pr_sd,
       bb9_plus_scale: Number.isFinite(parsed.bb9_plus_scale) ? Number(parsed.bb9_plus_scale) : base.bb9_plus_scale,
       hr9_plus_ncaa_avg: Number.isFinite(parsed.hr9_plus_ncaa_avg) ? Number(parsed.hr9_plus_ncaa_avg) : base.hr9_plus_ncaa_avg,
       hr9_plus_ncaa_sd: Number.isFinite(parsed.hr9_plus_ncaa_sd) ? Number(parsed.hr9_plus_ncaa_sd) : base.hr9_plus_ncaa_sd,
+      hr9_plus_ncaa_sd_bad: Number.isFinite(parsed.hr9_plus_ncaa_sd_bad) ? Number(parsed.hr9_plus_ncaa_sd_bad) : base.hr9_plus_ncaa_sd_bad,
       hr9_pr_sd: Number.isFinite(parsed.hr9_pr_sd) ? Number(parsed.hr9_pr_sd) : base.hr9_pr_sd,
       hr9_plus_scale: Number.isFinite(parsed.hr9_plus_scale) ? Number(parsed.hr9_plus_scale) : base.hr9_plus_scale,
       era_damp_thresholds: withFallbackArray(asNumArray(parsed.era_damp_thresholds), base.era_damp_thresholds, base.era_damp_thresholds.length),

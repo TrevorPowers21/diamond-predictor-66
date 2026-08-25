@@ -89,10 +89,10 @@ const STATS: StatDef[] = [
   { key: "k9_plus", table: "Pitching Master", statCol: "K9", qualCol: "IP", qualMin: 40, lowerBetter: false, perNine: true },
   { key: "bb9_plus", table: "Pitching Master", statCol: "BB9", qualCol: "IP", qualMin: 40, lowerBetter: true, perNine: true },
   { key: "hr9_plus", table: "Pitching Master", statCol: "HR9", qualCol: "IP", qualMin: 40, lowerBetter: true, shrink: true, perNine: true },
-  // hitters (symmetric — two-sided ≈ single, but keep it consistent + data-fresh)
-  { key: "r_ba_std", table: "Hitter Master", statCol: "AVG", qualCol: "pa", qualMin: 100, lowerBetter: false },
-  { key: "r_obp_std", table: "Hitter Master", statCol: "OBP", qualCol: "pa", qualMin: 100, lowerBetter: false },
-  { key: "t_iso_std", table: "Hitter Master", statCol: "ISO", qualCol: "pa", qualMin: 100, lowerBetter: false },
+  // NOTE: hitters (AVG/OBP/ISO) are symmetric (sd_good ≈ sd_bad) and currently well-calibrated;
+  // they use a different model_config key convention (r_ncaa_avg_ba / r_ba_std_ncaa / r_ba_std_pr).
+  // Deferred to a clean follow-on — writing their good-SD here would need the hitter directional
+  // code landed in lockstep or it would use sd_good symmetrically. Pitching-only for this build.
 ];
 
 async function main() {

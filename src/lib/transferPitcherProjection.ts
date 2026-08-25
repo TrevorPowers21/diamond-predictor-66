@@ -108,6 +108,12 @@ type RateWork = {
 
 // Lower-is-better rate (ERA, FIP, WHIP, BB9, HR9): apply confTerm subtracted,
 // compTerm added, parkTerm added, optionally damped.
+// Two-sided (split) SD: PR+ > 100 = better talent → project toward the compressed GOOD side (sd_good);
+// PR+ < 100 → the wide BAD side (sd_bad). The caller picks it so projectLower/Higher stay unchanged.
+// Mirrors projectPitchingRate's directional SD (stage 5.5 calibration).
+const dsd = (prPlus: number, sdGood: number, sdBad: number): number =>
+  (prPlus >= 100 ? sdGood : (Number.isFinite(sdBad) ? sdBad : sdGood));
+
 const projectLower = (
   last: number,
   prPlus: number,
@@ -374,12 +380,12 @@ export function computeTransferPitcherProjection(
 
   // Project each rate at the to-school. WHIP uses damp 0.75 (matches existing
   // TransferPortal behavior); BB9 has no park term.
-  const eraWork = projectLower(era!, eraPr!, eq.era_plus_ncaa_avg, eq.era_pr_sd, eq.era_plus_ncaa_sd, eq.transfer_era_power_weight, eq.transfer_era_conference_weight, fromEraPlus!, toEraPlus!, eq.transfer_era_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_era_park_weight, fromRg, toRg);
-  const fipWork = projectLower(fip!, fipPr!, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, eq.fip_plus_ncaa_sd, eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, fromFipPlus!, toFipPlus!, eq.transfer_fip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_fip_park_weight, fromRg, toRg);
-  const whipWork = projectLower(whip!, whipPr!, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, eq.whip_plus_ncaa_sd, eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, fromWhipPlus!, toWhipPlus!, eq.transfer_whip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
-  const k9Work = projectHigher(k9!, k9Pr!, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, eq.k9_plus_ncaa_sd, eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, fromK9Plus!, toK9Plus!, eq.transfer_k9_competition_weight, fromHitterTalent!, toHitterTalent!);
-  const bb9Work = projectLower(bb9!, bb9Pr!, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, eq.bb9_plus_ncaa_sd, eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, fromBb9Plus!, toBb9Plus!, eq.transfer_bb9_competition_weight, fromHitterTalent!, toHitterTalent!, null, null, null);
-  const hr9Work = projectLower(hr9!, hr9Pr!, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, eq.hr9_plus_ncaa_sd, eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, fromHr9Plus!, toHr9Plus!, eq.transfer_hr9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf);
+  const eraWork = projectLower(era!, eraPr!, eq.era_plus_ncaa_avg, eq.era_pr_sd, dsd(eraPr!, eq.era_plus_ncaa_sd, eq.era_plus_ncaa_sd_bad), eq.transfer_era_power_weight, eq.transfer_era_conference_weight, fromEraPlus!, toEraPlus!, eq.transfer_era_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_era_park_weight, fromRg, toRg);
+  const fipWork = projectLower(fip!, fipPr!, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, dsd(fipPr!, eq.fip_plus_ncaa_sd, eq.fip_plus_ncaa_sd_bad), eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, fromFipPlus!, toFipPlus!, eq.transfer_fip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_fip_park_weight, fromRg, toRg);
+  const whipWork = projectLower(whip!, whipPr!, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(whipPr!, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, fromWhipPlus!, toWhipPlus!, eq.transfer_whip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
+  const k9Work = projectHigher(k9!, k9Pr!, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(k9Pr!, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, fromK9Plus!, toK9Plus!, eq.transfer_k9_competition_weight, fromHitterTalent!, toHitterTalent!);
+  const bb9Work = projectLower(bb9!, bb9Pr!, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(bb9Pr!, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, fromBb9Plus!, toBb9Plus!, eq.transfer_bb9_competition_weight, fromHitterTalent!, toHitterTalent!, null, null, null);
+  const hr9Work = projectLower(hr9!, hr9Pr!, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(hr9Pr!, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, fromHr9Plus!, toHr9Plus!, eq.transfer_hr9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf);
   const pEra = eraWork.projected;
   const pFip = fipWork.projected;
   const pWhip = whipWork.projected;
