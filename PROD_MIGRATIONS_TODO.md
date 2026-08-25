@@ -135,7 +135,13 @@ Apply in order at push time. All additive/idempotent. Staging dates noted.
   0.15->0.61, pWAR 2.31->2.05; HR9 negatives 66->3. **PROD order:** run `compute-projection-calibration.ts --apply` (stage 5.5)
   BEFORE re-running pitcher precomputes -> re-run all 17 teams transfer + returner-pitcher batch (raise statement_timeout for the
   propagate step) -> re-bake snapshots+markets -> deploy edge fn `process-precompute-jobs` with the directional-SD mirror (Trevor).
-  **REMAINING on staging:** full 17-team + returner re-run; edge-fn Deno mirror; hitters (symmetric, follow-on); ~3 residual neg HR9.
+  **FULL RE-RUN DONE STAGING 2026-08-25:** transfer (18 teams) + returner batches re-run; snapshots re-baked (backfill-neutral
+  bp1205/tb167 + heal 561/561 + resync markets). Board verified — top-12 pitchers all genuine stuff (0 weak-stuff mid-major).
+  ⚠ **RETURNER OVERLAY FIX (commit 3c4e8c8):** `precompute-returner-pitchers` never overlaid model_config `_plus_ncaa_` (only
+  `p_*`) → ran on stale symmetric SDs. Fixed. **PROD: the returner batch needs this overlay or returners ignore the calibration.**
+  **19 residual neg HR9 = qualification gap** (all 0–5 IP / lastHR9 0.00; D1 sub-5-IP slip through while JUCO sub-20-IP already
+  nulled) — NOT a floor/calibration issue. Fix TBD (min-IP qual for D1 returners, or per-pitcher last-year shrinkage). Investigate-only.
+  **REMAINING:** edge-fn Deno mirror (Trevor deploys); hitters (symmetric, follow-on).
 
 ## 7b snapshot total_hitter_war fill (feature/war-recalibration) — 2026-08-24
 - [ ] **Fill total_hitter_war into HITTER snapshots** — `scripts/backfill-snapshot-total-hitter-war.ts` (idempotent-by-value, dry-run default, `--apply`). Snapshots stored `o_war` only, so the 7b display swap made build-player profiles fall back to `o_war` (offense-only) while the Dashboard shows total → misaligned WAR + market. Sets `total_hitter_war = o_war + d_war + bsr_war` on `team_build_players.{player_snapshot,neutral_snapshot}` + `target_board.{transfer_snapshot,neutral_snapshot}` (d/bsr from the player's precompute row; snapshot's own team-scoped/toggled o_war preserved). **APPLIED STAGING 2026-08-24** (verified 1149 build hitters correct, 0 wrong, idempotent). **PROD: run `--apply` after the prod re-price/precompute.** ⚠ Must run AFTER the snapshot writers carry total (below) OR it's a one-time catch-up; re-run any time snapshots are re-baked.

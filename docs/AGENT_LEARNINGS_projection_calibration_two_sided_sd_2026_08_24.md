@@ -74,6 +74,23 @@ Two-sided moves HR9 from impossible (−0.01) to 0.14, but real elite is 0.29–
   negative HR9 = an individual pitcher's OWN noisy last-year HR9 in the 0.3/0.7 blend (calibration shrink doesn't touch the
   per-pitcher input) — optional: shrink the last-year input too. (5) re-bake snapshots + markets after the full re-run.
 
+## ★ FULL RE-RUN + RE-BAKE — DONE + VERIFIED on staging (2026-08-25)
+- **Transfer (18 customer teams)** `precompute-pitchers --apply` — done, 0 propagate timeouts. Overlays model_config `_plus_ncaa_` (incl. `_sd_bad`) already.
+- **⚠ RETURNER OVERLAY GAP (found + fixed, commit `3c4e8c8`):** `precompute-returner-pitchers` only overlaid `p_*` power weights, NEVER the `_plus_ncaa_` means/SDs → it ran on stale symmetric code-defaults. Added the same overlay `precompute-pitchers` has. **PROD: the returner batch needs this overlay too, or returners ignore the calibration.** Re-run → returner HR9 negatives 63 → 19.
+- **Re-bake** `backfill-neutral-snapshot` (bp 1205 / tb 167) + `heal-stale-snapshots` (561/561, 0 err) + `resync-target-snapshots` (markets already consistent) — snapshots now carry the new pitcher WARs/markets.
+- **VERIFIED board:** top-12 projected returner pitchers are ALL genuine stuff (Stuff+ 99–113: Flora 113 / Blair 110 / Volantis 108) — **0 weak-stuff mid-major arms at the top** (the reported bug, fixed). Yochum 0.15→0.61 / pWAR 2.31→2.05.
+
+## ★ THE 19 RESIDUAL NEGATIVE HR9 — INVESTIGATED (2026-08-25): a SAMPLE-QUALIFICATION gap, NOT calibration
+Pulled all 19 negatives' inputs: **every one has IP = 0–5 (mostly 1 IP) and lastHR9 = 0.00.** They barely pitched and
+trivially allowed 0 HR in ~1 inning. Even a *below-average*-rated one (Owen Pincince, hr9_pr_plus 45) goes negative — so it's
+NOT the rating/SD. Root cause: these are sub-threshold pitchers getting a full projection off ~1 inning of noise.
+**Key inconsistency:** the returner batch ALREADY nulls JUCO pitchers under 20 IP (1,167 of them per the run log), but **D1
+pitchers under ~5 IP slip through.** So the negatives are a qualification gap, not a two-sided-SD failure. They're 0.29% of
+returners and don't top the board (≈0 pWAR value). **Fix options (Trevor's call — investigate-only for now):**
+(a) apply a min-IP qualification to D1 returner projections (null sub-X-IP, mirroring the JUCO sub-20-IP nulling);
+(b) per-pitcher last-year shrinkage — for IP=1, `IP/(IP+K=71)` pulls lastHR9 essentially to the league mean, so the blend
+    can't go negative; (c) both. Not a floor either way — it's fixing garbage-in on ~1-inning pitchers.
+
 ## WHERE IT LIVES IN THE EDGE FUNCTION (pipeline placement, per `PIPELINE_pitch_log_to_projections.md`)
 The two-sided SD recompute is a **NEW calibration stage 5.5**, between the Masters/ratings/conference baselines and the projections:
 ```

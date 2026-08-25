@@ -114,9 +114,13 @@ Full detail: **`docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08
 - **Fix (data-proven):** **two-sided/split SD** — `sd_good` (spread below the mean) vs `sd_bad` (above), use the directional
   one. Lands ERA elite at 2.52, WHIP/BB9/K9/AVG/ISO within ~0.02–0.05 of real elite. NO floor (rejected — "lazy"), NO uniform
   `r`-shrink (rejected — squashed elite AVG to .318). **"Realistic SD" = qualified pop (min IP/AB) + directional semi-deviation.**
-- **Open before build:** the sample qualifier (test 25/40/60 IP), and HR9 (the one holdout — corr 0.32, rating barely tracks HR9).
-- **Plan:** compute per-stat two-sided SDs → store method+values in model_config → wire into the edge fn (re-derives from each
-  season's actuals) → re-run precomputes → re-verify across the range. **NOT built yet.**
+- **★ BUILT + RE-RUN + VERIFIED on staging (2026-08-25).** Spec locked (all data-driven): qualifier IP≥40/PA≥100 + two-sided
+  (split) SD (`sd_good` toward elite, `sd_bad` toward poor) + HR9 sample-size shrinkage with data-derived K=71 (variance
+  decomposition). Producer `compute-projection-calibration.ts` (stage 5.5) → model_config; `pitcherProjection`/`transferPitcherProjection`
+  use the directional SD. Commits `57e8f12` (code), `3c4e8c8` (returner overlay fix). Full transfer (18 teams) + returner re-run +
+  snapshot re-bake done. **Board fixed** (top-12 pitchers all genuine Stuff+ 99–113; 0 weak-stuff mid-major arms). Yochum
+  0.15→0.61 / pWAR 2.31→2.05. HR9 negatives 66→19 (the 19 = a sub-5-IP qualification gap, not calibration — see agent-learnings).
+  **REMAINING:** edge-fn Deno mirror (Trevor deploys); hitters (symmetric follow-on); the 19-negative qualification fix (Trevor's call).
 - **DOCTRINE (verbatim):** "every audit verified code matches spec and constants match the mean and SD, and both were true.
   Nothing verified that the model's output matched reality across the range, and a bug calibrated perfectly at the mean is
   invisible to every mean-based check." → add an across-the-range calibration check to every modeling review.
