@@ -103,11 +103,26 @@ strength (~0.33)** → elite HR9 lands ~0.6–0.8 (= the actual top-rated mean, 
 rank players well, so the two-sided SD lands their elite correctly with no extra regression. The regression amount is per-stat and
 earned by the measured predictive power, not a uniform shrink (which over-compressed the good stats) or a floor.
 
-## LOCKED SPEC (2026-08-25)
-- **Qualifier: IP≥40 / PA≥100** (Trevor confirmed — cleans the SD without gutting the sample; see sensitivity table).
-- **Two-sided SD** on the qualified pop for every stat (skew + impossible-value fix).
-- **Per-stat regression by measured predictive power** — ~1.0 for the well-ranked stats (two-sided SD alone), heavier for HR9
-  (~0.33) where the rating genuinely can't rank the stat. All from the data; the edge fn re-derives each season.
+## ★★★ FINAL LOCKED SPEC (2026-08-25) — all data-driven, no floors/dials ★★★
+Refined after testing: a uniform stiff qualifier (IP≥80) fixes HR9 but BREAKS the others (calibrates on an elite-only
+subpop → ERA/BB9 overshoot). The right split:
+1. **Qualifier: IP≥40 / PA≥100** (Trevor confirmed).
+2. **Two-sided (split) SD** on the qualified pop for EVERY stat — `sd_good` (deviations better than the mean) projecting toward
+   elite, `sd_bad` toward poor. Fixes the skew + impossible values; lands ERA/WHIP/BB9/K9/AVG/ISO elite on reality.
+3. **Sample-size shrinkage on HR9 ONLY** — HR9 is the sole **luck-dominated** stat (luck SD 0.42 > talent SD 0.37 at IP≥40;
+   every other stat is talent-dominated, so the two-sided SD alone handles them — leave them untouched). Per-pitcher:
+   `regressed = league_mean + (observed − league_mean) × IP/(IP+K)`.
+4. **K is DATA-DERIVED** (variance decomposition, NOT eyeballed): a rate's luck variance scales as `C/IP` (Poisson events,
+   `C = 9·mean` for per-9 rates, `= mean` for WHIP); `talent_var = observed_var − mean_luck_var`; **`K = C / talent_var`**.
+   HR9 K = **71** this season (reliability 0.36 at 40 IP). Derived K per stat: HR9 71 · K9 25 · WHIP 26 · BB9 22 · ERA 18 —
+   HR9's is far the largest, quantifying why only it needs shrinkage. The edge fn re-derives K each season.
+   → HR9 elite projects **0.66** (= top-rated arms' actual mean 0.78 / Trevor's ~0.84 comfort). No floor, no dial.
+5. **Pipeline: stage 5.5** — compute means + two-sided SDs + HR9's K on the qualified pop → store in `model_config` (read by
+   returner/transfer/edge fn) → stage 6 projections consume → run the whole chain front-to-end + re-verify across the range.
+
+**Superseded idea:** the earlier "per-stat regression by predictive power r" — replaced by the two-sided SD (handles the
+well-ranked stats with no regression) + HR9-only sample-size shrinkage (handles the one luck-dominated stat). Re-weighting the
+HR9 composite is a DEAD END (ceiling 0.335) — do NOT pursue it as the fix.
 
 ## RELATED
 `project_pitcher_damping_path_b` · `feedback_pause_and_confirm_before_changes` (this was a long collaborative modeling session — propose + prove with data, don't set rules) · `project_power_rating_refits_2026_08_11` (the HR9 composite refit that exposed this).
