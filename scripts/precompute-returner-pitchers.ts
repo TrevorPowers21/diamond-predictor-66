@@ -130,6 +130,25 @@ async function main() {
   // 1. Load equation weights
   console.log(`${C.cyan}→${C.reset} loading equation weights...`);
   const pitchingEq = readPitchingWeights();
+  // Overlay model_config <stat>_plus_ncaa_* (incl. the stage-5.5 two-sided _sd / _sd_bad + calibrated
+  // means) onto pitchingEq — readPitchingWeights() is code-default in Node, so the DB values must be
+  // applied here (same overlay precompute-pitchers does). Without this the returner uses stale
+  // symmetric SDs and HR9 over-projects (negative).
+  {
+    const { data: mc } = await supabase
+      .from("model_config").select("config_key, config_value")
+      .eq("model_type", "admin_ui").eq("season", CURRENT_SEASON);
+    let overlaid = 0;
+    for (const r of (mc || []) as Array<{ config_key: string | null; config_value: any }>) {
+      const k = String(r.config_key);
+      const v = Number(r.config_value);
+      if (Number.isFinite(v) && (k.startsWith("transfer_") || k.includes("_plus_ncaa_")) && k in (pitchingEq as any)) {
+        (pitchingEq as any)[k] = v;
+        overlaid++;
+      }
+    }
+    console.log(`  overlaid ${overlaid} pitching ncaa/transfer weights from model_config`);
+  }
   const powerEq = await loadPitchingPowerEq(CURRENT_SEASON);
 
   // 2. Park factors
