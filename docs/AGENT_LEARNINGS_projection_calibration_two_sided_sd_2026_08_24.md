@@ -59,6 +59,21 @@ Two-sided moves HR9 from impossible (−0.01) to 0.14, but real elite is 0.29–
 4. Re-run all precomputes; re-verify the calibration table (actual vs projected across the range).
 5. Add the doctrine + the across-the-range calibration check to the audit doctrine.
 
+## ★ BUILD STATUS (2026-08-25) — PITCHING BUILT + VERIFIED on staging
+- **Producer** `scripts/compute-projection-calibration.ts` (stage 5.5) — computes per-stat calibrated mean + `sd_good`/`sd_bad`
+  on the qualified pop; HR9 shrinkage (data-K=71) baked into HR9's mean/SD. Writes `<stat>_plus_ncaa_avg/_ncaa_sd/_ncaa_sd_bad`
+  to model_config. **APPLIED STAGING** (19 keys; era 5.475/1.545/2.265, hr9 1.076/0.213/0.271, K=70.8).
+- **Code** (commit `57e8f12`): `pitchingEquations` type/defaults/merge-reader gain `<stat>_plus_ncaa_sd_bad`; `projectPitchingRate`
+  (returner) + `transferPitcherProjection.dsd()` (transfer, 6 sites) use the directional SD (rawZ≥0 → sd_good, else sd_bad).
+  Covers returner, transfer, TB sim, PitcherProfile. 0 new tsc errors, 265 tests pass. Batch overlays the model_config keys.
+- **VERIFIED (Arkansas re-run):** Yochum projHR9 **0.15 → 0.61**, pWAR **2.31 → 2.05**, pRV+ 151 → 142. HR9 negatives collapsed
+  ~66 → 3 (0.06%), 0% below 0.3. Systematic over-projection fixed.
+- **REMAINING:** (1) full re-run — all 17 customer teams (transfer) + returner-pitcher batch; the `propagate` SQL step needs the
+  raised statement_timeout (big-write). (2) **edge fn (Deno) `process-precompute-jobs`** mirror of the directional SD — Trevor
+  deploys. (3) **hitters** (AVG/OBP/ISO) — symmetric, deferred follow-on (different model_config key convention). (4) ~3 residual
+  negative HR9 = an individual pitcher's OWN noisy last-year HR9 in the 0.3/0.7 blend (calibration shrink doesn't touch the
+  per-pitcher input) — optional: shrink the last-year input too. (5) re-bake snapshots + markets after the full re-run.
+
 ## WHERE IT LIVES IN THE EDGE FUNCTION (pipeline placement, per `PIPELINE_pitch_log_to_projections.md`)
 The two-sided SD recompute is a **NEW calibration stage 5.5**, between the Masters/ratings/conference baselines and the projections:
 ```
