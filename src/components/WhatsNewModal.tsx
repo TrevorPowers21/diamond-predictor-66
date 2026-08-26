@@ -36,12 +36,12 @@ const RELEASES: Release[] = [
         ],
       },
       {
-        title: "Market Valuations, Informed by Research and Refined With You",
+        title: "Improved Market Valuations",
         tagline:
-          "Market values are grounded in our research into how programs spend, meant as a strong starting point that we will keep tuning with coach feedback through this first cycle.",
+          "An improved market value on every player, built from our research and refined with coach feedback through this first cycle.",
         details: [
-          "Each valuation accounts for the conference you are building for and the value of the position, as a research-based estimate rather than a fixed price.",
-          "As coaches weigh in this cycle, the model keeps improving, so the numbers move closer to how your market actually behaves.",
+          "Each valuation accounts for the conference you are building for and the value of the position.",
+          "As coaches weigh in this cycle, the numbers keep improving.",
         ],
       },
       {
