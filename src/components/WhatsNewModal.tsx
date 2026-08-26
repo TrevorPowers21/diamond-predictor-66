@@ -53,6 +53,17 @@ const RELEASES: Release[] = [
           "It is the quickest way to see whether a player's value comes from his bat, his glove, his legs, or all three.",
         ],
       },
+      {
+        title: "Sharper Projections for Every Hitter and Pitcher",
+        tagline:
+          "Every projection has been rebuilt on the complete 2026 season with refined models, giving you a clearer, more reliable read on how a player is likely to perform when he steps into your program.",
+        details: [
+          "Projections are built from pitch-by-pitch 2026 tracking data, reflecting the quality of contact, stuff, and plate discipline behind the numbers.",
+          "The hitting and pitching models were each sharpened this cycle against real D1 outcomes, tightening how a player's raw production translates into what you can expect going forward.",
+          "Every projection accounts for the level of competition a player faced, so a big season against elite arms reads differently than the same line against weaker ones.",
+          "The result is a steadier forward look you can lean on when you weigh returners against transfers and set your board.",
+        ],
+      },
     ],
     whatElse: [
       "Two-way players are valued on both sides at once, with a hitter line and a pitcher line, each carrying its own WAR and market.",
