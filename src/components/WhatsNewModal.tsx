@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v8";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v9";
 
 type Feature = {
   title: string;
@@ -20,6 +20,45 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-08-26",
+    headline: "The truest read yet on every player's value, from a full 2026 data-science pass",
+    landingRoute: "/dashboard/returning",
+    features: [
+      {
+        title: "Complete WAR: Offense, Defense, and Baserunning Together",
+        tagline:
+          "Every hitter's headline WAR now brings together everything a player does to help you win, at the plate, in the field, and on the bases, for the truest single measure of his value.",
+        details: [
+          "Total WAR combines offensive, defensive, and baserunning value into one number on every profile, dashboard, and Team Builder row.",
+          "Defense and baserunning are built from 2026 tracking data, so a great glove or an aggressive baserunner gets the credit he earns.",
+          "Because the number reflects the whole player, your roster totals and side-by-side comparisons tell a more complete story.",
+        ],
+      },
+      {
+        title: "Market Valuations, Informed by Research and Refined With You",
+        tagline:
+          "Market values are grounded in our research into how programs spend, meant as a strong starting point that we will keep tuning with coach feedback through this first cycle.",
+        details: [
+          "Each valuation accounts for the conference you are building for and the value of the position, as a research-based estimate rather than a fixed price.",
+          "As coaches weigh in this cycle, the model keeps improving, so the numbers move closer to how your market actually behaves.",
+        ],
+      },
+      {
+        title: "Run Values on Every Hitter's Season Stats",
+        tagline:
+          "See exactly where a hitter creates value, in runs, right on his Season Stats page, ranked against the country.",
+        details: [
+          "Batting, Defensive, and Baserunning run value sit together on the Stats page, each colored by national rank the same way the rest of your Statcast-style displays are.",
+          "It is the quickest way to see whether a player's value comes from his bat, his glove, his legs, or all three.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Two-way players are valued on both sides at once, with a hitter line and a pitcher line, each carrying its own WAR and market.",
+      "Player pages open cleanly from every historical and season table, landing on the right profile, headshot, and Season Stats.",
+    ],
+  },
   {
     date: "2026-07-17",
     headline: "Introducing the Front Office",
