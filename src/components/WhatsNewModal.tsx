@@ -23,7 +23,6 @@ const RELEASES: Release[] = [
   {
     date: "2026-08-26",
     headline: "The truest read yet on every player's value, from a full 2026 data-science pass",
-    landingRoute: "/dashboard/returning",
     features: [
       {
         title: "Complete WAR: Offense, Defense, and Baserunning Together",
