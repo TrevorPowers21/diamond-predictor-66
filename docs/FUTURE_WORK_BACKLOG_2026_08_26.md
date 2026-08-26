@@ -1,7 +1,22 @@
 # FUTURE WORK / BACKLOG — captured 2026-08-26
 
 Everything discussed and intentionally held off during the WAR-recalibration cycle, plus the new features Trevor
-wants next. One place so nothing is lost. Not prioritized yet — grouped by theme. Cross-refs to the deeper docs/memory.
+wants next. One place so nothing is lost. Grouped by theme. Cross-refs to the deeper docs/memory.
+
+---
+
+## ★★ TOP PRIORITY (Trevor flagged 2026-08-26)
+
+### Hitters two-sided (directional) SD  — VERY IMPORTANT
+Trevor **wanted this in this cycle** and thought it was in — it is NOT. Pitchers got the two-sided SD (each of the 6
+metrics has a `_sd_bad` directional key: era/fip/whip/k9/bb9/hr9); **hitters still use a SYMMETRIC SD** (ba/obp/iso
+have only `_std` / `_std_pr`, no `_std_bad`). This is a **build task**, not a config flip: compute the directional
+(bad-side) SDs for the hitter metrics (ba/obp/iso and/or wRC+ components) and wire them into the hitter projection the
+same way the pitcher path does. **#1 follow-on** — build it right after (or, if Trevor wants, before) the prod push.
+
+### Finalize the dev agent build  — VERY IMPORTANT
+Finish and ship the RSTR IQ dev agent — the CLI/dev agent that cross-checks the code against Supabase. Trevor wanted
+this and it was never completed. Scope + current state to confirm. [[project_rstr_dev_agent]]
 
 ---
 
@@ -49,7 +64,7 @@ every downstream aggregate in the same pass. [[project_unified_projection_edge_f
 - **dWAR opportunity-scaling** — dWAR is a fixed per-player value; it should scale up/down with defensive
   opportunity/innings (depth role) the way oWAR scales with PA. A depth-role change moves oWAR but not dWAR today.
   NEEDED. [[project_dwar_opportunity_scaling]]
-- **Hitters two-sided (directional) SD** — pitchers got the two-sided SD projection; hitters are the symmetric follow-on.
+- **Hitters two-sided (directional) SD** — ★★ moved to TOP PRIORITY above (Trevor wanted it this cycle).
 - **Market calibration research phase** — PVM/PTM tuned via coach feedback post-ship; the market model stays "calibrating."
   [[project_market_calibration_research_phase]] · [[project_market_value_ptm_unification]] (one model_config source + stored-only refactor).
 - **Player Score / NIL allocation v1** — budget→value rank-decay curve, decoupled from market; settled but NOT wired.
