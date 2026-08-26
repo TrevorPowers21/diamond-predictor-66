@@ -131,6 +131,10 @@ const projectLower = (
   fromPark: number | null,
   toPark: number | null,
   dampFactor = 1,
+  // HR9 ONLY (Trevor 2026-08-25): clamp at 0. Mirrors projectPitchingRate.floorAtZero —
+  // HR9 is the lone luck-dominated stat where a thin-sample blend can dip below 0; the
+  // other lower-is-better rates stay unfloored so a negative surfaces as a real bug.
+  floorAtZero = false,
 ): RateWork => {
   const safePrSd = prSd === 0 ? 1 : prSd;
   const powerAdj = ncaaAvg - (((prPlus - 100) / safePrSd) * ncaaSd);
@@ -140,12 +144,13 @@ const projectLower = (
   const parkTerm = parkWeight != null && fromPark != null && toPark != null ? parkWeight * ((toPark - fromPark) / 100) : 0;
   const mult = 1 - confTerm + compTerm + parkTerm;
   const adjustedMult = 1 + ((mult - 1) * dampFactor);
+  const rawProjected = blended * adjustedMult;
   return {
     last,
     powerAdj: round3(powerAdj),
     blended: round3(blended),
     mult: round3(adjustedMult),
-    projected: round3(Math.max(0, blended * adjustedMult)),
+    projected: round3(floorAtZero ? Math.max(0, rawProjected) : rawProjected),
     confTerm: round3(confTerm),
     compTerm: round3(compTerm),
     parkTerm: round3(parkTerm),
@@ -182,7 +187,9 @@ const projectHigher = (
     powerAdj: round3(powerAdj),
     blended: round3(blended),
     mult: round3(mult),
-    projected: round3(Math.max(0, blended * mult)),
+    // K9 (higher-is-better) is NOT floored — HR9 is the only floored rate. K9 can't
+    // realistically go negative anyway; leaving it unfloored keeps a real bug visible.
+    projected: round3(blended * mult),
     confTerm: round3(confTerm),
     compTerm: round3(compTerm),
     parkTerm: 0,
@@ -385,7 +392,7 @@ export function computeTransferPitcherProjection(
   const whipWork = projectLower(whip!, whipPr!, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(whipPr!, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, fromWhipPlus!, toWhipPlus!, eq.transfer_whip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
   const k9Work = projectHigher(k9!, k9Pr!, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(k9Pr!, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, fromK9Plus!, toK9Plus!, eq.transfer_k9_competition_weight, fromHitterTalent!, toHitterTalent!);
   const bb9Work = projectLower(bb9!, bb9Pr!, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(bb9Pr!, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, fromBb9Plus!, toBb9Plus!, eq.transfer_bb9_competition_weight, fromHitterTalent!, toHitterTalent!, null, null, null);
-  const hr9Work = projectLower(hr9!, hr9Pr!, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(hr9Pr!, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, fromHr9Plus!, toHr9Plus!, eq.transfer_hr9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf);
+  const hr9Work = projectLower(hr9!, hr9Pr!, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(hr9Pr!, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, fromHr9Plus!, toHr9Plus!, eq.transfer_hr9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf, 1, true);
   const pEra = eraWork.projected;
   const pFip = fipWork.projected;
   const pWhip = whipWork.projected;

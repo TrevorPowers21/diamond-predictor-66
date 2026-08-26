@@ -138,6 +138,7 @@ export const projectPitchingRate = ({
   impacts,
   lowerIsBetter,
   fallbackToLastStat = false,
+  floorAtZero = false,
 }: {
   lastStat: number | null;
   prPlus: number | null;
@@ -156,6 +157,13 @@ export const projectPitchingRate = ({
   // (TeamBuilder's previous behavior — carry the season's actual rate
   // forward as the projection rather than dropping the row entirely).
   fallbackToLastStat?: boolean;
+  // When true, clamp the projected rate at 0. HR9 ONLY (Trevor 2026-08-25):
+  // HR9 is the one luck-dominated stat where a thin-sample blend can still dip
+  // a hair below 0 even after the two-sided SD — a physical-floor clamp there is
+  // realistic (like market value at $0). Every OTHER rate is left UNfloored on
+  // purpose: the two-sided SD makes their math correct, so a negative would be a
+  // real bug we want VISIBLE, not silently masked (audit doctrine 2026-08-24).
+  floorAtZero?: boolean;
 }) => {
   // Strict guard on lastStat — without a season number, there's nothing to
   // project even with the fallback flag.
@@ -199,10 +207,11 @@ export const projectPitchingRate = ({
   // toward NCAA average, pull weak projections DOWN toward NCAA average —
   // i.e. damping fights outliers instead of preserving them.
   void thresholds; void impacts; void dampFactorForProjected;
-  // Physical floor: no pitching rate can be negative (like market value flooring at $0). The two-sided
-  // SD fixes the systematic over-projection; this only clamps thin-sample edge cases (≈1-IP arms whose
-  // last-year 0.00 + a class/dev multiplier drive the blend a hair below 0). Not masking broken math.
-  return Math.max(0, projected);
+  // HR9-only physical floor (floorAtZero): clamps the thin-sample edge case (≈1-IP arms whose last-year
+  // 0.00 + a class/dev multiplier drive the blend a hair below 0). Applied to HR9 ONLY — every other rate
+  // stays unfloored so a negative (which the two-sided SD should prevent) surfaces as a real bug rather
+  // than being silently masked. See the floorAtZero param doc + audit doctrine (2026-08-24).
+  return floorAtZero ? Math.max(0, projected) : projected;
 };
 
 const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
@@ -448,7 +457,7 @@ export function computePitcherProjection(
   const pWhip = projectPitchingRate({ lastStat: input.whip, prPlus: prPlus.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, ncaaSdBad: eq.whip_plus_ncaa_sd_bad, prSd: eq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
   const pK9 = projectPitchingRate({ lastStat: input.k9, prPlus: prPlus.k9PrPlus, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, ncaaSdBad: eq.k9_plus_ncaa_sd_bad, prSd: eq.k9_pr_sd, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
   const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, ncaaSdBad: eq.bb9_plus_ncaa_sd_bad, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
-  const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, ncaaSdBad: eq.hr9_plus_ncaa_sd_bad, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
+  const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, ncaaSdBad: eq.hr9_plus_ncaa_sd_bad, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true, floorAtZero: true });
 
   // Park factor is intentionally NOT applied to returner projections — the
   // pitcher's lastStat already reflects their home park, and they're staying
