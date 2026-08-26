@@ -1042,6 +1042,16 @@ async function main(): Promise<void> {
   }
   const totalSec = Number(process.hrtime.bigint() - startTotal) / 1e9;
   console.log(`\nAll ${tasks.length} aggregations done in ${(totalSec / 60).toFixed(1)} min.`);
+
+  // Descriptive hitter run values (batting/defensive/baserunning) + national z-scores
+  // on the 'all' rows. Runs AFTER the aggregations so the batting_rv counts are fresh;
+  // reads player_season_defense/baserunning for the DRS + wSB components. Same SQL fn
+  // the process-precompute-jobs edge fn calls, so batch + on-upload stay in lockstep.
+  console.log(`\n[run values] populate_hitter_run_values(2026)...`);
+  const rvStart = process.hrtime.bigint();
+  const { error: rvErr } = await (supabase as any).rpc("exec_sql", { sql: "select public.populate_hitter_run_values(2026);" });
+  if (rvErr) { console.error(`  FAILED: ${rvErr.message}`); process.exit(1); }
+  console.log(`  ok (${(Number(process.hrtime.bigint() - rvStart) / 1e9).toFixed(1)}s)`);
 }
 
 main().catch((e) => {
