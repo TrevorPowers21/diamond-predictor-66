@@ -414,3 +414,192 @@ Building the transfer equation lever finalization. Each DB change logged here as
   Code committed (08c40e2→95f22a6). STAGING re-price NOT yet run (needs Trevor nod). Full: `docs/AGENT_LEARNINGS_market_value_reverse_engineer_2026_08_21.md` + `docs/HANDOFF_MASTER_war_recalibration_2026_08_23.md`.
 
 - [ ] **⭐ total_hitter_war STORED DIRECTLY (2026-08-23)** — all 3 hitter producers (precompute-transfer-projections, process-precompute-jobs edge fn, backfill-2027-hitter-returners) now WRITE `total_hitter_war = o_war + d_war + bsr_war` in the upsert (was inline-only for market → left stale). ⇒ on PROD: the re-price re-runs (transfer per-team + returner backfill) fill total_hitter_war fresh; **`refresh_composite_war()` is REDUNDANT for the projection total** (still needed for the descriptive Master columns only — do NOT rely on it for `player_predictions.total_hitter_war` anymore). Code committed 572bd11/2d20a5f. Followed by STEP 7b display swap (o_war→total_hitter_war headline) — see `docs/AGENT_LEARNINGS_total_war_display_2026_08_23.md`.
+
+## ★ TWP FLAG RECOMPUTE — is_twp detector run (feature/war-recalibration) — 2026-08-26
+- [ ] **Run the canonical TWP detector `recomputeTwpStatus(2026, PA>=30, IP>=5)`** — `is_twp` was systemically
+  unset (only **2** flagged on staging) because the detector — the only writer of `is_twp`/primary `position` —
+  is reachable **only from a manual AdminDashboard button and had never been run on current-season data.** Effect:
+  ~253 real two-way players (both a Pitching Master pitcher-Role line AND a Hitter Master line meeting threshold)
+  were half-projected — the pitcher batch keys on `pitcherTest(position) || is_twp`, so a TWP labeled OF with
+  `is_twp=false` had its **pitching side dropped** (stale, unrefreshed projection; e.g. Evan Dempsey FGCU 88.7 IP /
+  3.9 pWAR off the pitcher board). The reported "stale orphan pitching rows" were this symptom.
+  **THRESHOLD = PA>=30 & IP>=5** (detector default; Trevor-confirmed 2026-08-26). Rationale: flag is **re-derived from
+  each season's actuals every run + has a demotion ladder**, so an inclusive threshold never permanently strips a
+  developing two-way player's dual-position eligibility (next year's data re-flags/demotes). 50/10 is the cleaner
+  one-year sample but only matters if the flag were permanent — it isn't.
+  **APPLIED STAGING 2026-08-26** via `scripts/run-twp-recompute.ts --apply` (thin runner over the canonical lib fn;
+  Node-CLI service-role client; added a backward-compatible `dryRun` param to `recomputeTwpStatus`). Result:
+  `is_twp` **2 → 253** (D1=90 / JUCO=163): 207 net-new + 45 legacy-`position='TWP'`-string migrated + 1 unchanged;
+  **0 P→hitter position flips** (the detector only sets hitter-primary when a valid Hitter Master Pos exists — 96
+  pitcher-side TWPs stay `position='P'` and just gain the flag); cleanup: 31 demoted→pitcher, 65 cleared→null
+  (alumni, no 2026 data), **34 left as `position='TWP'`** (tiny mixed samples + invalid hitter Pos → flagged for
+  MANUAL data fix, `is_twp=false`); 0 errors. Dry-run previewed first (dry-run-first discipline).
+  **PROD:** run the same `scripts/run-twp-recompute.ts --apply` against prod (regenerate from prod Masters — do NOT
+  copy staging flags). MUST run BEFORE the returner/transfer precomputes on prod (so both-side rows generate).
+  **FOLLOW-ON (dedicated pass, still on staging — NOT yet run):** re-run returner pitcher+hitter precomputes →
+  re-bake TWP markets (`rebake-twp-markets` / `rebuild-twp-target-rows` / `fix-returner-twp-hitter-market`) →
+  re-bake snapshots (`heal-stale-snapshots` / `backfill-neutral-snapshot` / `resync-*`) → verify known TWPs
+  end-to-end (both sides + combined NIL + both roster slots + sane team WAR). The 34 manual-fix `position='TWP'`
+  residuals are a separate data-quality cleanup.
+
+## ★ HR9-ONLY FLOOR + TWP PRECOMPUTE RE-RUN (feature/war-recalibration) — 2026-08-26
+Companion to the TWP FLAG RECOMPUTE entry above + the two-sided-SD calibration. Full writeup:
+`docs/AGENT_LEARNINGS_twp_flag_systemic_gap_2026_08_26.md` + `docs/HANDOFF_twp_flag_pass_2026_08_26.md`.
+
+- [ ] **HR9-ONLY code floor (CODE, no migration)** — narrowed the earlier blanket `Math.max(0, projected)` to HR9
+  ONLY (Trevor: "only on HR9 should there be a floor, everything else should work as is"). `pitcherProjection.
+  projectPitchingRate` + `transferPitcherProjection.projectLower` gain a `floorAtZero` param, passed `true` only from
+  the HR9 call site; `projectHigher` (K9) un-floored. Every non-HR9 rate stays UNfloored so a negative (which the
+  two-sided SD should prevent) surfaces as a real bug, not silently masked (audit doctrine). `npm test` 265 pass, 0
+  new tsc errors. **Ships with the branch code (no DB step); prod picks it up when the prod precomputes re-run.**
+- [ ] **TWP precompute re-run (STAGING done 2026-08-26; PROD = re-run after the prod detector run):**
+  - `precompute-returner-pitchers` — pool 7628→**7829** (+201 TWPs join via `pitcherTest(position) || is_twp`);
+    7633 upserted, propagated to 110,383 rows. **0 negative pitching rates across 104,401 rows** (floor holds).
+  - `backfill-2027-hitter-returners` — 8235 updated, 0 errors; writes `twp_hitter_market_value` + NULLs shared
+    `market_value` for D1 TWPs.
+  - **PROD ORDER:** run the TWP detector (`run-twp-recompute.ts --apply`) FIRST, THEN both returner precomputes,
+    THEN the transfer per-team precomputes, THEN re-bake markets/snapshots. (Detector before precomputes so both-side
+    rows generate.)
+- [ ] **⚠ JUCO TWP MARKET GAP — KNOWN, DEFERRED to the JUCO workstream (Trevor 2026-08-26).** The JUCO precompute
+  branches write only the shared `market_value`, never the `twp_*_market_value` split → the 163 JUCO TWPs show no
+  market on TWP surfaces (90 D1 TWPs correct). **Decision: keep all 253 flagged; fix the JUCO branches (write the
+  split + null shared for `is_twp`) BEFORE JUCO ships.** NOT a blocker for the D1 push. Re-run JUCO snapshot markets
+  after that fix. Detail in the agent-learnings doc.
+
+## ★ TWP TRANSFER RE-RUN + SNAPSHOT RE-BAKE (feature/war-recalibration) — 2026-08-26
+Completes the TWP flag pass. STAGING done + verified; PROD = same sequence after the prod detector run + returner
+precomputes. Full state: `docs/HANDOFF_twp_flag_pass_2026_08_26.md`.
+- [ ] **Transfer re-run** (`_run_step2_all.sh` = `precompute-transfer-projections` + `precompute-pitchers` × 18
+  customer teams) — the TWP transfer rows were stale/single-sided (2,186 of 2,221 pre-run). After: 1,529 D1-TWP
+  transfer rows carry the `twp_*` split across all 18 teams. STAGING 2026-08-26.
+- [ ] **Snapshot re-bake** (STAGING 2026-08-26, all `--apply`): `rebuild-twp-target-rows` · `rebake-twp-markets` ·
+  `backfill-neutral-snapshot` (bp=1205/tb=167) · `resync-target-snapshots --all` (9) · `resync-build-snapshot-markets
+  --all` (6, legit market→0 for negative-WAR). `heal-stale-snapshots` drift=0. VERIFIED: Dempsey combined NIL $66,114;
+  Overbeek target board 2 rows/team (both slots), SEC-scaled. 0 TWPs on build rosters.
+- [ ] **⚠ 88 D1-TWP one-sided transfer rows** (35 pitch-only / 53 hit-only) write shared `market_value` not the split
+  → same mechanism as the JUCO TWP market gap; **DEFERRED with it** (make the single-side transfer write path
+  TWP-aware). 5% of D1-TWP transfer rows; the 1,529 two-sided majority is correct.
+
+## ★ NORTH CAROLINA (18th team) RE-RUN + DYNAMIC TEAM LIST — 2026-08-26
+Resolves the "88 D1-TWP one-sided rows" (they were NOT a code gap): all 88 were on **North Carolina** (`e0defb42`),
+the 18th customer team (added 2026-08-25), which was **missing from the hardcoded 17-team `_run_step2_all.sh`** → NC's
+whole transfer set (10,207 rows) was stale (old model + pre-TWP-flag).
+- [ ] **NC transfer re-run** (`precompute-transfer-projections` + `precompute-pitchers --team e0defb42`) — STAGING done
+  2026-08-26 (5,023 hitters / 5,118 pitchers). D1-TWP transfer rows now **1,617 split / 0 shared-only.** **PROD: covered
+  automatically by the dynamic runner below (NC is an active customer team).** The earlier "88 deferred with JUCO"
+  note is SUPERSEDED — only the JUCO TWP market split remains deferred.
+- [ ] **Dynamic customer-team list (CODE — prevents recurrence):** `scripts/list-customer-teams.ts` (NEW) reads active
+  teams from the LIVE `customer_teams` table; `scripts/_run_step2_all.sh` rewritten to consume it (`--prod` supported).
+  No DB change — but it means the prod per-team re-run now covers ALL active customer teams, not a stale array.
+- [ ] **Edge-fn new-team automation (context):** the `customer_teams` AFTER-INSERT trigger → `precompute_jobs` →
+  `process-precompute-jobs` works (fired for NC at creation). Remaining: the edge fn runs the OLD symmetric model —
+  the edge-fn mirror (two-sided SD + HR9 floor + TWP-aware) must land so new teams are correct at birth. ⚠ PROCESS:
+  every projection-model change must update BOTH the offline batches AND the edge fn.
+
+## ★ EDGE-FN MIRROR — two-sided SD + HR9 floor (feature/war-recalibration) — 2026-08-26
+- [ ] **`process-precompute-jobs` mirrored to the current model** (was OLD symmetric): 6 `_plus_ncaa_sd_bad` keys added
+  to `PITCHING_EQ_DEFAULTS` (overlay loads live model_config values) + avg/sd defaults refreshed to 2026 calibration;
+  `dsd` directional-SD helper wired into all 6 projection call sites; HR9-only floor (`Math.max(0, projectLowerP(...))`),
+  other rates unfloored. D1 path already TWP-aware (no change). Deno check: 0 NEW errors (2 pre-existing).
+  **DEPLOYED STAGING branch `slrxowawbijbjrkozqlj` 2026-08-26 (v26→27).** Prod `main` (`trbvxuoliwrfowibatkm`) v12 UNCHANGED.
+  ⚠ staging is a persistent BRANCH of prod under ONE project — the prod-account CLI login reaches both; target with explicit
+  `--project-ref` (NEVER `--linked` = prod). **PROD (Trevor drives):** `supabase functions deploy process-precompute-jobs
+  --project-ref trbvxuoliwrfowibatkm`. Keep the edge fn in lockstep with src/lib on every future projection-model change.
+
+## ★★★ DEFINITIVE PROD PUSH ORDER → docs/PROD_PUSH_STEPS_2026_08_26.md (2026-08-26)
+The authoritative top-to-bottom execution order (51 steps, Phase 0→H) with the 4 pre-prod blockers resolved. Use it as
+THE runbook. Blocker resolutions this session:
+- [ ] **dWAR/bsrWAR prod path (blocker 1) — SOLVED.** `scripts/load-drs-wsb-staging.ts` + `scripts/drs/populate_descriptive_war.mjs`
+  + `populate_descriptive_war_reg.mjs` all now take `--prod` (reads `.env.production.local`, refuses on env mismatch) + the
+  loader gains `--dry-run`. Were staging-hardcoded. PROD dWAR/bsrWAR = migration 20260805 → `load-drs-wsb-staging.ts --prod`
+  (raw dRS/wSB into player_season_defense/baserunning, reuses the env-independent output CSVs) → `populate_descriptive_war.mjs
+  --prod --commit` (desc_owar/d_war/bsr_war/total) → `populate_descriptive_war_reg.mjs --prod --commit` (desc_*_reg). Steps 30–34.
+  Verified on staging (dry-run: 13,454 defense / 10,408 bsr rows; d_war mean 0.01, bsr_war 0, centered).
+- [ ] **Venue corrections (blocker 2) — NEEDS BUILD.** `venue_correction_persist.sql` + its producer were NEVER committed
+  (pasted to staging; scratchpad cleaned; 310-row fixture gone). A producer `scripts/compute_venue_corrections.ts` must be
+  written (LOO + empirical-Bayes from prod pitch_log) BEFORE prod Stuff+. Spec + view contract in PROD_PUSH_STEPS step 12.
+- [ ] **Conf-stats bucketA gate (blocker 3)** — re-run `conf_stats_bucketA_assembly.sql` on STAGING vs `_confstats_backup_preassembly`
+  (diff 0.0000) before trusting it on prod. Step 28.
+- [x] **Returner prod path (blocker 4) — RESOLVED = batch scripts** (`precompute-returner-pitchers:prod` +
+  `backfill-2027-hitter-returners:prod`). The edge-fn `recalculate-prediction` returner rebuild is DEAD — ignore old runbook steps 5–9/G3.
+
+## ★ VENUE CORRECTIONS PRODUCER + PITCH-LOG INTEGRITY (feature/war-recalibration) — 2026-08-26
+- [x] **Blocker 2 SOLVED — venue-corrections producer rebuilt:** `scripts/compute_venue_corrections.ts` (NEW; LOO +
+  empirical-Bayes, `--prod`/`--apply`/dry-run guarded). Reproduces the lost original: τ 0.622/0.662 (memory 0.63/0.66),
+  centering ≈0, n_pitchers 310/310 exact, worst park −2.57; matches the stored staging fixture within **0.011″**. Schema
+  = existing `venue_movement_corrections` (game_venue_id/ivb_corr/hb_corr/b_ivb/b_hb/n_pitchers/n_pitches) + full-passthrough
+  `pitch_log_corrected` view. **Did NOT overwrite staging** (existing fixture is the validated in-use one). PROD: run
+  `--prod --apply` AFTER pitch-log GATES 0+1 (see PROD_PUSH_STEPS "PITCH-LOG INTEGRITY").
+- [ ] **★ PITCH-LOG INTEGRITY GATES (prod prerequisite for ALL pitch-log derivations)** — locked into
+  `docs/PROD_PUSH_STEPS_2026_08_26.md`. **GATE 0 DEDUP:** prod pitch_log has ~3,425 duplicate PHYSICAL pitches under
+  DISTINCT `uniq_pitch_id`s (staging is clean, verified 0). ⚠ a `uniq_pitch_id` distinct-count shows 0 and MISLEADS —
+  detect via `runs IS NULL` junk (~3,509) + total ≈ 2,576,230; fix = `DELETE … WHERE runs IS NULL` after widen (or Approach
+  B rebuild). **GATE 1 MOVEMENT COMPLETE:** the venue fixture is computed from ivb/hb, so finish all movement population
+  FIRST (staging's audit backfilled ivb/hb on ~19,338 existing pitches AFTER its first fixture → 0.011″ drift; not new
+  rows, 0 dups — verified). THEN venue corrections → Stuff+ → conf-stats → team_season_stats. Research: no duplicate
+  uniq_pitch_id on staging; drift = in-place movement backfill, not double-import.
+
+## ★ COMPREHENSIVE PROD-PUSH DOCUMENTATION (feature/war-recalibration) — 2026-08-26
+Full branch cataloged (785 files) into the authoritative doc set. Use these for the push:
+- **`docs/PROD_PUSH_STEPS_2026_08_26.md`** — THE runbook. Ordered steps (Phase 0→H) + PITCH-LOG INTEGRITY gates
+  (dedup + movement-complete) + **CALCULATION REFERENCE** (every formula/constant/output) + **SCHEMA/SQL CHANGE
+  REFERENCE** (all 101 migrations: what each touches, idempotency, regenerate-on-prod flags) + PROD LANDMINES.
+- **`docs/STAGING_DISPLAY_TEST_CHECKLIST_2026_08_26.md`** — every UI change to verify on staging before push, with
+  PASS/FAIL per item (WAR-label swap, transfer market conference, TWP both-sides, TB WAR-sort, GM interface, /savant deletion).
+- **`docs/PRE_PROD_AUDIT_2026_08_26.md`** — readiness verdict + stale-doc reconciliations.
+- [ ] **NEW LANDMINE — model_config conflict:** `wrc_c1_model_config` sets `owar_replacement_runs_per_600=26.2`,
+  `step8_model_config_2026` sets **21.22** (current refit). ★ Run `step8` LAST/authoritative so 21.22 wins.
+- [ ] **NON-IDEMPOTENT migrations** (guard/one-time care): bare CREATE POLICY (June 20260622/23), `RENAME total_war`
+  (20260806), `TRUNCATE gm_allocation` (20260710120000), `team_season_stats_war_rollup` INSERT (dupes on re-run —
+  use the refresh fn), player_slot_values dedup DELETE. Full list in PROD_PUSH_STEPS landmines.
+- [ ] **ORDER:** `20260821010000` (ts war cols) BEFORE first `refresh_team_season_stats(2026)` (else empty table).
+- **TWO UI items to confirm before push:** `HistoricalPlayerTable` pitcher link → `/player/:id` (verify resolves);
+  `/savant/*` deletion (Leaderboards/Conf Stats page/Team Profiles removed, no replacement — confirm intended).
+
+## ★ PROD-PUSH HANDOFF + PlayerHub fix (feature/war-recalibration) — 2026-08-26
+- [x] **`docs/HANDOFF_PROD_PUSH_2026_08_26.md`** — the "start here" prod-push handoff (state, doc map, phase flow +
+  gates, verification, safety). Companions: PROD_PUSH_STEPS (51 steps + calc/schema refs), PRE_PROD_AUDIT,
+  STAGING_UX_WALKTHROUGH, STAGING_DISPLAY_TEST_CHECKLIST.
+- [x] **PlayerHub historical-player fix** (`src/pages/PlayerHub.tsx:176`) — identity query now resolves a uuid OR a
+  legacy source_player_id (Historical tables link by source_player_id). Fixes pitcher/hitter misclassification +
+  blank season-stats preview for historical players. tsc clean; page-load verify is in the UX walkthrough §9.
+- **model_config `owar_replacement_runs_per_600` RESOLVED:** staging = **21.22** (verified; = 1.62 repl × 13.1 RPW,
+  data-driven from the .380 win% anchor). PROD: run ONLY `step8_model_config_2026` (has 21.22); do NOT run
+  `wrc_c1_model_config` (stale 26.2). Currently a seeded constant the edge fn reads — future: auto-derive in a calibration stage.
+
+## ★ TEAM BUILDER WAR/MARKET + dWAR opportunity (feature/war-recalibration) — 2026-08-26
+- [ ] **dWAR opportunity-scaling — NEEDED, safe to DEFER past first prod push (Trevor).** dWAR does not scale with
+  defensive opportunity/innings (depth role) the way oWAR scales with PA — a depth-role change moves oWAR but not dWAR.
+  Full writeup: memory `project_dwar_opportunity_scaling`. Not a prod blocker; required follow-on.
+- [ ] **TB WAR column mislabeled** — `RosterTab.tsx:177` header says "oWAR" but the value is already `total_hitter_war`
+  (via `pickHitterWar`, clean rows). FIX = relabel header "oWAR"→"WAR" (+ the `:294` tooltip). Value compute NOT changed.
+- [ ] **TB market disconnect (INVESTIGATED)** — the live/dirty hitter path (`useTeamBuilderSimulation.ts:1101-1105`)
+  computes market from OFFENSE oWAR (`owarAdj`), not `total_hitter_war`. Clean rows read the stored (total-based) market;
+  toggling recomputes off offense-only → diverges most for bad defenders. FIX (confirm w/ Trevor): base the live market
+  on total (offense recomputed + stored d_war/bsr_war). Returner path has the same shape.
+- [ ] **Fill 16 build-snapshot totals** — 16 of 578 hitter build-snapshots have `o_war` but null `total_hitter_war`
+  (fill missed some non-default builds). FILL every build's snapshot `total_hitter_war = o_war + d_war + bsr_war`,
+  **without changing any saved toggle** (dev_agg/depth/nil untouched). STAGING + PROD (re-run after prod snapshots baked).
+- [ ] **★ Hitter descriptive Run Values on Season Stats banner — PROD needed (schema + fn + populate)** —
+  (1) apply `supabase/migrations/20260826150000_hitter_descriptive_run_values.sql` (6 cols on
+  `pitch_log_hitter_totals`, additive/idempotent) + `20260826150500_populate_hitter_run_values_fn.sql`
+  (the `populate_hitter_run_values(season)` fn); (2) after the season-stats aggregation
+  (`aggregate_pitch_log_dimensions.ts --apply`, which now CALLS the fn at the end) has filled the totals
+  tables, the `all`-row run values + national z-scores are populated — or run `select
+  populate_hitter_run_values(2026);` standalone if the totals already exist. Descriptive last-season values
+  (batting = wRC+-derived, defensive = drs_floor, baserunning = wsb_runs) + `*_z` over qualified pop
+  (`pa≥50`/`half_innings≥50`/`opportunities≥20`). Display pure-reads. ⚠ **When Track B (unified edge fn)
+  absorbs stage 3b, it MUST also call `populate_hitter_run_values(season)`** (season-stats aggregation is
+  currently a HAND-RUN script, not an edge fn). STAGING done 2026-08-26 (6,099 `all` rows; coverage
+  batting 6,053 / def 5,138 / bsr 5,346; Souza verified). Full writeup:
+  `docs/AGENT_LEARNINGS_hitter_run_values_2026_08_26.md`.
+- [ ] **★ Snapshot hitter market RE-PRICE (stale-PTM fix) — PROD needed** — `recompute-snapshot-hitter-market.ts --prod --apply`
+  (runbook **step 42b**, Phase F, AFTER market resyncs). Snapshot `market_value` re-derived = `total_hitter_war × $25k ×
+  PTM(build-program conf) × PVF(players.position)`, dollar field ONLY, all toggles preserved. Fixes snapshots frozen at the
+  OLD SEC 1.5 PTM (~$42.5k/win) from before the SEC-4.0 re-price — the profile/TB pure-read the snapshot so stale $ shows
+  verbatim (Souza showed $50,983 for 1.20 WAR; correct = $131,823). Root confirmed: profile/TB are NOT live-computing — they
+  read the active build snapshot; only the baked dollars were stale. **PVF stays in the market** (pricing layer, Allocation
+  Spec §7.2); it is removed only from the Player SCORE (`calcPlayerScore`, §1). ⚠ **Script gotcha now fixed (keep on prod):**
+  filter null/non-UUID pids + error-check the `players` position `.in` batches — one literal-`null` player_id else poisons a
+  whole batch (invalid-uuid), silently dropping ~200 real players' positions → PVF wrongly flattens to 1.0. STAGING done
+  2026-08-26 (472 rows, then 38 position-corrections; idempotent, 0 impossible/negative markets).
