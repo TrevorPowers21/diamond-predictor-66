@@ -76,6 +76,27 @@ export default function AdminUsers() {
     },
   });
 
+  const updateRole = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: "team_admin" | "general_user" }) => {
+      if (!scopedTeamId) throw new Error("No team selected");
+      // Same false-success guard as removeMember — an RLS-filtered update
+      // returns 0 rows with no error, which would otherwise look like it worked.
+      const { data, error } = await supabase
+        .from("user_team_access")
+        .update({ role })
+        .eq("user_id", userId)
+        .eq("customer_team_id", scopedTeamId)
+        .select("user_id");
+      if (error) throw error;
+      if (!data || data.length === 0) throw new Error("Nothing was updated — you may not have permission.");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-team-members", scopedTeamId] });
+      toast.success("Role updated");
+    },
+    onError: (e: any) => toast.error(`Could not update role: ${e.message}`),
+  });
+
   const removeMember = useMutation({
     mutationFn: async (userId: string) => {
       if (!scopedTeamId) throw new Error("No team selected");
@@ -189,9 +210,28 @@ export default function AdminUsers() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                            {m.role.replace("_", " ")}
-                          </span>
+                          <Select
+                            value={m.role}
+                            disabled={isSelf}
+                            onValueChange={(newRole) => {
+                              if (newRole === m.role) return;
+                              const label = newRole === "team_admin" ? "team admin" : "general user";
+                              if (confirm(`Change ${m.email ?? m.display_name ?? "this user"} to ${label}?`)) {
+                                updateRole.mutate({ userId: m.user_id, role: newRole as "team_admin" | "general_user" });
+                              }
+                            }}
+                          >
+                            <SelectTrigger
+                              className="h-7 w-[140px] text-xs uppercase tracking-wider disabled:opacity-50"
+                              title={isSelf ? "You can't change your own role" : undefined}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="general_user">General user</SelectItem>
+                              <SelectItem value="team_admin">Team admin</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(m.created_at).toLocaleDateString()}
