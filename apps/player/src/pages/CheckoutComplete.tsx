@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { usePlayerAuth } from "@/hooks/usePlayerAuth";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { usePlayerAuth } from "@/hooks/usePlayerAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Activity } from "lucide-react";
@@ -9,46 +9,38 @@ import { Activity } from "lucide-react";
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 30000;
 
-type EntitlementStatus = "inactive" | "pending" | "active" | "past_due" | "canceled";
+type PendingStatus = "pending" | "active" | "past_due" | "canceled" | "not_found";
 
-// The webhook is the sole source of truth for whether the payment actually
-// went through — this page never trusts stripe.confirmPayment()'s
-// client-side result. It subscribes to the player's own entitlement row
-// (RLS still applies, so this is safe) with a short-poll fallback in case
-// realtime is unavailable, and only reports success once status flips to
-// 'active' in the database.
+// This page runs with no Supabase session — the public checkout flow takes
+// payment before any account exists, so there's nothing to read
+// player_entitlements through RLS with. Instead it polls the public
+// get-pending-purchase-status function by subscriptionId (from Checkout's
+// navigate state, or the return_url query params if a 3DS redirect lost
+// that state). The webhook remains the sole source of truth for whether
+// payment actually went through — this page never trusts
+// stripe.confirmPayment()'s client-side result.
 export default function CheckoutComplete() {
-  const { user } = usePlayerAuth();
+  const location = useLocation();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<EntitlementStatus | "checking">("checking");
+  const { user } = usePlayerAuth();
+  const state = location.state as { subscriptionId?: string; email?: string } | null;
+  const params = new URLSearchParams(location.search);
+  const subscriptionId = state?.subscriptionId ?? params.get("subscriptionId") ?? null;
+  const email = state?.email ?? params.get("email") ?? undefined;
+  const [status, setStatus] = useState<PendingStatus | "checking">("checking");
 
   useEffect(() => {
-    if (!user) return;
+    if (!subscriptionId) return;
     let cancelled = false;
 
     const fetchStatus = async () => {
-      const { data } = await supabase
-        .from("player_entitlements")
-        .select("status")
-        .eq("user_id", user.id)
-        .eq("product", "athlete_monitoring")
-        .maybeSingle();
-      if (!cancelled && data?.status) setStatus(data.status as EntitlementStatus);
+      const { data } = await supabase.functions.invoke("get-pending-purchase-status", {
+        body: { subscriptionId },
+      });
+      if (!cancelled && data?.status) setStatus(data.status as PendingStatus);
     };
 
     fetchStatus();
-
-    const channel = supabase
-      .channel(`player_entitlements:${user.id}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "player_entitlements", filter: `user_id=eq.${user.id}` },
-        (payload) => {
-          if (!cancelled) setStatus(payload.new.status as EntitlementStatus);
-        },
-      )
-      .subscribe();
-
     const pollHandle = setInterval(fetchStatus, POLL_INTERVAL_MS);
     const timeoutHandle = setTimeout(() => clearInterval(pollHandle), POLL_TIMEOUT_MS);
 
@@ -56,19 +48,38 @@ export default function CheckoutComplete() {
       cancelled = true;
       clearInterval(pollHandle);
       clearTimeout(timeoutHandle);
-      supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [subscriptionId]);
 
-  // Once the webhook confirms the membership is active, go straight to the
-  // real player home rather than showing a dead-end "you're all set" card
-  // with nowhere else to go — /plans renders PlayerHome for active members,
-  // and it's the same destination they'll land on for every future login.
+  // Once the webhook confirms the membership is active: an already-logged-in
+  // member (the past-due recovery path — they have an account already) goes
+  // straight to /plans, same as before this page supported anonymous
+  // checkout. An anonymous purchaser has no account yet at all — they go set
+  // a password, which is what actually creates one and claims this purchase.
   useEffect(() => {
-    if (status === "active") navigate("/plans", { replace: true });
-  }, [status, navigate]);
+    if (status !== "active" || !subscriptionId) return;
+    if (user) {
+      navigate("/plans", { replace: true });
+    } else {
+      navigate("/create-account", { replace: true, state: { subscriptionId, email } });
+    }
+  }, [status, subscriptionId, email, user, navigate]);
 
-  if (status === "past_due" || status === "inactive") {
+  if (!subscriptionId) {
+    return (
+      <StatusCard
+        title="Nothing to confirm"
+        description="We couldn't find a checkout in progress."
+        action={
+          <Button asChild className="w-full cursor-pointer">
+            <Link to="/plans">Back to plans</Link>
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (status === "past_due" || status === "canceled" || status === "not_found") {
     return (
       <StatusCard
         title="We couldn't confirm your payment"

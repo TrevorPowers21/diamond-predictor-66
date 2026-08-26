@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -30,20 +30,29 @@ const shippingSchema = z.object({
 type ShippingForm = z.infer<typeof shippingSchema>;
 
 export default function PlanSelect() {
-  const { user, signOut } = usePlayerAuth();
+  const { user, loading: authLoading, signOut } = usePlayerAuth();
   const navigate = useNavigate();
   const [status, setStatus] = useState<EntitlementStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [statusLoading, setStatusLoading] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [addPolarLoop, setAddPolarLoop] = useState(false);
+  const [email, setEmail] = useState("");
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm<ShippingForm>({ resolver: zodResolver(shippingSchema), defaultValues: { country: "US" } });
 
+  // This page is public — most visitors have no session at all, in which
+  // case there's no entitlement to check and nothing to wait on. Only a
+  // logged-in visitor (a returning member) needs the status lookup, to
+  // decide between PlayerHome and the past-due recovery message below.
   useEffect(() => {
-    if (!user) return;
+    if (authLoading) return;
+    if (!user) {
+      setStatusLoading(false);
+      return;
+    }
     supabase
       .from("player_entitlements")
       .select("status")
@@ -52,11 +61,11 @@ export default function PlanSelect() {
       .maybeSingle()
       .then(({ data }) => {
         setStatus((data?.status as EntitlementStatus) ?? "inactive");
-        setLoading(false);
+        setStatusLoading(false);
       });
-  }, [user]);
+  }, [user, authLoading]);
 
-  if (loading) {
+  if (authLoading || statusLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Activity className="h-8 w-8 animate-spin text-primary" />
@@ -70,10 +79,14 @@ export default function PlanSelect() {
   if (status === "active") return <PlayerHome />;
 
   const isPastDue = status === "past_due";
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // Logged-in members (past-due recovery) already have a known email server
+  // side — only anonymous visitors need to type one in.
+  const canContinue = !!selectedPlan && (!!user || isValidEmail);
 
   const goToCheckout = (shippingAddress?: ShippingForm) => {
-    if (!selectedPlan) return;
-    navigate("/checkout", { state: { plan: selectedPlan, addPolarLoop, shippingAddress } });
+    if (!selectedPlan || !canContinue) return;
+    navigate("/checkout", { state: { plan: selectedPlan, addPolarLoop, shippingAddress, email: user ? undefined : email } });
   };
 
   const onContinue = handleSubmit(
@@ -219,7 +232,24 @@ export default function PlanSelect() {
           </CardContent>
         </Card>
 
-        <Button className="w-full cursor-pointer" disabled={!selectedPlan} onClick={onContinue}>
+        {!user && (
+          <div className="space-y-2">
+            <Label htmlFor="checkout-email">Email</Label>
+            <Input
+              id="checkout-email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              We'll use this to set up your account right after checkout.
+            </p>
+          </div>
+        )}
+
+        <Button className="w-full cursor-pointer" disabled={!canContinue} onClick={onContinue}>
           Continue to checkout
         </Button>
 
@@ -236,9 +266,15 @@ export default function PlanSelect() {
         </Card>
 
         <p className="text-center text-sm text-muted-foreground">
-          <button onClick={() => signOut()} className="underline cursor-pointer">
-            Sign out
-          </button>
+          {user ? (
+            <button onClick={() => signOut()} className="underline cursor-pointer">
+              Sign out
+            </button>
+          ) : (
+            <>
+              Already a member? <Link to="/login" className="underline">Log in</Link>
+            </>
+          )}
         </p>
       </div>
     </div>

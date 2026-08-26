@@ -144,6 +144,29 @@ Deno.serve(async (req) => {
     return data?.user_id ?? null;
   }
 
+  // Before a purchase is claimed into a real account (public checkout flow,
+  // no Supabase user yet), its only record is pending_player_purchases,
+  // keyed by subscription id instead of user_id. Same out-of-order guard as
+  // applyEntitlementUpdate. No-op if the row was already claimed and
+  // removed — at that point player_entitlements is the row of record and
+  // userIdForSubscription() above is what applies.
+  async function applyPendingPurchaseUpdate(subscriptionId: string, patch: Record<string, unknown>): Promise<{ error: string | null }> {
+    const { data: current } = await adminClient
+      .from("pending_player_purchases")
+      .select("last_event_created_at")
+      .eq("stripe_subscription_id", subscriptionId)
+      .maybeSingle();
+    if (!current) return { error: null };
+    if (current.last_event_created_at && new Date(current.last_event_created_at) > new Date(event.created * 1000)) {
+      return { error: null }; // stale event, skip silently
+    }
+    const { error } = await adminClient
+      .from("pending_player_purchases")
+      .update({ last_event_created_at: toISO(event.created), ...patch })
+      .eq("stripe_subscription_id", subscriptionId);
+    return { error: error?.message ?? null };
+  }
+
   let writeError: string | null = null;
 
   switch (event.type) {
@@ -157,13 +180,11 @@ Deno.serve(async (req) => {
       const invoice = event.data.object as Stripe.Invoice;
       const subscriptionId = typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
       if (!subscriptionId) break;
-      const userId = await userIdForSubscription(subscriptionId);
-      if (!userId) break;
       const status = event.type === "invoice.paid" ? "active" : "past_due";
-      const result = await applyEntitlementUpdate(userId, {
-        status,
-        stripe_subscription_id: subscriptionId,
-      });
+      const userId = await userIdForSubscription(subscriptionId);
+      const result = userId
+        ? await applyEntitlementUpdate(userId, { status, stripe_subscription_id: subscriptionId })
+        : await applyPendingPurchaseUpdate(subscriptionId, { status });
       writeError = result.error;
       break;
     }
@@ -171,8 +192,6 @@ Deno.serve(async (req) => {
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       const subscription = event.data.object as Stripe.Subscription;
-      const userId = await userIdForSubscription(subscription.id);
-      if (!userId) break;
       const status = event.type === "customer.subscription.deleted" ? "canceled" : mapSubscriptionStatus(subscription.status);
       // Recent Stripe API versions moved current_period_end from the
       // subscription itself to its item(s) — add_invoice_items don't
@@ -181,12 +200,15 @@ Deno.serve(async (req) => {
       // Fall back to the legacy top-level field for older API versions.
       const item = subscription.items.data[0] as (Stripe.SubscriptionItem & { current_period_end?: number }) | undefined;
       const currentPeriodEnd = item?.current_period_end ?? subscription.current_period_end;
-      const result = await applyEntitlementUpdate(userId, {
+      const patch = {
         status,
-        stripe_subscription_id: subscription.id,
         current_period_end: toISO(currentPeriodEnd),
         cancel_at: toISO(subscription.cancel_at),
-      });
+      };
+      const userId = await userIdForSubscription(subscription.id);
+      const result = userId
+        ? await applyEntitlementUpdate(userId, { ...patch, stripe_subscription_id: subscription.id })
+        : await applyPendingPurchaseUpdate(subscription.id, patch);
       writeError = result.error;
       break;
     }

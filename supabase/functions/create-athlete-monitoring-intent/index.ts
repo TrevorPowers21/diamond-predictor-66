@@ -1,7 +1,7 @@
 // Edge Function: create-athlete-monitoring-intent
 //
-// Creates (or reuses) the Stripe Customer for the calling player and starts
-// a fixed-term membership Subscription — either:
+// Creates (or reuses) the Stripe Customer and starts a fixed-term membership
+// Subscription — either:
 //   - six_month:   $300/mo, includes an initial assessment + 1 retest
 //   - twelve_month: $250/mo, includes 4 two-hour assessments
 // Both bill monthly and do NOT auto-renew — enforced by setting cancel_at at
@@ -14,10 +14,21 @@
 // 'on_subscription' is required — without it, month-2+ invoices have no
 // payment method attached and silently fail.
 //
-// This function never marks an entitlement 'active' — it only ever writes
-// status: 'pending'. Only the stripe-webhook function (reacting to a
-// verified Stripe event) may flip status to 'active'. That split is the
-// actual security boundary of this payment flow.
+// This function never marks a membership 'active' — it only ever records
+// 'pending'. Only the stripe-webhook function (reacting to a verified
+// Stripe event) may flip status to 'active'. That split is the actual
+// security boundary of this payment flow.
+//
+// Two calling modes, both handled here since the Stripe subscription-build
+// logic (pricing, Polar Loop add-on) is identical either way:
+//   - Authenticated (Authorization header with a valid player session): an
+//     existing member buying/renewing. Writes go to player_entitlements,
+//     keyed by user_id, same as before self-serve checkout existed.
+//   - Anonymous (no valid session, `email` required in the body): the
+//     public checkout flow — no Supabase account exists yet. Writes go to
+//     pending_player_purchases, keyed by the Stripe subscription id, and
+//     get claimed into a real account later by complete-player-signup once
+//     the player sets a password.
 //
 // Optional Polar Loop add-on: a one-time physical-good purchase attached to
 // the SAME first invoice as the membership's first month, via
@@ -39,6 +50,9 @@
 //     computed per-request via price_data, since its amount depends on the
 //     order total, not a fixed catalog price)
 //
+// verify_jwt = false is set in supabase/config.toml for this function — it
+// must accept calls with no session at all (the anonymous mode above).
+//
 // Deploy:
 //   supabase functions deploy create-athlete-monitoring-intent
 
@@ -51,6 +65,7 @@ const PLAN_TERM_MONTHS: Record<"six_month" | "twelve_month", number> = {
   twelve_month: 12,
 };
 const CARD_PROCESSING_FEE_RATE = 0.035;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface ShippingAddress {
   name: string;
@@ -73,6 +88,7 @@ interface RequestBody {
   plan: "six_month" | "twelve_month";
   addPolarLoop?: boolean;
   shippingAddress?: ShippingAddress;
+  email?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -95,9 +111,6 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return json({ error: "Missing Authorization header" }, 401);
-
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -111,14 +124,18 @@ Deno.serve(async (req) => {
     return json({ error: "Server is misconfigured (missing env vars)" }, 500);
   }
 
-  const callerClient = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const {
-    data: { user: caller },
-    error: callerErr,
-  } = await callerClient.auth.getUser();
-  if (callerErr || !caller) return json({ error: "Invalid or expired token" }, 401);
+  // Authenticated mode is opt-in via a real, verifiable session — a bare
+  // anon apikey header (always present on supabase.functions.invoke calls)
+  // does not count, only a session that actually resolves to a user.
+  const authHeader = req.headers.get("Authorization");
+  let caller: { id: string } | null = null;
+  if (authHeader) {
+    const callerClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data } = await callerClient.auth.getUser();
+    caller = data.user ? { id: data.user.id } : null;
+  }
 
   let body: RequestBody;
   try {
@@ -150,13 +167,32 @@ Deno.serve(async (req) => {
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-  const { data: playerAccount } = await adminClient
-    .from("player_accounts")
-    .select("user_id, email")
-    .eq("user_id", caller.id)
-    .maybeSingle();
-  if (!playerAccount) {
-    return json({ error: "No player account found for this user. Complete signup first." }, 400);
+  let email: string;
+  if (caller) {
+    const { data: playerAccount } = await adminClient
+      .from("player_accounts")
+      .select("email")
+      .eq("user_id", caller.id)
+      .maybeSingle();
+    if (!playerAccount) {
+      return json({ error: "No player account found for this user. Complete signup first." }, 400);
+    }
+    email = playerAccount.email;
+
+    const { data: existingEntitlement } = await adminClient
+      .from("player_entitlements")
+      .select("status")
+      .eq("user_id", caller.id)
+      .eq("product", PRODUCT)
+      .maybeSingle();
+    if (existingEntitlement?.status === "active") {
+      return json({ error: "A membership is already active on this account.", alreadyActive: true }, 409);
+    }
+  } else {
+    if (!body.email || !EMAIL_RE.test(body.email)) {
+      return json({ error: "A valid email is required" }, 400);
+    }
+    email = body.email;
   }
 
   // NOTE: pin an explicit apiVersion rather than trusting the Stripe
@@ -169,35 +205,36 @@ Deno.serve(async (req) => {
     httpClient: Stripe.createFetchHttpClient(),
   });
 
-  const { data: existingEntitlement } = await adminClient
-    .from("player_entitlements")
-    .select("status")
-    .eq("user_id", caller.id)
-    .eq("product", PRODUCT)
-    .maybeSingle();
-  if (existingEntitlement?.status === "active") {
-    return json({ error: "A membership is already active on this account.", alreadyActive: true }, 409);
-  }
-
-  const { data: billingCustomer } = await adminClient
-    .from("player_billing_customers")
-    .select("stripe_customer_id")
-    .eq("user_id", caller.id)
-    .maybeSingle();
-
-  let stripeCustomerId = billingCustomer?.stripe_customer_id;
-  if (!stripeCustomerId) {
-    const customer = await stripe.customers.create({
-      email: playerAccount.email,
-      metadata: { supabase_user_id: caller.id },
-    });
-    stripeCustomerId = customer.id;
-    const { error: insertCustomerErr } = await adminClient
+  let stripeCustomerId: string;
+  if (caller) {
+    const { data: billingCustomer } = await adminClient
       .from("player_billing_customers")
-      .insert({ user_id: caller.id, stripe_customer_id: stripeCustomerId });
-    if (insertCustomerErr) {
-      return json({ error: `Could not record billing customer: ${insertCustomerErr.message}` }, 500);
+      .select("stripe_customer_id")
+      .eq("user_id", caller.id)
+      .maybeSingle();
+
+    if (billingCustomer?.stripe_customer_id) {
+      stripeCustomerId = billingCustomer.stripe_customer_id;
+    } else {
+      const customer = await stripe.customers.create({
+        email,
+        metadata: { supabase_user_id: caller.id },
+      });
+      stripeCustomerId = customer.id;
+      const { error: insertCustomerErr } = await adminClient
+        .from("player_billing_customers")
+        .insert({ user_id: caller.id, stripe_customer_id: stripeCustomerId });
+      if (insertCustomerErr) {
+        return json({ error: `Could not record billing customer: ${insertCustomerErr.message}` }, 500);
+      }
     }
+  } else {
+    // No account yet to key a reuse lookup off of — each anonymous
+    // checkout attempt gets its own Stripe Customer. An abandoned attempt
+    // just leaves a stray incomplete Customer/Subscription in Stripe,
+    // which Stripe auto-expires; harmless.
+    const customer = await stripe.customers.create({ email });
+    stripeCustomerId = customer.id;
   }
 
   // Shipping lives on the Customer (visible in the Dashboard for order
@@ -246,7 +283,12 @@ Deno.serve(async (req) => {
     payment_settings: { save_default_payment_method: "on_subscription" },
     cancel_at: cancelAt,
     expand: ["latest_invoice.payment_intent"],
-    metadata: { supabase_user_id: caller.id, product: PRODUCT, plan, polar_loop: addPolarLoop ? "true" : "false" },
+    metadata: {
+      ...(caller ? { supabase_user_id: caller.id } : { customer_email: email }),
+      product: PRODUCT,
+      plan,
+      polar_loop: addPolarLoop ? "true" : "false",
+    },
   });
   const invoice = subscription.latest_invoice;
   const paymentIntent =
@@ -259,21 +301,36 @@ Deno.serve(async (req) => {
     return json({ error: "Stripe did not return a client secret" }, 500);
   }
 
-  const { error: upsertErr } = await adminClient.from("player_entitlements").upsert(
-    {
-      user_id: caller.id,
-      product: PRODUCT,
-      status: "pending",
+  if (caller) {
+    const { error: upsertErr } = await adminClient.from("player_entitlements").upsert(
+      {
+        user_id: caller.id,
+        product: PRODUCT,
+        status: "pending",
+        plan,
+        stripe_subscription_id: subscription.id,
+        stripe_payment_intent_id: (paymentIntent as { id: string }).id,
+        cancel_at: new Date(cancelAt * 1000).toISOString(),
+      },
+      { onConflict: "user_id,product" },
+    );
+    if (upsertErr) {
+      return json({ error: `Could not record pending entitlement: ${upsertErr.message}` }, 500);
+    }
+  } else {
+    const { error: insertErr } = await adminClient.from("pending_player_purchases").insert({
+      email,
       plan,
+      stripe_customer_id: stripeCustomerId,
       stripe_subscription_id: subscription.id,
       stripe_payment_intent_id: (paymentIntent as { id: string }).id,
+      status: "pending",
       cancel_at: new Date(cancelAt * 1000).toISOString(),
-    },
-    { onConflict: "user_id,product" },
-  );
-  if (upsertErr) {
-    return json({ error: `Could not record pending entitlement: ${upsertErr.message}` }, 500);
+    });
+    if (insertErr) {
+      return json({ error: `Could not record pending purchase: ${insertErr.message}` }, 500);
+    }
   }
 
-  return json({ clientSecret, plan });
+  return json({ clientSecret, plan, subscriptionId: subscription.id, email });
 });

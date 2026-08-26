@@ -23,9 +23,10 @@ interface CheckoutState {
   plan: Plan;
   addPolarLoop?: boolean;
   shippingAddress?: ShippingAddress;
+  email?: string;
 }
 
-function CheckoutForm() {
+function CheckoutForm({ subscriptionId, email }: { subscriptionId: string; email?: string }) {
   const stripe = useStripe();
   const elements = useElements();
   const navigate = useNavigate();
@@ -41,10 +42,17 @@ function CheckoutForm() {
     // redirect: 'if_required' keeps the player on this page unless their
     // bank truly requires a redirect (e.g. some 3DS flows) — in the common
     // case we go straight to /checkout/complete, which is the actual
-    // source of truth (the webhook), not this client-side result.
+    // source of truth (the webhook), not this client-side result. A real
+    // redirect loses React Router state entirely (full page navigation),
+    // and there's no session to recover identity from for an anonymous
+    // purchase — so subscriptionId/email also ride along as query params,
+    // which survive the round trip.
+    const returnUrl = new URL(`${window.location.origin}/checkout/complete`);
+    returnUrl.searchParams.set("subscriptionId", subscriptionId);
+    if (email) returnUrl.searchParams.set("email", email);
     const { error: confirmError } = await stripe.confirmPayment({
       elements,
-      confirmParams: { return_url: `${window.location.origin}/checkout/complete` },
+      confirmParams: { return_url: returnUrl.toString() },
       redirect: "if_required",
     });
 
@@ -54,7 +62,7 @@ function CheckoutForm() {
       return;
     }
 
-    navigate("/checkout/complete");
+    navigate("/checkout/complete", { state: { subscriptionId, email } });
   };
 
   return (
@@ -72,6 +80,7 @@ export default function Checkout() {
   const location = useLocation();
   const checkoutState = location.state as CheckoutState | null;
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [subscriptionId, setSubscriptionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,15 +92,17 @@ export default function Checkout() {
           plan: checkoutState.plan,
           addPolarLoop: checkoutState.addPolarLoop,
           shippingAddress: checkoutState.shippingAddress,
+          email: checkoutState.email,
         },
       })
       .then(({ data, error: invokeError }) => {
         if (cancelled) return;
-        if (invokeError || !data?.clientSecret) {
+        if (invokeError || !data?.clientSecret || !data?.subscriptionId) {
           setError(data?.error ?? invokeError?.message ?? "Could not start checkout.");
           return;
         }
         setClientSecret(data.clientSecret);
+        setSubscriptionId(data.subscriptionId);
       });
     return () => {
       cancelled = true;
@@ -129,9 +140,9 @@ export default function Checkout() {
               <Activity className="h-6 w-6 animate-spin text-primary" />
             </div>
           )}
-          {!error && clientSecret && options && (
+          {!error && clientSecret && subscriptionId && options && (
             <Elements stripe={stripePromise} options={options}>
-              <CheckoutForm />
+              <CheckoutForm subscriptionId={subscriptionId} email={checkoutState.email} />
             </Elements>
           )}
         </Card>
