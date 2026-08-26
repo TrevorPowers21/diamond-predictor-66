@@ -1,29 +1,34 @@
 #!/bin/zsh
+# Runs the per-team transfer precomputes (hitter + pitcher) for EVERY active
+# customer team. The team list is read LIVE from `customer_teams` via
+# scripts/list-customer-teams.ts — never hardcoded — so a newly-added team
+# (e.g. North Carolina, added 2026-08-25) can't be silently skipped again.
+#
+#   zsh scripts/_run_step2_all.sh            # staging (.env.local)
+#   zsh scripts/_run_step2_all.sh --prod     # prod (.env.production.local) — needs explicit go
 cd ~/dev-main/diamond-predictor-66
-TEAMS=(
-  "ea255751-261b-4300-9bb5-fb49efc18dac:PennState"
-  "6a6f19c8-9f99-4d84-a636-1781524aec34:VirginiaTech"
-  "39fa8d00-4121-4041-b5d6-2c0990767ba4:BYU"
-  "d2c62120-964d-4ae6-a6ff-bafc4eb8c803:OleMiss"
-  "3b1cc0e2-4acd-4a27-a7bc-d345c347f18d:Georgia"
-  "05b486db-3a9b-4e41-bdd8-e15d111586db:CalPoly"
-  "1d1a8a72-b917-4287-b8b9-39d685f94a48:Campbell"
-  "1b01e663-117d-438d-8734-193b532a878e:GeorgiaSouthern"
-  "b5b69a75-3082-4d26-b6c9-14cdb9b8e335:KennesawState"
-  "aeb1d7f2-a4e6-4ada-a840-a4653e0f2667:UAB"
-  "8829bcbc-f3c9-475b-bd2a-d1c344b9f31a:SouthAlabama"
-  "ee947a80-a37e-46d7-bb83-629ee338cfa6:Kansas"
-  "6deca66a-b4c0-403f-9614-a9d32f1d5994:Arkansas"
-  "3c8de28f-52f3-4e45-b931-df30f8492e41:GrandCanyon"
-  "b565ce8b-2dac-42f1-ba28-3465ca097459:CoastalCarolina"
-  "189202f9-2700-4cc2-a274-eaedc3a40136:UCSB"
-  "299d321d-d0eb-4be7-88b2-e561060c9fdf:NotreDame"
-)
+
+if [[ "$1" == "--prod" ]]; then
+  ENV_FILE=".env.production.local"; PROD_FLAG="--prod"; TARGET="PROD"
+else
+  ENV_FILE=".env.local"; PROD_FLAG=""; TARGET="STAGING"
+fi
+
+# Pull the live active customer-team list (uuid:Name per line).
+TEAMS=("${(@f)$(npx tsx --env-file-if-exists=$ENV_FILE scripts/list-customer-teams.ts 2>/dev/null)}")
+if [[ ${#TEAMS[@]} -eq 0 || -z "${TEAMS[1]}" ]]; then
+  echo "✗ no customer teams returned from list-customer-teams.ts ($TARGET) — aborting."; exit 1
+fi
+echo "===== STEP 2 on $TARGET — ${#TEAMS[@]} active customer teams ====="
+
+i=0
 for entry in $TEAMS; do
+  [[ -z "$entry" ]] && continue
+  i=$((i+1))
   uuid="${entry%%:*}"; name="${entry##*:}"
-  echo "===== $name HITTER ====="
-  npx tsx --env-file-if-exists=.env.local scripts/precompute-transfer-projections.ts --team "$uuid" 2>&1 | grep -iE "Result:|computed|error" | head -3
-  echo "===== $name PITCHER ====="
-  npx tsx --env-file-if-exists=.env.local scripts/precompute-pitchers.ts --team "$uuid" 2>&1 | grep -iE "Result:|computed|overlaid|error" | head -3
+  echo "===== [$i/${#TEAMS[@]}] $name HITTER ====="
+  npx tsx --env-file-if-exists=$ENV_FILE scripts/precompute-transfer-projections.ts --team "$uuid" $PROD_FLAG 2>&1 | grep -iE "Result:|computed|error" | head -3
+  echo "===== [$i/${#TEAMS[@]}] $name PITCHER ====="
+  npx tsx --env-file-if-exists=$ENV_FILE scripts/precompute-pitchers.ts --team "$uuid" $PROD_FLAG 2>&1 | grep -iE "Result:|computed|overlaid|error" | head -3
 done
-echo "===== STEP 2 ALL DONE ====="
+echo "===== STEP 2 ALL DONE ($i teams on $TARGET) ====="

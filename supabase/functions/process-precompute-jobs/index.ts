@@ -521,12 +521,14 @@ function applyTransferPostprocess(projected: any, inputs: any, transferMultiplie
 const PITCHING_EQ_DEFAULTS = {
   fip_plus_weight: 0.30, era_plus_weight: 0.25, whip_plus_weight: 0.15,
   k9_plus_weight: 0.15, bb9_plus_weight: 0.10, hr9_plus_weight: 0.05,
-  era_plus_ncaa_avg: 6.21, era_plus_ncaa_sd: 1.587898316, era_pr_sd: 29.48780404, era_plus_scale: 20,
-  fip_plus_ncaa_avg: 5.08, fip_plus_ncaa_sd: 1.000197585, fip_pr_sd: 22.20492306, fip_plus_scale: 20,
-  whip_plus_ncaa_avg: 1.64, whip_plus_ncaa_sd: 0.2521159606, whip_pr_sd: 24.58561805, whip_plus_scale: 20,
-  k9_plus_ncaa_avg: 8.21, k9_plus_ncaa_sd: 1.990147058, k9_pr_sd: 43.76562188, k9_plus_scale: 20,
-  bb9_plus_ncaa_avg: 4.82, bb9_plus_ncaa_sd: 1.340745984, bb9_pr_sd: 42.89490618, bb9_plus_scale: 20,
-  hr9_plus_ncaa_avg: 1.12, hr9_plus_ncaa_sd: 0.4677282102, hr9_pr_sd: 34.13833398, hr9_plus_scale: 20,
+  // avg/sd/sd_bad refreshed to the 2026 two-sided-SD calibration (2026-08-26). sd_bad = the wide
+  // worse-than-mean semi-deviation; the overlay loads live model_config values, these are fallbacks.
+  era_plus_ncaa_avg: 5.474523, era_plus_ncaa_sd: 1.545191, era_plus_ncaa_sd_bad: 2.264985, era_pr_sd: 29.48780404, era_plus_scale: 20,
+  fip_plus_ncaa_avg: 5.074767, fip_plus_ncaa_sd: 1.272503, fip_plus_ncaa_sd_bad: 1.843704, fip_pr_sd: 22.20492306, fip_plus_scale: 20,
+  whip_plus_ncaa_avg: 1.531371, whip_plus_ncaa_sd: 0.255751, whip_plus_ncaa_sd_bad: 0.337614, whip_pr_sd: 24.58561805, whip_plus_scale: 20,
+  k9_plus_ncaa_avg: 8.588246, k9_plus_ncaa_sd: 2.305547, k9_plus_ncaa_sd_bad: 1.966669, k9_pr_sd: 43.76562188, k9_plus_scale: 20,
+  bb9_plus_ncaa_avg: 4.076382, bb9_plus_ncaa_sd: 1.306371, bb9_plus_ncaa_sd_bad: 1.733557, bb9_pr_sd: 42.89490618, bb9_plus_scale: 20,
+  hr9_plus_ncaa_avg: 1.075525, hr9_plus_ncaa_sd: 0.212733, hr9_plus_ncaa_sd_bad: 0.271141, hr9_pr_sd: 34.13833398, hr9_plus_scale: 20,
   pwar_ip_sp: 85, pwar_ip_rp: 35, pwar_ip_sm: 50,
   pwar_r_per_9: 6.915, pwar_replacement_runs_per_9: 1.92, pwar_runs_per_win: 13.1,  // D1 (mirror pitchingEquations, 2026-08-10)
   sp_to_rp_reg_era_pct: 6, sp_to_rp_reg_fip_pct: 8, sp_to_rp_reg_whip_pct: 5,
@@ -594,6 +596,12 @@ const applyRoleTransitionAdjustment = (
   if (lowerIsBetter) return step > 0 ? value / factor : value * factor;
   return step > 0 ? value * factor : value / factor;
 };
+
+// Two-sided (split) SD selector — mirror of src/lib/transferPitcherProjection.dsd + pitcherProjection's
+// directional SD (stage 5.5 calibration). PR+ >= 100 projects toward the GOOD side (compressed → sd_good);
+// PR+ < 100 toward the wide BAD side (sd_bad). Falls back to sd_good when sd_bad is absent.
+const dsd = (prPlus: number, sdGood: number, sdBad: number | undefined | null): number =>
+  (prPlus >= 100 ? sdGood : (Number.isFinite(sdBad as number) ? (sdBad as number) : sdGood));
 
 const projectLowerP = (
   last: number, prPlus: number, ncaaAvg: number, prSd: number, ncaaSd: number,
@@ -699,12 +707,15 @@ function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: P
   const fromHr9Pf = input.fromHr9ParkRaw != null ? parkToIndex(input.fromHr9ParkRaw) : null;
   const toHr9Pf = input.toHr9ParkRaw != null ? parkToIndex(input.toHr9ParkRaw) : null;
 
-  const pEra = projectLowerP(input.era, input.storedPrPlus.era, eq.era_plus_ncaa_avg, eq.era_pr_sd, eq.era_plus_ncaa_sd, eq.transfer_era_power_weight, eq.transfer_era_conference_weight, input.fromEraPlus, input.toEraPlus, eq.transfer_era_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_era_park_weight, fromRg, toRg);
-  const pFip = projectLowerP(input.fip, input.storedPrPlus.fip, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, eq.fip_plus_ncaa_sd, eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, input.fromFipPlus, input.toFipPlus, eq.transfer_fip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_fip_park_weight, fromRg, toRg);
-  const pWhip = projectLowerP(input.whip, input.storedPrPlus.whip, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, eq.whip_plus_ncaa_sd, eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, input.fromWhipPlus, input.toWhipPlus, eq.transfer_whip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
-  const pK9 = projectHigherP(input.k9, input.storedPrPlus.k9, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, eq.k9_plus_ncaa_sd, eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, input.fromK9Plus, input.toK9Plus, eq.transfer_k9_competition_weight, input.fromHitterTalent, input.toHitterTalent);
-  const pBb9 = projectLowerP(input.bb9, input.storedPrPlus.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, eq.bb9_plus_ncaa_sd, eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, input.fromBb9Plus, input.toBb9Plus, eq.transfer_bb9_competition_weight, input.fromHitterTalent, input.toHitterTalent, null, null, null);
-  const pHr9 = projectLowerP(input.hr9, input.storedPrPlus.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, eq.hr9_plus_ncaa_sd, eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, input.fromHr9Plus, input.toHr9Plus, eq.transfer_hr9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf);
+  const pEra = projectLowerP(input.era, input.storedPrPlus.era, eq.era_plus_ncaa_avg, eq.era_pr_sd, dsd(input.storedPrPlus.era, eq.era_plus_ncaa_sd, eq.era_plus_ncaa_sd_bad), eq.transfer_era_power_weight, eq.transfer_era_conference_weight, input.fromEraPlus, input.toEraPlus, eq.transfer_era_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_era_park_weight, fromRg, toRg);
+  const pFip = projectLowerP(input.fip, input.storedPrPlus.fip, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, dsd(input.storedPrPlus.fip, eq.fip_plus_ncaa_sd, eq.fip_plus_ncaa_sd_bad), eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, input.fromFipPlus, input.toFipPlus, eq.transfer_fip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_fip_park_weight, fromRg, toRg);
+  const pWhip = projectLowerP(input.whip, input.storedPrPlus.whip, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(input.storedPrPlus.whip, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, input.fromWhipPlus, input.toWhipPlus, eq.transfer_whip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
+  const pK9 = projectHigherP(input.k9, input.storedPrPlus.k9, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(input.storedPrPlus.k9, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, input.fromK9Plus, input.toK9Plus, eq.transfer_k9_competition_weight, input.fromHitterTalent, input.toHitterTalent);
+  const pBb9 = projectLowerP(input.bb9, input.storedPrPlus.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(input.storedPrPlus.bb9, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, input.fromBb9Plus, input.toBb9Plus, eq.transfer_bb9_competition_weight, input.fromHitterTalent, input.toHitterTalent, null, null, null);
+  // HR9-only physical floor at 0 (mirror src/lib floorAtZero, Trevor 2026-08-25): HR9 is the lone
+  // luck-dominated rate where a thin-sample blend can dip below 0 even after the two-sided SD. Every
+  // OTHER rate stays unfloored so a negative surfaces as a real bug, not silently masked.
+  const pHr9 = Math.max(0, projectLowerP(input.hr9, input.storedPrPlus.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(input.storedPrPlus.hr9, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, input.fromHr9Plus, input.toHr9Plus, eq.transfer_hr9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf));
 
   const roleCurve = {
     tier1Max: eq.rp_to_sp_low_better_tier1_max, tier2Max: eq.rp_to_sp_low_better_tier2_max, tier3Max: eq.rp_to_sp_low_better_tier3_max,

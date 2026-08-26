@@ -19,9 +19,16 @@ import { readFileSync } from "fs";
 import { assertCentering } from "./_fixture_guard.mjs";
 
 const COMMIT = process.argv.includes("--commit");
+const IS_PROD = process.argv.includes("--prod");
 const SEASON = 2026;
-const env = Object.fromEntries(readFileSync(".env.local", "utf8").split("\n").filter(l => l.includes("=")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
-const sb = createClient(env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+const ENV_FILE = IS_PROD ? ".env.production.local" : ".env.local";
+const env = Object.fromEntries(readFileSync(ENV_FILE, "utf8").split("\n").filter(l => l.includes("=")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
+const _url = env.VITE_SUPABASE_URL || env.SUPABASE_URL;
+// Prod guard (mirror the batch scripts): refuse to write prod unless --prod is explicit.
+if (/trbvxuoliwrfowibatkm/.test(_url) && !IS_PROD) { console.error("✗ URL looks like PROD but --prod not passed. Refusing."); process.exit(1); }
+if (IS_PROD && !/trbvxuoliwrfowibatkm/.test(_url)) { console.error("✗ --prod passed but URL is not prod. Refusing."); process.exit(1); }
+console.log(`target: ${IS_PROD ? "🔴 PROD" : "STAGING"}${COMMIT ? "" : " [dry-run — pass --commit to write]"}`);
+const sb = createClient(_url, env.SUPABASE_SERVICE_ROLE_KEY);
 
 const C = JSON.parse(readFileSync("output/descriptive_constants.json", "utf8"));
 const W = JSON.parse(readFileSync("output/woba_weights.json", "utf8"));
