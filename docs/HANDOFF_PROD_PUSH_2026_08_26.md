@@ -77,5 +77,11 @@ auto-derivation (fold 21.22's derivation into a calibration stage) · nil_valuat
 
 ## POST-PUSH
 - Append every prod change to `PROD_MIGRATIONS_TODO.md` as it runs.
-- WhatsNewModal note (no em dashes) if WAR numbers move.
-- Run the STAGING_UX_WALKTHROUGH against prod as a smoke test.
+- **WhatsNewModal note is DONE** — the `2026-08-26` release (4 features) is already in-branch, `STORAGE_KEY` v9, fires on
+  the frontend deploy for all users. No em-dashes in the new release. See `docs/AGENT_LEARNINGS_ui_and_whats_new_2026_08_26.md`.
+- Run the STAGING_UX_WALKTHROUGH (or `docs/STAGING_CLICKTHROUGH_2026_08_26.md`) against prod as a smoke test.
+
+## FRONTEND / DISPLAY SHIPPING WITH THIS MERGE (no separate prod DB step, except run-value data)
+What's New v9 release · hitter Season-Stats **VALUE** run-value panel (needs step 13b + `populate_hitter_run_values`) ·
+"oWAR"→"WAR" relabel (RosterTab/TargetBoardTab) · PlayerHub historical id resolution · softened market-valuation copy.
+Full record: `docs/AGENT_LEARNINGS_ui_and_whats_new_2026_08_26.md`. Verify: `docs/STAGING_CLICKTHROUGH_2026_08_26.md`.

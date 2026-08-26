@@ -593,6 +593,14 @@ Full branch cataloged (785 files) into the authoritative doc set. Use these for 
   currently a HAND-RUN script, not an edge fn). STAGING done 2026-08-26 (6,099 `all` rows; coverage
   batting 6,053 / def 5,138 / bsr 5,346; Souza verified). Full writeup:
   `docs/AGENT_LEARNINGS_hitter_run_values_2026_08_26.md`.
+- [ ] **FRONTEND / DISPLAY — ships with the branch merge to main (Vercel prod build); NO separate DB step** —
+  (a) **What's New modal** new `2026-08-26` release (4 features: Complete WAR / Market Valuations / Run Values /
+  Sharper Projections), `STORAGE_KEY` v8→**v9** so it fires for all users on deploy — this IS the deferred
+  "post-push WhatsNewModal note," now in-branch; (b) **run-value VALUE panel** on hitter Season Stats (needs the
+  data from step 13b + `populate_hitter_run_values`); (c) **"oWAR"→"WAR"** header relabel (RosterTab / TargetBoardTab);
+  (d) **PlayerHub** historical id resolution (uuid OR source_player_id). Copy rules honored (no overclaim / no
+  disparaging past / no em-dashes). Full record: `docs/AGENT_LEARNINGS_ui_and_whats_new_2026_08_26.md`. Verify via
+  `docs/STAGING_CLICKTHROUGH_2026_08_26.md`.
 - [ ] **★ Snapshot hitter market RE-PRICE (stale-PTM fix) — PROD needed** — `recompute-snapshot-hitter-market.ts --prod --apply`
   (runbook **step 42b**, Phase F, AFTER market resyncs). Snapshot `market_value` re-derived = `total_hitter_war × $25k ×
   PTM(build-program conf) × PVF(players.position)`, dollar field ONLY, all toggles preserved. Fixes snapshots frozen at the

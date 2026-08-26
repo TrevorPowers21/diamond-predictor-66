@@ -126,7 +126,7 @@ route shell.**
 | Route | Check |
 |---|---|
 | `/savant`, `/savant/leaderboards`, `/savant/conferences`, `/savant/teams`, `/savant/team|hitter|pitcher/:id` | **Routes + pages deleted** — every `/savant/*` URL 404s/redirects. ⚠ Confirm the STANDALONE Leaderboards / Conference Stats page / Team Profiles going away is intended (the per-player displays live on at `/dashboard/.../stats`) |
-| `/dashboard/player/:id/stats` HitterPitchLog | Stats/Visuals toggle; panels Batted Ball / Plate Discipline / Per-Pitch Success / Ball Flight / **Inferred Bat Speed + Squared-Up%** (new); Visuals spray + 13-zone heat maps. Tracked → "2026 vs NCAA Avg"; untracked → "No pitch-log data linked" |
+| `/dashboard/player/:id/stats` HitterPitchLog | Stats/Visuals toggle; panels Batted Ball / Plate Discipline / Per-Pitch Success / Ball Flight / **Inferred Bat Speed + Squared-Up%** (new); Visuals spray + 13-zone heat maps. Tracked → "2026 vs NCAA Avg"; untracked → "No pitch-log data linked". **NEW: "VALUE" panel** right of the banner — 3 `PercentileBar` rows (Batting / Defensive / Baserunning Run Value), pure-read of stored `*_rv`/`*_rv_z`, same width+font as Batted Ball Data, bottom flush with the Stats/Visuals selector line. Position players only; **disappears on any dimension split / filter** (rv is on the `all` row only). |
 | `/dashboard/pitcher/:id/stats` PitcherPitchLog | Quality of Stuff / Batted Ball / Per-Pitch; Visuals strike-zone density, 13-zone usage, usage pie (~100%), movement plot (clusters by type), whiff/xwOBA zones; tracking badge FULL/PARTIAL/LOW. Untracked → empty-state. "Rolling xwOBA — coming next" is an intentional placeholder |
 
 ## 10. Conference Stats tables (still-live embedded)
@@ -142,8 +142,10 @@ route shell.**
 - Power Ratings: ISO Pull%/LA10-30 → single **"Pull Air %"**; WHIP now includes **Stuff+**; HR/9 now includes **HardHit%**.
 
 ## 12. What's-New Modal / Release Notes  (`WhatsNewModal.tsx`)
-Open the modal, confirm each of the six new entries renders (headline + bullets, no em-dash issues), and the top
-release's landing route works. Newest first: 2026-07-17 "Introducing the Front Office" (landing `/gm`, auto-navigates
-on dismiss — verify it lands GM home only for GM-access users) · 2026-07-09 inferred bat speed/squared-up · 2026-07-04
-improved roster building · 2026-06-29 Visuals tab + per-pitch run value · 2026-06-27 scouting grades w/ percentile ·
-2026-06-23 comprehensive 2026 analysis.
+**NEW newest release `2026-08-26`** (added this session; `STORAGE_KEY` v9 so it fires on hard refresh): FOUR features —
+Complete WAR (o+d+bsr) · **Market Valuations, Informed by Research** (humble copy, program-tier scaled, NOT overclaiming) ·
+Run Values on Season Stats · Sharper Projections. Landing `/dashboard/returning`. **No em-dashes in the new release.**
+Then the prior releases newest-first: 2026-07-17 "Introducing the Front Office" (landing `/gm`, GM-access users only) ·
+2026-07-09 inferred bat speed/squared-up · 2026-07-04 improved roster building · 2026-06-29 Visuals tab + per-pitch run
+value · 2026-06-27 scouting grades w/ percentile · 2026-06-23 comprehensive 2026 analysis. (Older entries still contain
+em-dashes — Trevor said leave them.)

@@ -64,9 +64,9 @@ this pass confirms the DISPLAY. If any ✗ hits, stop and note the step.
     ✓ "Budget used" is IDENTICAL across Home, Roster, Funding Sources, Analytics for the same build. Allocate a vendor $10k → Remaining drops $10k AND the player's Roster NIL rises $10k (no double-count).
     ✗ Any two pages disagree on "used", or the allocation double-counts.
 
-15. **What's-New modal**
-    ✓ Opens; six entries render (headline + bullets, no em-dashes); top release's landing route works.
-    ✗ Missing/garbled entry or em-dashes.
+15. **What's-New modal** (hard refresh to trigger — storage key is v9)
+    ✓ Newest release **2026-08-26** shows first with FOUR features — Complete WAR · Market Valuations · Run Values · Sharper Projections — each headline + bullets, no em-dashes; dismiss lands on `/dashboard/returning`.
+    ✗ Modal doesn't fire on refresh, a feature missing/garbled, em-dashes, or wrong landing.
 
 ---
 **If all ✓:** the display layer matches the DB-verified data. **Any ✗:** note the step number — that's the one to fix before the push.
