@@ -169,7 +169,12 @@ export default function PlayerHub() {
     queryKey: ["player-identity", playerId],
     enabled: !!playerId,
     queryFn: async () => {
-      const { data } = await (supabase as any).from("players").select("*").eq("id", playerId).maybeSingle();
+      // Resolve either a players.id UUID (normal) or a legacy source_player_id — the Historical
+      // player tables link by source_player_id (HistoricalPlayerTable → /player/:id). Mirror
+      // usePlayerSourceId / PitcherProfile so a historical player's identity, pitcher/hitter
+      // classification (position below), and season-stats preview all resolve instead of coming back null.
+      const col = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(playerId) ? "id" : "source_player_id";
+      const { data } = await (supabase as any).from("players").select("*").eq(col, playerId).maybeSingle();
       return data as any;
     },
   });
