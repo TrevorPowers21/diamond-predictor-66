@@ -22,17 +22,19 @@ nothing recomputes until Phase E), so nothing is half-broken.
 
 **Commits (feature/war-recalibration):** `1abe09d` reconciliation · `a1c2026` gap-fill+PhaseA log · `a6ef44d` PhaseB log · `56ff2a1` A11 · (+ GATE/venue logged in the ledger).
 
-## ▶ RESUME POINT — Phase C, step 19
-Next up is **Phase C — producers/backfills** (runbook steps 19–29). Order + the pitch-log-derivation sequence
-(venue done → Stuff+ classify → Stuff+ score → conf stats → team_season_stats).
+## ▶ SESSION 2 (2026-08-27) — done + resume point
+- ✅ **C19 pitcher_full_name — DONE** — was corrupt (= batter name); fixed to players `First Last` via
+  `pitcher_id=source_player_id`. NEW committed `scripts/sql/fix_pitcher_full_names.sql` (single idempotent UPDATE,
+  900s SET LOCAL). Verified 41/41 correct table-wide. ⚠ exec_sql gateway-timed-out at 125s but txn COMMITTED server-side.
+- ⏳ **C20 park_code — IN PROGRESS** — rewrote `scripts/backfill_park_code_load.ts` prod-capable + self-contained
+  (was staging-hardcoded + missing the UPDATE): creates `_park_code_fix`, loads park_code from `docs/drs-reference/*DRS Pitch Log.csv`,
+  then raised-timeout `UPDATE pitch_log.park_code`. **RESUME HERE:** run it (`--prod`), verify park_code populated + matches staging, commit + log.
 
-### ⚠ KNOWN GAP to fix FIRST (step 19)
-**`pitcher_full_name` fix has NO committed script** — the runbook describes it only as "build `_pitcher_name_fix` from
-prod players + `fix_pnames` keyset loop over prod pitch_log; also fix `ingest_pitch_log.ts` mapping." This is the same
-ad-hoc-gap pattern as A8/A9/A11. **First task tomorrow: reconstruct it** (the pitcher_full_name column is corrupt = the
-BATTER name, per `reference_pitch_log_pitcher_name_corrupt` memory; the fix maps pitcher_full_name from `players` via
-`pitcher_id`/`pitcher_abbrev_name`). Build it, dry-run, apply, **commit the script** (close the gap). Check the actual
-prod state of `pitcher_full_name` first — it may or may not already be fixed.
+### Then continue Phase C
+21 is_conference_game (`backfill_is_conference_game.ts`) · 22 sequence (`pitch_log_sequence_backfill_steps.sql`) ·
+23 pull_air/in_zone · Stuff+ (heavy) · 24 trackman · 25 derive_masters · 26 scores · 27 ncaa_avg · 28 conf-stats (G-gate) · 29 NJCAA re-tag.
+⚠ Expect more staging-hardcoded scripts / missing UPDATE-SQL / missing helper tables — same reconstruct-from-staging-and-commit pattern.
+Full learnings: `docs/AGENT_LEARNINGS_prod_push_execution_2026_08_27.md`.
 
 ### Phase C steps (per runbook, with what exists)
 - **19** pitcher_full_name — ⚠ reconstruct (above).
