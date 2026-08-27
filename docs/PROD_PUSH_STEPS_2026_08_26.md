@@ -21,6 +21,31 @@ resolutions). Companion: `docs/PRE_PROD_AUDIT_2026_08_26.md` (verdict + reconcil
 
 ---
 
+# ★ PROD STATE — RECONCILED 2026-08-26 (live read-only probe; authoritative for THIS run)
+Prod = **"Push-1 done + PRE-recalibration config."** Verified against prod, not assumed. Most of the push is NEEDED;
+a few DDL/data items are already applied. Mark each step against this before running.
+
+**ALREADY DONE on prod (SKIP or idempotent-re-run only):**
+- `pitch_log.runs` attribution widen (A5) — DONE (Push-1). The dedup gate's `runs IS NULL` detection depends on it.
+- `team_season_stats` table + **war columns** (A10, incl. hitter_war/rotation_pwar) — DONE. But the table is **EMPTY for 2026** → Phase F populate still NEEDED.
+- `player_season_defense` (13,454) + `player_season_baserunning` (10,432) — DONE, **current engine 0.11.0**. Loader (D30) is idempotent upsert → re-run harmless or SKIP. **desc-WAR Master cols are still MISSING → D31/32 populate NEEDED.**
+- `20260806 RENAME total_war→total_hitter_war` — DONE (`total_hitter_war` exists). ⚠ **SKIP — non-idempotent, ERRORS on re-run.**
+- `trackman_pitches` col — present (DDL done; the **data backfill C24 still NEEDED**). `offensive_power_rating` col — present.
+- `team_war_snapshots` **2025 champions = 309 rows — DONE (never drop).** 2026 = 466 (will be reseeded F45).
+- `refresh_composite_war()` exists but at **÷10** (Push-1 v1) → A6 redefines ÷13.1 (def only), F39 refires.
+
+**NEEDED (run per runbook — prod does NOT have these):**
+- **A2/3** Master `desc_*` / `desc_*_reg` cols (MISSING) · **A7** `park_code`/`is_conference_game`/`sequence` (MISSING) ·
+  **A8** ConfStats `hitter_talent_plus`/`run_env_factor`/`era_plus…hr9_plus` (MISSING) · **A9** Park `*_seasonal`/`era_factor` (MISSING) ·
+  **A11** `pitch_log_pitcher_totals.ip` (MISSING) + Masters UNIQUE · **A12** venue corrections (**table EMPTY, 0 rows, no version → populate**) · **A13b** run-value cols (MISSING).
+- **ALL of Phase B** — model_config **79→201 keys**, `nil_tier_sec` **1.5→4.0**, `ncaa_averages.wrc` **0.357→0.3782**, `owar_repl_600` **25→21.22**, `r_obp_std_pr` **28.889→31.89504**, transfer weights, **two-sided SD (`_sd_bad` = 0 → 6)**.
+- **ALL of Phase C** producers (park_code/conf/sequence backfills, pull_air/in_zone, trackman_pitches DATA, derive_masters, Stuff+ rollup, computeAndStoreScores, ncaa_averages, conf-stats env+/OPR/HTP, **NJCAA_D1 re-tag = 0 → NEEDED**).
+- **Phase D** descriptive-WAR populate (D31/32, after A2/3). **Phase E** TWP detector (**is_twp 137→253**) + returner/transfer precomputes. **Phase F** all re-bakes. **Phase G** edge fn (**prod v12 → v27**). **Phase H** drops last.
+
+**STILL TO VERIFY before GATE 0:** the `runs IS NULL` junk count on prod pitch_log (the dedup gate — see below).
+
+---
+
 # ★★★ PITCH-LOG INTEGRITY — DO THIS BEFORE ANY PITCH-LOG DERIVATION (foundational) ★★★
 **Every** prod value derived from `pitch_log` — venue corrections, Stuff+ classification + scoring, Conference Stats,
 `team_season_stats`, pitch-log pitching rates, park factors — is only as correct as the pitch_log underneath it. Two
