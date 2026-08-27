@@ -1,5 +1,22 @@
 # Prod migration checklist — `feature/general-manager-interface`
 
+## ★ PROD PUSH EXECUTION LOG — 2026-08-26 (LIVE, feature/war-recalibration)
+Following `docs/PROD_PUSH_STEPS_2026_08_26.md` exactly, in order. Each step logged the instant it completes.
+Prod state reconciled first (Push-1 + pre-recalibration config) — see the runbook's "PROD STATE — RECONCILED" section.
+- [x] **GATE 0 — dedup prod pitch_log** — `DELETE FROM pitch_log WHERE runs IS NULL;` (raised statement_timeout). Junk count
+  was **3,509** (= expected; attribution complete, safe). Deleted → verify `count(*) WHERE runs IS NULL` = **0**. Done 2026-08-26.
+- [x] **GATE 1 — ivb/hb movement complete** — validated via the venue-corrections DRY-RUN on prod: **311 venues, τ IVB 0.622″ / HB 0.662″, centering IVB −0.0066″ / HB +0.0204″, worst park −2.57** (all in range, reproduces the known fixture). Movement complete + stable. Done 2026-08-26.
+- [x] **A12 venue corrections — APPLIED + verified** — `scripts/sql/venue_correction_persist_prod.sql` via `_run_sql_file.ts` (exec_sql OK). NOTIFY pgrst reloaded. `venue_movement_corrections` = **311 rows, v1-2026-loo-eb**, worst IVB −2.57, `pitch_log_corrected` view resolves. Done 2026-08-26.
+- [x] **Phase A DDL — APPLIED + verified (11 files)** — desc_* cols (Hitter+Pitching Master) · `20260810` composite ÷13.1
+  def · `20260808` pitch_num_in_game/ab_num_in_game/pitch_num_in_ab · `20260818…` park_code + is_conference_game ·
+  `20260821000000` ConfStats era_plus…hr9_plus · **`20260826160000_war_recalibration_gap_alters.sql` (NEW — filled the
+  ad-hoc ConfStats run_env_factor/hitter_talent_plus/updated_at + Park 10×`*_seasonal`+updated_at + pitcher `ip`; generated
+  by diffing staging↔prod, types match staging)** · `20260823` player_predictions team-scoped RLS · `20260826150000`+`150500`
+  run-value cols+fn. All verified present on prod. ⚠ 20260806 RENAME skipped (already done). Done 2026-08-26.
+- [ ] **A11 Masters UNIQUE (source_player_id, "Season")** — DEFERRED within Phase A: dedup-check prod Hitter/Pitching Master first, then add. (Needed before the `derive_masters_from_pitchlog` upserts in Phase C.)
+- [ ] (then B config → C producers → D desc-WAR → E precomputes → F re-bakes → G edge fn → H drops.)
+
+
 > ## ★★★ LOGGING DISCIPLINE — VITALLY IMPORTANT (Trevor 2026-08-19) ★★★
 > **EVERY schema or SQL change is logged HERE, no exceptions.** This file is the single
 > authoritative record for the staging→prod push. The instant we run ANY of the following
