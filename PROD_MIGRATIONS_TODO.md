@@ -14,7 +14,12 @@ Prod state reconciled first (Push-1 + pre-recalibration config) — see the runb
   by diffing staging↔prod, types match staging)** · `20260823` player_predictions team-scoped RLS · `20260826150000`+`150500`
   run-value cols+fn. All verified present on prod. ⚠ 20260806 RENAME skipped (already done). Done 2026-08-26.
 - [ ] **A11 Masters UNIQUE (source_player_id, "Season")** — DEFERRED within Phase A: dedup-check prod Hitter/Pitching Master first, then add. (Needed before the `derive_masters_from_pitchlog` upserts in Phase C.)
-- [ ] (then B config → C producers → D desc-WAR → E precomputes → F re-bakes → G edge fn → H drops.)
+- [x] **Phase B config — APPLIED + verified** — `step8_model_config_2026.sql` (201 keys; repl 21.22, r_obp_std_pr 31.89504) ·
+  `ncaa_averages.wrc=0.3782` · `seed_nil_tiers` (nil_tier_sec **4.0**, ACC 1.5 / Big12 1.2 / JUCO 0.35) ·
+  `store_transfer_weights_and_sds --apply` (42 keys, all confirming no-op — step8 covered them) ·
+  `compute-projection-calibration --apply` (**19 keys incl. 6 `_sd_bad` two-sided SD**, hr9_shrink_k 66.4). Done 2026-08-26.
+- [ ] **A11 Masters UNIQUE** (dedup-check first) — before Phase C step 25 derive_masters.
+- [ ] (then C producers → D desc-WAR → E precomputes → F re-bakes → G edge fn → H drops.)
 
 
 > ## ★★★ LOGGING DISCIPLINE — VITALLY IMPORTANT (Trevor 2026-08-19) ★★★
