@@ -19,6 +19,7 @@ Prod state reconciled first (Push-1 + pre-recalibration config) — see the runb
   `store_transfer_weights_and_sds --apply` (42 keys, all confirming no-op — step8 covered them) ·
   `compute-projection-calibration --apply` (**19 keys incl. 6 `_sd_bad` two-sided SD**, hr9_shrink_k 66.4). Done 2026-08-26.
 - [x] **A11 Masters UNIQUE — APPLIED + verified** — 0 true dups (stable id-scan; earlier 5/7 were pagination artifacts). Added `hitter_master_source_player_season_uniq` + `pitching_master_source_player_season_uniq` via NEW idempotent `20260826160500_masters_source_season_unique.sql` (prod + staging, both were missing it). Done 2026-08-26.
+- [x] **C19 pitcher_full_name fix — APPLIED + verified** (2026-08-27) — prod `pitcher_full_name` held the BATTER name; fixed to players `First Last` via `pitcher_id=source_player_id` (single idempotent UPDATE, 900s timeout; gateway HTTP-timed-out at 125s but the txn committed server-side). Verified 41/41 correct table-wide, 0 corrupt. NEW committed `scripts/sql/fix_pitcher_full_names.sql` (closes the ad-hoc gap).
 - [ ] (then C producers → D desc-WAR → E precomputes → F re-bakes → G edge fn → H drops.)
 
 
