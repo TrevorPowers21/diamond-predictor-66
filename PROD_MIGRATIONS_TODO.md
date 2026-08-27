@@ -18,7 +18,7 @@ Prod state reconciled first (Push-1 + pre-recalibration config) — see the runb
   `ncaa_averages.wrc=0.3782` · `seed_nil_tiers` (nil_tier_sec **4.0**, ACC 1.5 / Big12 1.2 / JUCO 0.35) ·
   `store_transfer_weights_and_sds --apply` (42 keys, all confirming no-op — step8 covered them) ·
   `compute-projection-calibration --apply` (**19 keys incl. 6 `_sd_bad` two-sided SD**, hr9_shrink_k 66.4). Done 2026-08-26.
-- [ ] **A11 Masters UNIQUE** (dedup-check first) — before Phase C step 25 derive_masters.
+- [x] **A11 Masters UNIQUE — APPLIED + verified** — 0 true dups (stable id-scan; earlier 5/7 were pagination artifacts). Added `hitter_master_source_player_season_uniq` + `pitching_master_source_player_season_uniq` via NEW idempotent `20260826160500_masters_source_season_unique.sql` (prod + staging, both were missing it). Done 2026-08-26.
 - [ ] (then C producers → D desc-WAR → E precomputes → F re-bakes → G edge fn → H drops.)
 
 
