@@ -75,6 +75,13 @@ Splitter:  0.10·zMax(velo) − 0.20·z(ivb) + 0.25·z(armHB) + 0.05·zAbs(relH)
 ## 8. A2 PROD DRY-RUN (`reclassify_prod.ts --dry-run`, read-only, prod trbvxuoliwrfowibatkm)
 2,013,005 labels; needs_review 8.6%. Distribution (prod vs staging): 4S 37.7/37 · SI 16.1/16.5 · SL 11.1/14 · CH 10.6/9 · GY 7.9/6.4 · CB 5.6/5.7 · SW 5.2/5.6 · FC 3.7/3.6 · SPL 2.1/2.3. (SL/GY/CH = the known seam bleed; fastballs/SW/CB/FC/SPL dead-on.)
 
+## 8b. FULL-POPULATION PER-ROW STUFF+ CALC (`reclassify_v2.ts --score`, staging, READ-ONLY, 2026-08-28)
+The real linear chain at scale: classify v2 → aggregate per (pitcher × label × hand) → score each row by label → recenter each bucket → per-pitcher rollup.
+- **27,869 scored rows / 4,804 pitchers / 2,000,674 pitches** (= staging `_reclass_result` count exactly; 0 pitchers skipped). needs_review **8.6% per-pitch**.
+- Per-pitcher OVERALL Stuff+: **p10 90.7 · p25 94.8 · p50 99.0 · p75 103.0 · p90 107.0 · mean 98.6** (centered ~99, tight realistic spread).
+- Raw per-(type×hand) bucket offset from 100 BEFORE recenter (recenter then shifts each to exactly 100): 4S-R 104.7 (n=564k) · SI-R 102.0 · 4S-L 104.7 · SL-R 105.2 · CH-R 98.6 · GY-R 100.3 · SI-L 101.7 · CB-R 101.8 · SW-R 102.7 · CH-L 99.8 · FC-R 104.3 · SL-L 104.9 · GY-L 101.2 · SPL-R 101.1 · CB-L 101.8 · SW-L 102.9 · FC-L 103.8 · SPL-L 99.5. (All within 98.6–105.2 → no runaway bucket.)
+- NOTE parity: `--score` recenters pitch-weighted; the production `stuffPlusEngine.ts:450` recenters **per-pitcher unweighted** — match the engine exactly when `--score` becomes the real producer.
+
 ## 9. CONFIG (model_config, 2026) — resolved 2026-08-28
 - **2026 model WEIGHTS: identical** prod vs staging (62 keys, 0 diffs). ✓
 - **2026 derived baselines/SDs** (`*_ncaa_avg`/`*_std_pr` etc.): per-env DERIVED (regenerated on prod in C27); prod holds the fresh `step8_model_config_2026.sql` recalibration (e.g. `r_obp_std_pr = 31.89504`, `t_ba_std_pr = 29.99699`). NOT synced — regenerate.
