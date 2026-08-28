@@ -327,10 +327,56 @@ async function stuffcheck() {
   console.log(`\nBiggest Stuff+ discrepancies (pitcher: v2 vs staging):`);
   perP.map((x) => ({ ...x, d: Math.abs(x.v2 - x.st) })).sort((a, b) => b.d - a.d).slice(0, 8).forEach((x) => console.log(`  ${x.pid.slice(-9)}: v2 ${x.v2.toFixed(1)}  staging ${x.st.toFixed(1)}  Δ ${(x.v2 - x.st).toFixed(1)}  (${x.n}p)`));
 }
+// ─── SCORE: the per-row Stuff+ calculation (classify v2 → aggregate per label×hand → score by label → RECENTER per bucket → per-pitcher rollup). READ-ONLY compute, no writes. ───
+async function scoreAll() {
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+  const env = /trbvxuoliwrfowibatkm/.test(url) ? "PROD" : /slrxowawbijbjrkozqlj/.test(url) ? "STAGING" : "?";
+  const sb = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } }) as any;
+  console.log(`per-row Stuff+ calc — env=${env} (READ-ONLY compute, no writes)`);
+  const pf = new Map<string, number>();
+  { let last = ""; for (;;) { const { data } = await sb.from("_reclass_pf").select("pitcher_id,pf_velo").gt("pitcher_id", last).order("pitcher_id").limit(1000); if (!data || !data.length) break; for (const r of data) pf.set(r.pitcher_id, r.pf_velo); last = data[data.length - 1].pitcher_id; if (data.length < 1000) break; } }
+  const pop = new Map<string, SPop>();
+  { const { data } = await sb.from("pitcher_stuff_plus_ncaa").select("*").eq("season", SEASON); for (const r of data ?? []) pop.set(`${r.pitch_type}::${r.hand}`, r); }
+  let pitchers = [...pf.keys()].sort();
+  if (args.includes("--sample")) { const step = Math.max(1, Math.floor(pitchers.length / SAMPLE)); pitchers = pitchers.filter((_, i) => i % step === 0).slice(0, SAMPLE); }
+  console.log(`scoring ${pitchers.length} pitchers over ${pop.size} (type×hand) baselines...`);
+  const rows: { pid: string; lbl: string; hand: string; n: number; raw: number }[] = []; let done = 0, skipped = 0, reviewPitches = 0, allPitches = 0;
+  for (const pid of pitchers) {
+    const pr: (P & { rh: number | null; rs: number | null; ext: number | null })[] = []; let last = "";
+    for (;;) { const { data } = await sb.from("pitch_log_corrected").select("uniq_pitch_id,pitch_type,pitcher_hand,release_velocity,ivb_corrected,hb_corrected,spin,rel_height,rel_side,extension,pitch_type_reclassified").eq("pitcher_id", pid).eq("season", SEASON).gt("uniq_pitch_id", last).order("uniq_pitch_id").limit(1000);
+      if (!data || !data.length) break; for (const r of data) pr.push({ uniq: r.uniq_pitch_id, raw: r.pitch_type, hand: r.pitcher_hand, velo: r.release_velocity, ivb: r.ivb_corrected, hb: r.hb_corrected, spin: r.spin, stored: r.pitch_type_reclassified, rh: r.rel_height, rs: r.rel_side, ext: r.extension }); last = data[data.length - 1].uniq_pitch_id; if (data.length < 1000) break; }
+    const usable = pr.filter((p) => p.velo != null && p.ivb != null && p.hb != null); if (usable.length < 1) { skipped++; continue; }
+    const fbv = usable.filter((p) => p.raw === "FA" || p.raw === "SI").map((p) => p.velo);
+    const labels = classifyPitcher(usable, pf.get(pid) ?? (fbv.length ? mean(fbv) : mean(usable.map((p) => p.velo))));
+    const hand = usable[0].hand;
+    for (const p of usable) { allPitches++; if (labels.get(p.uniq)?.review) reviewPitches++; }
+    const g: Record<string, typeof usable> = {}; for (const p of usable) { const l = labels.get(p.uniq)?.label; if (l) (g[l] ??= []).push(p); }
+    for (const [lbl, ps] of Object.entries(g)) {
+      const pp = pop.get(`${lbl}::${hand}`); if (!pp) continue;
+      const row: SRow = { velocity: mean(ps.map((p) => p.velo)), ivb: mean(ps.map((p) => p.ivb)), hb: mean(ps.map((p) => armHBof(p.hb, p.hand))), rel_height: mean(ps.map((p) => p.rh ?? NaN).filter((x) => !isNaN(x))) || null, rel_side: mean(ps.map((p) => p.rs ?? NaN).filter((x) => !isNaN(x))) || null, extension: mean(ps.map((p) => p.ext ?? NaN).filter((x) => !isNaN(x))) || null, spin: mean(ps.map((p) => p.spin ?? NaN).filter((x) => !isNaN(x))) || null, fb_ch_velo_diff: null };
+      const s = scorePitch(lbl, row, pp); if (s == null) continue;
+      rows.push({ pid, lbl, hand, n: ps.length, raw: s });
+    }
+    if (++done % 500 === 0) console.log(`  ${done}/${pitchers.length} pitchers, ${rows.length} rows`);
+  }
+  // RECENTER each (pitch_type × hand) bucket to mean 100 (pitch-weighted)
+  const buck: Record<string, { sum: number; n: number }> = {}; for (const r of rows) { const k = `${r.lbl}::${r.hand}`; (buck[k] ??= { sum: 0, n: 0 }); buck[k].sum += r.raw * r.n; buck[k].n += r.n; }
+  const shift: Record<string, number> = {}; for (const [k, b] of Object.entries(buck)) shift[k] = b.sum / b.n - 100;
+  for (const r of rows) r.raw = Math.round((r.raw - shift[`${r.lbl}::${r.hand}`]) * 10) / 10;
+  // per-pitcher overall (pitch-weighted mean of recentered row scores)
+  const byP: Record<string, { sum: number; n: number }> = {}; for (const r of rows) { (byP[r.pid] ??= { sum: 0, n: 0 }); byP[r.pid].sum += r.raw * r.n; byP[r.pid].n += r.n; }
+  const overalls = Object.values(byP).map((b) => b.sum / b.n).sort((a, b) => a - b);
+  const q = (x: number) => overalls[Math.min(overalls.length - 1, Math.floor(x * overalls.length))];
+  console.log(`\n=== PER-ROW STUFF+ CALC complete (${env}, READ-ONLY) — ${rows.length} scored rows / ${Object.keys(byP).length} pitchers / ${allPitches} pitches; ${skipped} pitchers skipped; needs_review ${(100 * reviewPitches / allPitches).toFixed(1)}% (per-pitch) ===`);
+  console.log(`\nper-(type×hand) RAW bucket offset from 100 (recenter shifts each to exactly 100.0):`);
+  for (const [k, b] of Object.entries(buck).sort((a, b) => b[1].n - a[1].n)) console.log(`  ${k.padEnd(20)} raw=${(b.sum / b.n).toFixed(1)} pitch-n=${b.n}`);
+  console.log(`\nper-pitcher OVERALL Stuff+ distribution: p10=${q(.1).toFixed(1)} p25=${q(.25).toFixed(1)} p50=${q(.5).toFixed(1)} p75=${q(.75).toFixed(1)} p90=${q(.9).toFixed(1)}  mean=${(overalls.reduce((a, b) => a + b, 0) / overalls.length).toFixed(1)}`);
+}
 const __direct = !!process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
-if (__direct && args.includes("--stuffcheck")) stuffcheck().catch((e) => { console.error(e); process.exit(1); });
+if (__direct && args.includes("--score")) scoreAll().catch((e) => { console.error(e); process.exit(1); });
+else if (__direct && args.includes("--stuffcheck")) stuffcheck().catch((e) => { console.error(e); process.exit(1); });
 else if (__direct && args.includes("--pitcher")) pitcher().catch((e) => { console.error(e); process.exit(1); });
 else if (__direct && args.includes("--mismatches")) mismatches().catch((e) => { console.error(e); process.exit(1); });
 else if (__direct && args.includes("--derive")) derive().catch((e) => { console.error(e); process.exit(1); });
 else if (__direct && args.includes("--validate")) validate().catch((e) => { console.error(e); process.exit(1); });
-else if (__direct) console.log("usage: --validate | --derive | --mismatches | --pitcher | --stuffcheck  [--sample N]");
+else if (__direct) console.log("usage: --validate | --derive | --mismatches | --pitcher | --stuffcheck | --score  [--sample N]");
