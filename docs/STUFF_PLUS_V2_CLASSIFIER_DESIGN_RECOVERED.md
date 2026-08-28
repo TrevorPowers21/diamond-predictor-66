@@ -371,3 +371,5 @@ plain pitch-type switch (line 305: `case "Gyro Slider": return calcGyroSlider(..
 There is NO Stage-3 score-informed reclassification and NO scoring-a-pitch-as-a-gyro. The gyro/slider (and 4S/sinker) SEAM BLEED is
 just accepted (labeled by the range boundary; genuinely-ambiguous clusters → `needs_review` → backfill/review). This SIMPLIFIES the
 remaining build: wire v2 labels → stuffPlusEngine → aggregate. Ignore the "3-stage/gyro_stuff_plus" sections above — this correction wins.
+
+> ★★★ EXACT VALUES cheat-sheet (every decided number): `docs/STUFF_PLUS_EXACT_VALUES.md`

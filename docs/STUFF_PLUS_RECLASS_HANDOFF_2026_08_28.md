@@ -237,3 +237,5 @@ reclassifyRHP/LHP, reclassify_pitch_log.ts, _run_reclassify_*) are SUPERSEDED �
 ### NEXT STEP (Trevor): the Stuff+ per-row-by-label scoring (steps 2-3) — build A5 aggregator + wire stuffPlusEngine on v2 labels (drop v1).
 ### PROD EXECUTION (GATED): A2 `--go` needs PGURI + "prod, now?" + audit blockers resolved (landmine committed ✓; ledger drift). Then A5 → score → rollup on prod.
 ### TRACK B: this exact linear chain is the on-ingest edge fn (`project_unified_projection_edge_function`); the classifier + scoring are the committed forward process.
+
+> ★★★ **ALL EXACT DECIDED NUMBERS** (classifier thresholds, algorithm gates, the 9 scoring equations, derived ranges, validation, config) are in ONE place: **`docs/STUFF_PLUS_EXACT_VALUES.md`**.
