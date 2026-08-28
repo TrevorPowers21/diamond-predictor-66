@@ -1346,3 +1346,9 @@ are small-sample arms (Δ17.6 was a 165-pitch guy) or the known gyro-under-call 
 **VERDICT: v2 (92.6% per-pitch / 93.0% arsenal-mix) is GOOD ENOUGH — the classification difference from staging does not move the product
 Stuff+.** The full linear pipeline (classify→track usage→backfill→score→aggregate) is proven. REMAINING for prod: wire the A2 committed
 writer (keyset) to stamp v2 labels on prod pitch_log → run the real stuffPlusEngine (steps 4-5) on prod → rollups. NO feedback loop / gyro_stuff_plus.
+
+## 2026-08-28 — PIPELINE FIX + NEXT STEP (Trevor). v2 REPLACES v1 in the Stuff+ chain; next = Stuff+ per-row-by-label.
+recompute-stuff-plus.ts step 2 runs the OLD v1 runBreakingBallReclassification → would CLOBBER v2 → DROP it (v2 classifies at pitch level;
+labels in pitch_log.pitch_type_reclassified). The 3 drifted v1 copies SUPERSEDED. LINEAR process: classify(v2)→aggregate(A5: pitch_log→
+pitcher_stuff_plus_inputs)→SCORE per row by label (stuffPlusEngine calculateStuffPlus, calcGyroSlider=single gyro eq)→rollup→season aggregate.
+NEXT STEP = the per-row-by-label scoring (validated via --stuffcheck: |Δ| 0.85, 91% within ±2). Full plan: STUFF_PLUS_RECLASS_HANDOFF_2026_08_28 §GO-FORWARD PLAN.
