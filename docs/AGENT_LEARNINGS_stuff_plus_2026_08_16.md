@@ -1189,3 +1189,160 @@ NO WEIGHT RE-TUNE NEEDED — levers as designed (conf 1-3%, HTP dominant ~7%, St
 admin display) so the audit is traceable; HTP IS derivable on prod from stored OPR/Stuff+/WRC+ (hitter_talent_plus column added this session).
 Then transfer correctness (oWAR depth-role reconcile + input mapping) → the run.
 ### KEY LESSON: conference env+ = calcPitchingPlus scale-20 on the CONFERENCE RATE, NOT the player pr_plus (/50×100). Don't conflate the two.
+## ★★ CORRECTION (2026-08-28) — the "classifier v2" ran IN-DB and was NEVER committed as code
+Discovered while trying to rebuild the per-pitch reclassification for the prod push. **The classifier that produced staging's
+final `pitch_log.pitch_type_reclassified` (`_reclass_result`, 2M) is NOT in the repo.** Commits `8827a38`/`63b0edd`
+("stuff+ phase 1: classifier v2 … in-DB") touched **only docs**. So the v2 refinements ran as **ad-hoc SQL in the Supabase
+editor** and only the OUTPUT survived. Specifically NOT committed: the **FASTBALL movement split** (FA/SI → 4S vs Sinker by
+`IVB−|armHB|`; "~20% of tagged 4-seams are sinkers"), the **v2 breaking thresholds** (the committed `reclassifyRHP` Cutter
+rule `ivb>3` is an EARLIER, more-aggressive version — it does NOT reproduce staging, plateaus ~73%), the **cross-label
+anchor-gravity override**, and the **per-pitch propagation** to pitch_log. COMMITTED + reusable: `reclassifyRHP/LHP` (breaking,
+earlier), `movementDistance=√(dIVB²+dHB²)`, `consolidate()` (within-label dedup, exact 4"/6"/5% constants, `BREAKING_BALL_TAGS`
+family guard). GROUND TRUTH stored on staging (RLS-locked): `_reclass_result`, `_reclass_map` (pitcher×seed→label),
+`_reclass_pf` (pitcher→pf_velo). **The exact v2 SQL, if it survives, is only in the staging Supabase SQL-editor history (~08-16/17)
+or a local `.sql` scratch file.** Full writeup + Track-B rebuild scope: `docs/STUFF_PLUS_RECLASS_REBUILD_PLAN.md` §"INVESTIGATION FINDINGS".
+**LESSON: never run a load-bearing derivation as ad-hoc in-DB SQL — commit it. The classification is the heart of Stuff+ and it
+lived only in scratchpad + its stored output.**
+
+## ★★ UPDATE (2026-08-28) — the in-DB classifier v2 IS RECOVERABLE from `pg_stat_statements` (supersedes "only in stored output")
+Staging retained the classifier SQL in `pg_stat_statements`. The exact unified CASE (curve→sweeper→fastball-gap-split(4S/Sinker/
+Cutter)→offspeed(Splitter/Change-up)→Slider→Gyro, on ivb_corrected/armHB/gap/spin) was recovered verbatim; only the literal
+thresholds are masked (`$N`) and get fit to `_reclass_result`. `pf_velo` per pitcher is stored in `_reclass_pf`. Full structure +
+method: `docs/STUFF_PLUS_RECLASS_REBUILD_PLAN.md` §BREAKTHROUGH. **Lesson add:** even ad-hoc in-DB SQL is recoverable from
+`pg_stat_statements` (when enabled) — check it before declaring a lost derivation gone; the structure survives (constants masked).
+
+## ★ DECISION (2026-08-28): prod = ROLL OUT staging `_reclass_result` labels (bit-exact); classifier rebuild = Track B
+Recovered classifier reproduces staging ~85% (structure + documented boundaries known; exact tuned constants normalized away,
+survive only in `_reclass_result`). So: prod push uses staging's exact per-pitch labels (env-independent by uniq_pitch_id, keyset
+copy), and the CLEAN committed classifier (corrected values in `STUFF_PLUS_RECLASS_REBUILD_PLAN.md` §"CORRECTED VALUES") is built
+in Track B, validated to ~100% vs `_reclass_result`. Comprehensive: `docs/STUFF_PLUS_RECLASS_HANDOFF_2026_08_28.md`.
+
+---
+## ★★ CORRECTION (Trevor 2026-08-28): WE ARE NOT COPYING STAGING. REGENERATE on prod.
+Reverses the earlier "roll out staging `_reclass_result` labels" note above — that was WRONG. Prod reclassification = RUN THE
+COMMITTED CLASSIFIER (`scripts/reclassify_backfill.ts` logic) ON PROD DATA (venue-corrected), per HANDOFF_STUFF_PLUS §E.PROD
+("regenerate end-to-end, NOT copy") + [[feedback_derive_over_copy]] (derivation must work in future / Track B on-ingest).
+CONSEQUENCE: the committed classifier must reproduce staging's `_reclass_result` closely FIRST (today ~85%). `_reclass_result`
+is now ONLY the validation ground-truth, NOT a source to copy. `scripts/_reclass_rollout.ts` (copy path) is DEAD — do not use.
+
+## ★★★ 2026-08-28 (later) — CLASSIFIER DESIGN RECOVERED. Tier-1 "unrecoverable" was WRONG about the DESIGN.
+**PROVENANCE CORRECTION:** the Aug-16/17 v2 classifier DESIGN conversation was in **THIS marathon session's own transcript
+(`7531d0c4-…jsonl`)** all along — 45 gyro/armHB hits Aug-16, 247 Aug-17. My Tier-1 hunt failed because I searched `6de1d4f8`/`9ae…`
+(which hold ONLY April–July PODCAST chatter — the "clouded" data). Lesson: this session file spans Aug-16 → Aug-28; date-scope
+IT (ts startswith 2026-08-16/17) and grep seam keywords. Trevor caught this before I did.
+**WHAT'S RECOVERED (full design, not just boundaries): `docs/STUFF_PLUS_V2_CLASSIFIER_DESIGN_RECOVERED.md`** — 4-agent date-scoped
+mine + synthesis. All 7 CASE arms w/ rationale; the two SEAMS Trevor asked about **STATED verbatim**: Gyro↔Slider at **|armHB|=5**
+(Gyro=|armHB|<5 & IVB∈[−4,+4]; "28% of SL-tags were gyros"), Slider↔Curveball at **IVB=−8** (refined `IVB≤−8 & armHB<4 & gap≥4`;
+blend strip IVB∈[−8,−4] gap-decides). Both TIEBREAKERS recovered: CT/SL arsenal ("2nd distinct breaking ball→Cutter else Slider",
+valley MEASURED at 7) + gyro/curve blend-strip (gap≤8→gyro, ≥10→curve). Anchor algo: anchors ≥60p OR ≥10% mix, fold-guard (velo/gap
+family), score-and-flag needs_review (**6.86% baseline golden — alert if it drifts UP**), <150p small-sample→global-on-cluster-means.
+Validation: 4-check gate (20-arm panel WAIVED), **final deployed 0.867 overall vs TrackMan 0.822** (cluster-level BEATS per-pitch
+0.834 which FAILED Check 1 on breaking). Biggest edge = **FB/sinker extraction +0.072**, NOT breaking (+0.026).
+**STILL UNRECOVERABLE (SILENT):** the exact TUNED literal constants (masked to `$N` in pg_stat_statements) — survive ONLY in
+`_reclass_result`. So: DESIGN recovered, exact NUMBERS still fit from the answer key. 5 transcript-vs-as-built flags logged in the
+spec §5, top one: fastball gate design=`gap<2` vs as-built=`gap<4` (+5%).
+**MECHANIC-1 WIN (this session):** removing the Sweeper ivb-gate → 85.4%→**88.6%** vs `_reclass_result`, Sweeper→Slider 1112→270.
+(Note: design keeps the SEED gate `ivb∈[−2,+6]` + folds near-sweepers via the anchor; my gate-removal APPROXIMATES the fold.)
+**UPDATED A1 PLAN:** build to the RECOVERED SPEC — implement the 2 tiebreakers + anchor-fold + FA/SI cluster-mean strip (none in the
+~85% `reclassify_backfill.ts` yet) → fit exact constants to `_reclass_result` → ≥95%. Far more direct than one-seam-at-a-time probing.
+
+## ★★★ 2026-08-28 — CLEAN-ROOM v2 CLASSIFIER + a VALIDATION-SAMPLING BUG that produced MIRAGE numbers
+### ⚠ METHODOLOGY BUG (critical — distrust any prior match%): validation sample was BIASED
+The v2 validate pulled pitchers via `pitch_log.select('pitcher_id').limit(20000/40000)` — but **PostgREST silently caps reads at
+1000 rows**, so it returned the SAME ~few high-volume arms regardless of `--sample N`. Proof: `--sample 70` and `--sample 150`
+returned BIT-IDENTICAL (1160/1272 = 91.2%). So the whole ramp **85.4→88.6→90.2→91.2%** was a MIRAGE on one tiny biased set.
+**FIX:** spread-sample `SAMPLE` pitchers evenly across ALL 4804 pitchers (`[...pf.keys()].sort()`, step = len/SAMPLE). **Honest
+diverse-sample (120 pitchers, 55,369 pitches) = 85.2%.** LESSON: reclassifier accuracy MUST be measured on a diverse spread; any
+match% that does NOT move when you change `--sample` is lying (PostgREST 1000-row cap). Distrust single-number wins on small samples.
+
+### CLEAN-ROOM v2 — `scripts/reclassify_v2.ts` (supersedes patched `reclassify_backfill.ts`)
+Trevor's call: build FROM the recovered process, not patch shortcuts. New file faithful to `STUFF_PLUS_V2_CLASSIFIER_DESIGN_RECOVERED.md`:
+7 CASE arms (SEED-gated Sweeper — fold handles near-sweepers, NOT gate-deletion), anchor algo (seed→merge Δ(4/3.5/2.5)→label-by-mean
+→anchor-fold ≥60p|≥10%→tiebreakers), fold-guard, score-and-flag `needs_review` (4.1%), small-sample<150 fallback. **This IS the A2
+committed-writer foundation.** Honest 85.2% on diverse sample.
+
+### FOLD-GUARD TOO COARSE (the real bug the good sample exposed)
+`FAM()` lumps ALL breaking balls as one family "BRK" → a small GYRO cluster folds into a nearby CUTTER/SLIDER anchor (same BRK +
+|Δvelo|<3) → **Gyro→Cutter 791, Slider→Cutter 335, Gyro→Slider 315**. A gyro is NOT a cutter; breaking balls are distinct pitches
+that must not cross-fold (spec golden: "a bullet is a gyro"). FIX: fold breaking-ball residuals only into SAME-LABEL anchors (FB
+4S/Sinker may cross-fold as one fastball family; OFF likewise). IN PROGRESS.
+
+### Diverse-sample confusion profile (v2 85.2%, the REAL targets)
+Sweeper→Slider 1733 (near-sweepers not folding to sweeper anchor) · 4S↔Sinker 1559+922 (FA/SI strip) · Gyro→Cutter 791 (fold-guard) ·
+Gyro→Change 344 · Slider→Cutter 335 · Gyro→Slider 315 · Curve→Slider 303 · Cutter→Slider 251 · Change→Splitter 205 (spin ~1400 line).
+
+## 2026-08-28 — INFORMED grinding: arsenal-mix cross-check + box-rule CEILING (~87%)
+Added pitcher-level cross-check to `reclassify_v2.ts` validate (Trevor's reassessment method): per-pitcher ARSENAL-MIX overlap
+(Σ min(myCount,stagingCount) per type) + worst-mismatch pitcher report. At v2 86.9% per-pitch, ARSENAL-MIX = **87.6%** — so the
+per-pitch scatter mostly does NOT change arsenals (borderline pitches balance out), but the mix ALSO plateaus ~87%.
+**Systematic (not scatter) misses the mix view exposed:** I UNDER-call Gyro (pitcher 297562880: my Slider:361 = staging Gyro:368)
+and UNDER-call Sweeper (near-sweepers). Derived Gyro↔Slider boundary from `_reclass_result`: it's an **armHB-primary seam,
+crossover armHB≈−5**; ivb barely separates (both span ivb −6..+9). BUT widening the Gyro ivb gate [−4,4]→[−4,8] **REGRESSED
+86.9→86.0** (Slider→Gyro 348→795) — near-neutral-armHB pitches at ivb 4–8 are ~50/50 gyro/slider, so a wider BOX over-claims.
+**CONCLUSION:** gyro↔slider (and 4S↔sinker) are 2-D (armHB×ivb) decision SURFACES that axis-aligned box rules can't capture
+cleanly — and the exact surfaces are precisely the TUNED CONSTANTS that survive ONLY in `_reclass_result`. Box-rule reconstruction
+plateaus ~**87%** (per-pitch AND arsenal-mix). → the ≥95% reassessment must be the STUFF+ cross-check (does Stuff+ computed from
+my labels match staging's within tolerance?), not more box-tweaking. Reverted the gyro widen.
+
+## ★★★ 2026-08-28 — BREAKTHROUGH: the classifier is TWO-STAGE (coarse SEED → per-pitcher RESOLUTION). Recovered from `_reclass_map`.
+This is WHY box-rule reconstruction plateaus ~87%: staging's classifier is NOT a per-pitch rule. `_reclass_map` (37,256 rows,
+pitcher×seed→label) proves a two-stage process:
+**STAGE 1 — coarse per-pitch SEED into 10 buckets** (NOT the 9 final types): `4S, SI, FBSTRIP, SL, SW, GY, CB, CH, SPL, FC`.
+  The critical one WE NEVER HAD: **`FBSTRIP`** (4,597 seeds) = the ambiguous fastball rr∈[−4,+4] strip, held as its OWN bucket
+  (this IS the "sinker vs 4-seam" mechanism). Per-seed totals: 4S 4559 · SI 3600 · FBSTRIP 4597 · SL 4659 · SW 3423 · GY 3932 ·
+  CB 3260 · CH 4153 · SPL 2002 · FC 3071.
+**STAGE 2 — per-pitcher cluster RESOLUTION overrides 23.4% of seeds** (28,534 stay / 8,722 override). Top overrides (seed→label,
+  % of that seed): FBSTRIP→4S 71% · FBSTRIP→Sinker 28% · **SL→Gyro Slider 33%** · GY→Slider 19% · SI→4S 6% · SPL→Change 10% ·
+  SL→Cutter 4% · FC→Gyro 6% · CH→Split 3% · 4S→Sinker 3% · FC→Slider 4% · CB→Change 4% · GY→Cutter 2% · SW→Curve 1%.
+  needs_review = 48% of map rows (~9% pitch-weighted).
+**IMPLICATION:** the label ≈ seed 77% of the time; the OTHER 23% (the overrides) are the per-pitcher cluster decisions our box
+rules skip entirely — the two biggest being FBSTRIP→4S/Sinker (the FA/SI strip) and SL→Gyro (a THIRD of slider-seeds). To learn
+the CORRECT forward process (Trevor: we never saved it + 100% need it): rebuild as SEED (10 buckets incl. FBSTRIP) → per-pitcher
+cluster → RESOLVE, with the resolution rules reverse-engineered from `_reclass_map` + movement. NOT copying — learning the process
+from the staging labels. Tool: `scripts/_map_transitions.ts`. This UPDATES `STUFF_PLUS_V2_CLASSIFIER_DESIGN_RECOVERED.md` §1/§2.
+## 2026-08-28 — v2 at 90.2%/91.0% arsenal-mix (honest diverse sample). Per-hand ranges DERIVED + handedness VERIFIED (armHB unifies hands). LESSON: set boundaries at pitch CORE not p95 tail; bleed OK. See STUFF_PLUS_V2_CLASSIFIER_DESIGN_RECOVERED §DERIVED ranges.
+
+## 2026-08-28 — v2 at 91.5% per-pitch / 92.0% arsenal-mix (honest diverse sample). Sweeper fix: armHB≤−12 DOMINATES (ivb only excludes curve ≤−8) → Sweeper→Slider 606→223.
+### The ~8.5% mismatch BREAKDOWN (from --mismatches; movement of the mismatched pitches):
+- SEAM BLEED (realistic, fine): 4S↔Sinker @ rr≈±2 (rr=0 seam) · Gyro↔Slider @ armHB≈−5 (genuine overlap) · Slider↔Sweeper @ −12 edge.
+- STAGING NOISE (my label defensible): Gyro→Cutter 257 = ivb+7/0-HB pitches = CUTTERS per Trevor, staging mislabeled gyro · Gyro/Slider→Change arm-side +ivb.
+- TRUE error rate ~2-3%; rest is bleed + staging inconsistency. → 91.5% is a strong forward classifier. Modes: reclassify_v2.ts --validate/--derive/--mismatches.
+### NEXT: Stuff+ cross-check — does the ~8% (mostly within-family bleed) move per-pitcher Stuff+? (the product-level 'good enough' test).
+## 2026-08-28 — ARCHITECTURE: process is classify→SCORE→reclassify-with-scores (feedback loop, not pipeline). gyro_stuff_plus scores each breaking ball as-a-gyro; post-stuff+ full-arsenal pass flips borderline seam cases by which score is coherent. This resolves gyro↔slider/4S↔sinker bleeds box-rules can't. v2 (91.5%) = first pass; score-flip = second pass (needs scorer). See design spec §FEEDBACK LOOP.
+## CORRECTION 2026-08-28: NO feedback loop / NO gyro_stuff_plus. calcGyroSlider is the SINGLE gyro eq in the unified engine (stuffPlusEngine.ts:305). Architecture is LINEAR: classify-by-ranges → full Stuff+ once (score by label) → season aggregate. gyro_stuff_plus = scratchpad cruft, drop. Supersedes the 3-stage feedback-loop entry above.
+
+## ★★★ FINAL PROCESS (Trevor-confirmed 2026-08-28) — LINEAR classify→Stuff+, with the SEAM-LOCAL usage backfill. (supersedes the feedback-loop entries)
+The forward reclassification→Stuff+ is LINEAR (no feedback loop, no gyro_stuff_plus, no score-flip — all dropped as scratchpad cruft):
+1. **CLASSIFY by derived RANGES** — `reclassify_v2.ts` (10-bucket seed incl FBSTRIP → per-pitcher merge → label-by-mean → tiebreakers).
+   Clear labels + ~8% seam-unclear flagged. Stage-1 = 91.5% / 92.0% arsenal-mix (honest diverse sample).
+2. **TRACK USAGE %** per pitcher from the CLEAR pitches → his true arsenal.
+3. **BACKFILL the unclear ~8%** = usage-weighted fold, but with a TIGHT SEAM-LOCAL PROXIMITY GATE (Trevor: "they have to be close").
+   THREE cases: (a) CORE pitch far from any seam → KEEP label, usage irrelevant (a −15 IVB cluster NEVER folds into gyro no matter the
+   gyro usage); (b) BORDERLINE (near a seam AND within tight movement distance of one of the two seam-adjacent pitches the pitcher throws)
+   → fold to the HIGHER-USAGE of those two (usage only breaks the tie WHEN MOVEMENT CANNOT); (c) DISTINCT but far from all his pitches →
+   KEEP + `needs_review` (a pitcher can throw 1 of any pitch; never erase it). GATE = tight distance to a SEAM-ADJACENT dominant pitch,
+   NOT "nearest anchor" (the sloppy version swallows legit distinct pitches). This is what staging did (confirmed via `--pitcher <id>`).
+4. **RUN FULL STUFF+ ONCE** — `stuffPlusEngine.ts` scores each pitch by its FINAL label (switch by pitch_type; calcGyroSlider = single gyro eq).
+5. **AGGREGATE over the season** → per-pitcher true overall Stuff+ + usage %.
+Saved to push-to-prod (`docs/STUFF_PLUS_RECLASS_REBUILD_PLAN.md`) + Track B (`docs/PIPELINE_pitch_log_to_projections.md`) + Track B memory.
+NEXT BUILD: step-3 seam-local fold → validate vs `_reclass_result` → wire steps 4-5 (existing engine) → per-pitcher Stuff+ cross-check.
+
+## 2026-08-28 — STEP 3 BUILT (seam-local usage backfill) → v2 92.6% per-pitch / 93.0% arsenal-mix (from 91.5%). needs_review 8.7%.
+Implemented in `reclassify_v2.ts` classifyPitcher: after seed→merge→label→FBSTRIP-resolve, a cluster folds into a strictly-LARGER
+dominant pitch (anchor ≥60p OR ≥10% mix) ONLY IF within a TIGHT gate: `moveDist=√(dIVB²+dHB²) < 5` AND `|Δvelo| < 3`. Usage = pick the
+largest close anchor. Handles both non-anchor residuals AND a small "anchor" that's really a variant of a bigger pitch (design: "close
+candidate anchors merge into one"). A non-anchor with NO larger close pitch → keep label + `needs_review` (distinct rare pitch). The TIGHT
+gate is the guardrail: a −15 IVB cluster is ~15" from a gyro anchor → NEVER folds into gyro. VALIDATED via `--pitcher 205105664` (4S guy):
+his n=82/n=66 variants folded → 4S, giving **4S FB 972 = staging 972 EXACT**; sweeper/curve/slider kept distinct. Remaining ~7% = seam
+bleed (gyro↔slider @ armHB−5 SEED boundary — accepted) + staging noise (gyro→cutter on +ivb pitches where v2 is arguably MORE correct).
+NEXT: wire steps 4-5 (run `stuffPlusEngine` on v2 labels → per-pitcher Stuff+ + usage% → aggregate) → Stuff+ cross-check vs staging → A2 prod writer.
+
+## ★★★ 2026-08-28 — STUFF+ CROSS-CHECK PASSES (steps 4-5). v2 classification is PRODUCT-VALIDATED end-to-end.
+`reclassify_v2.ts --stuffcheck` (faithful copy of the 9 stuffPlusEngine equations; aggregate v2 labels vs staging labels per
+(pitcher×type×hand) → score both with the same NCAA baselines → per-pitcher pitch-weighted overall Stuff+ → compare):
+**per-pitcher overall Stuff+ |Δ| mean=0.85, p50=0.44, p90=1.95 (on ~100±15 scale); 78% within ±1, 91% within ±2, 96% within ±3.**
+So the ~7% classification scatter (mostly WITHIN-family: 4S↔Sinker, gyro↔slider) is Stuff+-INVISIBLE for ~91% of pitchers. Outliers
+are small-sample arms (Δ17.6 was a 165-pitch guy) or the known gyro-under-call pitcher (Δ−7.2) — few + modest + inherently low-confidence.
+**VERDICT: v2 (92.6% per-pitch / 93.0% arsenal-mix) is GOOD ENOUGH — the classification difference from staging does not move the product
+Stuff+.** The full linear pipeline (classify→track usage→backfill→score→aggregate) is proven. REMAINING for prod: wire the A2 committed
+writer (keyset) to stamp v2 labels on prod pitch_log → run the real stuffPlusEngine (steps 4-5) on prod → rollups. NO feedback loop / gyro_stuff_plus.

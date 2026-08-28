@@ -89,3 +89,24 @@ velo bands monotonic (93+ →114, <85 →97); low-velo top arms = legit elite-sh
 - **V1 conf Stuff+ retirement** = code cleanup (stop the old name-keyed conf script).
 - **Backups to drop after acceptance:** _ncaa_backup_preanchor, _master_stuff_backup, _confstats_backup, _reclass_result/_map/_pf.
 - Next real step: the recompute chain (6b→7) consumes conf Stuff+ + per-player Stuff+ → projections + NIL.
+
+## ★★ 2026-08-28 — the ACTUAL classifier (recovered from staging pg_stat_statements)
+The per-pitch classification that produced `_reclass_result`/`pitch_log.pitch_type_reclassified` was in-DB scratchpad, now
+RECOVERED. It is a single unified CASE (NOT the committed `reclassifyRHP`), per pitch on `pitch_log_corrected`:
+`armHB=(hand=R?hb:−hb)`, `gap=pf_velo−release_velocity` (pf_velo stored in `_reclass_pf`), `ivb=ivb_corrected`:
+```
+case
+  when ivb <= $ then Curveball
+  when ivb >= $ and armhb <= $ and gap between $,$ then Sweeper
+  when gap < $ and (ivb−abs(armhb)) > $ then 4S FB
+  when gap < $ and (ivb−abs(armhb)) < $ then Sinker
+  when gap < $ then Cutter?            -- fastball-gap middle (verify label vs _reclass_result)
+  when armhb > $ and coalesce(spin,$) < $ then Splitter
+  when armhb > $ then Change-up
+  when armhb <= $ then Slider
+  when abs(armhb) < $ and ivb between $,$ then Gyro Slider
+  else …
+end
+```
+Then per-pitcher anchor override (≥60p OR ≥10% mix; sub-bar folds into nearest anchor). Literal thresholds masked (`$N`) → from
+THE PARTITION + fit to `_reclass_result`. Full detail + recovery method: `docs/STUFF_PLUS_RECLASS_REBUILD_PLAN.md` §BREAKTHROUGH.

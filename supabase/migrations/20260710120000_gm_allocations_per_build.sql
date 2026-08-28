@@ -12,7 +12,12 @@
 -- contract PDF + terms will attach to it.
 
 -- Brand-new tables (only test data); clear before adding the NOT NULL build FK.
-TRUNCATE public.gm_allocation, public.gm_allocation_source;
+-- ⚠️ LANDMINE NEUTRALIZED 2026-08-28 (prod-push audit): this migration is ALREADY APPLIED
+-- to prod + staging, where gm_allocation / gm_allocation_source now hold LIVE coach data.
+-- Re-running the original TRUNCATE would WIPE it. It was only ever needed on first apply
+-- (tables were empty test data then; a fresh replay also starts empty, so the
+-- ALTER ... SET NOT NULL below succeeds without it). DISABLED — DO NOT RE-ENABLE.
+-- TRUNCATE public.gm_allocation, public.gm_allocation_source;
 
 ALTER TABLE public.gm_allocation_source
   ADD COLUMN IF NOT EXISTS team_build_id uuid REFERENCES public.team_builds(id) ON DELETE CASCADE;

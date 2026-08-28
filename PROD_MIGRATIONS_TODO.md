@@ -87,7 +87,7 @@ Apply in filename (timestamp) order. Runner used on staging:
 - [ ] `20260709150000_gm_target_board.sql`
 - [ ] `20260709160000_gm_target_asking.sql`
 - [ ] `20260709170000_gm_allocations.sql`  — gm_allocation_source + gm_allocation (funding sources)
-- [ ] `20260710120000_gm_allocations_per_build.sql`
+- [x] `20260710120000_gm_allocations_per_build.sql`  — ✅ APPLIED prod+staging (out-of-band). ⚠️ LANDMINE NEUTRALIZED 2026-08-28: originally `TRUNCATE gm_allocation, gm_allocation_source` — now DISABLED in the migration file (live coach data). DO NOT re-enable / re-run the original.
 - [ ] `20260710130000_gm_scholarship_mode.sql`
 - [ ] `20260713120000_gm_contracts.sql`  — gm_contract + gm_contract_obligation + gm-contracts storage bucket
 - [ ] `20260713140000_team_builds_is_active.sql`  — the live/active build flag
