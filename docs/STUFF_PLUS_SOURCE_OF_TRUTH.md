@@ -202,3 +202,13 @@ do NOT rebuild either. Full numbers: `docs/STUFF_PLUS_EXACT_VALUES.md` §11. Lan
 **⚠ AGREEMENT WITH THE ANCHOR IS NOT ACCURACY.** The anchor is the previous classifier's output, not truth. The residual
 ~4.7% mixes v2-wrong / **v2-RIGHT-anchor-wrong** / coin-flips — partition with `scripts/v2_coherence_test.ts` before
 treating it as error, and before deciding whether staging's labels should be updated rather than preserved.
+
+---
+## 🏆 PHASE-H CLEANUP — DO NOT DROP `_reclass_result` (2026-08-29)
+Phase H lists Stuff+ `_reclass_*` temp tables as drop candidates. **EXCLUDE these three:**
+- **`_reclass_result` (2,000,674 rows)** — the ONLY surviving record of the lost ANCHOR classifier's output. Its source
+  code was scratchpad-only and is gone permanently. Once staging is overwritten with v2 this is the SOLE way to ever
+  measure against the old process. It is the regression baseline for every future classifier change.
+- `_reclass_map` (37,101 rows) — per-pitcher seed→label resolution; the evidence base for arsenal-conditioning research.
+- `_reclass_pf` (4,804 rows) — per-pitcher primary-FB velo.
+Safe to drop: `_reclass_fix` (transient writer staging table only).

@@ -307,3 +307,13 @@ too narrow.
 All five in ONE session, on BOTH environments.
 **PRESERVE `_reclass_result` (2,000,674 rows)** — it is the only surviving record of the anchor's output and remains the
 historical reference/regression baseline. Do NOT drop it in the Phase-H cleanup.
+
+---
+## 🏆 PHASE-H CLEANUP — DO NOT DROP `_reclass_result` (2026-08-29)
+Phase H lists Stuff+ `_reclass_*` temp tables as drop candidates. **EXCLUDE these three:**
+- **`_reclass_result` (2,000,674 rows)** — the ONLY surviving record of the lost ANCHOR classifier's output. Its source
+  code was scratchpad-only and is gone permanently. Once staging is overwritten with v2 this is the SOLE way to ever
+  measure against the old process. It is the regression baseline for every future classifier change.
+- `_reclass_map` (37,101 rows) — per-pitcher seed→label resolution; the evidence base for arsenal-conditioning research.
+- `_reclass_pf` (4,804 rows) — per-pitcher primary-FB velo.
+Safe to drop: `_reclass_fix` (transient writer staging table only).

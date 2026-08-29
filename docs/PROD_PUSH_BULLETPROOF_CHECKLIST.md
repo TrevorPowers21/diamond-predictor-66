@@ -257,3 +257,13 @@ prior prod work was a read-only dry run. v2 vs prod's existing labels = **70.9% 
 pitches = 29.1%)**, and v2 is far closer to the validated set (distribution deviation from anchor **38.7 → 21.6**),
 correcting prod's Cutter 10.3%→3.7% (anchor 2.4%) and Splitter 0.7%→2.1% (anchor 2.2%). Prod run is GATED on PGURI +
 an explicit "prod, now?" and MUST be followed immediately by the Stuff+ recompute chain.
+
+---
+## 🏆 PHASE-H CLEANUP — DO NOT DROP `_reclass_result` (2026-08-29)
+Phase H lists Stuff+ `_reclass_*` temp tables as drop candidates. **EXCLUDE these three:**
+- **`_reclass_result` (2,000,674 rows)** — the ONLY surviving record of the lost ANCHOR classifier's output. Its source
+  code was scratchpad-only and is gone permanently. Once staging is overwritten with v2 this is the SOLE way to ever
+  measure against the old process. It is the regression baseline for every future classifier change.
+- `_reclass_map` (37,101 rows) — per-pitcher seed→label resolution; the evidence base for arsenal-conditioning research.
+- `_reclass_pf` (4,804 rows) — per-pitcher primary-FB velo.
+Safe to drop: `_reclass_fix` (transient writer staging table only).
