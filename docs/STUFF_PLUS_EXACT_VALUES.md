@@ -317,3 +317,25 @@ Phase H lists Stuff+ `_reclass_*` temp tables as drop candidates. **EXCLUDE thes
 - `_reclass_map` (37,101 rows) — per-pitcher seed→label resolution; the evidence base for arsenal-conditioning research.
 - `_reclass_pf` (4,804 rows) — per-pitcher primary-FB velo.
 Safe to drop: `_reclass_fix` (transient writer staging table only).
+
+### 11.13 ★ FINAL ORDERING + FINAL ACCURACY (2026-08-29) — §4.5 runs BEFORE the step-4 backfill
+Trevor's insight: a correctly-placed §4.5 should create NO work for the backfill. It was running AFTER the fold, so it
+re-read each fringe cluster's own mean armHB and flipped back clusters the fold had just consolidated — manufacturing
+phantom pitches. (The fold REASSIGNS a fringe cluster's LABEL to the dominant anchor's; it does not merge membership,
+so a later rule re-reading that cluster's own centroid undoes it.)
+**Moving §4.5 before step 4 is strictly better on BOTH metrics — not a tradeoff:**
+| metric | §4.5 AFTER fold (was committed) | **§4.5 BEFORE fold (FINAL)** |
+|---|---|---|
+| per-pitch accuracy (full 2,000,674) | 95.1% (1,903,348) | **95.2% (1,904,808)** |
+| arsenal-mix overlap | 95.2% | **95.3%** |
+| pitchers with BOTH Gyro+Slider | 20% | **16%** |
+| FRAGMENTED (fringe <12% vs >15%) | 7% | **5%** |
+| median minority share of the pair | 2.8% | **1.1%** |
+| `Slider → Gyro Slider` (over-calling) | 15,838 | **13,501** |
+| `Gyro Slider → Slider` | 7,210 | 7,978 |
+needs_review 8.1% in both. **FINAL ACCURACY = 95.2% per-pitch / 95.3% arsenal-mix.** Supersedes the 95.1% in §11.10.
+The surviving 5% fringe are clusters the fold DECLINED to absorb (outside `moveDist<5` & `|Δvelo|<3`) — i.e. genuinely
+distinct rare pitches, which is the intended behaviour: a real 2% pitch must survive. ⚠ UNMEASURED: whether those
+5% are truly distinct or ghosts leaking a slightly-too-tight gate (measurable via their actual moveDist distribution).
+⚠ PROCESS NOTE: this reorder was swept into a Stage-0 plumbing commit by `git add -A` instead of being committed on its
+own measurement. Modeling changes must land in their own commit with their number attached.
