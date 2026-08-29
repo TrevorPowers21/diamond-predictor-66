@@ -30,7 +30,9 @@ async function pageAll(table: string, cols: string, seasonCol: string, season: n
   let from = 0;
   const page = 1000;
   for (;;) {
-    const { data, error } = await (sb as any).from(table).select(cols).eq(seasonCol, season).range(from, from + page - 1);
+    // ★ STAGE-0 (2026-08-29): unordered .range() silently drops/dupes rows across pages. Both callers
+    // (pitcher_stuff_plus_inputs, "Pitching Master") have an "id" PK — verified 2026-08-29.
+    const { data, error } = await (sb as any).from(table).select(cols).eq(seasonCol, season).order("id", { ascending: true }).range(from, from + page - 1);
     if (error) throw new Error(`${table}: ${error.message}`);
     if (!data || !data.length) break;
     out.push(...data);

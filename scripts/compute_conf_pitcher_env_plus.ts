@@ -10,7 +10,8 @@ const { data: na } = await (sb as any).from("ncaa_averages").select("*").eq("sea
 const A = na[0];
 // WHIP mean: IP-weighted from Pitching Master D1 (paginate)
 let ipSum=0, whipIpSum=0, off=0;
-for(;;){ const { data } = await (sb as any).from("Pitching Master").select('"WHIP","IP",division').eq("Season",SEASON).eq("division","D1").range(off,off+999);
+// ★ STAGE-0 (2026-08-29): unordered .range() over Pitching Master silently drops/dupes rows -> wrong IP-weighted WHIP mean.
+for(;;){ const { data } = await (sb as any).from("Pitching Master").select('"WHIP","IP",division,id').eq("Season",SEASON).eq("division","D1").order("id",{ascending:true}).range(off,off+999);
   if(!data||!data.length) break;
   for(const r of data){ const ip=Number(r.IP)||0, w=Number(r.WHIP); if(ip>0&&Number.isFinite(w)){ ipSum+=ip; whipIpSum+=w*ip; } }
   if(data.length<1000) break; off+=1000; }
