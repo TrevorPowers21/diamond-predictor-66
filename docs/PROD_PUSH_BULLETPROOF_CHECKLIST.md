@@ -267,3 +267,76 @@ Phase H lists Stuff+ `_reclass_*` temp tables as drop candidates. **EXCLUDE thes
 - `_reclass_map` (37,101 rows) — per-pitcher seed→label resolution; the evidence base for arsenal-conditioning research.
 - `_reclass_pf` (4,804 rows) — per-pitcher primary-FB velo.
 Safe to drop: `_reclass_fix` (transient writer staging table only).
+
+---
+# 🔴 STAGE 0 — BLOCKERS FOUND BY AUDIT 2026-08-29. NOTHING RUNS ON PROD UNTIL THESE ARE FIXED.
+Two independent read-only audits (docs/state + prod data). **Prod's DATA is ready — 100.00% of prod's `is_data=true`
+rows (~1,906,398) are v2-classifiable, venue corrections resolve, same games/window as staging. Every blocker below is
+CODE or SCHEMA.** Any one stops the chain; #2 is the dangerous one because it fails SILENTLY.
+
+## THE FOUR HARD BLOCKERS
+1. **PROD `pitch_log_corrected` VIEW IS STALE — missing `classification_version`.** The view is `select pl.*, …` and
+   Postgres FREEZES `*` at creation time, so prod's view is stuck at **94 columns** vs the base table's 99. Missing:
+   `classification_version, needs_review, ab_num_in_game, pitch_num_in_game, pitch_num_in_ab, park_code,
+   is_conference_game, game_string`. Running the scorer's exact query (`compute_pitch_log_stuff_plus.ts:172-179`)
+   against prod returns: `column pitch_log_corrected.classification_version does not exist`. Same query on staging = OK.
+   ⚠ `create or replace view` will NOT fix it (new columns land mid-list) → needs **`drop view pitch_log_corrected
+   cascade; create view …`** rebuilt against the current column list. **DDL — requires an explicit go, separate from
+   the data-write "prod, now?".** (Reclassification itself is unaffected: `reclassify_prod.ts:38-39` doesn't read those columns.)
+2. **⚠ SILENT-CORRUPTION RISK — scorer is hard-filtered to the OLD version string.**
+   `compute_pitch_log_stuff_plus.ts:151` and `:176` both `.eq("classification_version", "v1-anchor-2026-08-17")`, but
+   `reclassify_prod.ts:19` stamps `v2-ranges-2026-08-28`. **Step 1 and step 3 of the corrected chain DO NOT CONNECT.**
+   Unfixed, the scorer matches 0 rows, no-ops, and leaves prod with NEW LABELS + OLD `stuff_plus` — the one invariant
+   every doc says must never happen — while appearing to succeed. FIX: parameterize (`--class-version`, default v2).
+   (This supersedes checklist G7's "do NOT loosen filter" guidance, which assumed the anchor version.)
+3. **`_reclass_pf` DOES NOT EXIST ON PROD** (staging: 4,804 rows) and has **NO producer anywhere in the repo** — every
+   reference is a READ. `compute_pitch_log_stuff_plus.ts:132-135` does `process.exit(1)` if it can't load it, so prod
+   scoring aborts immediately. FIX: have `reclassify_prod.ts` materialize it as a by-product of its existing
+   `pfbVelo()` (`:28`), or inline the same computation into the scorer.
+4. **`aggregate_pitch_log_dimensions.ts` has NO prod path** — `:957` reads `process.env.VITE_SUPABASE_URL` only, no
+   `SUPABASE_URL` fallback and no `--prod` guard. It is step 4 of the chain and also calls `populate_hitter_run_values(2026)`.
+
+## ALSO REQUIRED BEFORE THE RUN
+5. **Resolve the UNCOMMITTED §4.5 reordering** in `src/savant/lib/stuffPlusClassifierV2.ts`. The working tree moves the
+   gyro floor to BEFORE the step-4 backfill (fixes fragmentation: 7%→5% of pitchers, median fringe 2.8%→1.1%), but the
+   **confirmed 95.1% was measured on the COMMITTED ordering** (after step 4, before `tiebreak`). Measure or revert —
+   it changes labels on 6-8% of breaking-ball volume. ⚠ Trevor's standing caveat: agreement-with-the-anchor is NOT
+   accuracy for a rule the anchor never had.
+6. **`.order(PK)` on `derive_masters_from_pitchlog.ts:188-201`** (`fetchAll`, unordered `.range()` over ~2.5M rows →
+   silent drop/dupe). Precondition for chain step 5. Same fix needed on
+   `backfill_trackman_pitches_pitching_master.ts:32-33` and `compute_conf_pitcher_env_plus.ts:13` before C24/C28.
+7. **⛔ GATE THE LEGACY LANE OUT OF THE LIVE PROD CSV PATH.** `scripts/import-csvs/runner.ts:442,461` calls
+   `runBreakingBallReclassification` + `runStuffPlusPipeline` + `legacy_rollupStuffPlusToMaster`, and that script is
+   `npm run import:prod` — which per standing practice goes DIRECT TO PROD. **A routine TruMedia import today runs the
+   legacy raw-HB lane and scores left-handers BACKWARDS.** Gate behind `season <= 2025` / `--legacy-stuff`. Also delete
+   npm `recompute-stuff:prod` and `recompute-stuff-scoped:prod` (`package.json:21,93`) — one keystroke from a prod legacy write.
+
+## LEDGER + DOC INTEGRITY (fix before an operator follows them literally)
+8. **`PROD_MIGRATIONS_TODO.md` is missing entries for work ALREADY DONE on prod:** C20 park_code (2,576,146 = 100%),
+   C21 is_conference_game + C22 sequence (2,576,146), and migration `20260828000000_pitch_log_classification_version_needs_review.sql`.
+   The ledger's own rule (`:28-38`) says "if it's not here, it doesn't happen on prod" — an operator would RE-RUN them.
+9. **C21/C22 were COPIED from staging, not derived** (`_next_derived.ts`). The logged principle requires prod to DERIVE
+   these going forward; that FOLLOW-UP is on no task list, and **Track B breaks on the next ingest without it.**
+10. **Stale text still in these docs:** the top correction banner still says "do NOT overwrite staging's labels"
+    (REVERSED by EXACT_VALUES §11.12 — we now standardize on v2 in BOTH envs); five docs still print
+    "94.3% → projected ~95.3-95.4%" (confirmed number is **95.1%**, §11.10); the BULLETPROOF verdict is still **NO-GO**
+    on blockers G2/G3/G5/G6 that are now FALSE or DONE (v2 writer exists; classifier is 95.1% not ~85%; the "A5
+    aggregator missing" and "baseline deriver missing" claims were disproven).
+11. **Row-count contradiction across docs** — 2,576,230 (total) vs 2,576,146 (filled) vs ~2,176,888 (labeled) vs
+    2,013,005 (v2 dry-run labels) are DIFFERENT populations and no doc says so. Pre-register which number each gate
+    checks, or the verify step is unfalsifiable. Prod is_data=true ≈ **1,906,398** (74.01% of 2,575,996).
+
+## STILL-MISSING PRODUCER (new obligation created by the §11.12 decision)
+12. **No STAGING reclassification writer.** `reclassify_prod.ts:100` hard-aborts unless PGURI is prod
+    (`if (!/trbvxuoliwrfowibatkm/.test(uri)) … exit(1)`). §11.12 requires staging to get the SAME full chain, so this
+    needs an env-parameterized target. Not listed as a task in any doc before now.
+
+## GREEN — verified ready on prod (audit 2026-08-29, read-only)
+v2-classifiable **100.00%** of is_data=true (~1,906,398) · venue corrections **311 rows**, ivb/hb_corrected differ from
+raw in 100% of samples · release_velocity/ivb/hb/spin/rel_height/rel_side/pitcher_hand/pitcher_id/park_code/
+is_conference_game/sequence/pitcher_full_name all **0.00% NULL** (extension 0.04%) · same games + window as staging
+(2026-02-13 → 06-22, identical first/last uniq_pitch_id) · `pitcher_stuff_plus_ncaa` 18 D1 buckets ·
+pitch_log_pitcher_totals 37,186 · hitter_totals 50,227 · by_pitch_type 161,310 / 252,464.
+⚠ `Pitching Master` rollup is BEHIND staging: `trackman_pitches>0` **1,126 vs 6,458**; `stuff_plus` 5,251 vs 6,011.
+⚠ `vaa` column absent on prod — NOT a blocker (100% NULL on staging; neither classifier nor scorer reads it).
+⚠ The known prod dup issue (~3,425 dup rows / 29 games) still lives on this table.

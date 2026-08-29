@@ -108,6 +108,13 @@ export function classifyPitcher(ps: P[], pfVelo: number): Map<string, { label: s
     return out;
   }
 
+  // 4.5) GYRO/SLIDER SEAM FLOOR — runs BEFORE the step-4 backfill (Trevor 2026-08-29). Running it AFTER the fold
+  //      re-split already-consolidated clusters and manufactured fringe ghosts (measured: 20% of pitchers ended up with
+  //      BOTH Gyro and Slider, median minority share only 2.8% — e.g. "Gyro 4.2% + Slider 39.4%" = ONE slider straddling
+  //      the -3 line). Flipping FIRST lets the existing seam-local fold absorb any split it creates, while a genuinely
+  //      distinct rare pitch still survives because it sits outside the fold's moveDist<5 & |Δvelo|<3 gate.
+  for (const x of labeled) if (x.label === "Slider" && x.c.ar >= GYRO_ARMHB_FLOOR) x.label = "Gyro Slider";
+
   // 4) SEAM-LOCAL USAGE BACKFILL — anchors = dominant pitches (≥60p OR ≥10% of mix). A cluster folds into a
   //    strictly-LARGER anchor ONLY within a TIGHT movement+velo gate. Far from all anchors = genuinely distinct → needs_review.
   const isAnchor = (c: Cl) => c.n >= 60 || c.n >= 0.10 * total;
@@ -119,11 +126,6 @@ export function classifyPitcher(ps: P[], pfVelo: number): Map<string, { label: s
     if (cands.length) x.label = cands.reduce((b, a) => (a.c.n > b.c.n ? a : b), cands[0]).label;
     else if (!isAnchor(x.c)) x.review = true;
   }
-
-  // 4.5) GYRO/SLIDER SEAM — MUST run BEFORE tiebreak(): the CT/SL ride-floor tiebreak only fires on clusters still
-  //      labeled Slider/Cutter, so flipping first ALSO removes 68-87% of "Gyro Slider -> Cutter" errors (415->131,
-  //      437->56). Flipping AFTER tiebreak yields only +0.77/+0.95pp instead of +0.96/+1.24pp. Do not reorder §5.
-  for (const x of labeled) if (x.label === "Slider" && x.c.ar >= GYRO_ARMHB_FLOOR) x.label = "Gyro Slider";
 
   // 5) TIEBREAKERS at the two ambiguous seams (needs arsenal context)
   const brkAnchorCount = labeled.filter((x) => isAnchor(x.c) && BREAKING.includes(x.label)).length;
