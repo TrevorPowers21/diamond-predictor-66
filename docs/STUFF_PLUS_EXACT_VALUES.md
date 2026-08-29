@@ -278,3 +278,32 @@ gyro/slider disputes no longer have both. So this measures the OTHER residual. W
 relative to physical truth is STILL UNMEASURED — do not claim it either way.
 → **BEST-EVIDENCED NEXT FIX: `Sweeper→Slider`** (8,114 pitches; coherence says v2 is wrong on 72%). The docs specify the
 sweeper `armHB <= -12` bar is SLOT-CONDITIONED; v2 applies it flat. See 11.6 item 3.
+
+### 11.12 ★★★ DECISION REVERSED (2026-08-29, Trevor): STANDARDIZE ON v2 EVERYWHERE — overwrite staging too
+11.11 measured that the ANCHOR wins the residual 56/44. That measurement stands. The DECISION nonetheless is to
+**overwrite staging's `pitch_type_reclassified` with v2**, because accuracy-on-a-sample is not the deciding criterion —
+**reproducibility and cross-environment consistency are.**
+
+**COST, quantified:** the anchor's edge is 56/44 on DISPUTES ONLY. Disputes ≈ 4.9% of pitches (97,326), so the net
+advantage ≈ 12% × 97,326 ≈ **11,700 pitches ≈ 0.6% of the population**. That is the entire price.
+
+**WHAT THAT 0.6% BUYS:**
+- The anchor has **NO SOURCE CODE** (lost scratchpad) → it can never be re-run, on new data or on prod.
+- Staging and prod would stay permanently on DIFFERENT, unstampable label sets → no valid cross-env accuracy check.
+- Track B needs a classifier that runs on EVERY ingest. The anchor cannot. v2 can.
+- One vocabulary (`4S FB`, not `4-Seam Fastball`) + a `classification_version` stamp on every row, in both environments.
+Trevor 2026-08-29: *"we need to overwrite staging because it is the best known process that we have and it needs to be
+consistent. Whatever wrote staging last time is just the one that got away."*
+
+**SUPERSEDES:** the "do NOT overwrite staging" guidance in 11.11 and in SOURCE_OF_TRUTH §4. Those were argued purely on
+the 56/44 accuracy edge and did not weigh reproducibility. The measurement was right; the conclusion drawn from it was
+too narrow.
+
+**OPERATIONAL CONSEQUENCE — staging gets the SAME full chain as prod, not just a label rewrite:**
+1. run v2 → `pitch_type_reclassified` + `classification_version='v2-...'` + `needs_review` (also fixes the ~191k
+   old-vocabulary `4-Seam Fastball` leftovers from pitchers the anchor run skipped → ONE vocabulary at last)
+2. RE-DERIVE `pitcher_stuff_plus_ncaa` (MANDATORY — the §4.5 gyro fix shifts 6-8% of breaking-ball volume)
+3. `compute_pitch_log_stuff_plus.ts` → 4. `aggregate_pitch_log_dimensions.ts` → 5. `derive_masters_from_pitchlog.ts`
+All five in ONE session, on BOTH environments.
+**PRESERVE `_reclass_result` (2,000,674 rows)** — it is the only surviving record of the anchor's output and remains the
+historical reference/regression baseline. Do NOT drop it in the Phase-H cleanup.
