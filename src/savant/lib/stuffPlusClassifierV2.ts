@@ -31,6 +31,16 @@ export function classifySeed(ivb: number, armhb: number, spin: number, gap: numb
 
 const BREAKING = ["Slider", "Sweeper", "Curveball", "Gyro Slider", "Cutter"];
 
+// §4.5 GYRO/SLIDER SEAM FLOOR. DERIVED 2026-08-29 from anchor ground truth.
+// The seam is NOT separable per-pitch (best single-axis armHB cut = 74.9% vs a 56% base rate), but it IS separable at
+// the CLUSTER CENTROID: the anchor's SL-seed resolution is predicted 89.1% by the cluster's own mean armHB (cut -5.1)
+// vs only 71.5% by sweeper-presence-in-arsenal. ⚠ The "arsenal rule" (flip Slider->Gyro when the pitcher has a GY seed
+// and no SW seed) is a CONFOUND of this and, implemented literally, LOSES 1.0-1.3pp — DO NOT USE IT.
+// End-to-end (post-merge, post-backfill, pitch-weighted) the optimum cut is -3.
+// MEASURED on two DISJOINT pitcher samples: 92.49%->93.45% (350 pitchers/149,726 pitches) and
+// 93.85%->95.09% (300 pitchers/126,672 pitches). Zero change to any fastball or offspeed confusion pair.
+const GYRO_ARMHB_FLOOR = -3;
+
 export interface P { uniq: string; raw: string; hand: string; velo: number; ivb: number; hb: number; spin: number | null; stored: string | null; }
 interface Pt { p: P; iv: number; ar: number; ve: number; sp: number; gap: number; }
 interface Cl { pts: Pt[]; iv: number; ar: number; ve: number; sp: number; gap: number; n: number; seeds: Set<string>; }
@@ -93,6 +103,7 @@ export function classifyPitcher(ps: P[], pfVelo: number): Map<string, { label: s
 
   // §2.6 SMALL-SAMPLE FALLBACK (<150 pitches): cluster means only, no fold/tiebreak
   if (total < 150) {
+    for (const x of labeled) if (x.label === "Slider" && x.c.ar >= GYRO_ARMHB_FLOOR) x.label = "Gyro Slider";
     for (const x of labeled) for (const t of x.c.pts) out.set(t.p.uniq, { label: x.label, review: false });
     return out;
   }
@@ -108,6 +119,11 @@ export function classifyPitcher(ps: P[], pfVelo: number): Map<string, { label: s
     if (cands.length) x.label = cands.reduce((b, a) => (a.c.n > b.c.n ? a : b), cands[0]).label;
     else if (!isAnchor(x.c)) x.review = true;
   }
+
+  // 4.5) GYRO/SLIDER SEAM — MUST run BEFORE tiebreak(): the CT/SL ride-floor tiebreak only fires on clusters still
+  //      labeled Slider/Cutter, so flipping first ALSO removes 68-87% of "Gyro Slider -> Cutter" errors (415->131,
+  //      437->56). Flipping AFTER tiebreak yields only +0.77/+0.95pp instead of +0.96/+1.24pp. Do not reorder §5.
+  for (const x of labeled) if (x.label === "Slider" && x.c.ar >= GYRO_ARMHB_FLOOR) x.label = "Gyro Slider";
 
   // 5) TIEBREAKERS at the two ambiguous seams (needs arsenal context)
   const brkAnchorCount = labeled.filter((x) => isAnchor(x.c) && BREAKING.includes(x.label)).length;

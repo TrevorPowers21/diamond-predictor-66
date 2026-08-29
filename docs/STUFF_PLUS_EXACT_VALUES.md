@@ -175,3 +175,74 @@ Remaining 114,812 errors, ranked:
 → The GYRO/SLIDER seam alone is a THIRD of all remaining error (2x the fastball seam). The anchor's own rule for it is
 already in `_reclass_map` (see 11.6 item 1) — arsenal-conditioned, learnable from data we hold. Closing most of it
 would put v2 near 96%.
+
+### 11.8 GYRO/SLIDER SEAM — research + FIX (2026-08-29). Biggest single remaining error source.
+**Why it mattered:** Gyro<->Slider = 38,268 pitches = **33% of ALL remaining error** (2x the fastball seam).
+
+**FINDING A — the seam is NOT separable per-pitch.** Anchor-labeled distributions `[p5/p25/p50/p75/p95]`
+(350 pitchers / 149,726 pitches):
+- **Gyro Slider** (n=13,051): armHB `-8.0/-4.3/-2.2/-0.1/3.1` · ivb `-6.1/-1.7/1.5/3.8/7.7` · rr `-11.4/-5.4/-1.5/1.7/5.7` · velo `75.9/79.5/81.6/83.8/86.9` · gap `5.1/7.2/8.6/10.2/12.9` · spin `1769/2116/2267/2437/2664`
+- **Slider** (n=16,596): armHB `-11.4/-9.1/-6.7/-4.2/0.1` · ivb `-6.8/-2.9/0.9/4.7/9.9` · rr `-15.4/-10.2/-6.0/-1.2/6.0` · spin `1931/2207/2379/2533/2776`
+- **Cutter** (n=4,769): armHB `-8.0/-4.3/-2.1/-0.1/1.8` · ivb `3.5/6.1/7.8/10.0/14.5` · gap `2.5/3.9/5.0/6.1/7.4`
+Best single-axis PER-PITCH cut, Gyro vs Slider: **armHB 74.9% @ -4.08** (base rate 56%); rr 64.2 · spin 59.9 · velo 58.3 · gap 58.0 · ivb 56.0. The clouds share the whole -8..0 armHB band → no clean per-pitch threshold exists.
+(Gyro vs Cutter IS separable: ivb 86.4% @ 5.49, gap 84.9% @ 5.68 — v2 already encodes this. Slider vs Cutter: gap 87.6% @ 6.05.)
+
+**FINDING B — ⚠ THE "ARSENAL RULE" IS A CONFOUND. DO NOT IMPLEMENT IT.**
+`_reclass_map` really does show SL-seed resolution flipping with arsenal (GY+SL 64.5% Gyro; GY+SL+FC 67.7%; GY+SL+FC+CB 70.4%; vs SL+SW 95.0% Slider; GY+SL+SW 85.8% Slider). BUT regressing the anchor's SL resolution on
+per-pitcher features (n=165 pitchers with both GY and SL clusters >=8 pitches):
+| predictor | accuracy |
+|---|---|
+| majority class | 56.4% |
+| hasSW alone (the "arsenal rule") | 71.5% |
+| **SL cluster mean armHB alone** | **89.1% @ armHB >= -5.10** |
+| slAr x hasSW (two thresholds) | 89.7% (noSW -5.1 / hasSW -5.3) |
+The two conditional thresholds are nearly identical and arsenal adds only +0.6pp over movement alone → **sweeper
+presence is a PROXY for "this pitcher's SL cluster sits further glove-side," not an independent rule.**
+Implemented literally it **LOSES 0.97pp (sample A) / 1.26pp (sample B)** — fixes Gyro->Slider 1,675->613 but creates
+Slider->Gyro 1,298->3,819. Recorded so nobody rebuilds it from the contingency table.
+
+**FINDING C — THE FIX (shipped): cluster-centroid floor `GYRO_ARMHB_FLOOR = -3`.**
+After step 4 (usage backfill) and **BEFORE step 5 (`tiebreak`)**: any cluster labeled `Slider` with mean armHB >= -3
+becomes `Gyro Slider`. Same line in the `<150` small-sample branch.
+Threshold sweep (Δpp vs base), two DISJOINT samples — A: 350 pitchers/149,726 pitches (base 92.488%); B: 300 pitchers/126,672 pitches (base 93.850%):
+| variant | A Δpp | B Δpp |
+|---|---|---|
+| arsenal rule (flip all Sliders when noSW & hasGY) | **-0.974** | **-1.262** |
+| widen §1.5 gyro IVB band to ±6 | -0.350 | — |
+| widen §1.5 gyro IVB band to -6..+8 | -0.740 | — |
+| post-tiebreak flip, armHB >= -5 | +0.106 | +0.030 |
+| post-tiebreak flip, armHB >= -4.5 | +0.572 | +0.574 |
+| post-tiebreak flip, armHB >= -3 | +0.771 | +0.948 |
+| **pre-tiebreak flip, armHB >= -3  ← SHIPPED** | **+0.960** | **+1.242** |
+| pre-tiebreak, armHB >= -2.5 | +0.765 | +1.159 |
+| pre-tiebreak, armHB >= -3.5 | +0.724 | +0.988 |
+| pre-tiebreak, armHB >= -4.5 | +0.749 | +0.858 |
+| pre-tiebreak -3 + require noSW | +0.888 | +1.203 |
+| pre-tiebreak -3 + ivb >= -6 gate | +0.900 | +1.242 |
+Pitch-weighted across both samples (276,398 pitches): **+1.09pp**. Stability: split-half Δ = +0.884/+1.038 (A) and
++1.376/+1.119 (B); -3 is argmax in 3 of 4 half-splits; every threshold -1..-4.5 is positive on BOTH samples.
+Confusion deltas (A base->new | B base->new): `Gyro->Slider` 1,675->471 | 1,788->508 · `Gyro->Cutter` 415->131 | 437->56 ·
+`Slider->Gyro` 1,298->1,348 | 1,046->1,125 · **all fastball + offspeed pairs IDENTICAL** (4S->SI 1,638->1,638; SI->4S 1,592->1,592).
+
+**ORDERING IS LOAD-BEARING:** running before `tiebreak()` is worth ~+0.3pp over after, because the CT/SL ride-floor
+tiebreak (`Slider & gap 6-8 & ar<=2 & iv>=5 -> Cutter`) then never fires on these clusters — that IS the Gyro->Cutter drop.
+
+**⚠ DOWNSTREAM IMPACT — NOT display-only.** This moves **6-8% of ALL breaking-ball volume** from Slider to Gyro Slider.
+Every artifact computed on the old mix MUST be regenerated after a reclass run: `pitcher_stuff_plus_ncaa` baselines,
+D1/regional means + SDs, pitch-shape percentiles. Reinforces the invariant: reclassify -> baseline -> score -> aggregate
+must complete in ONE session.
+**Honest caveat:** Curveball errors are RELABELED not fixed (`Curveball->Slider` 108->2 offset by `Curveball->Gyro` 131->237, net ~0).
+
+### 11.9 ★ METHODOLOGICAL WARNING — "agreement with the anchor" IS NOT ACCURACY
+The anchor is the PREVIOUS classifier's output (a lost scratchpad implementation), NOT ground truth. A 94.3% agreement
+figure measures SIMILARITY TO THE ANCHOR. The residual ~4.7% is a MIX of (a) v2 wrong, (b) **v2 RIGHT and the anchor
+wrong**, (c) genuine coin-flips. Evidence that (b) is real: two 2026-08-29 fixes (the offspeed armHB floor and the
+fastball merge guard) were "be physically correct" changes — a +1 armHB pitch is not a change-up; a 14ivb/8hb and an
+8ivb/14hb at equal velo are two different fastballs — that happened to ALSO raise agreement.
+→ Use the CLUSTER-COHERENCE test (`scripts/v2_coherence_test.ts`) to partition the residual: it scores which label puts
+a disputed pitch closer to its own movement centroid, using centroids built ONLY from pitches both labelings agree on
+(unbiased). Coherence readings so far: BEFORE fixes stored won 55.1/44.9 on 1,443 disputes; AFTER the merge guard
+40.1/59.9 on a much smaller/harder residual (818 disputes) — fewer, harder disputes is what a real fix looks like.
+⚠ Coherence favours tighter clusters and is a PROXY, not truth: treat >=60/40 as meaningful, ~50/50 as genuinely ambiguous.
+→ IF v2 wins a meaningful share of the residual, the earlier "do NOT overwrite staging's labels" guidance REVERSES —
+staging's anchor labels would be the ones needing updating. That guidance assumed the anchor was better; it may not survive measurement.
