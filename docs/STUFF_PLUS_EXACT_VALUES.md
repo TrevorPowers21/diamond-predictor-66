@@ -246,3 +246,15 @@ a disputed pitch closer to its own movement centroid, using centroids built ONLY
 ⚠ Coherence favours tighter clusters and is a PROXY, not truth: treat >=60/40 as meaningful, ~50/50 as genuinely ambiguous.
 → IF v2 wins a meaningful share of the residual, the earlier "do NOT overwrite staging's labels" guidance REVERSES —
 staging's anchor labels would be the ones needing updating. That guidance assumed the anchor was better; it may not survive measurement.
+
+### 11.10 ★ CONFIRMED FULL-POPULATION ACCURACY AFTER THE GYRO FIX (2026-08-29)
+`--validate --sample 4804`, ALL 2,000,674 pitches vs `_reclass_result`:
+**1,903,348 / 2,000,674 = 95.1% per-pitch  |  arsenal-mix 95.2%  |  needs_review 8.1%**
+(was 94.3% / 94.3% / 8.1% before §4.5 → **+0.8pp**, total errors **114,812 → 97,326**, −17,486.
+Slightly under the +1.09pp sample projection — samples were mildly optimistic. This 95.1% is the CONFIRMED number;
+replace any "projected ~95.3-95.4%" wording with it.)
+Confusions after (vs before): `Gyro→Slider` **25,197 → 7,210 (−71%)** · `Gyro→Cutter` 6,641 → 4,350 ·
+`Slider→Gyro` 13,071 → 15,838 · `Sweeper→Slider` 8,136 → 8,114 · **`4S→Sinker` 12,614 → 12,614 and
+`Sinker→4S` 14,184 → 14,184 — BYTE-IDENTICAL, zero fastball regression, exactly as predicted.**
+Gyro/Slider pair total 38,268 → 23,048 (−40%) but still the largest bucket; v2 now slightly OVER-calls gyro
+(`Slider→Gyro` is now the single biggest confusion) — the residual seam is symmetric-ish, not one-directional.
