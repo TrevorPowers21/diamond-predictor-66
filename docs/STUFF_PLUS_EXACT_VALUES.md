@@ -339,3 +339,33 @@ distinct rare pitches, which is the intended behaviour: a real 2% pitch must sur
 5% are truly distinct or ghosts leaking a slightly-too-tight gate (measurable via their actual moveDist distribution).
 ⚠ PROCESS NOTE: this reorder was swept into a Stage-0 plumbing commit by `git add -A` instead of being committed on its
 own measurement. Modeling changes must land in their own commit with their number attached.
+
+---
+## 12. STAGING FULL-CHAIN EXECUTION LOG (2026-08-29) — the first real write of the v2 chain
+Env: STAGING `slrxowawbijbjrkozqlj`, direct session (Supavisor session mode :5432) via `PGURI` in `.env.local`.
+Chain: classify → re-derive baseline → score per pitch → aggregate dimensions → marry onto Masters. ONE session.
+
+### STEP 0 — BACKUP (done, reversible)
+`_v2_prechain_backup` created on staging (unique index on `uniq_pitch_id`):
+**2,579,655 rows | 2,191,583 labeled | 2,014,152 with stuff_plus** — snapshot of `pitch_type_reclassified`,
+`classification_version`, `needs_review`, `stuff_plus` immediately BEFORE the chain. Any step is reversible with a
+single UPDATE…FROM join on `uniq_pitch_id`. ⚠ Do NOT drop this until the chain is verified end-to-end.
+
+### STEP 1 — RECLASSIFY (v2) — `reclassify_prod.ts --go --target=staging`
+- Classifier: `src/savant/lib/stuffPlusClassifierV2.ts` @ **95.2% per-pitch / 95.3% arsenal-mix** (§11.13).
+- **2,015,321 labels computed** (vs 2,000,674 in `_reclass_result` — v2 covers slightly more because it labels every
+  `is_data=true` row with movement, whereas the anchor run skipped ~191k rows belonging to pitchers it never processed).
+- Stamps `pitch_type_reclassified` + `classification_version='v2-ranges-2026-08-28'` + `needs_review`.
+- Also MATERIALIZES `_reclass_pf` (pitcher_id → pf_velo) as a by-product — first ever run of that new code path; the
+  scorer hard-depends on it (`compute_pitch_log_stuff_plus.ts:132-135` exits without it).
+- ⚠ OBSERVED IO THROTTLING mid-run: `_reclass_fix` load ran ~21s per 200k for the first ~1.2M rows, then degraded to
+  **~4.3 min per 200k**. This is the documented burst→baseline pattern (burst budget ≈5 min, then baseline). Expect
+  the same, worse, on prod — prod is on a smaller compute tier and its disk is more throttled.
+- Resumability confirmed by design: `_reclass_fix` is upserted by PK and the pitch_log UPDATE carries
+  `is distinct from` guards, so an interrupted run can simply be re-run.
+
+### WHAT THIS RUN PROVES (first-ever execution of the corrected chain)
+1. `_reclass_pf` materialization works (new code).
+2. The version stamp written in step 1 MATCHES the filter step 3 reads — the STAGE-0 blocker #2 fix
+   (`compute_pitch_log_stuff_plus.ts` was hard-filtered to `v1-anchor-2026-08-17`) actually holds end-to-end.
+3. The `--target=staging` double-keyed guard on the writer works (it refuses unless PGURI's project ref matches).
