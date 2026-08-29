@@ -45,3 +45,46 @@ The HITTER side already blocked correctly pre-existing: env+ (`fromAvgPlus`…`t
 - GAP 3 ✅ CODIFIED (a960334): `scripts/sql/conf_stats_bucketA_assembly.sql`. ★★★★ blocker cleared in code; ONE remaining gate = staging idempotent re-run vs `_confstats_backup_preassembly` (blocked this session: no staging conn, CLI linked=PROD).
 - **NEXT: GAP 5 (deferred-minor, optional) → then the real next phase: display-wiring audit (player eval + front office) → market-value re-eval → deploy edge fn (Trevor) → unify (Track B) → prod.**
 - ⚠️ INFRA NOTE for whoever resumes: `supabase --linked` = PROD (`trbvxuoliwrfowibatkm`); staging is `slrxowawbijbjrkozqlj` (.env.local). No Supabase MCP was connected this session. To run staging SQL: re-link or reconnect MCP; NEVER run conf-stats writes via `--linked` as-is (that's prod).
+
+---
+## ★★★ TRACK B — STUFF+ STAGE, LOCKED SPEC (2026-08-29). Supersedes any earlier Stuff+ description here.
+Track B = ONE function on pitch-log ingest (weekly/biweekly, local folder watch). Master-sheet uploads come LATER as a
+CHECK + to override only what pitch_log cannot produce (e.g. AVG/SB). **pitch_log is the SOURCE OF TRUTH.**
+
+**THE STUFF+ STAGE — exact order. Steps 1→5 MUST complete in ONE run; a label change invalidates every number below it.**
+1. **CLASSIFY** → `pitch_log.pitch_type_reclassified` + `classification_version` + `needs_review`
+   `src/savant/lib/stuffPlusClassifierV2.ts` (v2 — the SINGLE classifier), driven by `scripts/reclassify_prod.ts`.
+2. **RE-DERIVE the pop baseline** → `pitcher_stuff_plus_ncaa` (per pitch_type × hand, **armHB**, D1-only).
+   ⚠ MANDATORY, not optional: the §4.5 gyro fix moves **6-8% of ALL breaking-ball volume** Slider→Gyro Slider, so every
+   mix-dependent artifact (baselines, D1/regional means + SDs, pitch-shape percentiles) is invalid until regenerated.
+3. **SCORE per pitch** → `pitch_log.stuff_plus` — `scripts/compute_pitch_log_stuff_plus.ts`
+   (normalizes hb→armHB itself; recenters each (pitch_type × hand) bucket to mean 100).
+4. **AGGREGATE** → `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` / `*_by_pitch_type`
+   `scripts/aggregate_pitch_log_dimensions.ts` (must also call `populate_hitter_run_values(season)`).
+5. **MARRY ONTO THE MASTERS** → `scripts/derive_masters_from_pitchlog.ts`
+   (⚠ add `.order(PK)` to its `readAll` first — unordered `.range()` over ~2.5M rows silently drops/dupes).
+Then: power ratings → conference baselines → projections → market/NIL.
+
+**⛔ WHAT TRACK B MUST NEVER DO**
+- NEVER route Stuff+ through the LEGACY lane: `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline` →
+  `legacy_rollupStuffPlusToMaster` → `"Pitching Master".stuff_plus`. Nothing reads it for 2026 and it carries the latent
+  raw-HB bug (e5dec2f removed `hbSign`; PSP-I stores RAW hb ⇒ left-handers scored BACKWARDS).
+- NEVER call `legacy_breakingBallReclassification` (v1). It writes `rstr_pitch_class` on PSP-I, has never touched
+  pitch_log, and is NOT the anchor classifier. Conflating the two cost a full day (2026-08-28/29).
+- NEVER rewrite the stored `hb` column to armHB. `hb` is RAW by design (UI displays it; the CSV importer writes it raw).
+  armHB is a COMPUTE convention — normalize in memory only.
+- NEVER leave new labels with stale scores. Steps 1→5 are one transaction-of-work.
+
+**LANE COVERAGE (measured):** `pitch_log` is **D1-only** — 5,303 pitchers. PSP-I covers 7,012; the 1,709 difference is
+**1,627 NJCAA_D1 + 81 D1 + 1 D2**. → **JUCO has no pitch logs and stays CSV-derived** (scored vs D1 baselines). Track B's
+pitch_log chain covers D1 only; do not let it silently drop JUCO. JUCO process is being restarted separately.
+
+**CLASSIFIER STATE FEEDING TRACK B (2026-08-29):** v2 = **94.3% per-pitch** on the full 2,000,674-pitch anchor set
+(arsenal-mix 94.3%, needs_review 8.1%), **→ projected ~95.3-95.4%** with the §4.5 gyro floor. Three shipped fixes:
+offspeed `armHB >= 5` floor · fastball-family MERGE GUARD (>60% of 4S↔Sinker errors) · §4.5 gyro cluster floor `-3`
+applied BEFORE `tiebreak()`. Two logged NEGATIVE results — `rr > -1.7` and the "arsenal rule" confound (loses ~1pp) —
+do NOT rebuild either. Full numbers: `docs/STUFF_PLUS_EXACT_VALUES.md` §11. Lane map: `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md`.
+
+**⚠ AGREEMENT WITH THE ANCHOR IS NOT ACCURACY.** The anchor is the previous classifier's output, not truth. The residual
+~4.7% mixes v2-wrong / **v2-RIGHT-anchor-wrong** / coin-flips — partition with `scripts/v2_coherence_test.ts` before
+treating it as error, and before deciding whether staging's labels should be updated rather than preserved.
