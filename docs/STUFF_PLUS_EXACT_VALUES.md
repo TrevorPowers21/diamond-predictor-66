@@ -369,3 +369,31 @@ single UPDATE…FROM join on `uniq_pitch_id`. ⚠ Do NOT drop this until the cha
 2. The version stamp written in step 1 MATCHES the filter step 3 reads — the STAGE-0 blocker #2 fix
    (`compute_pitch_log_stuff_plus.ts` was hard-filtered to `v1-anchor-2026-08-17`) actually holds end-to-end.
 3. The `--target=staging` double-keyed guard on the writer works (it refuses unless PGURI's project ref matches).
+
+### STEP 1 RESULT (staging, 2026-08-29) ✅
+`classified 2,015,321 pitches | needs_review 8.1%` · `_reclass_pf materialized: 5,364 pitchers` (NEW producer, first
+ever run — worked) · `batches=101, updated=1,995,321, version_stamped=2,015,321/2,579,655`.
+Distribution: 4S FB 37.8% · Sinker 16.0% · Slider 10.3% · **Gyro Slider 10.2%** · Change-up 9.1% · Curveball 5.6% ·
+Sweeper 5.2% · Cutter 3.7% · Splitter 2.1%. (Gyro up from ~6.4% — the §4.5 floor, as expected.)
+The ~20k gap between stamped (2,015,321) and updated (1,995,321) is the `is distinct from` guard skipping rows whose
+label was already identical. The remaining ~564k unstamped rows are `is_data=false` — correctly left UNLABELED
+(the old process had wrongly labeled ~8% of non-data rows).
+
+### STEP 2 RESULT (staging) ✅ — armHB CONVENTION EMPIRICALLY CONFIRMED
+`✓ sign check passed on all 18 buckets` → `APPLIED — upserted 18/18 pop buckets for season 2026`.
+**This is the proof, not an assumption:** every arm-side bucket (4S FB/Sinker/Change-up/Splitter) came out POSITIVE
+for BOTH hands and every glove-side bucket (Slider/Sweeper/Curveball) NEGATIVE for both. The deriver was built to
+ABORT before writing if that failed. The whole 2026-08-29 lane analysis holds. (e.g. Sweeper::R hb = −15.9, sd 2.94.)
+Also proves the producer→consumer link: step 1 WROTE `_reclass_pf`, step 2 READ it back (5,364 pitchers).
+
+### ⚠ STEP 3 FAILURE #1 (staging) — transient network, chain halted CORRECTLY
+`scored=1,665,000` (~83%) then `TypeError: fetch failed / read ECONNRESET`. Step 4 did NOT run (halt-on-failure worked).
+**RESULTING PARTIAL STATE — the exact invariant violation we guard against:** staging held **v2 labels + STALE
+anchor-era scores** (`v2-stamped 2,015,321 | scored 2,014,152 | unscored 1,169`; the 2,014,152 matches the pre-chain
+backup exactly, i.e. those were the OLD scores sitting under NEW labels). The recenter pass never ran.
+→ **LESSON: step 3 is the single longest unattended step (~19+ min, ~1,700-2,700 rows/s, degrades under IO
+throttling) and had NO retry.** Re-run wrapped in 4 attempts. It is idempotent — `compute_pitch_log_stuff_plus.ts:185`
+re-scores ALL rows matching the class version (it does NOT filter `stuff_plus IS NULL`), so a re-run redoes the full
+~2M rather than resuming. Budget the full runtime on every attempt.
+→ **PROD IMPLICATION: prod is on a smaller compute tier with a more throttled disk. Do NOT run step 3 on prod
+unattended without retry, and expect materially longer than staging's ~19 min.**
