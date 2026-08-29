@@ -75,7 +75,7 @@ If a doc or script quotes a Stuff+ number, confirm which of these it means befor
   duplicate copy of the classifier that has since been deleted.
   - The cross-arm-side errors previously cited here (`Gyro Slider → Change-up`, `Slider → Change-up`) are **FIXED** by
     the offspeed armHB≥5 floor and the §4.5 gyro floor. See `docs/STUFF_PLUS_EXACT_VALUES.md` §11.
-  - **On overwriting staging's labels — OPEN, not settled.** "Agreement with the anchor" is NOT accuracy: the anchor is
+  - **On overwriting staging's labels — SETTLED 2026-08-29: DO NOT.** Coherence partition (234 pitchers, 1,188 decidable disputes, run after all three fixes) = v2 closer 44.1% / anchor closer 55.9%. The anchor wins the residual; the "maybe v2 is right" hypothesis was REJECTED by measurement. (Prod is unaffected — it is on OLD CASE labels, which v2 beats decisively.) ⚠ Caveat: the partition does NOT cover the Gyro<->Slider pair (largest residual, 23,048) — centroid basis missing after the §4.5 fix. Original framing follows: "Agreement with the anchor" is NOT accuracy: the anchor is
     the previous classifier's output, not truth, so the residual ~4.7% mixes v2-wrong, **v2-RIGHT-anchor-wrong**, and
     coin-flips. Partition it with `scripts/v2_coherence_test.ts` BEFORE deciding. If v2 wins a meaningful share, staging's
     labels are the ones that should be updated. (Coherence pre-fixes read 55.1/44.9 for stored on 1,443 disputes; after

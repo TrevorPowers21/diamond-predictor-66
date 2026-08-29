@@ -258,3 +258,23 @@ Confusions after (vs before): `Gyro→Slider` **25,197 → 7,210 (−71%)** · `
 `Sinker→4S` 14,184 → 14,184 — BYTE-IDENTICAL, zero fastball regression, exactly as predicted.**
 Gyro/Slider pair total 38,268 → 23,048 (−40%) but still the largest bucket; v2 now slightly OVER-calls gyro
 (`Slider→Gyro` is now the single biggest confusion) — the residual seam is symmetric-ish, not one-directional.
+
+### 11.11 ★ COHERENCE PARTITION OF THE RESIDUAL (2026-08-29) — SETTLED: do NOT overwrite staging
+`scripts/v2_coherence_test.ts --sample 250`, run AFTER all three fixes (v2 at 95.1%). Unbiased design: centroids built
+ONLY from pitches both labelings agree on, then each disputed pitch scored by distance to its v2-label vs anchor-label centroid.
+**234 pitchers | 102,872 agreed | 1,308 disputed → v2 closer 524/1,188 = 44.1% · ANCHOR closer 664/1,188 = 55.9%**
+→ **The residual ~4.9% is NOT mostly "v2 right / anchor wrong."** The anchor wins it ~56/44. The hypothesis that
+agreement-below-100% might largely be v2 IMPROVING on the anchor is REJECTED by measurement.
+→ **DECISION (now settled, no longer open): do NOT overwrite staging's `pitch_type_reclassified` with v2.**
+  This REVERSES the "open pending coherence" framing in SOURCE_OF_TRUTH §4.
+→ **Does NOT affect the PROD decision:** prod is on OLD per-pitch CASE labels, not anchor labels. v2 beats those
+  decisively (70.9% agreement; distribution deviation from the validated set 38.7 → 21.6; Cutter 10.3%→3.7% vs anchor 2.4%).
+Per-move (v2 wins / anchor wins): `Slider→Cutter` **23/0 (v2 100%)** · `Sinker→4S FB` 246/211 (v2 54%) ·
+`Change-up→Sinker` 43/55 · `4S FB→Sinker` 39/53 · `Change-up→Splitter` 8/15 · `Cutter→4S FB` 3/18 (anchor 86%) ·
+`Sweeper→Slider` **85/216 (anchor 72%)** · `Gyro Slider→Sinker` **0/20 (anchor 100%)**.
+⚠ **LIMITATION — the partition does NOT cover the largest residual.** Gyro↔Slider (23,048 pitches, the biggest bucket)
+is ABSENT from the breakdown: the test needs >=5 agreed pitches per label to form a centroid, and after the §4.5 fix many
+gyro/slider disputes no longer have both. So this measures the OTHER residual. Whether the -3 floor over-calls gyro
+relative to physical truth is STILL UNMEASURED — do not claim it either way.
+→ **BEST-EVIDENCED NEXT FIX: `Sweeper→Slider`** (8,114 pitches; coherence says v2 is wrong on 72%). The docs specify the
+sweeper `armHB <= -12` bar is SLOT-CONDITIONED; v2 applies it flat. See 11.6 item 3.
