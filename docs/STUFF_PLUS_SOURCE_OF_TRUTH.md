@@ -67,14 +67,21 @@ If a doc or script quotes a Stuff+ number, confirm which of these it means befor
   **anchor classifier** (its source code was lost — scratchpad only). These labels are the VALIDATED product.
 - `breakingBallReclassification.ts` (legacy lane) writes `rstr_pitch_class` on PSP-I and **has never touched pitch_log**.
   It is a DIFFERENT thing from the anchor classifier. Conflating the two caused a full day of wasted work (2026-08-28/29).
-- **v2** (`src/savant/lib/stuffPlusClassifierV2.ts`, from `scripts/reclassify_v2.ts`) is a clean-room RECONSTRUCTION of the
-  lost anchor classifier: **92.6%** vs `_reclass_result`, **90.5%** vs the stored pitch_log labels, and consolidates
-  slightly (5.85 → 5.54 distinct labels/pitcher).
-  - ⚠ v2 is **NOT** an upgrade to staging's labels. Some of its disagreements are errors (`Gyro Slider → Change-up` 156,
-    `Slider → Change-up` 39 — cross-arm-side moves that should not happen). **DO NOT overwrite staging's
-    `pitch_type_reclassified` with v2.**
-  - v2's real purpose: a committed, **re-runnable forward classifier** for PROD (whose pitch_log has no labels) and for
-    Track B on-ingest — because the original anchor code no longer exists.
+- **v2** (`src/savant/lib/stuffPlusClassifierV2.ts` — the SINGLE source; `scripts/reclassify_v2.ts` is only a validation
+  harness and no longer carries its own copy) is a clean-room RECONSTRUCTION of the lost anchor classifier.
+  **ACCURACY: 1,885,862 / 2,000,674 = 94.3% per-pitch** (full population) · arsenal-mix 94.3% · needs_review 8.1%,
+  **+ the §4.5 gyro fix (+0.96/+1.24pp measured on two disjoint samples) → projected ~95.3-95.4%.**
+  ⚠ The older "92.6% / 90.5%" figures are STALE — they predate the three 2026-08-29 fixes AND were measured against a
+  duplicate copy of the classifier that has since been deleted.
+  - The cross-arm-side errors previously cited here (`Gyro Slider → Change-up`, `Slider → Change-up`) are **FIXED** by
+    the offspeed armHB≥5 floor and the §4.5 gyro floor. See `docs/STUFF_PLUS_EXACT_VALUES.md` §11.
+  - **On overwriting staging's labels — OPEN, not settled.** "Agreement with the anchor" is NOT accuracy: the anchor is
+    the previous classifier's output, not truth, so the residual ~4.7% mixes v2-wrong, **v2-RIGHT-anchor-wrong**, and
+    coin-flips. Partition it with `scripts/v2_coherence_test.ts` BEFORE deciding. If v2 wins a meaningful share, staging's
+    labels are the ones that should be updated. (Coherence pre-fixes read 55.1/44.9 for stored on 1,443 disputes; after
+    the merge guard 40.1/59.9 on a smaller/harder 818-dispute residual. Re-run it after the gyro fix.)
+  - v2's confirmed purpose: the committed, **re-runnable forward classifier** for PROD (whose pitch_log carries only the
+    OLD per-pitch CASE labels) and for Track B on-ingest — the original anchor code no longer exists.
 
 ---
 
@@ -111,3 +118,44 @@ If a doc or script quotes a Stuff+ number, confirm which of these it means befor
 Ingest pitch_log (weekly/biweekly, local folder) → classify (v2) → derive baseline → score per pitch → aggregate to
 totals/by_pitch_type → power ratings → conference baselines → projections. Master-sheet uploads come later as a CHECK and
 to override only what pitch_log cannot produce (e.g. AVG/SB). Numbers referenced here: `docs/STUFF_PLUS_EXACT_VALUES.md`.
+
+---
+## ★★★ STUFF+ v2 CLASSIFIER — CURRENT STATE + CONCLUSIONS (2026-08-29). Numbers: `docs/STUFF_PLUS_EXACT_VALUES.md` §11.
+**ACCURACY vs the anchor ground truth (`_reclass_result`, all 4,804 pitchers / 2,000,674 pitches):**
+`1,885,862 / 2,000,674 = 94.3% per-pitch` · arsenal-mix 94.3% · needs_review 8.1% — **+ the §4.5 gyro fix (measured
++0.96pp / +1.24pp on two disjoint samples) → projected ~95.3-95.4%.** Supersedes the stale 92.6%, which predated the
+fixes AND was measured against a DUPLICATE copy of the classifier that has since been deleted.
+
+**THREE FIXES SHIPPED (all measured, none guessed):**
+1. **Offspeed armHB floor** `armhb > 0` → **`armhb >= 5`**. Gyro armHB p99=4.7 vs offspeed p1=5.3 — a clean empty gap.
+   Killed `Gyro→Change-up` (338 losses) and `Cutter→Change-up` (29) outright.
+2. **Fastball-family MERGE GUARD** — never merge clusters whose fastball-family seeds (`4S FB`/`Sinker`/`FBSTRIP`)
+   differ. Merge was swallowing the FBSTRIP cluster before it could be resolved; **>60% of all 4S↔Sinker errors** were
+   merged FBSTRIP clusters. 91.69% → 93.01%; 4S↔Sinker errors 2,830 → 1,676 (−41%). Also preserves genuine
+   two-fastball arms (14ivb/8hb vs 8ivb/14hb at equal velo stay SEPARATE; 14/8 vs 13/9 correctly merge).
+3. **§4.5 gyro/slider cluster-centroid floor** `GYRO_ARMHB_FLOOR = -3`, applied BEFORE `tiebreak()` (ordering is worth
+   ~+0.3pp). `Gyro→Slider` 1,675→471 / 1,788→508; `Gyro→Cutter` 415→131 / 437→56; zero fastball/offspeed regression.
+
+**TWO NEGATIVE RESULTS — do NOT redo these:**
+- `rr > -1.7` FBSTRIP cut (made agreement WORSE: disputes 1,443 → 2,503; it was fit on a merge-corrupted population).
+  `rr >= 0` stays — within noise of the 91.9% @ rr=-0.13 optimum.
+- The **"arsenal rule"** (flip Slider→Gyro when the pitcher has a GY seed and no SW seed) is a **CONFOUND**, not a rule:
+  sweeper-presence predicts the anchor 71.5% vs 89.1% for the cluster's own mean armHB. Implemented literally it
+  **LOSES 0.97/1.26pp**. Do not rebuild it from the `_reclass_map` contingency table.
+**VERIFIED ALREADY-OPTIMAL (do not touch):** Sweeper/Slider armHB −12 (1.0% error) · Gyro/Slider armHB −5.
+
+**⚠ AGREEMENT WITH THE ANCHOR IS NOT ACCURACY.** The anchor is the PREVIOUS classifier's output (a lost scratchpad
+implementation), not truth. The residual ~4.7% mixes (a) v2 wrong, (b) **v2 RIGHT and the anchor wrong**, (c) coin-flips.
+Partition it with `scripts/v2_coherence_test.ts` before treating any of it as error. If v2 wins a meaningful share, the
+"do NOT overwrite staging's labels" guidance REVERSES.
+
+**⚠ DOWNSTREAM — NOT display-only.** The gyro fix moves **6-8% of ALL breaking-ball volume** Slider→Gyro Slider. Every
+mix-dependent artifact MUST be regenerated after a reclass run: `pitcher_stuff_plus_ncaa` baselines, D1/regional means
++ SDs, pitch-shape percentiles. Reclassify → baseline → score → aggregate MUST complete in ONE session.
+
+**PROD STATUS:** prod pitch_log is on the OLD per-pitch CASE labels (`"4-Seam Fastball"` naming, ~2,176,888 rows, NO
+`classification_version` stamp, `needs_review` all null, no `_reclass_fix` table) — **v2 has NEVER written to prod**; the
+prior prod work was a read-only dry run. v2 vs prod's existing labels = **70.9% agreement (v2 would change 584,130
+pitches = 29.1%)**, and v2 is far closer to the validated set (distribution deviation from anchor **38.7 → 21.6**),
+correcting prod's Cutter 10.3%→3.7% (anchor 2.4%) and Splitter 0.7%→2.1% (anchor 2.2%). Prod run is GATED on PGURI +
+an explicit "prod, now?" and MUST be followed immediately by the Stuff+ recompute chain.
