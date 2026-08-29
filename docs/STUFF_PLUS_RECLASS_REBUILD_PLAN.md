@@ -1,4 +1,14 @@
 # STUFF+ RECLASSIFICATION — REBUILD PLAN (2026-08-28)
+> ⛔ **SUPERSEDED IN PART — READ `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md` FIRST (2026-08-29).**
+> Stuff+ statements in this file were written before the lanes were untangled and contain WRONG conclusions.
+> Corrected facts: (1) the LIVE Stuff+ is the **pitch_log lane** (armHB, self-consistent) — `pitch_log.stuff_plus` →
+> `pitch_log_pitcher_totals` → Season Stats/PitcherProfile. (2) `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline` →
+> `rollupStuffPlusToMaster` → `"Pitching Master".stuff_plus` is the **LEGACY lane**, not read for 2026 (fallback for
+> ≤2025 + JUCO only), and carries a latent raw-HB bug from `e5dec2f`. (3) `breakingBallReclassification.ts` never
+> touched `pitch_log` — it is NOT the anchor classifier. (4) v2 is a re-runnable reconstruction for PROD + Track B; it is
+> **NOT** an upgrade to staging's existing `pitch_type_reclassified` labels — do not overwrite them. (5) `A5 aggregator
+> missing`, `baseline deriver missing`, and `pop/row convention mismatch` claims are FALSE — all verified present/consistent.
+
 
 **Decision (Trevor): Option A — rebuild the per-pitch reclassification CORRECTLY (commit it), don't shortcut.** The structure
 is fine (per-pitch classify → consolidate/scrub at the end); we just have to rebuild the missing hop as committed code so prod

@@ -19,9 +19,9 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 import { runVeloDiffPipeline } from "../src/savant/lib/veloDiffPipeline.ts";
-import { runBreakingBallReclassification } from "../src/savant/lib/breakingBallReclassification.ts";
+import { runBreakingBallReclassification } from "../src/savant/lib/legacy_breakingBallReclassification.ts";
 import { runStuffPlusPipeline } from "../src/savant/lib/stuffPlusEngine.ts";
-import { rollupStuffPlusToMaster } from "../src/savant/lib/rollupStuffPlusToMaster.ts";
+import { rollupStuffPlusToMaster } from "../src/savant/lib/legacy_rollupStuffPlusToMaster.ts";
 import { computeAndStoreNcaaAverages } from "../src/lib/computeNcaaAverages.ts";
 import { computeAndStoreAllScores } from "../src/lib/computeAndStoreScores.ts";
 import { bulkRecalculatePredictionsLocal } from "../src/lib/predictionEngine.ts";

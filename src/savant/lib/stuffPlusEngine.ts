@@ -1,3 +1,17 @@
+/**
+ * ⚠ THIS FILE SERVES BOTH LANES — see docs/STUFF_PLUS_SOURCE_OF_TRUTH.md
+ *
+ * ★ SHARED / TOP DOG: `calculateStuffPlus` + the 9 calc* equations. Used by the LIVE pitch_log lane
+ *   (scripts/compute_pitch_log_stuff_plus.ts). They expect **armHB** (arm-side positive) — the `hbSign`
+ *   multiplier was folded out in e5dec2f because that caller normalizes hb itself. DO NOT relabel these legacy.
+ *
+ * ⚠ LEGACY: `runStuffPlusPipeline` (the aggregate entry point) reads `pitcher_stuff_plus_inputs`, which stores
+ *   **RAW hb**, and passes it straight into the armHB-expecting equations → LEFT-HANDERS SCORE BACKWARDS.
+ *   Not live (nothing has run it since 2026-08-17; nothing reads its output for 2026 — PitcherProfile.tsx:664
+ *   skips PSP-I for 2026). Fallback lane only (≤2025 seasons + JUCO).
+ *   BEFORE REVIVING IT: normalize raw→armHB in memory here (mirror compute_pitch_log_stuff_plus.ts ~line 200).
+ *   Do NOT rewrite the stored `hb` column — it is raw by design (UI displays it; CSV importer writes it raw).
+ */
 import { supabase } from "@/integrations/supabase/client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────

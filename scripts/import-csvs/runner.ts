@@ -14,9 +14,9 @@ import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
-import { rollupStuffPlusToMaster } from "@/savant/lib/rollupStuffPlusToMaster";
+import { rollupStuffPlusToMaster } from "@/savant/lib/legacy_rollupStuffPlusToMaster";
 import { runVeloDiffPipeline } from "@/savant/lib/veloDiffPipeline";
-import { runBreakingBallReclassification } from "@/savant/lib/breakingBallReclassification";
+import { runBreakingBallReclassification } from "@/savant/lib/legacy_breakingBallReclassification";
 import { runStuffPlusPipeline } from "@/savant/lib/stuffPlusEngine";
 import { supabase } from "@/integrations/supabase/client";
 

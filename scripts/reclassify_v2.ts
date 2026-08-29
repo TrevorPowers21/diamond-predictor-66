@@ -372,8 +372,62 @@ async function scoreAll() {
   for (const [k, b] of Object.entries(buck).sort((a, b) => b[1].n - a[1].n)) console.log(`  ${k.padEnd(20)} raw=${(b.sum / b.n).toFixed(1)} pitch-n=${b.n}`);
   console.log(`\nper-pitcher OVERALL Stuff+ distribution: p10=${q(.1).toFixed(1)} p25=${q(.25).toFixed(1)} p50=${q(.5).toFixed(1)} p75=${q(.75).toFixed(1)} p90=${q(.9).toFixed(1)}  mean=${(overalls.reduce((a, b) => a + b, 0) / overalls.length).toFixed(1)}`);
 }
+// ─── VS-STAGING: engine-fidelity — reproduce staging's EXACT pipeline on staging's OWN pitcher_stuff_plus_inputs rows
+// (same inputs, same equations, same per-pitcher-unweighted recenter + rounding) and compare to the STORED stuff_plus. ───
+async function vsstaging() {
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+  if (!/slrxowawbijbjrkozqlj/.test(url)) { console.error("staging only"); process.exit(1); }
+  const sb = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } }) as any;
+  const pop = new Map<string, SPop>();
+  { const { data } = await sb.from("pitcher_stuff_plus_ncaa").select("*").eq("season", SEASON); for (const r of data ?? []) pop.set(`${r.pitch_type}::${r.hand}`, r); }
+  const TYPES = ["4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "Sweeper", "Curveball", "Change-up", "Splitter"];
+  type IR = { pt: string; hand: string; pitches: number; velocity: number; ivb: number; hb: number; rh: number; rs: number; ext: number; spin: number; fbch: number; stored: number | null };
+  const rows: IR[] = []; let last: any = null;
+  for (;;) {
+    let qy = sb.from("pitcher_stuff_plus_inputs").select("id,pitch_type,hand,pitches,velocity,ivb,hb,rel_height,rel_side,extension,spin,fb_ch_velo_diff,stuff_plus").eq("season", SEASON).in("pitch_type", TYPES).order("id").limit(1000);
+    if (last !== null) qy = qy.gt("id", last);
+    const { data, error } = await qy; if (error) { console.error(error.message); process.exit(1); }
+    if (!data || !data.length) break;
+    for (const r of data) rows.push({ pt: r.pitch_type, hand: r.hand, pitches: r.pitches, velocity: r.velocity, ivb: r.ivb, hb: r.hb, rh: r.rel_height, rs: r.rel_side, ext: r.extension, spin: r.spin, fbch: r.fb_ch_velo_diff, stored: r.stuff_plus });
+    last = data[data.length - 1].id; if (data.length < 1000) break;
+  }
+  const scored: { key: string; raw: number; outlier: boolean; stored: number | null }[] = []; let drop = 0;
+  for (const r of rows) {
+    if (r.ivb == null || r.hb == null) { drop++; continue; }
+    if (r.ivb === 0 && r.hb === 0 && (r.pitches ?? 0) < 5) { drop++; continue; }
+    if ((r.pitches ?? 0) < 5) { drop++; continue; }
+    const pp = pop.get(`${r.pt}::${r.hand}`); if (!pp) { drop++; continue; }
+    const hbUse = (process.env.FLIP_L === "1" && r.hand === "L") ? -r.hb : r.hb;  // diagnostic: test raw-hb vs armHB on LHP
+    const s0 = scorePitch(r.pt, { velocity: r.velocity, ivb: r.ivb, hb: hbUse, rel_height: r.rh, rel_side: r.rs, extension: r.ext, spin: r.spin, fb_ch_velo_diff: r.fbch }, pp);
+    if (s0 == null) { drop++; continue; }
+    const raw = Math.round(s0 * 10) / 10;
+    scored.push({ key: `${r.pt}::${r.hand}`, raw, outlier: raw > 140 || raw < 60, stored: r.stored });
+  }
+  const calib: Record<string, { sum: number; count: number }> = {};
+  for (const s of scored) { if (s.outlier) continue; (calib[s.key] ??= { sum: 0, count: 0 }); calib[s.key].sum += s.raw; calib[s.key].count += 1; }
+  const shift: Record<string, number> = {}; for (const [k, b] of Object.entries(calib)) if (b.count) shift[k] = b.sum / b.count - 100;
+  const deltas: number[] = []; let matched = 0, cmp = 0; const worst: { key: string; raw: number; rec: number; stored: number; d: number }[] = [];
+  const perBucket: Record<string, { n: number; ok: number; sd: number }> = {};
+  for (const s of scored) {
+    const sh = shift[s.key]; if (sh == null || s.stored == null) continue;
+    const rec = Math.round((s.raw - sh) * 10) / 10; const d = Math.abs(rec - s.stored);
+    deltas.push(d); cmp++; if (d < 0.05) matched++; if (d >= 0.05) worst.push({ key: s.key, raw: s.raw, rec, stored: s.stored, d });
+    (perBucket[s.key] ??= { n: 0, ok: 0, sd: 0 }); perBucket[s.key].n++; if (d < 0.5) perBucket[s.key].ok++; perBucket[s.key].sd += d;
+  }
+  deltas.sort((a, b) => a - b); const q = (x: number) => deltas[Math.min(deltas.length - 1, Math.floor(x * deltas.length))];
+  console.log(`\nENGINE-FIDELITY — our scoring vs staging STORED pitcher_stuff_plus_inputs.stuff_plus (identical inputs, labels, recenter).`);
+  console.log(`rows ${rows.length}, scored ${scored.length}, dropped ${drop}, compared ${cmp}`);
+  console.log(`EXACT match (|Δ|<0.05): ${matched}/${cmp} = ${(100 * matched / cmp).toFixed(1)}%`);
+  console.log(`|Δ| mean=${(deltas.reduce((a, b) => a + b, 0) / deltas.length).toFixed(3)}  p50=${q(.5).toFixed(2)}  p90=${q(.9).toFixed(2)}  p99=${q(.99).toFixed(2)}  max=${deltas[deltas.length - 1].toFixed(2)}`);
+  console.log(`within ±0.5: ${(100 * deltas.filter((d) => d <= 0.5).length / deltas.length).toFixed(1)}%   ±1: ${(100 * deltas.filter((d) => d <= 1).length / deltas.length).toFixed(1)}%`);
+  console.log(`per-bucket recenter shift (our calc): ${Object.entries(shift).sort().map(([k, v]) => `${k}=${v.toFixed(2)}`).join(" | ")}`);
+  console.log(`\nper-bucket match rate (|Δ|≤0.5) + mean|Δ|:`);
+  for (const [k, b] of Object.entries(perBucket).sort()) console.log(`  ${k.padEnd(18)} ${b.ok}/${b.n} = ${(100 * b.ok / b.n).toFixed(0)}%   mean|Δ|=${(b.sd / b.n).toFixed(1)}`);
+  if (worst.length) { console.log(`\nnon-exact rows (worst 10):`); worst.sort((a, b) => b.d - a.d).slice(0, 10).forEach((w) => console.log(`  ${w.key.padEnd(18)} raw=${w.raw} rec=${w.rec} stored=${w.stored} Δ${w.d.toFixed(1)}`)); }
+}
 const __direct = !!process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
-if (__direct && args.includes("--score")) scoreAll().catch((e) => { console.error(e); process.exit(1); });
+if (__direct && args.includes("--vsstaging")) vsstaging().catch((e) => { console.error(e); process.exit(1); });
+else if (__direct && args.includes("--score")) scoreAll().catch((e) => { console.error(e); process.exit(1); });
 else if (__direct && args.includes("--stuffcheck")) stuffcheck().catch((e) => { console.error(e); process.exit(1); });
 else if (__direct && args.includes("--pitcher")) pitcher().catch((e) => { console.error(e); process.exit(1); });
 else if (__direct && args.includes("--mismatches")) mismatches().catch((e) => { console.error(e); process.exit(1); });
