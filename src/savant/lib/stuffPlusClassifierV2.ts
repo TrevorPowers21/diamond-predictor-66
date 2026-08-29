@@ -21,7 +21,11 @@ export function classifySeed(ivb: number, armhb: number, spin: number, gap: numb
   if (ivb >= 5 && gap >= 2 && gap <= 7 && armhb <= 2) return "Cutter";        // §1.3 cutter retains ride; CORE gap 2-7 (not the p95 tail)
   if (gap < 4) return rr > 4 ? "4S FB" : rr < -4 ? "Sinker" : "FBSTRIP";      // §1.4 FA/SI strip → resolved per-pitcher in §2
   if (Math.abs(armhb) < 5 && ivb >= -4 && ivb <= 4) return "Gyro Slider";     // §1.5 the bullet — 0 HB + neutral/NEGATIVE ivb
-  if (armhb > 0) return spin < 1400 ? "Splitter" : "Change-up";               // §1.6 offspeed arm-side
+  // §1.6 offspeed arm-side. armHB FLOOR = 5, DERIVED from anchor ground truth (120k pitches, 2026-08-29):
+  // offspeed (CH+SPL) armHB p1=5.3 / p5=6.7; Gyro ceiling p95=3.2 / p99=4.7 — a clean empty gap at ~5.
+  // Without this floor the rule fired from armHB>0 and swept the 0–5 band (gyros/cutters), which is what
+  // made v2 lose 338-to-85 on "Gyro Slider → Change-up" and 29-to-1 on "Cutter → Change-up".
+  if (armhb >= 5) return spin < 1400 ? "Splitter" : "Change-up";
   return "Slider";                                                            // §1.7 glove-side breaking residual
 }
 
@@ -29,8 +33,8 @@ const BREAKING = ["Slider", "Sweeper", "Curveball", "Gyro Slider", "Cutter"];
 
 export interface P { uniq: string; raw: string; hand: string; velo: number; ivb: number; hb: number; spin: number | null; stored: string | null; }
 interface Pt { p: P; iv: number; ar: number; ve: number; sp: number; gap: number; }
-interface Cl { pts: Pt[]; iv: number; ar: number; ve: number; sp: number; gap: number; n: number; }
-const mkCl = (pts: Pt[]): Cl => ({ pts, iv: mean(pts.map((x) => x.iv)), ar: mean(pts.map((x) => x.ar)), ve: mean(pts.map((x) => x.ve)), sp: mean(pts.map((x) => x.sp)), gap: mean(pts.map((x) => x.gap)), n: pts.length });
+interface Cl { pts: Pt[]; iv: number; ar: number; ve: number; sp: number; gap: number; n: number; seeds: Set<string>; }
+const mkCl = (pts: Pt[]): Omit<Cl,"seeds"> => ({ pts, iv: mean(pts.map((x) => x.iv)), ar: mean(pts.map((x) => x.ar)), ve: mean(pts.map((x) => x.ve)), sp: mean(pts.map((x) => x.sp)), gap: mean(pts.map((x) => x.gap)), n: pts.length });
 
 // ─── §3  tiebreakers, applied to a labeled cluster given the pitcher's arsenal context ───
 function tiebreak(c: Cl, label: string, _brkAnchorCount: number): string {
@@ -51,18 +55,29 @@ export function classifyPitcher(ps: P[], pfVelo: number): Map<string, { label: s
   const total = ps.length;
   const pts: Pt[] = ps.map((p) => ({ p, iv: p.ivb, ar: armHBof(p.hb, p.hand), ve: p.velo, sp: p.spin ?? 9999, gap: pfVelo - p.velo }));
 
-  // 1) boundary-seed → initial clusters
+  // 1) boundary-seed → initial clusters (seed identity is CARRIED — the merge guard below needs it)
   const bySeed = new Map<string, Pt[]>();
   for (const t of pts) { const s = classifySeed(t.iv, t.ar, t.sp, t.gap); (bySeed.get(s) ?? bySeed.set(s, []).get(s)!).push(t); }
-  let clusters: Cl[] = [...bySeed.values()].map(mkCl);
+  let clusters: Cl[] = [...bySeed.entries()].map(([s, p]) => ({ ...mkCl(p), seeds: new Set([s]) }));
 
   // 2) MERGE seed-clusters split by a seam (Δarmhb<4 & Δivb<3.5 & Δvelo<2.5)
+  //    ★ FASTBALL-FAMILY GUARD (2026-08-29): NEVER merge two clusters whose fastball-family seeds DIFFER.
+  //    At gap≈0 the raw gate (Δarmhb<4 & Δivb<3.5 & Δvelo<2.5) is trivially satisfied between 4S/Sinker/FBSTRIP —
+  //    they are the same pitch family — so merge swallowed the FBSTRIP cluster BEFORE step 3 could resolve it on its
+  //    own mean rr, then re-labeled the blob outside the ±4 strip. >60% of all 4S↔Sinker errors were merged FBSTRIP
+  //    clusters. MEASURED (200 pitchers / 87,070 pitches): this guard takes overall 91.69% → 93.01% and cuts
+  //    4S↔Sinker errors 2,830 → 1,676 (−41%), capturing the ENTIRE fastball win while keeping merge's gyro benefit.
+  const FBFAM = new Set(["4S FB", "Sinker", "FBSTRIP"]);
+  const fbSeeds = (c: Cl) => [...c.seeds].filter((s) => FBFAM.has(s)).sort().join("|");
   for (;;) {
     let merged = false;
     outer: for (let i = 0; i < clusters.length; i++) for (let j = i + 1; j < clusters.length; j++) {
       const a = clusters[i], b = clusters[j];
+      const fa = fbSeeds(a), fb = fbSeeds(b);
+      if (fa && fb && fa !== fb) continue; // distinct fastball-family seeds — keep them apart
       if (Math.abs(a.ar - b.ar) < 4 && Math.abs(a.iv - b.iv) < 3.5 && Math.abs(a.ve - b.ve) < 2.5) {
-        clusters[i] = mkCl([...a.pts, ...b.pts]); clusters.splice(j, 1); merged = true; break outer;
+        clusters[i] = { ...mkCl([...a.pts, ...b.pts]), seeds: new Set([...a.seeds, ...b.seeds]) };
+        clusters.splice(j, 1); merged = true; break outer;
       }
     }
     if (!merged) break;
@@ -70,6 +85,10 @@ export function classifyPitcher(ps: P[], pfVelo: number): Map<string, { label: s
 
   // 3) LABEL each cluster by its MEAN, then resolve the FA/SI strip by the cluster's own mean rr
   const labeled = clusters.map((c) => ({ c, label: classifySeed(c.iv, c.ar, c.sp, c.gap), review: false }));
+  // FBSTRIP resolution stays at rr >= 0. TESTED 2026-08-29: the "optimal single cut" of rr > -1.7 (derived by
+  // separating 4S FB vs Sinker on one axis) made agreement WORSE (disputes 1,443 -> 2,503). REAL REASON (found
+  // 2026-08-29): that cut was fit on the POST-MERGE population, where FBSTRIP no longer existed as a cluster. With the
+  // fastball-family merge guard in place, rr >= 0 is within noise of optimal (best achievable 91.9% @ rr=-0.13).
   for (const x of labeled) if (x.label === "FBSTRIP") { const rr = x.c.iv - Math.abs(x.c.ar); x.label = rr >= 0 ? "4S FB" : "Sinker"; }
 
   // §2.6 SMALL-SAMPLE FALLBACK (<150 pitches): cluster means only, no fold/tiebreak

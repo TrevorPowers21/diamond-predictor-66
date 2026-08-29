@@ -103,3 +103,52 @@ The real linear chain at scale: classify v2 → aggregate per (pitcher × label 
 - Classifier: `scripts/reclassify_v2.ts` (modes: --validate/--derive/--mismatches/--pitcher/--stuffcheck). A2 writer: `scripts/reclassify_prod.ts`.
 - Scoring: `src/savant/lib/stuffPlusEngine.ts` (`calculateStuffPlus`). Answer key: staging `_reclass_result` (2.0M) / `_reclass_map` (37,256) / `_reclass_pf` (4,804).
 - Plan: `docs/STUFF_PLUS_RECLASS_HANDOFF_2026_08_28.md` §GO-FORWARD PLAN. Design: `docs/STUFF_PLUS_V2_CLASSIFIER_DESIGN_RECOVERED.md`.
+
+---
+## 11. CLASSIFIER FIXES + DERIVED BOUNDARIES (2026-08-29) — all measured, none guessed
+
+### 11.1 FIX — offspeed armHB FLOOR = 5  (`classifySeed` rule 6)
+`if (armhb > 0)` → **`if (armhb >= 5)`**. DERIVED from anchor ground truth (120,000 pitches):
+armHB per label `[p1·p5·p25·p50·p75·p95]` — **Gyro** `[−10.8·−8.0·−4.4·−2.5·−0.3·3.2]` (p99 = **4.7**);
+**Splitter** `[5.2·5.9·8.7·11.5·14.2·17.6]`; **Change-up** `[5.4·7.2·12.1·15.0·17.6·21.2]` (offspeed p1 = **5.3**).
+Clean empty gap 4.7 → 5.3, so the boundary is 5. Rule 6 previously fired from armHB>0 and swept the 0–5 band.
+RESULT: `Gyro Slider → Change-up` 85/**338** losses → **eliminated**; `Cutter → Change-up` 1/**29** → **eliminated**;
+disputes 2,059 → 1,443; coherence verdict "STORED better" → "MIXED".
+
+### 11.2 FIX — FASTBALL-FAMILY MERGE GUARD  (`classifyPitcher` step 2) ★ the big one
+Never merge two clusters whose fastball-family seeds (`4S FB`/`Sinker`/`FBSTRIP`) DIFFER. At gap≈0 the gate
+(Δarmhb<4 & Δivb<3.5 & Δvelo<2.5) is trivially satisfied across the fastball family, so MERGE swallowed the FBSTRIP
+cluster BEFORE step 3 could resolve it on its own mean rr, then re-labeled the blob outside the ±4 strip.
+**>60% of all 4S↔Sinker errors were merged FBSTRIP clusters** (272 Sinker→4S + 113 4S→Sinker, both seed=FBSTRIP merged=true).
+MEASURED ablation (200 pitchers / 87,070 pitches): overall **91.69% → 93.01%**; 4S↔Sinker errors **2,830 → 1,676 (−41%)**.
+(Full merge removal = 93.67% but costs the gyro benefit: `Gyro→Slider` 1,127→1,912. The family guard captures the
+ENTIRE fastball win at lower risk.) Coherence: disputes **1,443 → 818 (−43%)**, agreed 54,887 → 55,318.
+VALIDATED per-pitch behaviour: 14 IVB/8 HB vs 8 IVB/14 HB @ same velo → kept SEPARATE (4S FB + Sinker);
+14/8 vs 13/9 (same pitch + noise) → correctly merged to ONE.
+
+### 11.3 NEGATIVE RESULT — do NOT "optimize" the FBSTRIP cut
+`rr >= 0` stays. A derived "optimal single cut" of `rr > −1.7` made agreement WORSE (disputes 1,443 → 2,503) because it
+was fit on the POST-MERGE population where FBSTRIP no longer existed as a cluster. With the merge guard in place,
+`rr >= 0` is within noise of optimal (best achievable **91.9% @ rr = −0.13**).
+
+### 11.4 SEAM BOUNDARIES — verified ALREADY OPTIMAL, do not touch
+- **Sweeper vs Slider on armHB: −12 is optimal** (misclassifies 243/24,449 = **1.0%**).
+- **Gyro vs Slider on armHB: −5 is optimal** (v2 already uses it).
+- Separation quality by axis for 4S vs Sinker: **rr 91.2%** > ivb 86.9% > armHB 79.9% > relH 76.7% > spin 65.1% > velo 64.0% > gap 62.4%. `rr` wins outright — there is no hidden spin/velo/slot axis.
+
+### 11.5 THE ANCHOR DID NOT TRUST TRACKMAN TAGS (confirms movement-derived approach)
+Anchor `Sinker` pitches: raw `FA` **54.3%** / raw `SI` 39.6%. Raw `FA` → anchor called **25.5% of them Sinker**.
+Raw-tag agreement on fastballs = **77.2%** vs `rr` alone at **91.2%** → the anchor OVERRODE the raw tag on ~23% of
+fastballs. (TrackMan auto-tags by VELOCITY, so a road sinker gets velocity-tagged as a 4-seam — the largest mistag in
+the sport, and precisely what movement-based classification exists to fix.)
+
+### 11.6 KNOWN REMAINING GAPS (documented, data exists, NOT yet implemented)
+1. **`Gyro Slider → Slider`** — now the largest bucket, bigger than the whole fastball seam. `_reclass_map` shows the
+   anchor's `SL` seed resolves `Slider 62.3% / Gyro 32.7%`, strongly ARSENAL-CONDITIONED:
+   `hasGY/noSW/hasFC` n=782 → Gyro 69%/Slider 21%; `hasGY/noSW/noFC` n=394 → Gyro 63%/Slider 36%;
+   `noGY/hasSW/noFC` n=345 → Slider 92%; `noGY/hasSW/hasFC` n=278 → Slider 86%. A GY seed roughly INVERTS the prior.
+2. **`Change-up → Sinker`** (~362–383, stable across ablations) — the `gap < 4` fastball gate fires BEFORE the arm-side
+   offspeed arm, so hard arm-side changeups within 4 mph of the FB get claimed by the fastball family.
+3. **`Sweeper → Slider`** (~361–382) — the docs specify the `armHB ≤ −12` bar is SLOT-CONDITIONED; v2 uses a flat −12.
+4. `tiebreak()` takes `_brkAnchorCount` and never reads it — the documented CT/SL arsenal rule ("2nd distinct breaking
+   ball in arsenal → CUTTER; only breaking ball → SLIDER") is unimplemented.
