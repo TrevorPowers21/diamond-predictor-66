@@ -96,8 +96,17 @@ async function main() {
     return;
   }
   // ---- GO: write via DIRECT prod session ----
+  // ★ STAGE-0 0.6 (2026-08-29): the §11.12 decision (standardize on v2 in BOTH envs) requires this writer to be
+  // able to target STAGING too. The guard is now double-keyed: --target must match the PGURI project ref, so it is
+  // still impossible to hit prod by accident, but staging is reachable.
   const uri = process.env.PGURI || "";
-  if (!/trbvxuoliwrfowibatkm/.test(uri)) { log("✗ PGURI is not the prod direct session — aborting"); process.exit(1); }
+  const targetArg = (args.find((a) => a.startsWith("--target=")) || "").split("=")[1] || "prod";
+  const PROD_REF = "trbvxuoliwrfowibatkm", STG_REF = "slrxowawbijbjrkozqlj";
+  const wantRef = targetArg === "staging" ? STG_REF : PROD_REF;
+  if (targetArg !== "prod" && targetArg !== "staging") { log(`✗ --target must be prod|staging (got '${targetArg}')`); process.exit(1); }
+  if (!uri.includes(wantRef)) { log(`✗ PGURI does not point at ${targetArg} (${wantRef}) — aborting`); process.exit(1); }
+  if (targetArg === "prod" && uri.includes(STG_REF)) { log("✗ --target=prod but PGURI is staging — aborting"); process.exit(1); }
+  log(`TARGET = ${targetArg.toUpperCase()} (${wantRef})`);
   writeFileSync(LOG, "");
   const mkClient = () => new pg.Client({ connectionString: uri, keepAlive: true, query_timeout: 600000 });
   let c = mkClient();
@@ -106,6 +115,22 @@ async function main() {
   }
   await c.connect(); await c.query("set statement_timeout = 0;"); log("connected to prod (direct).");
   await c.query(`create table if not exists _reclass_fix (uniq_pitch_id text primary key, label text, needs_review boolean default false)`);
+  // ★ STAGE-0 0.3 (2026-08-29): _reclass_pf (per-pitcher primary-FB velo) does NOT exist on prod and has NO producer
+  // anywhere in the repo — every reference is a READ. compute_pitch_log_stuff_plus.ts:132-135 does process.exit(1)
+  // without it, so prod scoring would abort. We already compute exactly this value via pfbVelo() during
+  // classification, so materialize it here as a by-product. Idempotent upsert.
+  await c.query(`create table if not exists _reclass_pf (pitcher_id text primary key, pf_velo double precision)`);
+  {
+    const pfRows = [...byP.entries()].map(([pid, ps]) => [pid, pfbVelo(ps.filter((p) => p.velo != null))] as [string, number])
+      .filter(([, v]) => Number.isFinite(v));
+    for (let i = 0; i < pfRows.length; i += 1000) {
+      const b = pfRows.slice(i, i + 1000);
+      await runq(`insert into _reclass_pf (pitcher_id, pf_velo) select * from unnest($1::text[],$2::double precision[])
+                  on conflict (pitcher_id) do update set pf_velo = excluded.pf_velo`,
+        [b.map((r) => r[0]), b.map((r) => r[1])]);
+    }
+    log(`_reclass_pf materialized: ${pfRows.length} pitchers`);
+  }
   // PHASE 1 — load computed labels into prod _reclass_fix (batched unnest, resumable)
   const rows = [...labels.entries()]; let loaded = Number((await c.query(`select count(*)::bigint n from _reclass_fix`)).rows[0].n);
   log(`load: _reclass_fix has ${loaded}; inserting ${rows.length} computed labels`);
