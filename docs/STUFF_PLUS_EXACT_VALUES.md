@@ -152,3 +152,26 @@ the sport, and precisely what movement-based classification exists to fix.)
 3. **`Sweeper → Slider`** (~361–382) — the docs specify the `armHB ≤ −12` bar is SLOT-CONDITIONED; v2 uses a flat −12.
 4. `tiebreak()` takes `_brkAnchorCount` and never reads it — the documented CT/SL arsenal rule ("2nd distinct breaking
    ball in arsenal → CUTTER; only breaking ball → SLIDER") is unimplemented.
+
+### 11.7 ★ FULL-POPULATION VALIDATION (2026-08-29) — the authoritative accuracy number
+`reclassify_v2.ts --validate --sample 4804` — ALL 4,804 pitchers, ALL 2,000,674 pitches vs `_reclass_result`.
+FIRST run measured against the REAL classifier (scripts/reclassify_v2.ts previously carried a DUPLICATE copy of the
+classifier; it now imports src/savant/lib/stuffPlusClassifierV2.ts — that duplication is why earlier numbers drifted).
+
+**1,885,862 / 2,000,674 = 94.3% per-pitch  |  ARSENAL-MIX overlap 94.3%  |  needs_review 8.1%**
+(supersedes the stale 92.6%, which predated both fixes AND was measured on the duplicate copy)
+
+Remaining 114,812 errors, ranked:
+| pair | pitches | % of all errors |
+|---|---|---|
+| Gyro <-> Slider (25,197 + 13,071) | 38,268 | 33% |
+| 4S <-> Sinker (14,184 + 12,614) | 26,798 | 23% |
+| Gyro <-> Cutter (6,641 + 2,776) | 9,417 | 8% |
+| Sweeper -> Slider | 8,136 | 7% |
+| Splitter <-> Change-up (4,976 + 2,210) | 7,186 | 6% |
+| Slider -> Cutter | 5,587 | 5% |
+| Cutter -> Slider | 3,371 | 3% |
+| Slider -> Curveball | 2,578 | 2% |
+→ The GYRO/SLIDER seam alone is a THIRD of all remaining error (2x the fastball seam). The anchor's own rule for it is
+already in `_reclass_map` (see 11.6 item 1) — arsenal-conditioned, learnable from data we hold. Closing most of it
+would put v2 near 96%.

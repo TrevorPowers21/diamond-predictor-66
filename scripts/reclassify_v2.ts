@@ -13,106 +13,11 @@ import { createClient } from "@supabase/supabase-js";
 const SEASON = 2026;
 const args = process.argv;
 const SAMPLE = Number(args[args.indexOf("--sample") + 1] ?? 70);
-export const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / (xs.length || 1);
-
-// ─── §1  PER-PITCH BOUNDARY SEED (recovered CASE-evaluation order; order is load-bearing) ───
-export function classifySeed(ivb: number, armhb: number, spin: number, gap: number): string {
-  const rr = ivb - Math.abs(armhb);
-  if (ivb <= -8 && armhb < 4 && gap >= 4) return "Curveball";                 // §1.1 topspin depth; refined gates (Check-3)
-  if (armhb <= -12 && ivb > -8 && ivb <= 6) return "Sweeper";                 // §1.2 extreme glove sweep; armHB≤−12 DOMINATES (a −15 armHB IS a sweeper); ivb only excludes curve territory (≤−8, caught above)
-  if (ivb >= 5 && gap >= 2 && gap <= 7 && armhb <= 2) return "Cutter";        // §1.3 cutter retains ride; +5 floor HELD; CORE gap 2-7 armHB≤2 (don't chase p95 tail — it bleeds into gyro/slider)
-  if (gap < 4) return rr > 4 ? "4S FB" : rr < -4 ? "Sinker" : "FBSTRIP"; // §1.4 strip → FBSTRIP bucket (STAGE-2 resolved per-pitcher cluster; recovered from _reclass_map: FBSTRIP→4S 71% / Sinker 28%)
-  if (Math.abs(armhb) < 5 && ivb >= -4 && ivb <= 4) return "Gyro Slider";     // §1.5 the bullet — 0 HB + neutral/NEGATIVE ivb (Trevor: "0 HB −6 IVB = gyro"; +7/0-HB = CUTTER not gyro). Blend tiebreaker extends gyro DOWN to −8, not up.
-  if (armhb > 0) return spin < 1400 ? "Splitter" : "Change-up";               // §1.6 offspeed arm-side (velo-sep upstream)
-  return "Slider";                                                            // §1.7 glove-side breaking residual
-}
-
-export const armHBof = (hb: number, hand: string) => (hand === "R" ? hb : -hb);
-const BREAKING = ["Slider", "Sweeper", "Curveball", "Gyro Slider", "Cutter"];
-const FAM = (b: string) => (["4S FB", "Sinker", "FBSTRIP"].includes(b) ? "FB" : ["Change-up", "Splitter"].includes(b) ? "OFF" : "BRK");
-// FOLD family: FB (4S/Sinker/FBSTRIP) + OFF (Change/Splitter) cross-fold within family; every BREAKING ball is its OWN fold-family
-// (a gyro is not a cutter — no gyro↔cutter↔slider cross-fold). Straddle-splits are already handled by the MERGE step.
-const foldFam = (b: string) => (["4S FB", "Sinker", "FBSTRIP"].includes(b) ? "FB" : ["Change-up", "Splitter"].includes(b) ? "OFF" : b);
-
-export interface P { uniq: string; raw: string; hand: string; velo: number; ivb: number; hb: number; spin: number | null; stored: string | null; }
-interface Pt { p: P; iv: number; ar: number; ve: number; sp: number; gap: number; }
-interface Cl { pts: Pt[]; iv: number; ar: number; ve: number; sp: number; gap: number; n: number; }
-const mkCl = (pts: Pt[]): Cl => ({ pts, iv: mean(pts.map((x) => x.iv)), ar: mean(pts.map((x) => x.ar)), ve: mean(pts.map((x) => x.ve)), sp: mean(pts.map((x) => x.sp)), gap: mean(pts.map((x) => x.gap)), n: pts.length });
-
-// ─── §3  tiebreakers, applied to a labeled cluster given the pitcher's arsenal context ───
-function tiebreak(c: Cl, label: string, brkAnchorCount: number): string {
-  // §3 gyro/curve blend strip: low-armHB, IVB∈(−8,−4) → depth-vs-bullet by velo gap
-  if (Math.abs(c.ar) < 5 && c.iv > -8 && c.iv < -4) {
-    return c.gap <= 8 ? "Gyro Slider" : c.gap >= 10 ? "Curveball" : label;
-  }
-  // §3 CT/SL arsenal: glove-side/neutral breaking in the 6–8 gap band around the measured valley of 7.
-  // A/B 2026-08-28: ride-floor (IVB≥5→cutter) ONLY; arsenal-based slider→cutter conversion DISABLED (was over-firing).
-  if ((label === "Slider" || label === "Cutter") && c.gap >= 6 && c.gap <= 8 && c.ar <= 2) {
-    if (c.iv >= 5) return "Cutter";                 // ride floor breaks the tie first
-    // return brkAnchorCount >= 2 ? "Cutter" : "Slider"; // arsenal conversion — DISABLED pending A/B
-  }
-  return label;
-}
-
-// ─── §2  PER-PITCHER ALGORITHM ───
-export function classifyPitcher(ps: P[], pfVelo: number): Map<string, { label: string; review: boolean }> {
-  const out = new Map<string, { label: string; review: boolean }>();
-  const total = ps.length;
-  const pts: Pt[] = ps.map((p) => ({ p, iv: p.ivb, ar: armHBof(p.hb, p.hand), ve: p.velo, sp: p.spin ?? 9999, gap: pfVelo - p.velo }));
-
-  // 1) boundary-seed → initial clusters
-  const bySeed = new Map<string, Pt[]>();
-  for (const t of pts) { const s = classifySeed(t.iv, t.ar, t.sp, t.gap); (bySeed.get(s) ?? bySeed.set(s, []).get(s)!).push(t); }
-  let clusters: Cl[] = [...bySeed.values()].map(mkCl);
-
-  // 2) MERGE seed-clusters split by a seam (Δarmhb<4 & Δivb<3.5 & Δvelo<2.5)
-  for (;;) {
-    let merged = false;
-    outer: for (let i = 0; i < clusters.length; i++) for (let j = i + 1; j < clusters.length; j++) {
-      const a = clusters[i], b = clusters[j];
-      if (Math.abs(a.ar - b.ar) < 4 && Math.abs(a.iv - b.iv) < 3.5 && Math.abs(a.ve - b.ve) < 2.5) {
-        clusters[i] = mkCl([...a.pts, ...b.pts]); clusters.splice(j, 1); merged = true; break outer;
-      }
-    }
-    if (!merged) break;
-  }
-
-  // 3) LABEL each cluster by its MEAN (this is the FA/SI ±4 strip cluster-mean resolution)
-  let labeled = clusters.map((c) => ({ c, label: classifySeed(c.iv, c.ar, c.sp, c.gap), review: false }));
-  // STAGE 2 — FBSTRIP RESOLUTION (both small-sample + main paths): resolve strip cluster by its OWN mean rr
-  // (recovered from _reclass_map: FBSTRIP→4S 71% / Sinker 28%; rr≥−1 fits the split — tune vs _reclass_result).
-  for (const x of labeled) if (x.label === "FBSTRIP") { const rr = x.c.iv - Math.abs(x.c.ar); x.label = rr >= 0 ? "4S FB" : "Sinker"; }
-
-  // §2.6 SMALL-SAMPLE FALLBACK (<150 pitches): global boundaries on cluster means only, no fold/tiebreak
-  if (total < 150) {
-    for (const x of labeled) for (const t of x.c.pts) out.set(t.p.uniq, { label: x.label, review: false });
-    return out;
-  }
-
-  // 4) STEP-3 SEAM-LOCAL USAGE BACKFILL (Trevor 2026-08-28) — anchors = the pitcher's DOMINANT pitches (≥60p OR ≥10% of his mix).
-  //    A non-anchor (borderline/unclear) cluster folds into the DOMINANT (highest-usage) anchor ONLY IF within a TIGHT movement+velo
-  //    gate (genuinely the same pitch region / at a seam). Usage only breaks the tie WHEN MOVEMENT ALREADY CAN'T. A cluster far from
-  //    ALL anchors is a genuinely distinct pitch → keep its own label + needs_review (a pitcher can throw 1 of any pitch in the sport).
-  //    The TIGHT gate is the whole game: a −15 IVB cluster is ~15" from a gyro anchor → never folds into gyro no matter the gyro usage.
-  const isAnchor = (c: Cl) => c.n >= 60 || c.n >= 0.10 * total;
-  const anchors = labeled.filter((x) => isAnchor(x.c));
-  const moveDist = (a: Cl, b: Cl) => Math.sqrt((a.iv - b.iv) ** 2 + (a.ar - b.ar) ** 2); // seam-local movement distance √(dIVB²+dHB²)
-  const TIGHT = 5; // inches — the borderline band; beyond this the cluster is a genuinely distinct pitch, NOT a fold candidate
-  for (const x of labeled) {
-    // fold into a strictly-LARGER dominant pitch within the tight seam gate — handles both non-anchor residuals AND a small "anchor"
-    // that is really a variant of a bigger pitch (design: "close candidate anchors merge into one"). Usage = pick the largest.
-    const cands = anchors.filter((a) => a !== x && a.c.n > x.c.n && moveDist(a.c, x.c) < TIGHT && Math.abs(a.c.ve - x.c.ve) < 3);
-    if (cands.length) x.label = cands.reduce((b, a) => (a.c.n > b.c.n ? a : b), cands[0]).label; // → the main pitch he throws
-    else if (!isAnchor(x.c)) x.review = true; // non-anchor with no larger close pitch = distinct rare pitch → keep label + flag
-  }
-
-  // 5) TIEBREAKERS at the two ambiguous seams (needs the arsenal context)
-  const brkAnchorCount = labeled.filter((x) => isAnchor(x.c) && BREAKING.includes(x.label)).length;
-  for (const x of labeled) x.label = tiebreak(x.c, x.label, brkAnchorCount);
-
-  for (const x of labeled) for (const t of x.c.pts) out.set(t.p.uniq, { label: x.label, review: x.review });
-  return out;
-}
+// ★ SINGLE SOURCE OF TRUTH: the classifier lives in src/savant/lib/stuffPlusClassifierV2.ts.
+// This script is now only the validation/analysis harness — it must NEVER carry its own copy of the
+// classifier logic (that duplication is what let the two drift apart on 2026-08-29).
+export { mean, armHBof, classifySeed, classifyPitcher, primaryFbVelo, type P } from "../src/savant/lib/stuffPlusClassifierV2.ts";
+import { mean, armHBof, classifySeed, classifyPitcher, type P } from "../src/savant/lib/stuffPlusClassifierV2.ts";
 
 // ─── validation harness (deterministic sample vs staging _reclass_result) ───
 async function validate() {
