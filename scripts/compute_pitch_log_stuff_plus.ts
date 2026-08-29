@@ -88,7 +88,16 @@ async function main(): Promise<void> {
     console.error("Missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
     process.exit(1);
   }
-  const supabase = createClient(url, key, { auth: { persistSession: false } });
+  // ★ STAGE-0 FIX (2026-08-29): the version filter was HARD-CODED to "v1-anchor-2026-08-17" while
+// reclassify_prod.ts stamps "v2-ranges-2026-08-28" — steps 1 and 3 of the chain did not connect, so the
+// scorer matched 0 rows, no-opped, and left NEW LABELS + OLD stuff_plus while appearing to succeed.
+// Now parameterized: --class-version=<v> or CLASS_VERSION env; defaults to the v2 stamp.
+const CLASS_VERSION_FILTER =
+  (process.argv.find((a) => a.startsWith("--class-version=")) || "").split("=")[1]
+  || process.env.CLASS_VERSION
+  || "v2-ranges-2026-08-28";
+
+const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   // ── 1. Load pop constants ─────────────────────────────────────────────
   console.log("Loading pop constants (D1, season 2026)…");
@@ -148,7 +157,7 @@ async function main(): Promise<void> {
   const { count: pendingCount } = await (supabase as any)
     .from("pitch_log")
     .select("uniq_pitch_id", { count: "exact", head: true })
-    .eq("classification_version", "v1-anchor-2026-08-17")
+    .eq("classification_version", CLASS_VERSION_FILTER)
     .eq("is_data", true)
     .not("pitch_type_reclassified", "is", null);
   const pending = pendingCount ?? 0; // 0 just means "unknown" for ratio display
@@ -173,7 +182,7 @@ async function main(): Promise<void> {
       .select(
         "uniq_pitch_id, pitcher_id, pitcher_hand, pitch_type_reclassified, release_velocity, ivb, hb, ivb_corrected, hb_corrected, rel_height, rel_side, extension, spin",
       )
-      .eq("classification_version", "v1-anchor-2026-08-17")  // ANCHOR REBUILD: re-score all reclassified (overwrites)
+      .eq("classification_version", CLASS_VERSION_FILTER)  // ANCHOR REBUILD: re-score all reclassified (overwrites)
       .eq("is_data", true)
       .not("pitch_type_reclassified", "is", null)
       .order("uniq_pitch_id", { ascending: true })

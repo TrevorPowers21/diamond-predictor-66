@@ -185,11 +185,14 @@ const eps = (kind: FieldSpec<any>["kind"]) =>
 // that PA's pitcher). Read (t as any).ip — no live per-pitcher scan needed.
 
 // ── paginated fetch ──────────────────────────────────────────────────
-async function fetchAll<T>(table: string, select: string, filters: (q: any) => any): Promise<T[]> {
+// ★ STAGE-0 FIX (2026-08-29): this paginated ~2.5M rows with an UNORDERED .range(), which silently drops and
+// duplicates rows (PostgREST gives no stable order without ORDER BY) -> corrupt Master stat lines / WAR.
+// orderCol defaults to "id"; callers on tables with a different PK must pass it explicitly.
+async function fetchAll<T>(table: string, select: string, filters: (q: any) => any, orderCol = "id"): Promise<T[]> {
   const out: T[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    let q = (sb as any).from(table).select(select).range(from, from + PAGE - 1);
+    let q = (sb as any).from(table).select(select).order(orderCol, { ascending: true }).range(from, from + PAGE - 1);
     q = filters(q);
     const { data, error } = await q;
     if (error) throw new Error(`${table}: ${error.message}`);
@@ -200,7 +203,9 @@ async function fetchAll<T>(table: string, select: string, filters: (q: any) => a
   return out;
 }
 async function fetchTotals<T>(table: string, keyCol: string): Promise<Map<string, T>> {
-  const rows = await fetchAll<any>(table, "*", (q) => q.eq("season", SEASON).eq("dimension_key", "all"));
+  // ★ STAGE-0: the totals tables have NO "id" column (keyed pitcher_id / batter_id), so the ordered
+  // pagination must sort on keyCol — passing "id" here would hard-error. VERIFIED 2026-08-29.
+  const rows = await fetchAll<any>(table, "*", (q) => q.eq("season", SEASON).eq("dimension_key", "all"), keyCol);
   const m = new Map<string, T>();
   for (const r of rows) m.set(String(r[keyCol]), r as T);
   return m;

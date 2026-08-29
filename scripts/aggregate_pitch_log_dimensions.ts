@@ -954,12 +954,19 @@ async function main(): Promise<void> {
   const skipKeys = new Set(skipKeysArg ? skipKeysArg.slice("--skip=".length).split(",") : []);
   const emitSqlDirArg = process.argv.find((a) => a.startsWith("--emit-sql="));
   const emitSqlDir = emitSqlDirArg ? emitSqlDirArg.slice("--emit-sql=".length) : null;
-  const url = process.env.VITE_SUPABASE_URL;
+  // ★ STAGE-0 FIX (2026-08-29): had NO prod path (VITE_SUPABASE_URL only) — step 4 of the chain could not run
+  // on prod. Adds the SUPABASE_URL fallback plus the standard double-keyed --prod guard.
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    console.error("Missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    console.error("Missing SUPABASE_URL / VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
     process.exit(1);
   }
+  const isProdUrl = /trbvxuoliwrfowibatkm/.test(url);
+  const prodFlag = process.argv.includes("--prod");
+  if (isProdUrl && !prodFlag) { console.error("✗ URL is PROD but --prod was not passed — refusing to run."); process.exit(1); }
+  if (!isProdUrl && prodFlag) { console.error("✗ --prod passed but URL is not prod — refusing to run."); process.exit(1); }
+  console.log(`[env] ${isProdUrl ? "PROD" : "STAGING/other"} ${url.replace(/https:\/\/([^.]+).*/, "$1")}`);
   const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   // Pre-resolve the heavy IN-subquery for vs_top_hitters. The Hitter Master
