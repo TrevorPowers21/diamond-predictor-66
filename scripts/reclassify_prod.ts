@@ -36,7 +36,7 @@ async function loadByPitcher(): Promise<Map<string, P[]>> {
     for (let a = 1; a <= 6; a++) {
       try {
         const res = await sb.from("pitch_log_corrected")
-          .select("uniq_pitch_id,pitcher_id,pitch_type,pitcher_hand,release_velocity,ivb_corrected,hb_corrected,spin")
+          .select("uniq_pitch_id,pitcher_id,pitch_type,pitcher_hand,release_velocity,ivb_corrected,hb_corrected,spin,pitch_type_reclassified")
           .eq("season", SEASON).eq("is_data", true).gt("uniq_pitch_id", last).order("uniq_pitch_id").limit(1000);
         if (res.error) throw new Error(res.error.message); data = res.data; break;
       } catch (e: any) { log(`  read ${a}/6 failed: ${e.message}`); if (a === 6) throw e; await sleep(3000 * a); }
@@ -45,7 +45,7 @@ async function loadByPitcher(): Promise<Map<string, P[]>> {
     for (const r of data) {
       if (r.release_velocity == null || r.ivb_corrected == null || r.hb_corrected == null) continue;
       (byP.get(r.pitcher_id) ?? byP.set(r.pitcher_id, []).get(r.pitcher_id)!).push(
-        { uniq: r.uniq_pitch_id, raw: r.pitch_type, hand: r.pitcher_hand, velo: r.release_velocity, ivb: r.ivb_corrected, hb: r.hb_corrected, spin: r.spin, stored: null });
+        { uniq: r.uniq_pitch_id, raw: r.pitch_type, hand: r.pitcher_hand, velo: r.release_velocity, ivb: r.ivb_corrected, hb: r.hb_corrected, spin: r.spin, stored: r.pitch_type_reclassified });
       n++;
     }
     last = data[data.length - 1].uniq_pitch_id;
@@ -76,8 +76,23 @@ async function main() {
   const labels = classifyAll(byP);
   if (DRY || !GO) {
     log(`\n=== DRY RUN complete — NO writes. ${labels.size} labels computed. To execute: provide PGURI + "prod, now?" ===`);
-    // sample 10 for eyeball
-    let i = 0; for (const [uniq, g] of labels) { if (i++ >= 10) break; log(`  ${uniq}  →  ${g.label}${g.review ? " (needs_review)" : ""}`); }
+    // ── COMPARE v2 vs what prod ALREADY has (normalize the old naming) ──
+    const NORM: Record<string, string> = { "4-Seam Fastball": "4S FB", "4-Seam": "4S FB", "Four-Seam Fastball": "4S FB" };
+    const norm = (s: string | null) => (s == null ? null : (NORM[s] ?? s));
+    let same = 0, cmp = 0, missing = 0; const moves: Record<string, number> = {}; const storedDist: Record<string, number> = {};
+    for (const [, ps] of byP) for (const p of ps) {
+      const v2 = labels.get(p.uniq)?.label; if (!v2) continue;
+      const st = norm(p.stored);
+      if (st == null) { missing++; continue; }
+      storedDist[st] = (storedDist[st] ?? 0) + 1;
+      cmp++; if (st === v2) same++; else moves[`${st} → ${v2}`] = (moves[`${st} → ${v2}`] ?? 0) + 1;
+    }
+    log(`\n── v2 vs PROD's EXISTING pitch_type_reclassified ──`);
+    log(`compared ${cmp} pitches (prod had no label on ${missing} of the classifiable rows)`);
+    log(`AGREEMENT: ${same}/${cmp} = ${cmp ? (100 * same / cmp).toFixed(1) : "?"}%   → v2 would CHANGE ${cmp - same} pitches (${cmp ? (100 * (cmp - same) / cmp).toFixed(1) : "?"}%)`);
+    log(`prod existing distribution: ${Object.entries(storedDist).sort((a, b) => b[1] - a[1]).map(([l, n]) => `${l} ${(100 * n / cmp).toFixed(1)}%`).join("  ")}`);
+    log(`top label MOVES (prod → v2):`);
+    Object.entries(moves).sort((a, b) => b[1] - a[1]).slice(0, 15).forEach(([k, n]) => log(`   ${String(n).padStart(7)}  ${k}`));
     return;
   }
   // ---- GO: write via DIRECT prod session ----

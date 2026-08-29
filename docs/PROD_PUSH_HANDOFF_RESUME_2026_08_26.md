@@ -188,3 +188,30 @@ staging schema/data, commit it, then apply — never improvise blind.**
 
 ## VERIFICATION GATES (at the end, from the runbook)
 201 keys / nil_tier_sec 4.0 (✓ done) · 0 negative projected rates except HR9-floored · top-12 pitchers Stuff+ 99–113 · TWP both sides + combined NIL, 253 flagged · market roster totals SEC ~$4.4M / ACC ~$1.7M / Big12 ~$1M · all 18 teams precomputed · team_season_stats 308 rows · edge fn staging↔prod lockstep (add a test team, projections match batch).
+
+---
+## ★★★ CORRECTED STUFF+ CHAIN (2026-08-29) — USE THIS, NOT THE LEGACY STEPS BELOW/ABOVE
+Any Stuff+ step in this document that routes through `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline` →
+`rollupStuffPlusToMaster` → `"Pitching Master".stuff_plus` is the **LEGACY lane** and is WRONG for 2026. Running it
+revives the latent raw-HB bug (e5dec2f removed `hbSign`; PSP-I still stores RAW hb ⇒ left-handers scored backwards)
+and writes numbers nothing displays. **Do not run those steps.**
+
+**THE CORRECT ORDER (pitch_log lane — the live source of truth):**
+1. **Reclassify** → `pitch_log.pitch_type_reclassified` + `classification_version` + `needs_review`
+   `scripts/reclassify_prod.ts` (v2 classifier; `--dry-run` first, then `--go` with PGURI + explicit "prod, now?")
+2. **Re-derive the pop baseline** → `pitcher_stuff_plus_ncaa` (per pitch_type × hand, **armHB**, D1-only)
+3. **Score per pitch** → `pitch_log.stuff_plus`  — `scripts/compute_pitch_log_stuff_plus.ts`
+   (normalizes hb→armHB itself; recenters each (pitch_type × hand) bucket to mean 100)
+4. **Aggregate** → `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` / `*_by_pitch_type`
+   `scripts/aggregate_pitch_log_dimensions.ts --apply` (also calls `populate_hitter_run_values(season)`)
+5. **Marry onto the Masters** → `scripts/derive_masters_from_pitchlog.ts --apply`
+   (⚠ add `.order(PK)` to its `readAll` pagination first — unordered `.range()` over ~2.5M rows silently drops/dupes)
+6. Then continue the runbook: C23–C29 → Phase D (dWAR) → E (precomputes) → F (re-bakes) → G (edge fn) → H (drops).
+
+**INVARIANTS**
+- ⚠ A label change invalidates every downstream number. Steps 1→5 must complete in the SAME working session;
+  never leave prod with new labels and old `stuff_plus`.
+- `hb` is stored RAW everywhere and displayed raw. armHB is a COMPUTE convention only — normalize in memory.
+  NEVER rewrite the stored `hb` column.
+- One consistent label vocabulary: `4S FB` (not `4-Seam Fastball`) + a `classification_version` stamp on every row.
+- Full detail + evidence: `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md`.

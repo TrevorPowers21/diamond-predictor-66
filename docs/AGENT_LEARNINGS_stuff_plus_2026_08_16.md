@@ -1362,3 +1362,46 @@ recompute-stuff-plus.ts step 2 runs the OLD v1 runBreakingBallReclassification �
 labels in pitch_log.pitch_type_reclassified). The 3 drifted v1 copies SUPERSEDED. LINEAR process: classify(v2)→aggregate(A5: pitch_log→
 pitcher_stuff_plus_inputs)→SCORE per row by label (stuffPlusEngine calculateStuffPlus, calcGyroSlider=single gyro eq)→rollup→season aggregate.
 NEXT STEP = the per-row-by-label scoring (validated via --stuffcheck: |Δ| 0.85, 91% within ±2). Full plan: STUFF_PLUS_RECLASS_HANDOFF_2026_08_28 §GO-FORWARD PLAN.
+
+---
+# ★ AGENT LEARNINGS — 2026-08-29: the day lost to conflated lanes (READ THIS)
+
+**What happened:** a full working day was burned "fixing" a Stuff+ problem that did not exist in the live product,
+because two different Stuff+ lanes had been conflated and the agent inferred instead of verifying.
+
+## The five wrong conclusions (all were stated confidently; all were FALSE)
+1. "The A5 aggregator (pitch_log → pitcher_stuff_plus_inputs) is missing and must be built." — FALSE. The live chain
+   never goes through PSP-I at all. Building it was work on a legacy table.
+2. "The baseline deriver is missing." — FALSE. `pitcher_stuff_plus_ncaa` exists, is armHB-derived, and is correct.
+3. "The live path has a pop/row convention mismatch." — FALSE. Verified consistent (CH R +14.93 / L +14.87).
+4. "Left-handers are being mis-scored today; this is a prod blocker." — FALSE as stated. The bug is REAL but LATENT,
+   in a lane nothing reads for 2026, and not on main. Trevor's pushback ("Volantis is 107.6 and the best projected
+   pitcher — a flaw that big would have been noticed") was CORRECT and is what exposed the error.
+5. "v2 must replace staging's pitch_log labels." — FALSE. v2 is a 90.5% reconstruction; overwriting validated anchor
+   labels with it would be a regression. v2's purpose is PROD + Track B (re-runnable forward process).
+
+## Root causes
+- **Inferring instead of tracing consumers.** The question "is this code live?" is answered by following what READS the
+  output to a display, not by reading the producer or a checklist. `PitcherProfile.tsx:664` ("PITCH_LOG Switch #1,
+  2026-06-23") skips PSP-I for 2026 — one grep would have prevented the entire day.
+- **Trusting secondary docs.** The bulletproof checklist and pipeline doc were written during the same confused period
+  and asserted the legacy lane was canonical. Trevor: "the bulletproof checklist was built while we were chasing our
+  tail so there is no guarantee it was even correct." Docs written amid confusion are NOT evidence.
+- **Alarming off self-built side-scripts.** A parallel `--score`/`--vsstaging` reimplementation produced "1.6% match",
+  which was reported as a data problem. It was an artifact of new code scored against old-code data. NEVER raise an
+  alarm from a reimplementation; verify against the committed path first.
+- **Building over instead of replacing.** e5dec2f folded `hbSign` out of the shared equations for the NEW pitch-log
+  caller and left the OLD aggregate caller passing raw hb. Two callers, one shared equation set, one updated.
+
+## Rules going forward
+- **Trace to a display before calling anything canonical.** Producer code and checklists prove nothing.
+- **Verify empirically, on data.** The mirror-correlation test (stored hb vs stuff_plus, by hand) settled in one query
+  what hours of code-reading and argument did not.
+- **When Trevor's product intuition contradicts an analysis, the analysis is probably wrong.** It was, three times.
+- **Distinguish LATENT from LIVE.** "Would break if run" ≠ "is broken." Severity depends on whether anything reads it.
+- **A label change invalidates every downstream number** — reclassify → baseline → score → aggregate → masters must
+  complete in one session.
+
+## The durable artifact
+`docs/STUFF_PLUS_SOURCE_OF_TRUTH.md` — top-dog vs legacy lanes, the three different Volantis numbers, coverage facts,
+file map. It exists so this day is never repeated. Read it FIRST, before any Stuff+ work.

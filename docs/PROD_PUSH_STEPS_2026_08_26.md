@@ -288,3 +288,30 @@ DDL idempotent; ALL row data (flags, stuff_plus, reclass, aggregates, xBA, spray
 - **NON-IDEMPOTENT (error/duplicate on re-run):** bare CREATE POLICY (20260622120000/140000, 20260623120000); `RENAME total_war` (20260806); `create policy player_predictions_select_team_scoped` (safe only with its paired DROP); **TRUNCATE gm_allocation/_source** (20260710120000); `team_season_stats_war_rollup` INSERT (no ON CONFLICT → dupes); `player_slot_values` dedup DELETE.
 - **CONFLICT (resolved):** `wrc_c1_model_config.sql` carries the STALE `owar_replacement_runs_per_600 = 26.2`; `step8_model_config_2026.sql` has the correct **21.22** (= 1.62 replacement-wins × 13.1 RPW, derived from the .380 win% anchor). **Resolution: on prod run ONLY `step8` (authoritative, 201-key); do NOT run `wrc_c1_model_config`.** Staging is already 21.22 (verified 2026-08-26). 21.22 must be set BEFORE the oWAR precomputes. (Future: fold the replacement-level derivation into a calibration stage so it re-derives each season instead of being a seeded constant.)
 - **ORDER:** `20260821010000` (ts war cols) BEFORE first `refresh_team_season_stats(2026)`; `seed_nil_tiers` before re-price; `refresh_composite_war()` FIRE (÷13.1) only after o_war re-precompute.
+
+---
+## ★★★ CORRECTED STUFF+ CHAIN (2026-08-29) — USE THIS, NOT THE LEGACY STEPS BELOW/ABOVE
+Any Stuff+ step in this document that routes through `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline` →
+`rollupStuffPlusToMaster` → `"Pitching Master".stuff_plus` is the **LEGACY lane** and is WRONG for 2026. Running it
+revives the latent raw-HB bug (e5dec2f removed `hbSign`; PSP-I still stores RAW hb ⇒ left-handers scored backwards)
+and writes numbers nothing displays. **Do not run those steps.**
+
+**THE CORRECT ORDER (pitch_log lane — the live source of truth):**
+1. **Reclassify** → `pitch_log.pitch_type_reclassified` + `classification_version` + `needs_review`
+   `scripts/reclassify_prod.ts` (v2 classifier; `--dry-run` first, then `--go` with PGURI + explicit "prod, now?")
+2. **Re-derive the pop baseline** → `pitcher_stuff_plus_ncaa` (per pitch_type × hand, **armHB**, D1-only)
+3. **Score per pitch** → `pitch_log.stuff_plus`  — `scripts/compute_pitch_log_stuff_plus.ts`
+   (normalizes hb→armHB itself; recenters each (pitch_type × hand) bucket to mean 100)
+4. **Aggregate** → `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` / `*_by_pitch_type`
+   `scripts/aggregate_pitch_log_dimensions.ts --apply` (also calls `populate_hitter_run_values(season)`)
+5. **Marry onto the Masters** → `scripts/derive_masters_from_pitchlog.ts --apply`
+   (⚠ add `.order(PK)` to its `readAll` pagination first — unordered `.range()` over ~2.5M rows silently drops/dupes)
+6. Then continue the runbook: C23–C29 → Phase D (dWAR) → E (precomputes) → F (re-bakes) → G (edge fn) → H (drops).
+
+**INVARIANTS**
+- ⚠ A label change invalidates every downstream number. Steps 1→5 must complete in the SAME working session;
+  never leave prod with new labels and old `stuff_plus`.
+- `hb` is stored RAW everywhere and displayed raw. armHB is a COMPUTE convention only — normalize in memory.
+  NEVER rewrite the stored `hb` column.
+- One consistent label vocabulary: `4S FB` (not `4-Seam Fastball`) + a `classification_version` stamp on every row.
+- Full detail + evidence: `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md`.
