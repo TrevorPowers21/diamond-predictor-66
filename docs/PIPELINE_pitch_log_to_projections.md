@@ -1401,7 +1401,7 @@ defense orphaned out of Arkansas's `team_drs`.
 | PA ≥ 150 | 1 | 0 |
 The other ~762 orphans top out at **18 PA** and staging has 759 of the same — that is normal Master-inclusion
 background, **NOT** a defect. Pitchers: 135 prod orphans, same character.
-→ **Do NOT "fix" this by running `--create-new` unscoped: it would create ~763 rows, 762 of which SHOULD NOT EXIST.**
+→ 🛑 **CORRECTED 2026-08-30: this warning was WRONG.** `--create-new` is ALREADY scoped — `MIN_PA` default **25** (`:74`) plus a **D1 gate** (`:473`). Of the 763 candidates on prod exactly **ONE** clears PA≥25 (Kozeal, 287); the rest top out at 18 PA. The threshold question is answered by the committed code: **25 PA / 20 BF**.
 
 ## WHAT TRACK B MUST DO (stage 5, the Masters rollup)
 `scripts/derive_masters_from_pitchlog.ts` already builds Master rows from `pitch_log_*_totals` and already has the
@@ -1428,3 +1428,69 @@ where plt.season = :season and plt.dimension_key = 'all' and plt.pa >= :qualifie
 **Require it to be EMPTY, or every exception explained BY NAME — never merely "small".** This is the third distinct
 shape of the same lesson: *populated ≠ fresh* (Conference Stuff+), *populated ≠ right lane* (`trackman_pitches`), and
 now ***count-correct ≠ complete***.
+
+---
+# 🔬 INVESTIGATION — THE MASTER NEW-ROW PATH (`derive_masters_from_pitchlog.ts --create-new`). TRACK B DEPENDS ON THIS.
+Chasing why prod is missing Camden Kozeal's 2026 Hitter Master row turned into an audit of the **new-row creation
+path itself** — the mechanism Track B must use on every upload. Everything below is VERIFIED on prod, read-only.
+
+## ✅ CORRECTION TO MY OWN EARLIER WARNING — `--create-new` IS ALREADY CORRECTLY SCOPED
+I previously wrote that `--create-new` "would create ~763 rows, 762 of which should not exist." **THAT WAS WRONG.**
+The producer already gates new rows on **two** filters (`:469`, `:473`):
+- **`MIN_PA` — default 25**, overridable via `--min-pa <n>` (`:74`, `:39`). Pitchers: `MIN_BF` default 20.
+- **D1 gate** — `if (!team || team.division !== "D1") skip`.
+Measured on prod: of **763** hitter new-row candidates, exactly **ONE** clears PA ≥ 25 — **Kozeal (287 PA)**. The other
+762 top out at **18 PA**. So the flag self-scopes correctly and the threshold question I logged as OPEN is **ANSWERED
+BY THE COMMITTED CODE: 25 PA / 20 BF.**
+
+## ✅ THE ROW CAN BE DERIVED ENTIRELY FROM PROD — NO COPY FROM STAGING NEEDED
+Verified prod's own pitch log reproduces staging's Master values **exactly**:
+`AVG (38+18+2+20)/243 = .321` · `OBP (78+36+4)/287 = .411` · `SLG 160/243 = .658` — staging Master: **.321 / .411 / .658**.
+And the identity resolves from prod alone: `pitch_log.batting_team_id = '3375'` → `"Teams Table"` (Season-filtered) →
+`University of Arkansas · SEC · D1 · id 5679ed85-…`; name from `players`; hand from the pitch log (`batter_hand = L`).
+★ **What a new Master row actually needs is NARROW.** Staging's Kozeal row has 60 populated columns, but the 11
+`*_score` fields, the 4 power ratings, and the whole `desc_*`/`woba`/`wraa` block (+ `_reg`) are **DOWNSTREAM OUTPUTS**
+of C26 and Phase D — they compute themselves once the row exists. (Proof: prod's reference Arkansas hitter has only
+**45** populated columns, precisely because Phase D has not run there.) Only identity + slash line + the batted-ball /
+discipline block must be seeded, and all of it is pitch-log-derived anyway.
+⛔ **So there is NO justification for copying the row from staging** ([[feedback_derive_over_copy]]).
+
+## 🔴 UNRESOLVED CONTRADICTION — EVERY GATE PASSES, YET THE RUN REPORTED 0 NEW ROWS
+Gate-by-gate trace for `source_player_id 1925267789` against PROD (each verified individually):
+| gate | result |
+|---|---|
+| in `pitch_log_hitter_totals` (season 2026, `dimension_key='all'`) | ✅ YES, `pa = 287` |
+| already has a 2026 `"Hitter Master"` row (→ would exclude) | ✅ NO — he IS a candidate |
+| representative `pitch_log` row (`repRows`, `:444`) | ✅ `batting_team_id='3375'`, `C. Kozeal`, hand `L` |
+| `teamBySource.get('3375')` (Teams Table, Season-filtered) | ✅ Arkansas, SEC, **D1**, Season 2026 |
+| `MIN_PA` ≥ 25 | ✅ 287 |
+**And a faithful replica of `buildNewRows`' candidate selection — same ordered pagination, same filters — returns:**
+```
+hmAll (Hitter Master 2026): 8244 rows → 8244 distinct   contains Kozeal? NO  ← candidate
+hitterTotals:               6099 rows → 6099 distinct   contains Kozeal? YES pa=287
+newHitterIds: 763           includes Kozeal? YES
+  of those PA>=25: 1  → ["1925267789"]
+```
+→ **The producer SHOULD create exactly one row: his. The dry-run reported `0 hitters, 0 pitchers` and
+`(skipped — non-D1 team / unresolved identity / below sample gate: 898)`.**
+⚠ The captured output was **missing its header** (began mid-table, no env banner, no "Pitch-log totals: N hitters"
+line), so the 0 may have come from a truncated or stale capture. **RE-RUN WITH A CLEAN FULL CAPTURE BEFORE CONCLUDING.**
+**DO NOT resolve this by assumption. It is either (a) a capture artifact, or (b) a real silent failure in the new-row
+path — and (b) would be a TRACK B BLOCKER, because a daily automated upload would silently never create anyone.**
+
+## ⚠ SIDE-FINDING — STAGING'S KOZEAL ROW POINTS AT THE **2025** TeamID
+Both envs carry two Arkansas `"Teams Table"` rows: `47acae04-…` (Season **2025**) and `5679ed85-…` (Season **2026**).
+Staging's 2026 Kozeal Master row has `TeamID = 47acae04-…` — **the 2025 row.** The producer resolves Season-filtered
+and would write `5679ed85-…`. Harmless for `team_drs` (both map to `source_id 3375`), but it means **staging's Master
+`TeamID` values are not uniformly season-correct** — worth a separate check before anything joins on `TeamID` across
+seasons. NOT investigated.
+
+## 🅱️ WHAT TRACK B MUST TAKE FROM THIS
+1. **Use the committed producer with `--create-new` and its existing PA/BF + D1 gates.** Do not hand-build rows, do not
+   copy across environments, do not invent a threshold — 25 PA / 20 BF is the committed answer.
+2. **New-row creation MUST run before anything that iterates the Masters** (descriptive WAR, `team_drs`, power ratings,
+   `computeNcaaAverages`, `refresh_team_season_stats`). A row created afterwards is missing from all of them.
+3. **`--create-new` needs its own VALUE gate**, because "0 rows created" is indistinguishable from "nothing to create":
+   after the stage, re-run the membership query and require it to be EMPTY. See the MEMBERSHIP GATE block.
+4. **Never trust a background/truncated log.** Validate by re-querying the DB, or by a full captured run — this
+   investigation was nearly concluded off a header-less capture. Same rule as "validate by CONTENT, not exit code."
