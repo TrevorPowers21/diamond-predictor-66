@@ -906,3 +906,32 @@ npx tsx --env-file .env.local scripts/derive_masters_from_pitchlog.ts --apply
    If HITTERS suddenly start changing too, stop and find out why.
 4. **PHASE-GATE after it runs:** Master `stuff_plus` non-null count should rise toward staging's (prod was 5,251 vs
    staging 6,011). "Column exists" ≠ "column populated" — verify the VALUE landed.
+
+---
+# ⚠️ `--direct` SILENT HANG — statement_timeout=0 removes the CEILING but also the FAILURE SIGNAL (prod, 2026-08-30)
+**What happened:** the prod stage-4 run stalled on `[41/48] vs_top_hitters → pitcher_by_pitch_type` and sat there for
+**39 minutes with zero log output**. Diagnosis over a second connection: **NO active query on prod** (`pg_stat_activity`
+showed only my own catalog lookup) and **0 ungranted locks** — so the database was doing nothing. The client process was
+alive but waiting forever. The direct connection had dropped and the client never learned about it.
+
+**ROOT CAUSE — a gap in the `--direct` fix shipped earlier the same day.** To defeat the HTTP gateway's ~125s cut we set
+`statement_timeout = 0` and a very long `query_timeout`. That correctly removes the ceiling that made `vs_top_hitters`
+impossible over `exec_sql` — but it ALSO removes the only signal that something died. A dropped pooler connection
+therefore presents as an INFINITE HANG instead of an error, and nothing retries because nothing failed.
+
+**FIX TO MAKE (not yet implemented):** on the `--direct` pg client set `keepAlive: true` with a keepalive delay, a
+finite `query_timeout` sized to the slowest known dimension with headroom (staging `vs_top_hitters` 254.9s, prod 151.6s
+→ e.g. 20-30 min, not 0), and per-dimension progress logging so a stall is visible in the log rather than only in
+`pg_stat_activity`. `statement_timeout=0` on the SERVER side is fine; it is the CLIENT-side infinite wait that is wrong.
+
+**HOW TO DETECT A STALL (do this, don't guess):**
+1. Compare the log's mtime to now — no output for >2× the slowest dimension = suspect.
+2. Query `pg_stat_activity` on a SEPARATE connection: if there is **no active query**, the client is hung, not slow.
+3. Check `pg_locks where not granted` — 0 means it is not a lock wait either.
+4. Also check for STALE PROCESSES from earlier runs (`pgrep -f aggregate_pitch_log`) — an old staging run was still
+   alive and competing for connections.
+
+**RECOVERY (safe — stage 4 is idempotent):** kill the hung + stale processes, then re-run. Prefer re-running the FULL
+set on prod rather than cherry-picking with `--only`/`--skip`: dimension rows that already exist may be STALE from the
+pre-v2 process, and "rows exist" does NOT mean "rows are fresh". Steps 1-3 are unaffected — do NOT redo them.
+**Nothing was corrupted by this stall.**
