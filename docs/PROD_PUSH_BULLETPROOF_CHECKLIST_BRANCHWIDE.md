@@ -453,3 +453,29 @@ filtered to a version string that matched 0 rows while appearing to succeed.
 4. **Verify FRESHNESS, not row count** — a failed step can leave stale rows that a count check passes.
 5. If a value is STILL empty after its producer ran, that is a SEPARATE BUG. Stop and diagnose; do NOT proceed to the
    next phase assuming it fills later.
+
+---
+# ✅ C27 → C26 APPLIED TO PROD 2026-08-30 (order is load-bearing — C27 FIRST)
+## C27 `computeNcaaAverages` — ✅ APPLIED
+`hittersUsed 5,340 · pitchersUsed 5,375 · fieldsWritten 72 · modelConfigRowsWritten 40 · ncaa_averages 2026 = 1 row`
+**`p_ncaa_avg_stuff_plus` 101.8341 → 100.0141** · `p_sd_stuff_plus = 5.04577` · `p_ncaa_avg_whiff_pct = 23.3673`.
+★ **The Stuff+ mean landing at 100.01 is independent CONFIRMATION that the recenter survived the whole chain**
+(score → aggregate → Master rollup). The old 101.83 came from the legacy-weighted lane.
+⚠ **C27 MUST PRECEDE C26.** `computeAndStoreScores.ts:206-211,:249` reads baselines from `ncaa_averages` and, for any
+MISSING field, falls back to HARDCODED defaults **SILENTLY** (`:212-215`). Wrong order ⇒ quietly wrong power ratings
+with no error. This ordering was inverted in the docs and is now corrected everywhere.
+
+## C26 `computeAndStoreScores` (propagate=false) — ✅ APPLIED
+`pitchers 8,071 updated, 0 errors · hitters 8,244 updated, 0 errors` · `propagate=false` honored on BOTH sides
+(**`player_predictions` untouched** — it is Phase F that repopulates those).
+🛑 **BUG FIXED BEFORE RUNNING:** `scripts/_run_store_no_propagate.ts` had **NO env guard** and its banner claimed
+"staging" while `--env-file .env.production.local` would happily write PROD. Added the standard double-keyed guard
+(URL and `--prod` must AGREE) and made the banner print the resolved env. Refuse path verified:
+running against the prod env WITHOUT `--prod` now aborts with `✗ URL is PROD but --prod was not passed`.
+
+## PATTERN WORTH NOTING (3 for 3 on the last three steps)
+C24 was sourcing from the LEGACY lane · C26's runner had no guard and a banner that LIED about the target DB · C27 was
+documented in the wrong ORDER. **Every one was caught by inspecting the step before running it, not after.** Do not
+run a remaining step (C28/C29, D, E, F) without first checking: (1) which LANE does it read from — pitch_log or the
+legacy PSP-I? (2) does it have a working double-keyed `--prod` guard? (3) is its position in the sequence right, and
+does anything it depends on fall back to defaults SILENTLY?
