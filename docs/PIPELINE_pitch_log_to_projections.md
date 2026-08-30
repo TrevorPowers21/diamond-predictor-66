@@ -204,9 +204,11 @@ and writes numbers nothing displays. **Do not run those steps.**
    `scripts/reclassify_prod.ts` (v2 classifier; `--dry-run` first, then `--go` with PGURI + explicit "prod, now?")
 2. **Re-derive the pop baseline** → `pitcher_stuff_plus_ncaa` (per pitch_type × hand, **armHB**, D1-only)
 3. **Score per pitch** → `pitch_log.stuff_plus`  — `scripts/compute_pitch_log_stuff_plus.ts`
+   🛑 **MUST READ BEFORE RUNNING THIS STEP:** the version filter is now parameterized (`--class-version=`, defaults to the v2 stamp) — it was hard-coded to `v1-anchor-2026-08-17`, which silently matched 0 rows and left NEW LABELS + OLD SCORES. This step is idempotent but does **NOT** resume: every attempt costs the FULL runtime (~36 min staging, longer on prod) and a mid-run failure leaves labels-without-scores. Run it DETACHED with `caffeinate -dimsu -w <pid>`. Requires `_reclass_pf` (materialized by step 1).
    (normalizes hb→armHB itself; recenters each (pitch_type × hand) bucket to mean 100)
 4. **Aggregate** → `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` / `*_by_pitch_type`
    `scripts/aggregate_pitch_log_dimensions.ts --apply` (also calls `populate_hitter_run_values(season)`)
+   🛑 **MUST READ BEFORE RUNNING THIS STEP → see "SOLVED — STEP 4 `vs_top_hitters`: USE `--direct`" at the end of this doc.** On PROD you MUST pass `--direct` (gateway cuts at ~125s; this dimension needs 253s on staging, longer on prod, and a failure HALTS the 8 dimensions after it). Verify by FRESHNESS not row count — a failed dimension leaves stale rows that look populated. The script EXITS 0 even when a dimension FAILED.
 5. **Marry onto the Masters** → `scripts/derive_masters_from_pitchlog.ts --apply`
    (⚠ add `.order(PK)` to its `readAll` pagination first — unordered `.range()` over ~2.5M rows silently drops/dupes)
 6. Then continue the runbook: C23–C29 → Phase D (dWAR) → E (precomputes) → F (re-bakes) → G (edge fn) → H (drops).
@@ -272,6 +274,7 @@ CHECK + to override only what pitch_log cannot produce (e.g. AVG/SB). **pitch_lo
    ⚠ MANDATORY, not optional: the §4.5 gyro fix moves **6-8% of ALL breaking-ball volume** Slider→Gyro Slider, so every
    mix-dependent artifact (baselines, D1/regional means + SDs, pitch-shape percentiles) is invalid until regenerated.
 3. **SCORE per pitch** → `pitch_log.stuff_plus` — `scripts/compute_pitch_log_stuff_plus.ts`
+   🛑 **MUST READ BEFORE RUNNING THIS STEP:** the version filter is now parameterized (`--class-version=`, defaults to the v2 stamp) — it was hard-coded to `v1-anchor-2026-08-17`, which silently matched 0 rows and left NEW LABELS + OLD SCORES. This step is idempotent but does **NOT** resume: every attempt costs the FULL runtime (~36 min staging, longer on prod) and a mid-run failure leaves labels-without-scores. Run it DETACHED with `caffeinate -dimsu -w <pid>`. Requires `_reclass_pf` (materialized by step 1).
    (normalizes hb→armHB itself; recenters each (pitch_type × hand) bucket to mean 100).
 4. **AGGREGATE** → `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` / `*_by_pitch_type`
    `scripts/aggregate_pitch_log_dimensions.ts` (must also call `populate_hitter_run_values(season)`).

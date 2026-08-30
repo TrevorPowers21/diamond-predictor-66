@@ -172,6 +172,7 @@ CHECK + to override only what pitch_log cannot produce (e.g. AVG/SB). **pitch_lo
    ⚠ MANDATORY, not optional: the §4.5 gyro fix moves **6-8% of ALL breaking-ball volume** Slider→Gyro Slider, so every
    mix-dependent artifact (baselines, D1/regional means + SDs, pitch-shape percentiles) is invalid until regenerated.
 3. **SCORE per pitch** → `pitch_log.stuff_plus` — `scripts/compute_pitch_log_stuff_plus.ts`
+   🛑 **MUST READ BEFORE RUNNING THIS STEP:** the version filter is now parameterized (`--class-version=`, defaults to the v2 stamp) — it was hard-coded to `v1-anchor-2026-08-17`, which silently matched 0 rows and left NEW LABELS + OLD SCORES. This step is idempotent but does **NOT** resume: every attempt costs the FULL runtime (~36 min staging, longer on prod) and a mid-run failure leaves labels-without-scores. Run it DETACHED with `caffeinate -dimsu -w <pid>`. Requires `_reclass_pf` (materialized by step 1).
    (normalizes hb→armHB itself; recenters each (pitch_type × hand) bucket to mean 100).
 4. **AGGREGATE** → `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` / `*_by_pitch_type`
    `scripts/aggregate_pitch_log_dimensions.ts` (must also call `populate_hitter_run_values(season)`).
