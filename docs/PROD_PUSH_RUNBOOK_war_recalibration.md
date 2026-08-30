@@ -866,3 +866,32 @@ hand-calibrated JUCO overlay.
 - `Stuff_plus` CHANGES from its stale pre-v2 value (compare BEFORE/AFTER — do not just count non-nulls).
 - Division split holds: **D1 = 30 · NJCAA_D1 = 10 · D2 = 2**.
 - Staging reference shape after the same fix: D1 avg **99.16** (92.9–107.3) · NJCAA_D1 avg **96.00** · D2 avg 93.00.
+
+---
+# ✅ C28 APPLIED TO PROD 2026-08-30 — all four steps, phase gate PASSED
+Ran via the DIRECT pg session with the prod ref asserted (equivalent to pasting; **never `--linked`**).
+BEFORE snapshot kept as `_c28_before` (alongside `_confstats_backup`).
+1. **bucketA assembly** → `OPS` `SLG` `slg_plus` 0/30 → **29/30**
+2. **`compute_conf_pitcher_env_plus --apply --prod`** → **30 conf rows**, 0 skipped.
+   SANITY (correct direction): SEC ERA 5.82 → era+ **105** · Ivy 5.20 → **117** · HR9 SEC 1.62 → hr9+ **68**
+   (SEC allows more HR ⇒ env+ <100) · Ivy 0.70 → **156**.
+3. **`derive_conf_opr_htp --apply --prod`** → **30 rows**. e.g. Big 12 HTP 120.4 → **121** · MWC 98.8 → 97.8.
+4. **★ `conferenceStuffPlusV2` (FIXED lane)** → **31 rows written**.
+
+## ★ THE `Stuff_plus` CATCH WAS REAL — this is why step 4 exists
+**D1 `Stuff_plus`: 101.17 → 99.15, with 30/30 rows CHANGED.** Prod now matches staging's **99.16**.
+Following the runbook's three steps would have left it at the stale pre-v2 **101.17** while everything around it was
+rebuilt — and a count check would have shown **30/30 populated and PASSED**. Because Conference Stuff+ is the
+competition-translation lever, that stale value would have silently biased EVERY projection of a player into a conference.
+Division relationship holds and matches staging: **D1 99.15 · NJCAA_D1 96.00 · D2 93.00**.
+
+## PHASE GATE RESULT (D1, all were 0/30 before)
+`era_plus 30` `fip_plus 30` `k9_plus 30` `whip_plus 30` `hitter_talent_plus 30` `run_env_factor 30` ✅
+`OPS 29` `SLG 29` ⚠ · `pitcher_ev_score 0` ⚠
+
+## ⚠ TWO LOOSE ENDS — NOT resolved, do not assume benign
+1. **`OPS`/`SLG`/`slg_plus` = 29/30**, one conference short. Probable cause: a conference with no qualifying hitters,
+   but **UNVERIFIED**. Identify the missing conference before trusting conference hitting rates for it.
+2. **`pitcher_ev_score` = 0/30 and `pitcher_iz_score` likewise** — listed as bucketA outputs but bucketA did NOT fill
+   them. Either they have a different producer or a precondition is unmet. **Find the producer before Phase F**, since
+   these feed pitcher-side conference context.
