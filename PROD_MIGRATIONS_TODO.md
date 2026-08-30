@@ -851,3 +851,37 @@ Do it in ONE sitting with the machine pinned awake (`caffeinate -dimsu -w <pid>`
 a gap leaves prod with **v2 labels + STALE scores**.
 ⚠ **Step 3 does NOT resume** (re-scores everything matching the class version), so any interruption costs the FULL
 runtime again. Consider building the two-phase fix (score only NULLs → always recenter all) BEFORE the prod run.
+
+---
+# ✅ SOLVED — STEP 4 `vs_top_hitters`: USE `--direct`. (staging-proven 2026-08-30)
+**Root cause CONFIRMED, not theorised:** the query is not broken, it is simply LONGER than the HTTP gateway allows.
+Over `exec_sql` it failed **twice, deterministically, at exactly 125.3s**. Over the DIRECT pg session the SAME query
+**succeeded in 253.2s** — i.e. it needs ~2× the gateway's ~125s ceiling. Nothing else changed.
+
+## THE COMMAND (staging)
+```
+npx tsx --env-file .env.local scripts/aggregate_pitch_log_dimensions.ts --apply --direct --only=vs_top_hitters
+```
+## ⚠⚠ THE COMMAND FOR PROD — RUN THE WHOLE OF STEP 4 WITH `--direct`, NOT JUST THIS DIMENSION
+```
+npx tsx --env-file .env.production.local scripts/aggregate_pitch_log_dimensions.ts --apply --prod --direct
+```
+**Reasoning:** `vs_top_hitters` already needs 253s on STAGING. Prod is a SMALLER compute tier with a MORE throttled
+disk (expect ~8-10 min for that one dimension), and prod's `exec_sql` has ALREADY been observed timing out on lighter
+queries. Through the gateway this dimension would fail on prod **100% of the time**, and the script HALTS on failure,
+so it would also block the 8 dimensions that come after it. `--direct` is NOT a staging workaround — it is the
+REQUIRED path on prod.
+
+## NEW FLAGS ADDED TO `aggregate_pitch_log_dimensions.ts` (2026-08-30)
+- **`--direct`** — executes over the `PGURI` session (`statement_timeout=0`, no gateway ceiling) instead of
+  `exec_sql`. Guarded: the PGURI project ref MUST match the target env or it refuses to run. Logs which path is used.
+- **`--only=<keys>`** — mirrors `--skip=`; runs ONLY the named dimension(s). Makes step 4 targetable, so a single
+  failed dimension can be re-run without redoing the other 47. (Partial answer to the resumability gap.)
+- (existing) **`--skip=<keys>`** — skip named dimensions.
+
+## ⚠ THE TRAP THIS CREATED — A STALE DIMENSION THAT LOOKS POPULATED
+When `vs_top_hitters` failed, `pitch_log_pitcher_totals` still SHOWED **5,349 rows** for that `dimension_key` — rows
+left over from a PRE-v2 run, computed from OLD labels and OLD Stuff+ scores. **A row-count check would have passed.**
+→ After ANY reclassification, verify a dimension by FRESHNESS (did this run write it?), never by row count.
+→ Related: the script **exits 0 even when a dimension FAILED** — validate by CONTENT (grep the log for `FAILED` and
+for the per-dimension `ok`), never by exit code. A run was wrongly marked COMPLETE this way on 2026-08-29.
