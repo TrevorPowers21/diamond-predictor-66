@@ -1569,3 +1569,52 @@ PA/IP**, and log explicitly when it creates none *and why*.
    incapable of ever doing its job.
 **And the process lesson:** I nearly closed this off a truncated background log that was missing its header. The clean
 full capture is what confirmed `0` was real and sent me to the code. **Never conclude from a partial log.**
+
+---
+# 🅱️ TRACK B — MASTER `TeamID` IS NOT SEASON-CONSISTENT, AND A SPLIT IS SILENT UNTIL IT ISN'T (2026-08-30)
+## THE UNDERLYING CONDITION
+`"Teams Table"` carries **one row per team PER SEASON** — prod has **308 rows for Season 2025** and **466 for 2026**,
+each with its own `id`. So a single program has MULTIPLE `TeamID` uuids. Arkansas (`source_id 3375`):
+`47acae04-1225-4506-9c12-8d6e55cbe9c5` = **Season 2025** · `5679ed85-eeea-4e47-be59-53ffc5087b38` = **Season 2026**.
+**The 2026 Masters do NOT consistently use the 2026 id.** Measured on PROD, Season 2026, Arkansas:
+| table | `47acae04…` (2025 id) | `5679ed85…` (2026 id) |
+|---|---|---|
+| `"Hitter Master"` | **16** | 0 |
+| `"Pitching Master"` | **18** | **1** ⚠ |
+Staging's 2026 Kozeal row likewise carried the **2025** id. **So the 2025 id is the DE-FACTO convention in the 2026
+Masters, and the lone pitcher on the 2026 id is a PRE-EXISTING SPLIT that predates this session.** ⬜ NOT FIXED —
+logged for whenever the Master `TeamID` question is addressed properly.
+
+## 🛑 WHY THIS MATTERS — ANY TEAM-LEVEL ROLLUP KEYED ON `TeamID` SILENTLY SPLITS THE TEAM
+`derive_team_drs.mjs` groups `Σ drs_floor` by the Masters' `TeamID`. If one player carries a different (but equally
+"valid") `TeamID` for the same program, he becomes **his own team**. Demonstrated live: after inserting Kozeal with the
+**2026** id (I "corrected" staging's 2025 id, assuming it was a bug — **IT WAS NOT**), the producer emitted:
+```
+div D1: 309 teams          ← was 308
+Arkansas  team_drs 32.770  raw_floor 35.255  team_IP 475.0
+Arkansas  team_drs  8.429  raw_floor  8.502  team_IP  14.0   ← Kozeal, alone, as a "team"
+```
+Reverting his `TeamID` to `47acae04…` restored **308 teams**, `raw_floor 43.757` (**exactly staging's**), `team_drs 41.272`.
+★ The split announced itself ONLY because the division team-count moved 308→309 and the centering assertion still held.
+**A per-team value check would have passed** — both buckets are internally consistent. **What caught it was a
+CARDINALITY check.**
+
+## 🅱️ REQUIREMENTS FOR TRACK B
+1. **Resolve `TeamID` ONE way, from ONE place, for the whole run** — do not mix a per-season lookup with whatever the
+   Masters happen to hold. Prefer joining on **`source_team_id` / `source_id`** (season-stable) over the per-season
+   uuid wherever a rollup groups by team. [[feedback_id_over_name]] extends here: *stable* id over *any* id.
+2. **When creating a Master row, adopt the `TeamID` its TEAMMATES already use** — never resolve it independently from
+   `"Teams Table"` by season. That is exactly the mistake made here, and it silently split a customer team.
+3. **CARDINALITY GATE on every team-level rollup:** assert the produced team count EQUALS the expected division count
+   (D1 = 308) and FAIL otherwise. A per-team value gate cannot see a split; a count of teams can.
+4. The zero-sum centering assertion (`Σ centered = 0`) **does NOT protect against this** — it held at 309 teams.
+
+## ✅ D29b DONE ON PROD (2026-08-30) — team_drs DERIVED, not pasted
+`scripts/drs/derive_team_drs.mjs --prod` (guard + ordered pagination added this session; reproduces staging's committed
+values **308/308 exact**, worst |Δ| 0.0000) → `scripts/sql/team_drs_store_PROD_2026_08_30.sql` → applied.
+`BEFORE with_drs 308 · sum -0.01 · Arkansas 41.060 (staging paste)`
+`AFTER  with_drs 308 · sum  0.00 · Arkansas 41.272 (PROD-DERIVED)`  — 308 rows updated.
+Residual vs the old staging values: **mean |Δ| 0.100**, max ~0.54 — prod's D1 population differs slightly (5,341 vs
+5,343 hitters), shifting the centering rate. Expected, not a defect.
+**Also on prod:** Camden Kozeal's 2026 Hitter Master row INSERTED (5,340 → **5,341** D1 hitters) — 31 seed columns,
+**all 29 derived columns deliberately omitted** so C26 and Phase D compute them on prod.
