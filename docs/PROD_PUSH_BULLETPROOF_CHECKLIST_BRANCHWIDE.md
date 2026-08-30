@@ -560,3 +560,35 @@ before C28. **C28 is NOT blocked on park factors.**
   Establish what refreshes it, or it stays stale while everything around it is rebuilt.
 - ⛔ bucketA must be **PASTED** in the SQL editor, never `--linked` (config.toml names a THIRD ref `kfkuhdmpchxyffmnowgj`).
 - ⛔ **NEVER** run `populate-conf-stats` on prod (overwrites the hand-calibrated JUCO overlay).
+
+---
+# 🔴→✅ CONFERENCE STUFF+ WAS ON THE LEGACY LANE — FIXED 2026-08-30 (critical for Track B)
+## THE FINDING (audit G14 said "no committed producer" — that was WRONG)
+`src/savant/lib/conferenceStuffPlusV2.ts` **IS** the producer of `"Conference Stats".Stuff_plus`. But it read
+per-pitcher scored rows from **`pitcher_stuff_plus_inputs`** — the **LEGACY CSV lane**. The v2 chain writes Stuff+ to
+`pitch_log.stuff_plus` and rolls it up to `"Pitching Master".stuff_plus`; it **NEVER writes PSP-I**, so PSP-I holds
+**PRE-v2 scores**. Conference Stuff+ would therefore have been built from stale numbers.
+**WHY THIS ONE MATTERS MOST:** Conference Stuff+ IS the competition-translation lever — a player projected INTO a
+conference is scored against that conference's Stuff+/HTP. A stale value silently biases **every projection**.
+This is the THIRD instance of the same shape (C24 `trackman_pitches`, `computeNcaaAverages` weighting, now this):
+**the VALUE moved to the pitch_log lane but a supporting INPUT was left on legacy.**
+
+## THE FIX
+Read the rolled-up per-pitcher value and its pitch count straight from `"Pitching Master"`:
+`Σ("Pitching Master".stuff_plus × trackman_pitches) / Σ(trackman_pitches)` — definition unchanged (pitch-weighted,
+full season). Both inputs are **pitch_log-sourced for D1** (C25 writes `stuff_plus`, C24 writes `trackman_pitches`)
+and correctly **fall back to the legacy lane for JUCO**, so ONE formula stays right for BOTH divisions without ever
+mixing lanes. Filters `stuff_plus IS NOT NULL AND trackman_pitches > 0`.
+
+## VERIFIED ON STAGING (values are sane and the D1/JUCO relationship is correct)
+`D1 30 conferences avg 99.16 (range 92.9–107.3)` · `NJCAA_D1 10 avg 96.00 (92.0–100.7)` · `D2 2 avg 93.00`.
+D1 centring near 100 with JUCO clearly below it is the expected "conference pitching depth" signal.
+
+## ⚠ GAP FOUND WHILE TESTING — `calculateConferenceStuffPlusV2` IGNORES `dryRun`
+It was called with `{ dryRun: true }` and **wrote anyway** ("5. write to Conference Stats"). The option is not
+implemented. Benign here (staging needed the refresh and the values are correct) but **there is no way to preview this
+producer**. Before running it on PROD: either add real dry-run support, or rely on `_confstats_backup` (already created
+on prod, 162 rows / 42 for 2026) as the rollback.
+## TRACK B REQUIREMENT
+Track B's conference-stats stage must compute Conference Stuff+ from the **pitch_log lane via Pitching Master**, never
+from `pitcher_stuff_plus_inputs`, and must keep the D1 / JUCO fallback split intact.
