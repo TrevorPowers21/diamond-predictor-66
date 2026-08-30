@@ -107,6 +107,22 @@ Apply in filename (timestamp) order. Runner used on staging:
 ## Migrations (chronological = apply order)
 
 > 
+
+### ✅ APPLIED TO PROD 2026-08-30 — REBUILT the stale `pitch_log_corrected` VIEW (blocker #1 CLEARED)
+The view was `select pl.*, …` and Postgres FREEZES `*` at creation time, so prod's copy was stuck at **94 of 99**
+base columns and did NOT expose `classification_version` → `compute_pitch_log_stuff_plus.ts` HARD-FAILED on prod
+("column pitch_log_corrected.classification_version does not exist") while the same query passed on staging.
+⚠ `create or replace view` CANNOT fix this (new columns land mid-list) — it required drop + create.
+**PRE-CHECK (read-only): NOTHING depended on the view**, so `cascade` was safe. Done inside a transaction with
+rollback-on-error. Definition preserved exactly: `pl.*` + `ivb_corrected = pl.ivb - coalesce(vc.ivb_corr,0)` +
+`hb_corrected = pl.hb - coalesce(vc.hb_corr,0)` + `vc.venue_correction_version`, LEFT JOIN
+`venue_movement_corrections` on `(game_venue_id, season)`.
+**VERIFIED: 94 → 102 columns; 10/10 previously-missing keys present** (`classification_version`, `needs_review`,
+`park_code`, `is_conference_game`, `pitch_num_in_game`, `ab_num_in_game`, `pitch_num_in_ab`, `game_string`,
+`ivb_corrected`, `hb_corrected`), and **the exact scorer query now succeeds on prod**.
+🛑 **LESSON — any `select *` VIEW goes stale the moment a column is added to its base table.** After ANY
+`ALTER TABLE pitch_log ADD COLUMN`, this view must be dropped and recreated or the chain silently breaks.
+
 ### ✅ APPLIED TO PROD 2026-08-30 — `team_season_stats` (3 migrations, DEPENDENCY order)
 Trevor: "Make this the first step on prod." Applied over the direct pg session, in DEPENDENCY order (NOT timestamp order):
 - [x] `20260819000000_team_season_stats.sql` — CREATE TABLE
