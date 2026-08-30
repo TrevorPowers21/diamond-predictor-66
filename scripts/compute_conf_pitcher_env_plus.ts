@@ -3,6 +3,18 @@
 // Means = ncaa_averages 2026 (whip computed IP-weighted from Pitching Master, absent in ncaa_averages).
 import { createClient } from "@supabase/supabase-js";
 const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+// ★ STAGE-0 double-keyed env guard (2026-08-30). This script had NO guard: `--env-file .env.production.local`
+// would write PROD with zero opt-in. C28 is a DESTRUCTIVE rebuild of the conference baselines that every
+// projection's competition-translation consumes, so the URL and the --prod flag must AGREE or it refuses to run.
+{
+  const _u = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const _isProd = /trbvxuoliwrfowibatkm/.test(_u);
+  const _pf = process.argv.includes("--prod");
+  if (_isProd && !_pf) { console.error("\u2717 URL is PROD but --prod was not passed — refusing."); process.exit(1); }
+  if (!_isProd && _pf) { console.error("\u2717 --prod passed but URL is not prod — refusing."); process.exit(1); }
+  console.log(`[env] ${_isProd ? "PROD" : "STAGING/other"}`);
+}
+
 const SEASON = 2026;
 
 // 1) means

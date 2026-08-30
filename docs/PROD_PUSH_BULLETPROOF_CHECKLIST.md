@@ -842,3 +842,29 @@ everything around it is rebuilt).
    conference Stuff+/HTP compare sanely to staging.
 ⛔ **NEVER run `populate-conf-stats` on prod** — it overwrites the hand-calibrated JUCO overlay. Different script,
 confusingly similar name, not part of C28.
+
+---
+# ✅ C28 BLOCKERS 1 & 2 CLEARED (2026-08-30) — blocker 3 was MY over-call, corrected
+## ✅ FIXED — `--prod` guards added to BOTH producers
+`compute_conf_pitcher_env_plus.ts` and `derive_conf_opr_htp.ts` had **NO env guard at all** (grep count 0) —
+`--env-file .env.production.local` would have written PROD with zero opt-in. Added the standard double-keyed guard
+(URL and `--prod` must AGREE, refuse otherwise, log the resolved env). **Refuse paths VERIFIED on both:**
+`✗ URL is PROD but --prod was not passed — refusing.`
+## ✅ FIXED — backups created on PROD
+`_confstats_backup` = **162 rows (42 for season 2026)** · `_parkfactors_backup` = **615 rows**.
+Park Factors was backed up too even though C28 only READS it — E2 rewrites that table later, and a restore point is
+cheap now and expensive to lack later.
+## ⚠️ CORRECTION — "park factors must be filled first" was WRONG (my over-call)
+`derive_conf_opr_htp.ts:10` reads **`rg_factor`**, which is **309/309 populated on prod**. It NEVER reads
+`rg_factor_seasonal`. The SAME script on staging reads the SAME column, so **both environments use identical park
+inputs for C28 and there is no divergence** — the staging-match gate remains valid.
+The empty `rg_factor_seasonal` (prod 0/309 vs staging 308/308) is **E2's job, later in the sequence**, and its
+producer `backfill_park_factors_seasonal.ts` is still hardwired to STAGING (audit G13/H4) — fix that before E2, not
+before C28. **C28 is NOT blocked on park factors.**
+## STILL OPEN BEFORE C28 RUNS
+- **G-GATE on STAGING** — re-run `conf_stats_bucketA_assembly.sql`, diff vs `_confstats_backup_preassembly`, require
+  **0.0000**. Never executed (deferred 2026-08-21). The reference table is a STAGING artifact.
+- **D1 `Conference Stats.Stuff_plus`** — 42/42 populated on prod but audit G14 says there is NO committed producer.
+  Establish what refreshes it, or it stays stale while everything around it is rebuilt.
+- ⛔ bucketA must be **PASTED** in the SQL editor, never `--linked` (config.toml names a THIRD ref `kfkuhdmpchxyffmnowgj`).
+- ⛔ **NEVER** run `populate-conf-stats` on prod (overwrites the hand-calibrated JUCO overlay).

@@ -6,6 +6,18 @@
 // Default dry-run; --apply to persist. STORED, read-only downstream (no live compute).
 import { createClient } from "@supabase/supabase-js";
 const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+// ★ STAGE-0 double-keyed env guard (2026-08-30). This script had NO guard: `--env-file .env.production.local`
+// would write PROD with zero opt-in. C28 is a DESTRUCTIVE rebuild of the conference baselines that every
+// projection's competition-translation consumes, so the URL and the --prod flag must AGREE or it refuses to run.
+{
+  const _u = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const _isProd = /trbvxuoliwrfowibatkm/.test(_u);
+  const _pf = process.argv.includes("--prod");
+  if (_isProd && !_pf) { console.error("\u2717 URL is PROD but --prod was not passed — refusing."); process.exit(1); }
+  if (!_isProd && _pf) { console.error("\u2717 --prod passed but URL is not prod — refusing."); process.exit(1); }
+  console.log(`[env] ${_isProd ? "PROD" : "STAGING/other"}`);
+}
+
 const SEASON = 2026, APPLY = process.argv.includes("--apply");
 const { data: pf } = await (sb as any).from("Park Factors").select("team_id, source_team_id, rg_factor").eq("season",SEASON);
 const rgByTeam=new Map((pf||[]).map((p:any)=>[String(p.team_id),p.rg_factor])), rgBySrc=new Map((pf||[]).map((p:any)=>[String(p.source_team_id),p.rg_factor]));
