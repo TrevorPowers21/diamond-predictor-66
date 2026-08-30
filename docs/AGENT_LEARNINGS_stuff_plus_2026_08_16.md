@@ -1795,3 +1795,51 @@ requirements list, written from what actually happened — not theory.
     → **TRACK B FIX: every gate query must state its season explicitly and assert a non-zero denominator.**
 12. **MACHINE SLEEP KILLED LONG RUNS.** Distinguish: environmental failures die at a DIFFERENT point each run;
     structural ones die at the SAME place with the SAME duration. Run detached with `caffeinate -dimsu -w <pid>`.
+
+---
+# ✅ PROVEN ON PROD — THE STUFF+ CHAIN, WHAT IT PRODUCED, AND WHY IT IS CORRECT (2026-08-30)
+The full 5-step chain has now run END-TO-END on BOTH environments. This is the record of what worked, the values it
+produced, and the EVIDENCE that it is right — not just that it completed.
+
+## THE RESULT — PROD AND STAGING AGREE ON INDEPENDENT DATA
+| check | STAGING | PROD | verdict |
+|---|---|---|---|
+| pitches classified | 2,015,321 | 2,013,005 | both = every `is_data=true` row |
+| label distribution | 4S 37.8 · SI 16.0 · SL 10.3 · GY 10.2 · CH 9.1 · CB 5.6 · SW 5.2 · FC 3.7 · SPL 2.1 | **IDENTICAL** | deterministic |
+| needs_review | 8.1% | 8.1% | identical |
+| per-pitcher Stuff+ | mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7 | **mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7** | identical |
+| bucket recenter | every (type×hand) = 100.0 | every (type×hand) = 100.0 | correct by construction |
+| unscored rows | 0 | 0 | full coverage |
+| armHB sign check | 18/18 buckets | 18/18 buckets | convention PROVEN twice |
+| Master avg stuff_plus | 98.82 | 98.86 | consistent |
+**WHY THIS IS THE PROOF:** two DIFFERENT pitch populations, run through the same committed classifier + scorer,
+produced the same distribution to the tenth of a percent AND the same per-pitcher percentiles. That cannot happen by
+chance if anything upstream (labels, baseline, convention, recenter) were wrong. Independent replication, not a
+self-check.
+
+## THE VALUES IT USED (canonical; see the "TRACK B — EVERY VALUE THE CHAIN COMPUTES WITH" block)
+Classifier v2 @ **95.2% per-pitch / 95.3% arsenal-mix** vs the anchor ground truth (full 2,000,674-pitch population).
+Three shipped fixes, each MEASURED not guessed: offspeed **armHB floor = 5** (gyro p99 4.7 vs offspeed p1 5.3, a clean
+empty gap) · **fastball-family merge guard** (91.69%→93.01%, 4S↔Sinker errors −41%) · **§4.5 gyro floor = −3 applied
+BEFORE the backfill** (95.1%→95.2% AND fragmentation 7%→5%, strictly better on both). Two NEGATIVE results recorded so
+they are never rebuilt: `rr > −1.7` and the "arsenal rule" (both lose ~1pp). Verified-optimal, do not touch:
+Sweeper/Slider armHB −12 (1.0% error) · Gyro/Slider armHB −5. **RPW = 13.1**, verified stored in BOTH envs'
+`model_config` (`owar_runs_per_win` / `pwar_runs_per_win`) and present 4× in prod's live `refresh_composite_war()`.
+
+## WHY EACH SAFEGUARD MATTERED (all of these fired or would have)
+- **Abort-before-write sign check** — the reason armHB is TRUSTED on both envs rather than assumed.
+- **Backups before every destructive step** (`_v2_prechain_backup` 2.58M/2.58M rows, `_hm_prestep5_backup` 30,025/30,027,
+  `_pm_prestep5_backup` 29,238/29,239) — made the whole chain reversible; used to disprove a suspected regression.
+- **Halt-on-failure between steps** — stopped a quoting bug before it wrote anything.
+- **`--direct` for stage 4** — `vs_top_hitters` needs 151–255s and the HTTP gateway cuts at ~125s, so it would have
+  failed 100% on prod AND halted the 8 dimensions behind it.
+- **New-row creation gated OFF** — prevented inventing half-populated Master rows. Confirmed 0 new rows on both envs.
+- **Phase-gate "value landed, not just ran"** — caught that `pull_air` went 0 → 4,366 on prod (C23 subsumed by C25).
+
+## ⚠ THE THREE TRAPS THAT PRODUCED FALSE ALARMS (check these before reporting a problem)
+1. **Season keys.** 2026 = completed/descriptive · 2027 = projections. Wrong season ⇒ misleading ZERO. Caused a false
+   "staging has no WAR data" alarm.
+2. **Different denominators.** A count across ALL seasons vs `Season=2026 AND division='D1'` are not comparable —
+   this produced a false "trackman_pitches regression" (it was 0 before AND after; C24 populates it, and it had not run).
+3. **"Rows exist" ≠ "rows fresh."** A failed aggregation leaves stale rows that PASS a count check.
+**RULE: compare like-for-like against the BACKUP before calling anything a regression.**
