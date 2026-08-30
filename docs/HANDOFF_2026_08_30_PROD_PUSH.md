@@ -38,8 +38,16 @@ Two different pitch populations → the same numbers. That is **independent repl
    `_run_store_no_propagate.ts` first (its banner had claimed "staging" while writing prod).
 4. ~~**C29 NJCAA_D1 re-tag**~~ ✅ **DONE 2026-08-30** — 10 rows re-tagged; prod now `D1 30 · NJCAA_D1 10 · D2 2`,
    0 NJCAA rows remain tagged D1 (matches staging). C28 is now safe to run.
-5. **C28** conference stats — G-GATE on staging first · bucketA **PASTE, never `--linked`** · `compute_conf_pitcher_env_plus`
-   · `derive_conf_opr_htp`. ⛔ **NEVER run `populate-conf-stats`** (overwrites the hand-calibrated JUCO overlay).
+5. **C28 conference stats — PARTIALLY PREPPED, 2 items left.**
+   ✅ DONE: `--prod` guards added to BOTH producers (refuse paths verified) · `_confstats_backup` (162 rows / 42 for
+   2026) + `_parkfactors_backup` (615) created on prod · **Conference Stuff+ lane FIXED** (was reading legacy PSP-I;
+   now `Σ(Pitching Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)`, verified on staging: D1 avg 99.16,
+   NJCAA_D1 96.00) · park-factor "blocker" RETRACTED (`derive_conf_opr_htp` reads `rg_factor`, 309/309 on prod).
+   ⬜ **REMAINING (1) G-GATE on STAGING** — re-run `conf_stats_bucketA_assembly.sql`, diff vs
+   `_confstats_backup_preassembly`, require **0.0000**. NEVER executed (deferred 2026-08-21).
+   ⬜ **REMAINING (2) `calculateConferenceStuffPlusV2` IGNORES `dryRun`** and writes regardless — there is no way to
+   preview it. Either add real dry-run support, or accept `_confstats_backup` as the rollback and run it knowingly.
+   ⛔ bucketA must be **PASTED**, never `--linked` · ⛔ **NEVER run `populate-conf-stats`** (overwrites the JUCO overlay).
 6. **Phase D** dWAR/bsrWAR (D30–34). Pagination fixed. ⚠ enable RLS on `player_season_defense`/`_baserunning` FIRST.
 7. **Phase E** ★order: TWP detector FIRST → returner pitchers → returner hitters → `_run_step2_all.sh --prod`.
 8. **Phase F** ★order: `refresh_composite_war()` (÷13.1) **only now** → snapshot WAR → TWP markets → resyncs
