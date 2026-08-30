@@ -1415,7 +1415,7 @@ newHitterIds: 763           includes Kozeal? YES
 → **The producer SHOULD create exactly one row: his. The dry-run reported `0 hitters, 0 pitchers` and
 `(skipped — non-D1 team / unresolved identity / below sample gate: 898)`.**
 ⚠ The captured output was **missing its header** (began mid-table, no env banner, no "Pitch-log totals: N hitters"
-line), so the 0 may have come from a truncated or stale capture. **RE-RUN WITH A CLEAN FULL CAPTURE BEFORE CONCLUDING.**
+line), so the 0 may have come from a truncated or stale capture. ✅ **RESOLVED — the clean re-run confirmed `0` was REAL, and the root cause is now found: a wrong argument in the `repRows` call at `:465` (`"batting_team_id"` passed where `"batter_id"` belongs), whose timeout error is then discarded at `:451`. See the ROOT CAUSE block.**
 **DO NOT resolve this by assumption. It is either (a) a capture artifact, or (b) a real silent failure in the new-row
 path — and (b) would be a TRACK B BLOCKER, because a daily automated upload would silently never create anyone.**
 
@@ -1435,3 +1435,78 @@ seasons. NOT investigated.
    after the stage, re-run the membership query and require it to be EMPTY. See the MEMBERSHIP GATE block.
 4. **Never trust a background/truncated log.** Validate by re-querying the DB, or by a full captured run — this
    investigation was nearly concluded off a header-less capture. Same rule as "validate by CONTENT, not exit code."
+
+---
+# 🐛🔴 ROOT CAUSE FOUND — `derive_masters_from_pitchlog.ts` CAN **NEVER** CREATE A HITTER MASTER ROW (2026-08-30)
+**This is a REAL, CONFIRMED BUG, not a capture artifact. It is a TRACK B BLOCKER.** Found by chasing why prod is
+missing Camden Kozeal's 2026 Hitter Master row; the missing row is the *symptom*, this is the *cause*.
+
+## THE DEFECT — AN ARGUMENT IN THE WRONG POSITION
+```ts
+async function repRows(ids, idCol, teamCol, abbrevCol, handCol) {        // :444
+  … await sb.from("pitch_log").select(`${teamCol}, ${abbrevCol}, ${handCol}`)
+        .eq("season", SEASON).eq(idCol, id).limit(1);                    // :451  ← filters on idCol
+  if (data && data[0]) map.set(id, data[0]);                             // ← `error` is DISCARDED
+}
+
+repRows(newHitterIds,  "batting_team_id", "batting_team_id", "batter_abbrev_name", "batter_hand");  // :465 ❌
+repRows(newPitcherIds, "pitcher_id",      "pitching_team_id", "pitcher_abbrev_name","pitcher_hand"); // :486 ✅
+```
+The **pitcher** call correctly passes `"pitcher_id"` as `idCol`. The **hitter** call passes **`"batting_team_id"`** —
+the TEAM column — in the ID-column position. So it executes
+`pitch_log WHERE season=2026 AND batting_team_id = '<a player id>'`.
+
+## WHY IT FAILS SILENTLY (three failures stacked)
+Verified on PROD:
+```
+AS CALLED  .eq('batting_team_id', playerId) → null   err: "canceling statement due to statement timeout"
+CORRECT    .eq('batter_id',       playerId) → [{"batting_team_id":"3375","batter_abbrev_name":"C. Kozeal","batter_hand":"L"}]
+```
+1. A player id never matches a team id, so the predicate matches **nothing**…
+2. …and scanning **2,576,146** `pitch_log` rows for it **EXCEEDS THE STATEMENT TIMEOUT** — it does not merely return
+   empty, it **ERRORS**.
+3. `:451` destructures **only `data`** and throws the error away ⇒ `rep` is `undefined` ⇒ `resolveTeam(undefined)` is
+   `undefined` ⇒ `if (!team || team.division !== "D1") { skipped++; continue; }` ⇒ **skipped, silently.**
+**Consequence: NO hitter Master row can EVER be created by this producer, on any environment, at any PA threshold.**
+
+## THE EVIDENCE THAT PINNED IT (every other gate was cleared first)
+Faithful read-only replicas against PROD, each ruling out a candidate cause:
+| checked | result |
+|---|---|
+| `hmAll` (Hitter Master 2026, ordered pagination) | 8,244 rows / 8,244 distinct — Kozeal **NOT** present ⇒ he IS a candidate |
+| `hitterTotals` (`pitch_log_hitter_totals`, `dimension_key='all'`) | 6,099 distinct — Kozeal present, `pa=287` |
+| `newHitterIds` | **763**, includes Kozeal; **exactly 1** clears `MIN_PA=25` → `["1925267789"]` |
+| `teamBySource` (Teams Table Season=2026) | 466 rows, 0 NULL `source_id`, `'3375'` → University of Arkansas **D1** ✅ |
+| `repRows` replica using the **CORRECT** `batter_id` | **763 resolved · 0 errored · 0 no-row** |
+| the ACTUAL run | **0 hitters created**, `skipped … 898` |
+★ **`898 = 763 hitters + 135 pitchers` — i.e. EVERY candidate of both kinds.** A universal skip, not a selective one,
+is what pointed at a shared gate rather than at the data.
+(The 135 pitchers are separately explained by `MIN_BF=20`; the pitcher `repRows` call itself is correct.)
+
+## ✅ THE FIX (one argument)
+`:465` → `repRows(newHitterIds, "batter_id", "batting_team_id", "batter_abbrev_name", "batter_hand")`
+**AND — independently — stop swallowing the error at `:451`:** `const { data, error } = …; if (error) { … }`. Count and
+report failures; a timeout must never masquerade as "this player has no pitch-log row." Without this second change the
+same class of failure stays invisible next time.
+
+## 🅱️ WHAT THIS MEANS FOR TRACK B — READ THIS TWICE
+Track B is **ONE EDGE FUNCTION RUNNING ONCE PER DAY, UNATTENDED.** This bug is precisely the failure mode it cannot
+survive:
+- the stage **runs**, **exits 0**, and prints a plausible number (`0 new rows`)
+- "0 created" is **indistinguishable** from "nothing to create" — and 362 days a year, "nothing to create" is the
+  truth, so it looks right
+- the only visible symptom is a **missing row**, which **no count gate can detect** (prod has 5,340 D1 hitters and
+  every count check passes on 5,340)
+- it took a **team-level dRS discrepancy on one team** to surface a **single missing player**
+**Therefore Track B MUST:** (1) treat any swallowed error as a **hard stop**, never a coerced empty; (2) gate the
+new-row stage on the **MEMBERSHIP query**, not on a count or an exit code; (3) **log every row it creates by name +
+PA/IP**, and log explicitly when it creates none *and why*.
+
+## 🧠 THE META-LESSON — THE FOURTH SHAPE
+1. *populated ≠ fresh* (Conference `Stuff_plus` 30/30 but pre-v2)
+2. *populated ≠ right lane* (`trackman_pitches` full, from the legacy table)
+3. *count-correct ≠ complete* (5,340 hitters, one of them missing)
+4. **NEW: *ran ≠ did anything*** — a stage can execute, exit 0, report a believable figure, and be structurally
+   incapable of ever doing its job.
+**And the process lesson:** I nearly closed this off a truncated background log that was missing its header. The clean
+full capture is what confirmed `0` was real and sent me to the code. **Never conclude from a partial log.**
