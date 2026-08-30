@@ -106,7 +106,25 @@ Apply in filename (timestamp) order. Runner used on staging:
 
 ## Migrations (chronological = apply order)
 
-> ### ✅ GM BLOCK IS FULLY LIVE ON PROD — DO **NOT** REPLAY (reconciled 2026-08-28/29)
+> 
+### ✅ APPLIED TO PROD 2026-08-30 — `team_season_stats` (3 migrations, DEPENDENCY order)
+Trevor: "Make this the first step on prod." Applied over the direct pg session, in DEPENDENCY order (NOT timestamp order):
+- [x] `20260819000000_team_season_stats.sql` — CREATE TABLE
+- [x] `20260821010000_team_season_stats_war_columns.sql` — ALTER add 10 WAR/RA9 cols
+- [x] `20260819010000_refresh_team_season_stats.sql` — CREATE FUNCTION
+⚠ **THE FILENAME TIMESTAMPS SORT WRONG.** `supabase db push` would apply fn (`...19010000`) BEFORE the ALTER
+(`...21010000`). The function's first statement is `DELETE FROM team_season_stats WHERE season = p_season`, so
+fn-before-ALTER empties the season then ABORTS on `hitter_war_total does not exist`. **Always apply these three by
+DEPENDENCY, never by timestamp.**
+VERIFIED on prod: table present, **127 columns**, **10/10** WAR/RA9 cols (`hitter_war_reg/total`, `rotation_pwar_reg/total`,
+`bullpen_pwar_reg/total`, `ra9_reg/total`, `fip_ra9_reg/total`), function present (2 args), **0 rows — correct, Phase F
+populates it**. Creating the function does NOT run it, so no data was touched.
+UNBLOCKS: **F44** `refresh_team_season_stats(2026)` and **G46** edge-fn deploy (`process-precompute-jobs` reads this
+table at `index.ts:1095,1419` and would throw mid-precompute without it).
+NOTE: staging has 128 cols vs prod's 127 — the extra is `preseason_proj_total_war`, which has no committed migration and
+is filled by a precompute, not DDL. Left out deliberately; expected to close during E/F.
+
+### ✅ GM BLOCK IS FULLY LIVE ON PROD — DO **NOT** REPLAY (reconciled 2026-08-28/29)
 > Every `20260705…`–`20260716…` GM migration below was applied OUT OF BAND and is **populated with live coach data on
 > prod** (gm_recruits 56 · gm_activity 114 · gm_allocation + gm_allocation_source 6+6 · gm_contract 4 · all 4
 > vendor-unification slices applied and filled). They are marked `[x]` so nobody "catches up the pending migrations" —
