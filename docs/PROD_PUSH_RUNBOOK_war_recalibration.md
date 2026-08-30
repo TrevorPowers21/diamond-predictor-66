@@ -954,3 +954,91 @@ BACKUP ✅ `_confstats_backup` (162 rows) + `_c28_before`.
 field off the report object. Harmless, but a reminder of the standing rule: **verify in the database, never from the
 log line.** (Fix the field name if this runner is reused.)
 ⬜ **STAGING still has these at 0/30** — run the same command there (without `--prod`) when catching staging up.
+
+---
+# 🗺️ PHASE D (dWAR / bsrWAR) — INVESTIGATION + PLAN (2026-08-30). Read before running anything.
+Phase D is **entirely a season-2026 (descriptive) operation** and is **INDEPENDENT of Phases C, E and F** — D31/D32
+take their constants from LOCAL JSON fixtures (`RPW 13.1`, E2T, replacement RA9, wOBA weights), NOT from `model_config`
+/ `ncaa_averages` / `Conference Stats`. Nothing Phase C produced is an input here. It can run now.
+
+## 🛑 THE ONE HARD BLOCKER — `team_war_snapshots.team_drs` DOES NOT EXIST ON PROD
+`populate_descriptive_war.mjs:76` reads `team_war_snapshots(source_team_id, team_drs)`; the error branch at `:65` is
+`process.exit(1)`. **D31 dies before writing a single row** (no partial-write risk, but it will not run).
+**THE FIX ALREADY EXISTS AND IS NOT A MIGRATION:** `scripts/sql/team_drs_store.sql` — it lives in `scripts/sql/`, NOT in
+`supabase/migrations/`, which is exactly why staging got it (2026-08-09) and prod never did. `PROD_MIGRATIONS_TODO.md:234`
+records it as "APPLIED STAGING … PROD pending."
+**VERIFIED it lands cleanly on prod:** 308 hardcoded `(source_team_id, drs)` values, **sum = −0.007** (correctly centered) ·
+**308/308 match prod `team_war_snapshots` season 2026** (prod has 466 rows; the 158 non-D1 correctly stay NULL) ·
+**5,375/5,375** prod D1 pitchers with IP>0 resolve `TeamID → Teams Table.source_id → team_drs` (full coverage, zero
+fallthrough to `drs_behind = 0`). `:2` is `add column if not exists` → idempotent.
+⚠ **DO NOT source these values from staging** — staging's `team_war_snapshots.team_drs` is now **0/308 non-null** (the
+table was rebuilt after the 2026-08-09 populate). `scripts/sql/team_drs_store.sql` is the ONLY surviving source of truth.
+
+## ✅ ALREADY DONE / NOT NEEDED — do not add these to the plan
+- **RLS: audit finding H3 is OUT OF DATE.** `relrowsecurity = true` with **0 policies** on `player_season_defense` AND
+  `player_season_baserunning`, on **BOTH** envs = **deny-all** to anon/authenticated. The broad table grants are inert
+  because RLS gates first. `service_role` bypasses RLS so the D30 loader is unaffected. **No RLS work to do.**
+- **D30's data is already on prod** at the current engine version: `player_season_defense` **13,454 rows** (9,268 players,
+  `drs-engine-0.11.0`, zero NULLs in drs_floor/total/ceiling; 4,343 are position='P', excluded from d_war by design) ·
+  `player_season_baserunning` **10,432 rows** (`drs-engine-0.6.0`). Prod has 24 MORE baserunning rows than staging
+  (prod `players` 31,467 vs staging 15,561 resolves better). **D30 is a no-op re-run — dry-run to confirm, then skip.**
+- **All 23 Master target columns EXIST on prod** (`woba, wraa, desc_owar, d_war, bsr_war, total_desc_war` + `_reg`
+  variants; `desc_ra9, desc_fip_ra9, drs_behind, desc_pwar, total_desc_war` + `_reg`). **No Master DDL needed.** All are
+  currently 0-populated on prod — that is what Phase D fills.
+- All input CSVs/JSON exist on this machine. ⚠ **They are NOT in git** (`scripts/drs/.gitignore` ignores `output/`;
+  `docs/drs-reference/.gitignore` ignores `*.csv`) — **Phase D can only be run from this machine.**
+- Run from the **repo root** (`node scripts/drs/populate_descriptive_war.mjs`), never `cd scripts/drs` — the scripts mix
+  `output/…`, `scripts/drs/output/…` and `docs/drs-reference/…` relative paths.
+
+## ⚠ FIX BEFORE RUNNING
+1. **D31 sort key is under-specified.** `populate_descriptive_war.mjs:62` maps `player_season_defense → "player_id"`, but
+   `player_id` is NOT unique there (**9,268 distinct over 13,454 rows**) so ties can shuffle across the 14 page
+   boundaries. Real PK is `(player_id, season, position)`. Mirror `src/lib/computeNcaaAverages.ts:184-185` exactly.
+   (The 2026-08-30 fix got the hard-error half right — neither table has an `id` column — but left the tie half open.)
+   Impact is second-order: a handful of wrong `d_war` values, not a hard failure.
+2. **🛑 KILL `scripts/load-drs-wsb-prod.ts`** — a STALE DUPLICATE of the loader that never received commit `af89611`'s
+   ordered-pagination fix (`:38` is still bare `.range()`), has **no `--dry-run`**, and is named for prod. It sits one
+   tab-completion from the correct script. Delete it or reduce it to a shim.
+
+## ▶️ ORDERED SEQUENCE
+```
+D29b (NEW)  PASTE scripts/sql/team_drs_store.sql in the Supabase SQL editor. ⛔ never `--linked`
+            (config.toml still names a third ref kfkuhdmpchxyffmnowgj). Idempotent.
+            GATE: select count(*) filter (where team_drs is not null), round(sum(team_drs)::numeric,2)
+                  from team_war_snapshots where season=2026;   EXPECT 308 and ~-0.01
+            Then tick PROD_MIGRATIONS_TODO.md:234.
+D30         npx tsx scripts/load-drs-wsb-staging.ts --prod --dry-run
+            EXPECT "13454 would upsert, 11 unresolved" / "10432 would upsert, 30 unresolved" → then SKIP the apply.
+            ⛔ NEVER scripts/load-drs-wsb-prod.ts
+D31         node scripts/drs/populate_descriptive_war.mjs --prod          (dry-run first, from repo root)
+            GATE vs staging (2026 D1): desc_owar mean 0.3456 · d_war mean 0.0103 · bsr_war mean 0.0000 ·
+            total_desc_war mean 0.3559 · HITTERS ~5,340 · PITCHERS ~5,375.
+            ★ Confirm `drs_behind` is NOT all-zero in the SPOT block — all-zero means D29b did not take.
+            then: node scripts/drs/populate_descriptive_war.mjs --prod --commit
+            ⚠ ~10,715 individual PostgREST UPDATEs at pool 24 (:151-163), several minutes, NO transaction.
+              A mid-run failure leaves a partial write; re-running is safe (pure recompute keyed by source_player_id+Season).
+D32         node scripts/drs/populate_descriptive_war_reg.mjs --prod      (dry-run, then --commit)
+            ★★ HARD-ORDER: MUST follow D31's commit. It reads `Pitching Master.drs_behind` (:79) and `num(NULL) → 0`,
+               so running it early produces WRONG desc_ra9_reg / desc_pwar_reg with **NO error**. Verify
+               drs_behind = 5,375/5,375 non-null on prod FIRST.
+            GATE: staging has 5,322/5,343 hitter _reg and 5,372/5,377 pitcher _reg — the ~20 shortfall is players absent
+            from hitter_accrued.csv, expected.
+D33         ⛔ SKIP. CSV-only output (`:36` writes team_drs.csv), no DB write anywhere, and `:13` hardcodes
+            `./.env.local`. D29b already supplies the values it would derive. If ever run it must be LAST (it reads the
+            Masters that D31/D32 write) — the checklist ordering that puts it before D30/D31 is WRONG.
+D34         VERIFY on prod, 2026, division='D1':
+            d_war / bsr_war / desc_owar / total_desc_war = 5,340 non-null each ·
+            desc_pwar / desc_ra9 / drs_behind = 5,375 each · avg(d_war) ≈ 0.010 · avg(bsr_war) ≈ 0.000 ·
+            avg(desc_owar) ≈ 0.346 · max|total_desc_war − (desc_owar+d_war+bsr_war)| ≤ 0.002 ·
+            drs_behind range ≈ −5.24 … 6.48 with ~11 exact zeros.
+```
+
+## 📄 DOC CORRECTIONS FROM THIS INVESTIGATION
+- **F39 is described wrongly in the runbook.** `refresh_composite_war()` on prod (read via `pg_get_functiondef`) updates
+  **`player_predictions`** (`d_war`, `bsr_war`, `total_hitter_war`) — **NOT the Masters**. So it does NOT overlap D31's
+  Master writes, and the accidental 2026-08-30 invocation left `Hitter Master.d_war` at 0/5,340 (confirmed).
+- **`regular_season_pa` / `regular_season_ip` are 0-populated on prod** (staging 5,339/5,343 and 5,374/5,377). NOT a
+  Phase D blocker — D32 selects but never reads them (its reg counts come from CSVs). Producer is
+  `scripts/lock-season-cli.ts` / `src/lib/lockRegularSeason.ts` ("Lock Regular Season 2026"). Will bite a later phase.
+- **`team_season_stats` is 0 rows on prod** (staging 308 for 2026). Filled in Phase F by `refresh_team_season_stats(2026)`,
+  whose step 6 carries `team_drs` across from `team_war_snapshots` — so D29b also unblocks that later carry.
