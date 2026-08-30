@@ -28,8 +28,9 @@ Two different pitch populations → the same numbers. That is **independent repl
 
 ---
 ## ▶️ NEXT ACTIONS, IN ORDER (prod)
-1. **C24** `backfill_trackman_pitches_pitching_master.ts --apply` — `trackman_pitches` is **0/5,375** on prod (expected;
-   C24 is its producer). Ordered-pagination fix already applied.
+1. ~~**C24** `backfill_trackman_pitches_pitching_master.ts`~~ ✅ **DONE 2026-08-30** — patched to be PITCH_LOG-FIRST for
+   D1 with a JUCO legacy fallback (the legacy source undercounted by ~12.1 pitches/pitcher and agreed with pitch_log
+   for only 11.9% of pitchers). Applied 5,618 rows. Gate: D1 5,375/5,375 · NJCAA_D1 2,695/2,695 · D2 1/1.
 2. **C27 `computeNcaaAverages` — BEFORE C26.** ⚠ `computeAndStoreScores` reads `ncaa_averages` and falls back to
    HARDCODED defaults **silently** when a field is missing. Wrong order = silently wrong power ratings.
 3. **C26** `computeAndStoreScores` (propagate=false).
