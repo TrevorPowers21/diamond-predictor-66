@@ -477,3 +477,37 @@ filtered to a version string that matched 0 rows while appearing to succeed.
 4. **Verify FRESHNESS, not row count** — a failed step can leave stale rows that a count check passes.
 5. If a value is STILL empty after its producer ran, that is a SEPARATE BUG. Stop and diagnose; do NOT proceed to the
    next phase assuming it fills later.
+
+---
+# 🛑 STEP 5 / C25 `derive_masters_from_pitchlog.ts` — READ BEFORE `--apply` (2026-08-30)
+**This script had NO gate on new-row creation.** `newHitterRows`/`newPitcherRows` were spread into the SAME upsert as
+the patches, so `--apply` silently INSERTED invented Master rows and there was no way to take the updates without the
+inserts. **FIXED 2026-08-30: new-row creation is now opt-in via `--create-new`, default OFF.**
+
+**WHY inserting them is wrong:** the Masters are the **TruMedia season-stat source of truth**. This script only marries
+pitch-log derivations onto EXISTING rows — it explicitly never writes `ERA, IP, G, GS, Role`. A row built from
+pitch_log alone is a **HALF-POPULATED player** that downstream treats as real with missing stats. And the candidates
+are exactly the pitchers present in pitch_log but ABSENT from the Master — identity-resolution gaps and non-TruMedia
+teams — i.e. the rows you least want silently materialized.
+
+## HOW TO RUN IT
+```
+# review first — dry run is the DEFAULT (no flag)
+npx tsx --env-file .env.local scripts/derive_masters_from_pitchlog.ts
+# apply patches to EXISTING rows only (new rows skipped + counted in the output)
+npx tsx --env-file .env.local scripts/derive_masters_from_pitchlog.ts --apply
+# ONLY if the new-row list has been reviewed and each row is genuinely wanted:
+#   ... --apply --create-new
+```
+## MANDATORY BEFORE `--apply` ON EITHER ENV
+1. **BACK UP BOTH MASTERS FIRST** — there is no other backup and this writes the season-stat tables.
+   Staging snapshots taken 2026-08-30: `_hm_prestep5_backup` (30,027 rows) · `_pm_prestep5_backup` (29,239), each a
+   full copy indexed on `(source_player_id, "Season")`. **Do the equivalent on PROD before C25.**
+2. **Read the diff, not the headline count.** The dry run reports "N would change", but the per-player samples show
+   many IDENTICAL before/after values (`9.42/9.42`, `4.81/4.81`) — i.e. no-op rewrites inflate that number. Confirm
+   WHICH FIELDS actually move and by how much before accepting it.
+3. **Hitters vs pitchers is a useful control.** An earlier dry run showed **0 hitters / 4,675 pitchers** changing —
+   consistent with this being Stuff+-driven (the chain just recomputed it) rather than something broader going wrong.
+   If HITTERS suddenly start changing too, stop and find out why.
+4. **PHASE-GATE after it runs:** Master `stuff_plus` non-null count should rise toward staging's (prod was 5,251 vs
+   staging 6,011). "Column exists" ≠ "column populated" — verify the VALUE landed.
