@@ -1101,3 +1101,82 @@ D34         VERIFY on prod, 2026, division='D1':
   `scripts/lock-season-cli.ts` / `src/lib/lockRegularSeason.ts` ("Lock Regular Season 2026"). Will bite a later phase.
 - **`team_season_stats` is 0 rows on prod** (staging 308 for 2026). Filled in Phase F by `refresh_team_season_stats(2026)`,
   whose step 6 carries `team_drs` across from `team_war_snapshots` — so D29b also unblocks that later carry.
+
+---
+# 📌 TWO DECISIONS LOCKED (Trevor, 2026-08-30)
+## 1. STAGING CATCH-UP HAPPENS **AFTER** THE PROD PUSH — and it will be run **THROUGH TRACK B**
+Staging is missing C24 / C26 / C27 / C28 / C28b / C29. It is **deliberately** not being caught up first.
+**Consequence to hold onto:** for the columns prod has and staging does not (`pitcher_ev90`, `pitcher_exit_velo`,
+`pitcher_in_zone_pct`, `pitcher_iz_whiff_pct`, and the conference `*_plus` set), **staging is NOT a valid reference**.
+Do not treat a prod↔staging mismatch as a prod defect without first checking which environment is behind.
+★ **The catch-up is not a manual re-run of six scripts — it is the FIRST REAL EXERCISE OF TRACK B.**
+## 2. `rg_factor_seasonal` **MUST** BE FILLED (not deferred) → E2 is a required step. See the E2 block.
+## ★ WHY TRACK B IS THE POINT — the target operating model
+**Track B is ONE edge function that runs ONCE PER DAY and performs the entire upload + store chain.** Everything in
+this push that is a hand-run script becomes a stage inside that single daily run. That is why **every finding, lane,
+order dependency, silent fallback and gate in these documents gets logged into
+`docs/PIPELINE_pitch_log_to_projections.md` in full detail** — that document is the SPECIFICATION Track B is built
+from, and the prod push is the dress rehearsal for it.
+**Every defect found in this push is a requirement for Track B**, because a daily automated run has no human to
+notice that a column is "populated but stale":
+- the value/input LANE SPLIT (pitch_log vs legacy PSP-I) — 3 occurrences, all invisible to count checks
+- ORDER dependencies where a stale input yields wrong numbers with **NO error**: C27→C26 · C29→C28 · D31→D32 ·
+  E35→precomputes · **E2→`derive_conf_opr_htp`** (found 2026-08-30)
+- SILENT FALLBACKS: hardcoded defaults for missing baselines, `num(NULL) → 0`, a version filter that matches 0 rows
+  and exits 0
+- destructive delete+reinsert stages that need a backup and a **row-level** (not count-level) gate
+**Rule for Track B: a stage is not "done" because it ran. It is done when a stage-specific VALUE gate passes.**
+
+---
+# 🅴2 PARK FACTORS SEASONAL — DECISION: **MUST BE FILLED** (Trevor, 2026-08-30). And it FORCES A C28 RE-RUN.
+`rg_factor_seasonal` is **0/309 on prod** vs 308/308 on staging. Trevor: **"rg factor seasonal 100% has to be filled."**
+So E2 is a REQUIRED step, not the deferral the docs assumed. Investigating it turned up **four** things, one of which
+is an ordering dependency that no doc records.
+
+## 🔴 1. THE ORDERING BOMB — **E2 INVALIDATES C28's OPR/HTP OUTPUTS. `derive_conf_opr_htp` MUST BE RE-RUN AFTER E2.**
+`backfill_park_factors_seasonal.ts:274` writes the **MAIN** factor columns too, not just `*_seasonal`:
+`avg_factor, obp_factor, iso_factor, rg_factor, whip_factor, hr9_factor` + the lhb/rhb set. For the CURRENT season it
+sets them to the **3-YEAR ROLLING** mean (2024/25/26), not the single season (`:267` `isCur ? rolling : sf`).
+**`derive_conf_opr_htp.ts:10` reads `"Park Factors".rg_factor`** — and C28 step 3 ALREADY RAN on prod against the
+*current* `rg_factor`, producing `run_env_factor` **30/30 (avg 101.879)** and `hitter_talent_plus` **30/30**.
+E2 changes `rg_factor` underneath them ⇒ **both silently go stale**, and `HTP = OPR + 1.25·(Stuff+−100) + 0.75·park`
+is the **competition-translation lever** — the exact same blast radius as the Conference Stuff+ catch.
+★ **THEREFORE: after E2 applies, RE-RUN `derive_conf_opr_htp.ts --apply --prod` (C28 step 3).** It is idempotent and
+cheap. A count check will show 30/30 and PASS either way — this is the **fourth** "populated but not fresh" trap of
+this push. Log the BEFORE/AFTER `run_env_factor` values and require them to CHANGE.
+(⚠ If E2 is instead run BEFORE C28 in some future ordering, C28 step 3 simply consumes the new value and no re-run is
+needed. The rule is: **`derive_conf_opr_htp` must be the LAST thing to touch park-derived conference columns.**)
+
+## 🔴 2. IT IS A DESTRUCTIVE DELETE + REINSERT OF THREE WHOLE SEASONS — not an upsert
+`:285-288` `await sb.from("Park Factors").delete().eq("season", y)` for **each of 2024, 2025, 2026**, THEN inserts
+(`:291`). There is **no upsert and no transaction** — a failure between the delete and the insert leaves Park Factors
+**EMPTY for those seasons**, which takes conference HTP and every park-adjusted projection with it.
+**PROD TODAY:** `2025 → 306 rows` · `2026 → 309 rows` · **no 2024 rows at all** (E2 CREATES the 2024 season on prod).
+✅ **`_parkfactors_backup` exists on prod = 615 rows = exactly 306 + 309.** Restore point confirmed complete.
+⚠ **ROW-COUNT GATE:** the reinsert only writes teams present in the CSVs. Prod 2026 has **309** rows and staging has
+**308** — so at least one prod team may NOT come back. **Diff the team list BEFORE/AFTER and account for every dropped
+row by name** before accepting the run. Do not gate on "it inserted lots of rows."
+
+## 🔴 3. HARDCODED TO STAGING — `--env-file` CANNOT REDIRECT IT (same defect class as the old F42)
+`:37` `const url = "https://slrxowawbijbjrkozqlj.supabase.co";` — a **literal staging URL** — and `:38-39` reads the
+**literal string `.env.local`** for the service key. `grep -c 'trbvxuoliwrfowibatkm'` = **0**, `grep -c -- '--prod'` = **0**.
+Running it "on prod" today would **silently rewrite STAGING's Park Factors and report success.**
+**FIX BEFORE RUNNING:** make it env-driven (`process.env` first, env-file fallback) + the standard double-keyed guard,
+copying the pattern now in `scripts/resync-build-snapshot-markets.ts`. Verify BOTH refuse paths.
+
+## ⚠ 4. MACHINE-LOCAL FIXTURES — like Phase D, this can only be run from this machine
+`:33` `ROOT = "/Users/danielleogonowski/RSTR IQ Data/park-factors"` — outside the repo, not in git.
+✅ **VERIFIED PRESENT: `2024/`, `2025/`, `2026/`, 6 CSVs each** (combined/lhb/rhb × hitter/pitcher).
+
+## ▶️ E2 ORDERED SEQUENCE
+```
+E2a  Add the double-keyed guard + env-driven URL/key to backfill_park_factors_seasonal.ts. Verify both refuse paths.
+E2b  DRY RUN on prod. It prints "2026 rolling vs existing" mean|Δ| / max|Δ| / worst-8 per metric (:247-254).
+     ★ READ THAT DIFF — it is telling you exactly how much C28's run_env_factor is about to move.
+     Record the 2026 team list; diff vs the 309 prod rows and name every team that would not be reinserted.
+E2c  Confirm _parkfactors_backup = 615 (done ✅). APPLY.
+     GATE: rg_factor_seasonal 309/309 (was 0/309) · rg_factor still 309/309 · 2024 season now present ·
+           no team silently dropped.
+E2d  ★ RE-RUN `derive_conf_opr_htp.ts --apply --prod` — C28 step 3. REQUIRED, see §1.
+     GATE: run_env_factor CHANGES from avg 101.879 (30/30 before and after — the count proves nothing).
+```
