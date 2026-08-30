@@ -1159,3 +1159,29 @@ on prod, 162 rows / 42 for 2026) as the rollback.
 ## TRACK B REQUIREMENT
 Track B's conference-stats stage must compute Conference Stuff+ from the **pitch_log lane via Pitching Master**, never
 from `pitcher_stuff_plus_inputs`, and must keep the D1 / JUCO fallback split intact.
+
+---
+# ✅ G-GATE EXECUTED AND PASSED (staging, 2026-08-30) — deferred since 2026-08-21, now done
+Method: snapshot `"Conference Stats"` 2026 → `_ggate_before`, re-run `scripts/sql/conf_stats_bucketA_assembly.sql`,
+then diff EVERY numeric column joined on `(conference_id, season)`.
+**RESULT: 77 numeric columns compared · 0 changed · worst absolute diff 0.000000.**
+✅ **The bucketA assembly is IDEMPOTENT** — re-running it does not drift values. Safe to run on prod.
+(Reference table `_confstats_backup_preassembly` exists on staging: 162 rows, 42 for 2026.)
+
+# 📊 PROD "Conference Stats" 2026 (D1, 30 rows) — WHAT IS FILLED vs WHAT C28 FILLS
+**FILLED (66 cols):** AVG · OBP · ISO · ERA · FIP · WHIP · K9 · BB9 · HR9 · `Overall_Power_Rating` · `WRC_plus` ·
+`ba_plus` · `ba_power_rating` · `Stuff_plus` · … (all inputs C28 needs are present)
+**EMPTY (13 cols) — exactly C28's outputs, so there is NO partial state:**
+`era_plus` `fip_plus` `k9_plus` `bb9_plus` `hr9_plus` `whip_plus` ← `compute_conf_pitcher_env_plus`
+`hitter_talent_plus` `run_env_factor` ← `derive_conf_opr_htp`
+`OPS` `SLG` `slg_plus` `pitcher_ev_score` `pitcher_iz_score` ← bucketA assembly
+
+## 🛑 STALE-VALUE CATCH — `Stuff_plus` IS 30/30 FILLED ON PROD **BUT IT IS PRE-v2**
+The Conference Stuff+ lane fix was applied and verified on **STAGING only**. Prod's `"Conference Stats".Stuff_plus`
+still holds the value computed BEFORE the v2 chain — a fully-populated column that PASSES any count check while being
+stale. Third occurrence today of "looks populated, isn't fresh".
+→ **C28 ON PROD NEEDS ONE MORE STEP THAN THE DOCS LIST:** run the FIXED `conferenceStuffPlusV2`
+(`Σ(Pitching Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)`) to refresh `Stuff_plus` from the pitch_log
+lane, ALONGSIDE the two producers that fill the 13 empty columns. Otherwise the competition-translation lever stays
+stale while everything around it is rebuilt.
+→ Staging reference after the fix: D1 30 conf avg **99.16** (92.9–107.3) · NJCAA_D1 10 avg **96.00** · D2 2 avg 93.00.
