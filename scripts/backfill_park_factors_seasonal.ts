@@ -23,8 +23,21 @@
  * whip_factor = obp-based, hr9_factor = iso-based (mirrors import-park-factors-2026.ts).
  *
  * Usage:
- *   npx tsx scripts/backfill_park_factors_seasonal.ts           # DRY RUN (prints, no writes)
- *   npx tsx scripts/backfill_park_factors_seasonal.ts --apply   # writes staging
+ *   staging: npx tsx --env-file=.env.local            scripts/backfill_park_factors_seasonal.ts [--apply]
+ *   prod:    npx tsx --env-file=.env.production.local scripts/backfill_park_factors_seasonal.ts --prod [--apply]
+ *
+ * ★ ENV FIX + GUARD ADDED 2026-08-30. This script was HARDCODED to staging — a literal staging URL and a literal
+ *   `.env.local` read for the key — so `--env-file` could NOT redirect it and running it "on prod" would have
+ *   silently rewritten STAGING and reported success. Same defect class as the old resync-build-snapshot-markets.
+ *
+ * 🛑 THIS IS A DESTRUCTIVE DELETE + REINSERT of seasons 2024/2025/2026 (see the write block) with NO transaction:
+ *   a failure between the delete and the insert leaves "Park Factors" EMPTY for those seasons, which takes conference
+ *   HTP and every park-adjusted projection with it. Back up first (`_parkfactors_backup`, 615 rows on prod = 306+309).
+ * 🛑 IT REWRITES THE **MAIN** FACTOR COLUMNS TOO, not just `*_seasonal` (current season → 3-yr rolling).
+ *   `derive_conf_opr_htp.ts:10` reads `"Park Factors".rg_factor`, so after this runs you MUST RE-RUN
+ *   `derive_conf_opr_htp --apply --prod` or `run_env_factor` / `hitter_talent_plus` silently go stale at 30/30.
+ * 🛑 GATE ON A TEAM-BY-TEAM DIFF, NOT A ROW COUNT: the reinsert only writes teams present in the CSVs, and prod 2026
+ *   has 309 rows vs staging's 308 — name every team that would not come back before accepting the run.
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, readdirSync } from "node:fs";
@@ -34,9 +47,19 @@ const ROOT = "/Users/danielleogonowski/RSTR IQ Data/park-factors";
 const SEASONS = [2024, 2025, 2026] as const;
 const CURRENT = 2026;
 
-const url = "https://slrxowawbijbjrkozqlj.supabase.co";
-const key = readFileSync(".env.local", "utf-8")
-  .split("\n").find(l => l.startsWith("SUPABASE_SERVICE_ROLE_KEY="))?.split("=", 2)[1] ?? "";
+// ── env-driven (process.env first, .env.local fallback) + double-keyed guard ──
+const envFileVal = (f: string, k: string) => {
+  try { return readFileSync(f, "utf-8").split("\n").find(l => l.startsWith(`${k}=`))?.split("=", 2)[1]?.trim() ?? ""; }
+  catch { return ""; }
+};
+const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || envFileVal(".env.local", "VITE_SUPABASE_URL");
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY || envFileVal(".env.local", "SUPABASE_SERVICE_ROLE_KEY");
+if (!url || !key) { console.error("✗ Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY."); process.exit(1); }
+const isProd = /trbvxuoliwrfowibatkm/.test(url);
+const prodFlag = process.argv.includes("--prod");
+if (isProd && !prodFlag) { console.error("✗ URL is PROD but --prod was not passed — refusing."); process.exit(1); }
+if (!isProd && prodFlag) { console.error("✗ --prod passed but URL is not prod — refusing."); process.exit(1); }
+console.log(`[env] ${isProd ? "PROD" : "STAGING/other"}  mode=${APPLY ? "APPLY (destructive delete+reinsert)" : "DRY-RUN"}`);
 const sb = createClient(url, key);
 
 type Cohort = "combined" | "lhb" | "rhb";

@@ -775,3 +775,27 @@ Part 1 (remaining steps) found **2 structural defects**. Part 2 (completed steps
 gate** — the verification query itself was wrong, which is the most expensive kind of error because it makes correct
 work *look* broken and broken work *look* fine.
 → **Audit the GATES with the same rigour as the steps.** A gate that cannot fail, or cannot pass, is not a gate.
+
+---
+# ✅ STEP 0 COMPLETE (2026-08-30) — five pre-flight code fixes, all refuse paths VERIFIED. No DB writes.
+| # | fix | verification |
+|---|---|---|
+| 1 | **`run-twp-recompute.ts` (E35) — double-keyed guard ADDED.** It had NONE (`grep -c` = 0 both ways) and writes `players.is_twp` + primary `position`, the identity table every precompute keys off. | `✗ URL is PROD but --prod was not passed — refusing.` ✅ · `✗ --prod passed but URL is not prod — refusing.` ✅ |
+| 2 | **`backfill_park_factors_seasonal.ts` (E2) — env-driven + guard.** Was HARDCODED to a literal staging URL and a literal `.env.local` key read, so `--env-file` could not redirect it and a "prod run" would have silently rewritten STAGING. Header now documents the destructive delete+reinsert, the `rg_factor` rewrite that forces a `derive_conf_opr_htp` re-run, and the team-by-team (not row-count) gate. | both refuse paths ✅ · staging allow path ✅ `[env] STAGING/other mode=DRY-RUN` |
+| 3 | **`populate_descriptive_war.mjs` (D31) — sort key now the FULL PK.** `player_id` alone is not unique on `player_season_defense` (9,268 distinct / 13,454 rows over 14 pages ⇒ ~4,186 rows in ambiguous order). Now `(player_id, season, position)` and `(player_id, season)`, mirroring `computeNcaaAverages` `PAGINATION_KEYS`. | parses + runs ✅ |
+| 4 | **`populate_descriptive_war.mjs` — write errors now COUNTED and FATAL.** They were printed but not counted inside a ~10,715-update loop that then **exited 0**, so a partial write looked identical to a clean run. Now per-table `written/failed` summary + `exit 1`. | ✅ |
+| 5 | **`scripts/load-drs-wsb-prod.ts` DELETED.** Stale duplicate: never got the ordered-pagination fix (`:38` bare `.range()`), no `--dry-run`, prod-named, one tab-completion from the correct script. | removed ✅ |
+
+**D31 DRY-RUN ON PROD (read-only) — CONFIRMS THE BLOCKER IS REAL AND SAFE:**
+```
+target: 🔴 PROD [dry-run — pass --commit to write]
+constants: RPW 13.1 E2T 1.1373 replRA9 8.83 | wOBA lg 0.3782 scale 0.947 repl 1.62/600
+team_war_snapshots column team_war_snapshots.team_drs does not exist
+```
+✅ constants correct · ✅ exits **before any write** · ✅ the only thing standing between us and Phase D is **D29b**.
+
+## ▶️ NEXT ACTION — **D29b NEEDS TREVOR'S EXPLICIT "prod, now?"** (it is DDL + a data write on prod)
+PASTE `scripts/sql/team_drs_store.sql` in the Supabase SQL editor. ⛔ **never `--linked`** (config.toml names a third
+ref `kfkuhdmpchxyffmnowgj`). Idempotent (`:2` is `add column if not exists`).
+**GATE:** `select count(*) filter (where team_drs is not null), round(sum(team_drs)::numeric,2) from
+team_war_snapshots where season = 2026;` → **EXPECT `308` and `~-0.01`.** Then tick `PROD_MIGRATIONS_TODO.md:234`.

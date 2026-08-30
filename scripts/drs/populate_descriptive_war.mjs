@@ -59,10 +59,17 @@ function sheet(path, key = "playerId") {
 // player_season_baserunning have NO "id" column (they are keyed player_id/source_player_id), so ordering them by
 // "id" would HARD-ERROR. Ordering is still required — unordered .range() silently drops/dupes rows and leaves
 // desc d_war / bsr_war NULL, which propagates into the projection engine.
-const ORDER_KEY = { "player_season_defense": "player_id", "player_season_baserunning": "player_id" };
-const okey = (t) => ORDER_KEY[t] || "id";
-async function all(t, cols, season = true) { let a = []; for (let f = 0; ; f += 1000) { let q = sb.from(t).select(cols).order(okey(t), { ascending: true }).range(f, f + 999); if (season) q = q.eq("Season", SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
-async function allNoSeason(t, cols, seasonCol) { let a = []; for (let f = 0; ; f += 1000) { let q = sb.from(t).select(cols).order(okey(t), { ascending: true }).range(f, f + 999); if (seasonCol) q = q.eq(seasonCol, SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
+// ★ FIX 2026-08-30 (part 2): a SINGLE key is not enough — it must be the FULL primary key or ties can still shuffle
+// across page boundaries. player_season_defense has 9,268 distinct player_id over 13,454 rows (14 pages), so ordering
+// by player_id alone leaves ~4,186 rows in ambiguous order. Mirrors PAGINATION_KEYS in src/lib/computeNcaaAverages.ts.
+const ORDER_KEYS = {
+  "player_season_defense": ["player_id", "season", "position"],
+  "player_season_baserunning": ["player_id", "season"],
+};
+const okeys = (t) => ORDER_KEYS[t] || ["id"];
+const ordered = (q, t) => okeys(t).reduce((acc, k) => acc.order(k, { ascending: true }), q);
+async function all(t, cols, season = true) { let a = []; for (let f = 0; ; f += 1000) { let q = ordered(sb.from(t).select(cols), t).range(f, f + 999); if (season) q = q.eq("Season", SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
+async function allNoSeason(t, cols, seasonCol) { let a = []; for (let f = 0; ; f += 1000) { let q = ordered(sb.from(t).select(cols), t).range(f, f + 999); if (seasonCol) q = q.eq(seasonCol, SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
 
 // ── load sources ─────────────────────────────────────────────────────────────
 const hitSheet = sheet("docs/drs-reference/Full Season Hitting Master Stats.csv");
@@ -148,20 +155,30 @@ console.log("  tiny-IP tail (worst desc_ra9):", JSON.stringify(tail));
 if (!COMMIT) { console.log("\n(dry run — pass --commit to write)"); process.exit(0); }
 
 // ── write (concurrency-limited UPDATEs by source_player_id) ───────────────────
+// ★ FIX 2026-08-30: errors were printed but NOT COUNTED and NOT FATAL, inside a ~10,715-update loop that then
+// exited 0 — so a partial write looked exactly like a clean run. Now counted, summarised, and non-zero exit.
+let writeErrors = 0;
 async function writeAll(table, updates) {
-  let done = 0; const POOL = 24;
+  let done = 0, errs = 0; const POOL = 24;
   for (let i = 0; i < updates.length; i += POOL) {
     await Promise.all(updates.slice(i, i + POOL).map(async u => {
       const { source_player_id, ...cols } = u;
       const { error } = await sb.from(table).update(cols).eq("source_player_id", source_player_id).eq("Season", SEASON);
-      if (error) { console.error(table, source_player_id, error.message); }
+      if (error) { errs++; if (errs <= 10) console.error(`  ✗ ${table} ${source_player_id}: ${error.message}`); }
     }));
     done += Math.min(POOL, updates.length - i);
     if (done % 2400 === 0 || done === updates.length) process.stdout.write(`\r  ${table}: ${done}/${updates.length}`);
   }
   console.log("");
+  writeErrors += errs;
+  console.log(`  ${table}: ${updates.length - errs}/${updates.length} written, ${errs} FAILED${errs > 10 ? " (first 10 shown)" : ""}`);
 }
 console.log("\nwriting…");
 await writeAll("Hitter Master", hitUpd);
 await writeAll("Pitching Master", pitUpd);
-console.log("done.");
+if (writeErrors > 0) {
+  console.error(`\n✗ ${writeErrors} row update(s) FAILED — this is a PARTIAL WRITE. Re-run is safe (pure recompute`);
+  console.error(`  keyed by source_player_id + Season). Do NOT treat this run as complete.`);
+  process.exit(1);
+}
+console.log("done. 0 write errors.");

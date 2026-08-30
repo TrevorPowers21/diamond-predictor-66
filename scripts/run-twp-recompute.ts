@@ -4,15 +4,29 @@
  * SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY from .env.local (staging).
  *
  * Usage:
- *   npx tsx --env-file-if-exists=.env.local scripts/run-twp-recompute.ts            # DRY RUN (default)
- *   npx tsx --env-file-if-exists=.env.local scripts/run-twp-recompute.ts --apply    # WRITE
+ *   staging: npx tsx --env-file=.env.local            scripts/run-twp-recompute.ts [--apply]
+ *   prod:    npx tsx --env-file=.env.production.local scripts/run-twp-recompute.ts --prod [--apply]
  * Threshold: PA>=30 & IP>=5 (detector default; Trevor-confirmed 2026-08-25).
+ *
+ * ★ ENV GUARD ADDED 2026-08-30. This script had NO guard of any kind (`grep -c` = 0 for both the prod ref and
+ *   `--prod`), so `--env-file .env.production.local` wrote PROD with ZERO opt-in and passing `--prod` did nothing.
+ *   It is the FIRST step of Phase E and it writes `players.is_twp` + primary `position` — the identity table every
+ *   downstream precompute keys off — so an accidental prod write here corrupts every projection that follows.
+ *   Fifth instance of this defect (after _run_store_no_propagate, both C28 producers, and the market scripts).
  */
 import { recomputeTwpStatus } from "@/lib/recomputeTwpStatus";
 import { supabase } from "@/integrations/supabase/client";
 
 const APPLY = process.argv.includes("--apply");
 const PA = 30, IP = 5, SEASON = 2026;
+
+// ── double-keyed env guard: the URL and the --prod flag must AGREE ────────────
+const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+const isProd = /trbvxuoliwrfowibatkm/.test(url);
+const prodFlag = process.argv.includes("--prod");
+if (isProd && !prodFlag) { console.error("✗ URL is PROD but --prod was not passed — refusing."); process.exit(1); }
+if (!isProd && prodFlag) { console.error("✗ --prod passed but URL is not prod — refusing."); process.exit(1); }
+console.log(`[env] ${isProd ? "PROD" : "STAGING/other"}  season=${SEASON}  mode=${APPLY ? "APPLY" : "DRY-RUN"}`);
 
 // snapshot current position/is_twp by source_player_id for flip classification
 const sidMeta = new Map<string, { pos: string | null; twp: boolean; div: string | null }>();
