@@ -1407,3 +1407,52 @@ D34         VERIFY on prod, 2026, division='D1':
   `scripts/lock-season-cli.ts` / `src/lib/lockRegularSeason.ts` ("Lock Regular Season 2026"). Will bite a later phase.
 - **`team_season_stats` is 0 rows on prod** (staging 308 for 2026). Filled in Phase F by `refresh_team_season_stats(2026)`,
   whose step 6 carries `team_drs` across from `team_war_snapshots` — so D29b also unblocks that later carry.
+
+---
+# 🔁 DOC-vs-REALITY SWEEP (2026-08-30, late) — re-probed prod directly. FOUR 🛑 BLOCKERS ARE STALE, ONE IS NEW.
+Method: direct pg session against the prod ref + `grep -c` on each named script. **Verified, not asserted.**
+Every 🛑 in these docs was re-checked against the live database and the current file, because several were written
+BEFORE the fixes that resolved them and a stale blocker is as expensive as a missed one.
+
+## ✅ STALE — these 🛑 blockers are RESOLVED. Do not re-do this work.
+| doc claim | reality on 2026-08-30 |
+|---|---|
+| **F44 / step 10a: "`team_season_stats` does not exist, 3 migrations unapplied, CANNOT RUN TODAY"** | **table EXISTS + `refresh_team_season_stats` fn EXISTS** (`pg_proc` = 1). The 3 migrations were applied in DEPENDENCY order as Phase-C prereqs. Table is **0 rows** — that is F44's job, not a blocker. **F44 is RUNNABLE.** |
+| **G46: "blocked — `team_season_stats` missing"** | Same. The gate is now only "F44 has RUN and populated it", not "the table must be created". |
+| **F42: "`resync-build-snapshot-markets.ts:17` is hardcoded to `.env.local`, will silently write STAGING"** | **FIXED.** The file header now documents the old defect and it is env-driven (`process.env` first, env-file fallback) with a **double-keyed guard**. **F42's first half is runnable.** |
+| **F41: "`rebake-twp-markets.ts` / `fix-returner-twp-hitter-market.ts` have no `--prod` flag and no ref assert"** | **FIXED.** Both now `grep -c trbvxuoliwrfowibatkm` = 1 with `--prod` handling. Still invoke them directly (not npm scripts) — that half of the note stands. |
+| **D30: "`load-drs-wsb-staging.ts:53` unordered `.range()` over `players`"** | **FIXED** — `fetchAll` now takes an `orderCol` (default `id`) and orders ascending. The comment documenting why is in the file. |
+
+## 🔴 NEW BLOCKER — `scripts/run-twp-recompute.ts` (step E35) HAS NO ENV GUARD AT ALL
+`grep -c 'trbvxuoliwrfowibatkm'` = **0** and `grep -c -- '--prod'` = **0**. E35 is the **FIRST** step of Phase E and it
+**sets `is_twp` + primary `position` on `players`** — a write to the identity table that every downstream precompute
+keys off. `--env-file .env.production.local` writes PROD with **zero opt-in**, and passing `--prod` does nothing.
+This is the SAME defect already fixed in `_run_store_no_propagate.ts` (C26), both C28 producers, and the four market
+scripts — **the fifth instance of it.** ⚠ Prod `is_twp` = **137/31,467** vs staging's 253, so this step genuinely has
+work to do on prod and WILL be run. **Add the standard double-keyed guard and verify the refuse path before Phase E.**
+
+## 🔴 STILL OPEN — `backfill_park_factors_seasonal.ts` (E2) is unguarded AND staging-hardwired
+`grep -c` = **0 / 0**. Prod `"Park Factors"` 2026 = **309 rows · `rg_factor` 309/309 ✅ · `rg_factor_seasonal` 0/309 ❌**
+(staging 308/308). Confirms audit G13/H4: the producer has never run on prod. **Not a C28 blocker** (C28 reads
+`rg_factor`, which is full) — but it must be guarded + re-pointed before E2, and F44/G46 consume park-derived values.
+
+## 📊 PROD STATE PROBED DIRECTLY (2026-08-30) — the numbers Phase D/E/F start from
+```
+team_season_stats           EXISTS, 0 rows        refresh_team_season_stats()  EXISTS
+team_war_snapshots.team_drs COLUMN ABSENT  ← the Phase D hard blocker (D29b)
+"Park Factors" 2026         309 · rg_factor 309 ✅ · rg_factor_seasonal 0 ❌
+"Hitter Master"   2026 D1   5,340 · d_war 0 · desc_owar 0 · total_desc_war 0   ← Phase D fills
+"Pitching Master" 2026 D1   5,375 · drs_behind 0 · desc_pwar 0                 ← Phase D fills
+players                     31,467 · is_twp 137   (staging 253)                ← E35 fills
+customer_teams active       14  ✅ (NOT 18 — that is a staging number)
+player_predictions 2027     200,754 rows (pre-existing; Phase E regenerates)
+```
+★ **`Hitter Master.d_war` = 0/5,340 is independent CONFIRMATION that the accidental `refresh_composite_war()` did NOT
+touch the Masters** — it writes `player_predictions`. The runbook's F39 description is wrong; see the Phase D block.
+
+## 🧠 LESSON — RE-PROBE BEFORE TRUSTING A 🛑 YOU WROTE YESTERDAY
+Four blockers were already fixed and one brand-new one was sitting unflagged in the very next phase. A 🛑 records the
+state at the moment it was written; it is **not** a live indicator. **Re-run the check, then act.** The 5-question
+pre-flight (LANE · GUARD · ORDER · SILENT FALLBACK · BACKUP) has now found a real defect before **every** step it has
+been applied to — C24 (legacy lane) · C26 (no guard, lying banner) · C27 (wrong order) · C28 (no guards on either
+producer, no backup) · C28b (no runner at all) · Conference Stuff+ (legacy lane) · D31 (sort key) · **E35 (no guard)**.

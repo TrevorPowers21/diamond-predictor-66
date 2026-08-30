@@ -16,20 +16,63 @@
 >   95.1%, "~85%", and any "projected ~95.3-95.4%"**.
 > - **DECISION (Trevor, FINAL):** standardize on v2 in **BOTH** environments — **DO overwrite staging's labels.** Any
 >   "do NOT overwrite staging's labels" guidance anywhere is REVERSED and obsolete.
-> - **STAGING:** the v2 chain is RUN + VERIFIED — backup `_v2_prechain_backup` (2,579,655 rows, DO NOT DROP) ·
->   2,015,321 classified/stamped `v2-ranges-2026-08-28` (needs_review 8.1%) · `_reclass_pf` materialized (5,364
->   pitchers) · baseline armHB SIGN CHECK PASSED 18/18 · 2,015,321 scored + recentered (every type×hand bucket exactly
->   100.0) · step 4 all 48 dimensions + `populate_hitter_run_values`. **Still open on staging:** step 5
->   `derive_masters_from_pitchlog.ts` is DRY-RUN ONLY (0 hitters / 4,675 pitchers would change; never applied on ANY env).
-> - **PROD:** still on the OLD per-pitch CASE labels (`"4-Seam Fastball"`, ~2,176,888 labeled of ~2,575,996, no
->   `classification_version`, `needs_review` all null). **v2 has NEVER written to prod.** Prod's DATA is ready (100.00% of
->   `is_data=true` rows are v2-classifiable; venue corrections present and resolving).
-> - **⛔ THE ONE REMAINING PROD BLOCKER:** prod's `pitch_log_corrected` VIEW is `select pl.*` **FROZEN at 94 of 99
->   columns** and is MISSING `classification_version`, so the scorer hard-fails there. Fix =
->   `drop view pitch_log_corrected cascade; create view …`. **DDL — requires its own explicit go**, separate from the
->   data-write "prod, now?".
-> - **▶ NEXT ACTION:** rebuild that view on prod, then run the prod Stuff+ chain (reclassify → baseline → score →
->   aggregate **with `--direct`** → Masters) in ONE 4-6 h sitting, machine pinned awake.
+> - **STAGING:** v2 chain RUN + VERIFIED — backup `_v2_prechain_backup` (2,579,655, DO NOT DROP) · 2,015,321 classified
+>   `v2-ranges-2026-08-28` (needs_review 8.1%) · `_reclass_pf` (5,364) · baseline armHB SIGN CHECK 18/18 · scored +
+>   recentered · step 4 all 48 dimensions + `populate_hitter_run_values`. ⚠ **STAGING HAS SINCE DRIFTED BEHIND PROD** —
+>   it never received C24 / C26 / C27 / C28 / C28b / C29. A prod↔staging mismatch is **not** automatically a prod defect.
+> - **★ PROD — SUPERSEDED, THE WHOLE STUFF+ BLOCK IS DONE (2026-08-30).** Everything above this line that says prod is
+>   "on the OLD per-pitch CASE labels", that "v2 has NEVER written to prod", or that the `pitch_log_corrected` view is
+>   "THE ONE REMAINING PROD BLOCKER" is **OBSOLETE — do not act on it.** Actual prod state:
+>   view rebuilt 94→102 cols ✅ · **2,013,005 pitches classified + stamped `v2-ranges-2026-08-28`** · label distribution
+>   IDENTICAL to staging · sign check **18/18** · scored + recentered, **0 unscored** · **48/48** aggregations
+>   (`--direct`, 24.3 min) · Masters 4,772 P + 4,373 H, **0 new rows** · per-pitcher gate **mean 99.3 / p50 99.3 /
+>   p10 93.1 / p90 105.7 — IDENTICAL to staging**. Two different pitch populations, same numbers = independent
+>   replication. Then C24 · C27 · C26 · C29 · C28 (4 steps) · C28b all applied. **PHASE C IS COMPLETE ON PROD.**
+> - **▶ NEXT: Phase D (dWAR/bsrWAR).** Plan in `docs/HANDOFF_2026_08_30_PROD_PUSH.md`. Prod Masters are 0-populated for
+>   every `desc_*` column; the one hard blocker is the missing `team_war_snapshots.team_drs` column.
+>
+> ## 🅱️ WHAT TRACK B MUST ABSORB — the full list, with the lane and the trap for each
+> Every item below is a stage currently run as a **hand-run script**. Track B is ONE on-ingest function that runs them
+> in this order. For each: the LANE it must read, and the specific way it silently goes wrong.
+> 1. **Reclassify** — `stuffPlusClassifierV2.ts` via `reclassify_prod.ts`. Must also materialize `_reclass_pf`
+>    (primary-FB velo per pitcher) — stage 2 hard-exits without it. ⚠ ORDER: §4.5 gyro floor runs BEFORE the step-4
+>    backfill. ⚠ Stamp `classification_version`.
+> 2. **Re-derive the population baseline** — `derive_stuff_plus_pop_baseline.ts` → `pitcher_stuff_plus_ncaa`, **from
+>    pitch_log, in armHB, D1-only**. ⛔ NEVER from `pitcher_stuff_plus_inputs` (RAW hb ⇒ LHP scored backwards).
+>    MANDATORY after ANY reclassification — the gyro floor moves 6–8% of breaking-ball volume, so every mix-dependent
+>    mean/SD is invalid until regenerated. Has a hard sign check that aborts before writing.
+> 3. **Score + recenter** — `compute_pitch_log_stuff_plus.ts`. 🛑 **SILENT-CORRUPTION TRAP:** its
+>    `classification_version` filter was HARD-CODED to the v1 stamp; it is now `--class-version=`. If the filter and
+>    the stamp disagree it scores **0 rows and exits 0**. Track B must pass the version it just stamped, never a literal.
+> 4. **Aggregate (stage 3b)** — `aggregate_pitch_log_dimensions.ts`, 48 aggregations / 10 dimensions, **and it must
+>    then call `populate_hitter_run_values(season)`** for the Season Stats VALUE cluster. ⚠ validate by LOG CONTENT,
+>    not exit code — a single dimension can FAIL while the process exits 0.
+> 5. **Masters rollup** — `derive_masters_from_pitchlog.ts`. ⚠ new-row creation is gated behind `--create-new`
+>    (default OFF) — Track B must NEVER create Master rows implicitly.
+> 6. **`trackman_pitches`** — `pitch_log_pitcher_totals.total_pitches` at `dimension_key='all'` for **D1**, legacy
+>    `pitcher_stuff_plus_inputs` **only for JUCO** (JUCO has no pitch logs at all). Keep the lanes separate.
+> 7. **`computeNcaaAverages`** → `ncaa_averages` + `model_config`. ★ **MUST precede the power-rating store** —
+>    `computeAndStoreScores.ts:206-211,:249` falls back to HARDCODED defaults **SILENTLY** for any missing baseline.
+> 8. **Power ratings** — `computeAndStoreScores` with `propagate=false`.
+> 9. **Conference stats** — bucketA assembly (idempotent, G-GATE proved 0 changed / worst diff 0.000000) →
+>    `compute_conf_pitcher_env_plus` → `derive_conf_opr_htp` → **★ `conferenceStuffPlusV2`**, which is a SEPARATE
+>    producer the runbook omitted. It must read `Σ("Pitching Master".stuff_plus × trackman_pitches)/Σ(trackman_pitches)`
+>    — the **pitch_log lane via Pitching Master** — never `pitcher_stuff_plus_inputs`. On prod this moved Conference
+>    Stuff+ **101.17 → 99.15 with 30/30 rows changed**, and a count check would have shown 30/30 and PASSED while every
+>    projection stayed biased through the competition-translation lever. ⚠ this producer IGNORES `dryRun` and writes
+>    regardless. Then `conferenceScoutingAverages` for `pitcher_ev_score`/`pitcher_iz_score`.
+>    ⛔ NEVER `populate-conf-stats` — it overwrites the hand-calibrated JUCO overlay.
+> 10. **Phase D stages** — dRS/wSB load → `populate_descriptive_war` → `_reg`. ★★ the `_reg` pass reads
+>    `Pitching Master.drs_behind` and coerces `NULL → 0`, so running it before the main pass produces wrong values with
+>    **NO error**. Needs `team_war_snapshots.team_drs` to exist or it hard-exits.
+> 11. **TWP detector** must run BEFORE the precomputes so both-side rows generate.
+>
+> ### 🅱️ THE ONE PATTERN TRACK B EXISTS TO PREVENT
+> Three separate defects this push were the **same shape**: *the VALUE moved to the pitch_log lane but a supporting
+> INPUT was left on legacy* — C24 `trackman_pitches`, `computeNcaaAverages` weighting, and Conference Stuff+. All three
+> were invisible to count checks. **Track B must derive every input in the same pass, from the same lane, stamped with
+> the same `classification_version` + `constants_version`** — that is the whole point of collapsing these into one
+> function. A partially-refreshed set of aggregates is the failure mode, and it always looks like success.
 
 The "one process." Today it's **scattered manual scripts**; the goal (Track B) is ONE function that fires on ingest and
 runs the whole chain, storing everything. This doc is the map: every stage, what it computes, where it STORES (DB), and
