@@ -55,6 +55,61 @@ Two different pitch populations → the same numbers. That is **independent repl
 **PHASE-GATE EVERY STEP:** count non-null BEFORE and AFTER · compare to staging for the **same season** · validate by
 CONTENT not exit code · verify FRESHNESS not row count. "Column exists" ≠ "column populated".
 
+
+---
+## 📍 WHERE WE ARE RIGHT NOW (updated 2026-08-30, end of session)
+**PROD — everything through C29 is DONE, verified, and logged:**
+| step | result on PROD |
+|---|---|
+| prereqs | `team_season_stats` (3 migrations, dependency order) · `pitch_log_corrected` view rebuilt 94→102 cols · backups `_v2_prechain_backup` 2,576,146 / `_hm_prestep5_backup` 30,025 / `_pm_prestep5_backup` 29,238 |
+| Stuff+ 1 classify | 2,013,005 stamped `v2-ranges-2026-08-28`, needs_review 8.1% |
+| Stuff+ 2 baseline | armHB sign check **18/18** |
+| Stuff+ 3 score | 2,013,005 scored + recentered, **0 unscored**, every bucket 100.0 |
+| **GATE** | per-pitcher Stuff+ **mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7 — IDENTICAL to staging** |
+| Stuff+ 4 aggregate | 48/48 + `populate_hitter_run_values`, 24.3 min (`--direct`) |
+| Stuff+ 5 Masters | 4,772 pitchers + 4,373 hitters, **0 new rows**; `pull_air` 0 → 4,366 |
+| C24 trackman_pitches | 5,618 rows; **D1 5,375/5,375 from pitch_log · NJCAA_D1 2,695/2,695 from legacy** |
+| C27 ncaa_averages | 72 fields / 40 config rows; `p_ncaa_avg_stuff_plus` 101.8341 → **100.0141** |
+| C26 power ratings | pitchers 8,071 · hitters 8,244 · 0 errors · `propagate=false` |
+| C29 NJCAA re-tag | 10 rows → `D1 30 · NJCAA_D1 10 · D2 2` |
+**STAGING:** the same 5-step chain is complete (2,015,321 pitches). Staging has NOT had C24/C26/C27/C29 applied.
+**NEXT: C28 — the riskiest remaining step. Full prep plan below.**
+
+---
+## 🛑 C28 PREP PLAN — CONFERENCE STATS (do NOT run any of this without working the plan)
+C28 rebuilds the conference baselines that every projection's competition-translation consumes (a player projected
+INTO a conference is scored against that conference's Stuff+/HTP). Blast radius = every projection.
+
+### THE FOUR HAZARDS
+1. **⛔ `bucketA_assembly.sql` must be PASTED into the SQL editor — NEVER `supabase db query --linked`.** `--linked`
+   resolves to whatever project the CLI is linked to, and `supabase/config.toml` currently names a THIRD project ref
+   (`kfkuhdmpchxyffmnowgj`) that is neither staging nor prod. Verify with `supabase projects list` before anything.
+2. **⛔ NEVER run `populate-conf-stats` on prod.** It OVERWRITES the hand-calibrated JUCO overlay. It is not part of
+   C28; it is a different, destructive script with a confusingly similar name.
+3. **★ THE G-GATE HAS NEVER BEEN EXECUTED.** The docs require: re-run `conf_stats_bucketA_assembly.sql` on STAGING,
+   diff against `_confstats_backup_preassembly`, confirm **0.0000**, and only then touch prod. This proves the
+   assembly is idempotent. It was deferred on 2026-08-21 ("no staging conn") and never done.
+4. **⚠ D1 `Conference Stats.Stuff_plus` HAS NO COMMITTED PRODUCER** (audit G14). It exists on prod only as a COPY
+   from the paused push. Establish what actually writes it BEFORE running C28, or the conference Stuff+ silently
+   stays stale while everything around it is refreshed.
+
+### PRE-FLIGHT (answer all five in writing first)
+- **LANE:** does each producer read pitch_log or the legacy PSP-I? (`derive_conf_opr_htp`, `compute_conf_pitcher_env_plus`)
+- **GUARD:** does each have a working double-keyed `--prod` guard? (`compute_conf_pitcher_env_plus` pagination was
+  fixed 2026-08-29; re-verify the guard.)
+- **ORDER:** C29 ✅ done. Confirm nothing else in C28 depends on a step not yet run.
+- **SILENT FALLBACK:** does anything substitute defaults when an input is missing? (C26 did — that is why C27 ran first.)
+- **BACKUP:** `_confstats_backup` does NOT exist on prod. **CREATE IT FIRST** — C28 is a destructive rebuild.
+
+### EXECUTION ORDER (only after the above)
+1. Back up prod: `create table _confstats_backup as select * from "Conference Stats"` (+ verify row count).
+2. **G-GATE on STAGING** — re-run bucketA, diff vs `_confstats_backup_preassembly`, require 0.0000. ABORT if not.
+3. PROD: paste `conf_stats_bucketA_assembly.sql` in the SQL editor (never `--linked`).
+4. `compute_conf_pitcher_env_plus.ts --apply --prod`
+5. `derive_conf_opr_htp.ts --apply --prod`
+6. **PHASE GATE:** `hitter_talent_plus` and `run_env_factor` go from 0/42 non-null to populated; D1 = 30 rows and
+   NJCAA_D1 = 10 remain correctly separated; conference Stuff+/HTP compare sanely to staging.
+
 ---
 ## 🛑 MISTAKES MADE — DO NOT REPEAT
 - **A subagent given prod credentials called `refresh_composite_war()` "to see if it existed" and wrote ~112k live rows.**
@@ -139,3 +194,58 @@ does anything it depends on fall back to defaults SILENTLY?
 `derive_conf_opr_htp`) filter on `division`. Running C28 first writes D1-derived values into the JUCO overlay and
 CONTAMINATES the JUCO baselines silently — the same "keep JUCO and true NCAA D1 separate" principle applied in C24.
 Also: with 10 JUCO rows counted as D1, the D1 conference SDs were inflated (JUCO FIP runs 6.4–8.0).
+
+---
+# 🛑 C28 PRE-FLIGHT — FINDINGS (2026-08-30). RUN NOTHING UNTIL THESE ARE RESOLVED.
+Ran the 5-question pre-flight (LANE · GUARD · ORDER · SILENT FALLBACK · BACKUP) against PROD. Three blockers found.
+
+## ✅ LANE — CLEAN (both producers are on the correct lane)
+`compute_conf_pitcher_env_plus.ts` reads `ncaa_averages` (refreshed by C27 ✅) + `"Pitching Master"` D1 WHIP/IP
+(refreshed by C26 ✅) + `"Conference Stats"`. `derive_conf_opr_htp.ts` reads `"Park Factors".rg_factor` +
+`"Conference Stats"` + `"Teams Table"`. **Neither touches the legacy `pitcher_stuff_plus_inputs`.** Also confirms the
+C27-before-C26-before-C28 ordering is right: C28 consumes what both of those produced.
+
+## 🔴 BLOCKER 1 — NEITHER PRODUCER HAS ANY `--prod` GUARD
+`grep -c "trbvxuoliwrfowibatkm\|--prod"` = **0** for BOTH `compute_conf_pitcher_env_plus.ts` and
+`derive_conf_opr_htp.ts`. `--env-file .env.production.local` writes PROD with **zero opt-in** — the same defect
+already fixed in `_run_store_no_propagate.ts` (C26) and the four market scripts. **FIX BEFORE RUNNING:** add the
+standard double-keyed guard (URL and `--prod` must AGREE) and verify the refuse path.
+
+## 🔴 BLOCKER 2 — NO BACKUP EXISTS ON PROD, AND THE G-GATE REFERENCE DOES NOT EXIST EITHER
+`_confstats_backup` = **ABSENT** on prod · `_confstats_backup_preassembly` = **ABSENT** on prod.
+C28 is a DESTRUCTIVE rebuild of the conference baselines that every projection's competition-translation consumes.
+**FIX: `create table _confstats_backup as select * from "Conference Stats"` on prod FIRST.**
+⚠ The documented **G-GATE** (re-run bucketA on STAGING, diff vs `_confstats_backup_preassembly`, require 0.0000) has
+**NEVER been executed** — it was deferred 2026-08-21 ("no staging conn"). The preassembly baseline it compares against
+does not exist on prod, so the gate must be run on STAGING, where the artifact belongs.
+
+## 🔴 BLOCKER 3 — `Park Factors.rg_factor_seasonal` IS EMPTY ON PROD (0/309) — SILENT-FALLBACK RISK
+| | PROD | STAGING |
+|---|---|---|
+| Park Factors 2026 rows | 309 | 308 |
+| `rg_factor` | **309 ✅** | 308 |
+| `rg_factor_seasonal` | **0 ❌** | **308 ✅** |
+`derive_conf_opr_htp.ts:10` reads **`rg_factor`**, which IS populated on prod — so C28 will run. BUT prod is missing
+the entire `*_seasonal` set that staging has (its producer, E2 `backfill_park_factors_seasonal.ts`, is hardwired to
+STAGING and has never run on prod — audit G13/H4). **Decide BEFORE C28 whether the conference run-environment should
+use the seasonal factors** (as staging effectively does downstream) or the flat `rg_factor`. If prod and staging use
+different park inputs, their conference HTP/OPR will diverge and the staging-match gate becomes meaningless.
+
+## CURRENT PROD STATE (what C28 is meant to fill)
+`Conference Stats` 2026 = **42 rows** (D1 30 · NJCAA_D1 10 · D2 2 after C29) ·
+**`hitter_talent_plus` 0/42** · **`run_env_factor` 0/42** ← C28 fills these · `Stuff_plus` **42/42** (pre-existing copy;
+audit G14 notes D1 `Stuff_plus` has NO committed producer — confirm what refreshes it or it stays stale while
+everything around it is rebuilt).
+
+## ORDERED EXECUTION (only after 1-3 are resolved)
+1. Add `--prod` guards to both producers; verify refuse paths.
+2. `create table _confstats_backup as select * from "Conference Stats"` on PROD; verify row count = 42.
+3. Run the **G-GATE on STAGING** (bucketA re-run vs `_confstats_backup_preassembly`, require diff 0.0000). ABORT if not.
+4. Resolve the `rg_factor` vs `rg_factor_seasonal` decision.
+5. PROD: **PASTE** `conf_stats_bucketA_assembly.sql` in the SQL editor — **NEVER `--linked`** (`supabase/config.toml`
+   currently names a THIRD project ref `kfkuhdmpchxyffmnowgj`; run `supabase projects list` first).
+6. `compute_conf_pitcher_env_plus.ts --apply --prod` → `derive_conf_opr_htp.ts --apply --prod`.
+7. **PHASE GATE:** `hitter_talent_plus` and `run_env_factor` go 0/42 → populated; D1 stays 30 and NJCAA_D1 stays 10;
+   conference Stuff+/HTP compare sanely to staging.
+⛔ **NEVER run `populate-conf-stats` on prod** — it overwrites the hand-calibrated JUCO overlay. Different script,
+confusingly similar name, not part of C28.

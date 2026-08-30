@@ -1843,3 +1843,78 @@ Sweeper/Slider armHB −12 (1.0% error) · Gyro/Slider armHB −5. **RPW = 13.1*
    this produced a false "trackman_pitches regression" (it was 0 before AND after; C24 populates it, and it had not run).
 3. **"Rows exist" ≠ "rows fresh."** A failed aggregation leaves stale rows that PASS a count check.
 **RULE: compare like-for-like against the BACKUP before calling anything a regression.**
+
+---
+# 🛑 C28 PRE-FLIGHT — FINDINGS (2026-08-30). RUN NOTHING UNTIL THESE ARE RESOLVED.
+Ran the 5-question pre-flight (LANE · GUARD · ORDER · SILENT FALLBACK · BACKUP) against PROD. Three blockers found.
+
+## ✅ LANE — CLEAN (both producers are on the correct lane)
+`compute_conf_pitcher_env_plus.ts` reads `ncaa_averages` (refreshed by C27 ✅) + `"Pitching Master"` D1 WHIP/IP
+(refreshed by C26 ✅) + `"Conference Stats"`. `derive_conf_opr_htp.ts` reads `"Park Factors".rg_factor` +
+`"Conference Stats"` + `"Teams Table"`. **Neither touches the legacy `pitcher_stuff_plus_inputs`.** Also confirms the
+C27-before-C26-before-C28 ordering is right: C28 consumes what both of those produced.
+
+## 🔴 BLOCKER 1 — NEITHER PRODUCER HAS ANY `--prod` GUARD
+`grep -c "trbvxuoliwrfowibatkm\|--prod"` = **0** for BOTH `compute_conf_pitcher_env_plus.ts` and
+`derive_conf_opr_htp.ts`. `--env-file .env.production.local` writes PROD with **zero opt-in** — the same defect
+already fixed in `_run_store_no_propagate.ts` (C26) and the four market scripts. **FIX BEFORE RUNNING:** add the
+standard double-keyed guard (URL and `--prod` must AGREE) and verify the refuse path.
+
+## 🔴 BLOCKER 2 — NO BACKUP EXISTS ON PROD, AND THE G-GATE REFERENCE DOES NOT EXIST EITHER
+`_confstats_backup` = **ABSENT** on prod · `_confstats_backup_preassembly` = **ABSENT** on prod.
+C28 is a DESTRUCTIVE rebuild of the conference baselines that every projection's competition-translation consumes.
+**FIX: `create table _confstats_backup as select * from "Conference Stats"` on prod FIRST.**
+⚠ The documented **G-GATE** (re-run bucketA on STAGING, diff vs `_confstats_backup_preassembly`, require 0.0000) has
+**NEVER been executed** — it was deferred 2026-08-21 ("no staging conn"). The preassembly baseline it compares against
+does not exist on prod, so the gate must be run on STAGING, where the artifact belongs.
+
+## 🔴 BLOCKER 3 — `Park Factors.rg_factor_seasonal` IS EMPTY ON PROD (0/309) — SILENT-FALLBACK RISK
+| | PROD | STAGING |
+|---|---|---|
+| Park Factors 2026 rows | 309 | 308 |
+| `rg_factor` | **309 ✅** | 308 |
+| `rg_factor_seasonal` | **0 ❌** | **308 ✅** |
+`derive_conf_opr_htp.ts:10` reads **`rg_factor`**, which IS populated on prod — so C28 will run. BUT prod is missing
+the entire `*_seasonal` set that staging has (its producer, E2 `backfill_park_factors_seasonal.ts`, is hardwired to
+STAGING and has never run on prod — audit G13/H4). **Decide BEFORE C28 whether the conference run-environment should
+use the seasonal factors** (as staging effectively does downstream) or the flat `rg_factor`. If prod and staging use
+different park inputs, their conference HTP/OPR will diverge and the staging-match gate becomes meaningless.
+
+## CURRENT PROD STATE (what C28 is meant to fill)
+`Conference Stats` 2026 = **42 rows** (D1 30 · NJCAA_D1 10 · D2 2 after C29) ·
+**`hitter_talent_plus` 0/42** · **`run_env_factor` 0/42** ← C28 fills these · `Stuff_plus` **42/42** (pre-existing copy;
+audit G14 notes D1 `Stuff_plus` has NO committed producer — confirm what refreshes it or it stays stale while
+everything around it is rebuilt).
+
+## ORDERED EXECUTION (only after 1-3 are resolved)
+1. Add `--prod` guards to both producers; verify refuse paths.
+2. `create table _confstats_backup as select * from "Conference Stats"` on PROD; verify row count = 42.
+3. Run the **G-GATE on STAGING** (bucketA re-run vs `_confstats_backup_preassembly`, require diff 0.0000). ABORT if not.
+4. Resolve the `rg_factor` vs `rg_factor_seasonal` decision.
+5. PROD: **PASTE** `conf_stats_bucketA_assembly.sql` in the SQL editor — **NEVER `--linked`** (`supabase/config.toml`
+   currently names a THIRD project ref `kfkuhdmpchxyffmnowgj`; run `supabase projects list` first).
+6. `compute_conf_pitcher_env_plus.ts --apply --prod` → `derive_conf_opr_htp.ts --apply --prod`.
+7. **PHASE GATE:** `hitter_talent_plus` and `run_env_factor` go 0/42 → populated; D1 stays 30 and NJCAA_D1 stays 10;
+   conference Stuff+/HTP compare sanely to staging.
+⛔ **NEVER run `populate-conf-stats` on prod** — it overwrites the hand-calibrated JUCO overlay. Different script,
+confusingly similar name, not part of C28.
+
+---
+# 🧠 AGENT LEARNING — THE 5-QUESTION PRE-FLIGHT (validated 5 for 5 on 2026-08-30)
+Before running ANY step of a multi-stage push, answer these five IN WRITING. Every single time it was applied it
+found a real defect BEFORE the step ran, not after:
+1. **LANE** — does it read the LIVE lane or a legacy one? (**C24** was summing the legacy `pitcher_stuff_plus_inputs`
+   to set a user-facing leaderboard gate; the legacy source undercounted ~12.1 pitches/pitcher and agreed with
+   pitch_log for only 11.9% of pitchers.)
+2. **GUARD** — does it have a working double-keyed `--prod` guard? (**C26**'s runner had NONE and a banner claiming
+   "staging" while it would write prod. **BOTH C28 producers have NONE.** Three market scripts had none. One
+   hardcoded `.env.local` and would have resynced STAGING while reporting success on a prod run.)
+3. **ORDER** — is its position right? (**C27 must precede C26**; **C29 must precede C28**; the `team_season_stats`
+   migrations apply by DEPENDENCY, not by their timestamps, which sort WRONG.)
+4. **SILENT FALLBACK** — does anything substitute defaults when an input is missing? (`computeAndStoreScores` falls
+   back to HARDCODED baselines with no error — that is the entire reason C27 must run first.)
+5. **BACKUP** — does a restore point exist? (**`_confstats_backup` does not exist on prod** and C28 is a destructive
+   rebuild. The Masters had no backup before step 5 either — created one first.)
+**The unifying insight: the dangerous failures all LOOK LIKE SUCCESS.** A legacy-sourced count, a guardless script
+pointed at the wrong DB, a silent default substitution, a stale-but-populated table, an exit code of 0 with a failed
+sub-step — none of them raise an error. The pre-flight is what converts them into visible decisions.
