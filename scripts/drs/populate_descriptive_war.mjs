@@ -1,3 +1,4 @@
+// ★ STAGE-0 ordered pagination (2026-08-30): unordered .range() silently drops/dupes rows -> NULL desc WAR.
 /**
  * WAR redesign Step 3 — populate DESCRIPTIVE WAR onto the Masters (STAGING).
  * Descriptive = last-season actuals from raw accrued on-field data (Master export sheets now;
@@ -54,8 +55,14 @@ function sheet(path, key = "playerId") {
   for (let i = 1; i < t.length; i++) { if (!t[i]) continue; const c = parseLine(t[i]); const id = (c[gi(key)] || "").trim(); if (id) m[id] = c; }
   return { rows: m, gi };
 }
-async function all(t, cols, season = true) { let a = []; for (let f = 0; ; f += 1000) { let q = sb.from(t).select(cols).range(f, f + 999); if (season) q = q.eq("Season", SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
-async function allNoSeason(t, cols, seasonCol) { let a = []; for (let f = 0; ; f += 1000) { let q = sb.from(t).select(cols).range(f, f + 999); if (seasonCol) q = q.eq(seasonCol, SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
+// ★ STAGE-0 (2026-08-30) sort-key map. VERIFIED against the live schema: player_season_defense and
+// player_season_baserunning have NO "id" column (they are keyed player_id/source_player_id), so ordering them by
+// "id" would HARD-ERROR. Ordering is still required — unordered .range() silently drops/dupes rows and leaves
+// desc d_war / bsr_war NULL, which propagates into the projection engine.
+const ORDER_KEY = { "player_season_defense": "player_id", "player_season_baserunning": "player_id" };
+const okey = (t) => ORDER_KEY[t] || "id";
+async function all(t, cols, season = true) { let a = []; for (let f = 0; ; f += 1000) { let q = sb.from(t).select(cols).order(okey(t), { ascending: true }).range(f, f + 999); if (season) q = q.eq("Season", SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
+async function allNoSeason(t, cols, seasonCol) { let a = []; for (let f = 0; ; f += 1000) { let q = sb.from(t).select(cols).order(okey(t), { ascending: true }).range(f, f + 999); if (seasonCol) q = q.eq(seasonCol, SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
 
 // ── load sources ─────────────────────────────────────────────────────────────
 const hitSheet = sheet("docs/drs-reference/Full Season Hitting Master Stats.csv");

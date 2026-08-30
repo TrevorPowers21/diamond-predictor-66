@@ -1,3 +1,4 @@
+// ★ STAGE-0 ordered pagination (2026-08-30): unordered .range() silently drops/dupes rows -> NULL desc WAR.
 /**
  * Step 2 — populate REGULAR-SEASON descriptive WAR (≤ 2026-05-18) onto the Masters (STAGING).
  * Mirrors populate_descriptive_war.mjs but on regular-season inputs. The FULL-season desc_* columns stay
@@ -30,8 +31,8 @@ const WT=W.woba_weights_above_out_scaled, LGWOBA=W.lgwOBA, WSCALE=W.wOBAscale, O
 const num=v=>{const n=parseFloat(v);return Number.isFinite(n)?n:0;};
 function parseLine(line){const out=[];let cur="",q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(q){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}else{if(ch==='"')q=true;else if(ch===','){out.push(cur);cur="";}else cur+=ch;}}out.push(cur);return out;}
 function sheet(path,key="source_player_id"){const t=readFileSync(path,"utf8").split("\n");const H=parseLine(t[0]);const gi=k=>H.indexOf(k);const m={};for(let i=1;i<t.length;i++){if(!t[i])continue;const c=parseLine(t[i]);const id=(c[gi(key)]||"").trim();if(id)m[id]=c;}return{rows:m,gi};}
-async function all(t,cols){let a=[];for(let f=0;;f+=1000){const{data,error}=await sb.from(t).select(cols).eq("Season",2026).range(f,f+999);if(error){console.error(t,error.message);process.exit(1);}a=a.concat(data);if(data.length<1000)break;}return a;}
-async function allNoSeason(t,cols,sc){let a=[];for(let f=0;;f+=1000){let q=sb.from(t).select(cols).range(f,f+999);if(sc)q=q.eq(sc,2026);const{data,error}=await q;if(error){console.error(t,error.message);process.exit(1);}a=a.concat(data);if(data.length<1000)break;}return a;}
+async function all(t,cols){let a=[];for(let f=0;;f+=1000){const{data,error}=await sb.from(t).select(cols).eq("Season",2026).order("id",{ascending:true}).range(f,f+999);if(error){console.error(t,error.message);process.exit(1);}a=a.concat(data);if(data.length<1000)break;}return a;}
+async function allNoSeason(t,cols,sc){let a=[];for(let f=0;;f+=1000){let q=sb.from(t).select(cols).order("id",{ascending:true}).range(f,f+999);if(sc)q=q.eq(sc,2026);const{data,error}=await q;if(error){console.error(t,error.message);process.exit(1);}a=a.concat(data);if(data.length<1000)break;}return a;}
 const r3=x=>Number.isFinite(x)?Math.round(x*1000)/1000:null, r4=x=>Number.isFinite(x)?Math.round(x*10000)/10000:null;
 
 // ── sources ──────────────────────────────────────────────────────────────────

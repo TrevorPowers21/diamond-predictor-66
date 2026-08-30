@@ -47,10 +47,13 @@ function readCsv(p: string): Record<string, string>[] {
 const num = (v: string) => (v === "" || v === "None" || v == null ? null : Number(v));
 const int = (v: string) => (v === "" || v === "None" || v == null ? null : parseInt(v, 10));
 
-async function fetchAll(table: string, cols: string): Promise<any[]> {
+// ★ STAGE-0 ordered pagination (2026-08-30): unordered .range() silently drops/duplicates rows across pages
+// (PostgREST gives no stable order without ORDER BY). Over `players` that is ~32 pages on prod (31,467 rows) —
+// dropped rows log as "unresolved" and their d_war / bsr_war stay NULL, which then propagates into projections.
+async function fetchAll(table: string, cols: string, orderCol = "id"): Promise<any[]> {
   const out: any[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await (sb as any).from(table).select(cols).range(from, from + 999);
+    const { data, error } = await (sb as any).from(table).select(cols).order(orderCol, { ascending: true }).range(from, from + 999);
     if (error) throw new Error(`${table}: ${error.message}`);
     out.push(...(data || []));
     if (!data || data.length < 1000) break;
