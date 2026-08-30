@@ -638,3 +638,43 @@ hand-calibrated JUCO overlay.
 - `Stuff_plus` CHANGES from its stale pre-v2 value (compare BEFORE/AFTER — do not just count non-nulls).
 - Division split holds: **D1 = 30 · NJCAA_D1 = 10 · D2 = 2**.
 - Staging reference shape after the same fix: D1 avg **99.16** (92.9–107.3) · NJCAA_D1 avg **96.00** · D2 avg 93.00.
+
+---
+# 🔍 C28 LOOSE ENDS — INVESTIGATED AND RESOLVED (2026-08-30)
+Method: compare PROD against STAGING (which had already run C28) rather than reasoning from prod alone. This settled
+all three in minutes — **always diff the two environments before theorising.**
+
+## 1. ✅ `OPS`/`SLG`/`slg_plus` = 29/30 — EXPECTED, NOT A DEFECT. The missing conference is **Independent**.
+```
+PROD    — D1 conferences with NULL OPS: Independent
+STAGING — D1 conferences with NULL OPS: Independent   (identical)
+```
+Independents have no conference-mates, so the conference hitting aggregate has nothing to pool. **29/30 is CORRECT on
+both environments** — do NOT "fix" this. (Consistent with the existing rule that Independents are handled by
+faced-competition Stuff+/HTP rather than conference pooling.)
+
+## 2. ✅ `pitcher_ev_score` / `pitcher_iz_score` = 0/30 — NOT deprecated, NOT a prod gap. **Their producer has never run.**
+Empty on **BOTH** prod and staging, so it is not something C28 broke. ⚠ I nearly recorded them as dead columns
+superseded by `pitcher_ev90_score` / `pitcher_iz_whiff_score` — **that was WRONG.**
+**They have a real producer: `src/savant/lib/conferenceScoutingAverages.ts`**, which WRITES them at `:453` / `:455`
+(`pitcher_ev_score: round1(psEV)`, `pitcher_iz_score: round1(psIZ)`) and reads them back at `:520-522`.
+→ **ACTION: run `conferenceScoutingAverages` for 2026 to fill them.** It has never been run for this season on either
+environment. Pitcher EV mirrors hitter EV and is expected to be populated.
+
+## 3. ★ PROD IS NOW AHEAD OF STAGING on the raw conference pitcher metrics
+| column | PROD | STAGING |
+|---|---|---|
+| `pitcher_ev90` | **30/30** | 0/30 |
+| `pitcher_exit_velo` | **30/30** | 0/30 |
+| `pitcher_in_zone_pct` | **30/30** | 0/30 |
+| `pitcher_iz_whiff_pct` | **30/30** | 0/30 |
+| `pitcher_ev90_score` · `pitcher_iz_whiff_score` | 30/30 | 30/30 |
+The C28 run filled these on prod; staging never had them. **CONSEQUENCE: staging is no longer a valid reference for
+these columns** — do not treat a prod/staging mismatch here as a prod defect. Staging needs C24/C26/C27/C29 + this C28
+pass applied to catch up (it only ever received the Stuff+ chain and the Conference Stuff+ lane fix).
+
+## 🧠 LESSON
+Two of the three "problems" were not problems, and the third was nearly mis-diagnosed in the opposite direction
+(calling a live-but-unrun column deprecated). **Diff the environments FIRST, then grep for a producer, and only then
+conclude.** A column being empty means one of: (a) expected/no data to pool, (b) its producer has not run, or
+(c) genuinely dead — and those are indistinguishable from the fill count alone.
