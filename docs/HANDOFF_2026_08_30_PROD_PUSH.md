@@ -38,16 +38,17 @@ Two different pitch populations → the same numbers. That is **independent repl
    `_run_store_no_propagate.ts` first (its banner had claimed "staging" while writing prod).
 4. ~~**C29 NJCAA_D1 re-tag**~~ ✅ **DONE 2026-08-30** — 10 rows re-tagged; prod now `D1 30 · NJCAA_D1 10 · D2 2`,
    0 NJCAA rows remain tagged D1 (matches staging). C28 is now safe to run.
-5. **C28 conference stats — PARTIALLY PREPPED, 2 items left.**
-   ✅ DONE: `--prod` guards added to BOTH producers (refuse paths verified) · `_confstats_backup` (162 rows / 42 for
-   2026) + `_parkfactors_backup` (615) created on prod · **Conference Stuff+ lane FIXED** (was reading legacy PSP-I;
-   now `Σ(Pitching Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)`, verified on staging: D1 avg 99.16,
-   NJCAA_D1 96.00) · park-factor "blocker" RETRACTED (`derive_conf_opr_htp` reads `rg_factor`, 309/309 on prod).
-   ⬜ **REMAINING (1) G-GATE on STAGING** — re-run `conf_stats_bucketA_assembly.sql`, diff vs
-   `_confstats_backup_preassembly`, require **0.0000**. NEVER executed (deferred 2026-08-21).
-   ⬜ **REMAINING (2) `calculateConferenceStuffPlusV2` IGNORES `dryRun`** and writes regardless — there is no way to
-   preview it. Either add real dry-run support, or accept `_confstats_backup` as the rollback and run it knowingly.
-   ⛔ bucketA must be **PASTED**, never `--linked` · ⛔ **NEVER run `populate-conf-stats`** (overwrites the JUCO overlay).
+5. **C28 conference stats — READY, 4 steps (runbook listed 3).** ✅ prepped: `--prod` guards added to BOTH producers
+   (refuse paths verified) · `_confstats_backup` (162) + `_parkfactors_backup` (615) created on prod · **G-GATE PASSED**
+   (77 cols, 0 changed, worst 0.000000 — bucketA is idempotent) · Conference Stuff+ lane FIXED · park-factor blocker
+   RETRACTED (`rg_factor` 309/309 on prod).
+   **ORDER:** (1) PASTE bucketA in the SQL editor, never `--linked` → (2) `compute_conf_pitcher_env_plus --apply --prod`
+   → (3) `derive_conf_opr_htp --apply --prod` → (4) **★ refresh `Stuff_plus` via the FIXED `conferenceStuffPlusV2`** —
+   the step the runbook never had. `Stuff_plus` is Bucket B but is written by NEITHER bucketA NOR `derive_conf_opr_htp`;
+   it is the ONLY metric both STALE on prod and unrefreshed by the documented steps, and it is the
+   competition-translation lever. ⚠ that producer IGNORES `dryRun` — rollback is `_confstats_backup`.
+   ⛔ NEVER run `populate-conf-stats` (overwrites the JUCO overlay).
+
 6. **Phase D** dWAR/bsrWAR (D30–34). Pagination fixed. ⚠ enable RLS on `player_season_defense`/`_baserunning` FIRST.
 7. **Phase E** ★order: TWP detector FIRST → returner pitchers → returner hitters → `_run_step2_all.sh --prod`.
 8. **Phase F** ★order: `refresh_composite_war()` (÷13.1) **only now** → snapshot WAR → TWP markets → resyncs
@@ -341,3 +342,49 @@ stale. Third occurrence today of "looks populated, isn't fresh".
 lane, ALONGSIDE the two producers that fill the 13 empty columns. Otherwise the competition-translation lever stays
 stale while everything around it is rebuilt.
 → Staging reference after the fix: D1 30 conf avg **99.16** (92.9–107.3) · NJCAA_D1 10 avg **96.00** · D2 2 avg 93.00.
+
+---
+# 🧩 C28 BUCKET MAP — WHO WRITES WHAT, AND WHY `Stuff_plus` FELL THROUGH THE GAP (2026-08-30)
+`scripts/sql/conf_stats_bucketA_assembly.sql:12` states the split verbatim:
+`SCOPE: writes ONLY Bucket A (rates/env+/WRC_plus). Bucket B (OPR/Stuff_plus/run_env_factor/…)`
+
+| bucket | producer | columns it writes |
+|---|---|---|
+| **A** | `conf_stats_bucketA_assembly.sql` (PASTE in SQL editor) | `OBP` `ISO` `SLG` `OPS` `obp_plus` `slg_plus` `iso_plus` `WHIP` `FIP` `ERA` + rates + `WRC_plus` |
+| **B (pitching env+)** | `compute_conf_pitcher_env_plus.ts` | `era_plus` `fip_plus` `k9_plus` `bb9_plus` `hr9_plus` `whip_plus` |
+| **B (OPR/HTP)** | `derive_conf_opr_htp.ts` | `run_env_factor` `offensive_power_rating` `hitter_talent_plus` |
+| **B (Stuff+)** | ⚠ **`conferenceStuffPlusV2.ts` — a SEPARATE producer, NOT part of the documented C28 steps** | `Stuff_plus` |
+
+## ★ THE GAP, STATED PLAINLY
+`Stuff_plus` belongs to **Bucket B** but is written by **NEITHER** bucketA **NOR** `derive_conf_opr_htp`. It has its own
+producer that the C28 runbook never listed. So:
+**`Stuff_plus` is the ONLY Conference Stats metric that is BOTH (a) stale on prod (pre-v2) AND (b) not refreshed by any
+of the three documented C28 steps.** Every other filled column is either rewritten by Bucket A / Bucket B, or is a
+source input already refreshed by C24 / C26 / C27.
+Because it is 30/30 populated it PASSES every count check while being stale — and it is the competition-translation
+lever, so a stale value silently biases EVERY projection of a player INTO a conference.
+
+## ✅ C28 ON PROD — THE CORRECTED FOUR-STEP ORDER (the runbook had three)
+0. **Backups already created on prod:** `_confstats_backup` (162 rows / 42 for 2026) · `_parkfactors_backup` (615).
+1. **PASTE** `conf_stats_bucketA_assembly.sql` in the SQL editor. ⛔ **NEVER `--linked`** — `supabase/config.toml`
+   names a THIRD project ref (`kfkuhdmpchxyffmnowgj`). Run `supabase projects list` first.
+   ✅ **G-GATE PASSED 2026-08-30** — re-run on staging diffed 77 numeric columns: **0 changed, worst 0.000000**, so the
+   assembly is IDEMPOTENT and cannot drift prod's values.
+2. `npx tsx --env-file=.env.production.local scripts/compute_conf_pitcher_env_plus.ts --apply --prod`
+   ✅ `--prod` guard ADDED 2026-08-30 (it had none); refuse path verified.
+3. `npx tsx --env-file=.env.production.local scripts/derive_conf_opr_htp.ts --apply --prod`
+   ✅ `--prod` guard ADDED 2026-08-30 (it had none); refuse path verified.
+   Reads `"Park Factors".rg_factor` — **309/309 populated on prod** (it does NOT read `rg_factor_seasonal`, which is
+   empty on prod; that is E2's job and NOT a C28 blocker).
+4. **★ NEW STEP — refresh `Stuff_plus`:** run the FIXED `conferenceStuffPlusV2`
+   (`Σ("Pitching Master".stuff_plus × trackman_pitches) / Σ(trackman_pitches)`).
+   ⚠ **It IGNORES `dryRun` and writes regardless — no preview exists.** Rollback = `_confstats_backup`.
+⛔ **NEVER run `populate-conf-stats` on prod** — different script, confusingly similar name, overwrites the
+hand-calibrated JUCO overlay.
+
+## PHASE GATE AFTER C28 (verify VALUES, not just that it ran)
+- The 13 previously-EMPTY columns become populated: `era_plus` `fip_plus` `k9_plus` `bb9_plus` `hr9_plus` `whip_plus`
+  `hitter_talent_plus` `run_env_factor` `OPS` `SLG` `slg_plus` `pitcher_ev_score` `pitcher_iz_score`.
+- `Stuff_plus` CHANGES from its stale pre-v2 value (compare BEFORE/AFTER — do not just count non-nulls).
+- Division split holds: **D1 = 30 · NJCAA_D1 = 10 · D2 = 2**.
+- Staging reference shape after the same fix: D1 avg **99.16** (92.9–107.3) · NJCAA_D1 avg **96.00** · D2 avg 93.00.
