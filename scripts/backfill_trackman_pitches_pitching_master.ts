@@ -25,6 +25,20 @@ const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_
 });
 const host = (process.env.SUPABASE_URL || "").replace(/https:\/\//, "").split(".")[0];
 
+async function pageAll2(table: string, cols: string, seasonCol: string, season: number, orderCol: string, dimKey?: string): Promise<any[]> {
+  const out: any[] = []; let from = 0; const page = 1000;
+  for (;;) {
+    let q = (sb as any).from(table).select(cols).eq(seasonCol, season).order(orderCol, { ascending: true }).range(from, from + page - 1);
+    if (dimKey) q = q.eq("dimension_key", dimKey);
+    const { data, error } = await q;
+    if (error) throw new Error(`${table}: ${error.message}`);
+    if (!data || !data.length) break;
+    out.push(...data);
+    if (data.length < page) break;
+    from += page;
+  }
+  return out;
+}
 async function pageAll(table: string, cols: string, seasonCol: string, season: number): Promise<any[]> {
   const out: any[] = [];
   let from = 0;
@@ -46,13 +60,30 @@ async function main() {
   console.log(`DB=${host} season=${SEASON} mode=${APPLY ? "APPLY" : "DRY-RUN"}`);
 
   // 1. Σ pitches per source_player_id from the Stuff+ inputs
+  // ★ PITCH_LOG-FIRST (2026-08-30, Trevor: "keep juco and true ncaa d1 separate").
+  // trackman_pitches is the TrackMan sample-size gate for the Stuff+ display qualifier, so it must come from the
+  // SAME lane as the Stuff+ values. Sourcing it from the legacy CSV-fed `pitcher_stuff_plus_inputs` was WRONG:
+  // measured on prod, the two sources agree for only 638 of 5,367 shared pitchers (11.9%), and the legacy table
+  // UNDERCOUNTS by ~12.1 pitches/pitcher (2,507,664 vs 2,572,528 total). An undercount pushes borderline
+  // thin-sample arms the wrong way on the leaderboard.
+  // RULE: D1 -> pitch_log_pitcher_totals.total_pitches (dimension_key='all'). JUCO has NO pitch logs at all, so it
+  // MUST fall back to pitcher_stuff_plus_inputs (that is the 7,013 vs 5,509 pitcher gap). Never mix them.
+  const plogRows = await pageAll2("pitch_log_pitcher_totals", "pitcher_id,total_pitches", "season", SEASON, "pitcher_id", "all");
+  const plog = new Map<string, number>();
+  for (const r of plogRows) if (r.pitcher_id) plog.set(String(r.pitcher_id), Number(r.total_pitches || 0));
+  console.log(`pitch_log (D1, dimension_key='all'): ${plog.size} pitchers`);
+
   const inputs = await pageAll("pitcher_stuff_plus_inputs", "source_player_id,pitches", "season", SEASON);
   const sums = new Map<string, number>();
   for (const r of inputs) {
     if (!r.source_player_id) continue;
     sums.set(r.source_player_id, (sums.get(r.source_player_id) || 0) + Number(r.pitches || 0));
   }
-  console.log(`inputs: ${inputs.length} rows -> ${sums.size} pitchers with a summed pitch count`);
+  const psiOnly = sums.size;
+  let fromPlog = 0;
+  for (const [pid, n] of plog) { if (n > 0) { sums.set(pid, n); fromPlog++; } }
+  console.log(`inputs: ${inputs.length} legacy rows -> ${psiOnly} pitchers; ` +
+    `OVERRODE ${fromPlog} with pitch_log (D1); ${sums.size - fromPlog} remain legacy-sourced (JUCO / no pitch log)`);
 
   // 2. current Pitching Master rows for the season
   const master = await pageAll("Pitching Master", "source_player_id,trackman_pitches", "Season", SEASON);
