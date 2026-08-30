@@ -1599,3 +1599,44 @@ row created → `team_drs` re-derived → descriptive WAR matches. **Every link 
 `populate_descriptive_war_reg.mjs:79` reads `"Pitching Master".drs_behind` and coerces **`NULL → 0`**, so running it
 before D31 commits yields wrong `desc_ra9_reg` / `desc_pwar_reg` with **NO error**. Gate satisfied: `drs_behind` is
 **5,374/5,375 non-null** on prod. **Verify this count, never "D31 exited cleanly".**
+
+---
+# ✅✅ PHASE D COMPLETE ON PROD — 2026-08-30. D34 verification passed on every gate.
+| step | result |
+|---|---|
+| **D29b** `team_drs` | **DERIVED on prod** (not pasted) via `derive_team_drs.mjs --prod` → 308 D1 teams, Σ centered −0.0000, stored: `with_drs 308 · sum 0.00`. Arkansas 41.060 → **41.272**. |
+| **D30** dRS/wSB load | **NO-OP confirmed** by dry-run — `13454 would upsert / 11 unresolved`, `10432 / 30 unresolved`; data already present at `drs-engine-0.11.0` / `0.6.0`. Apply intentionally SKIPPED. |
+| **D31** descriptive WAR | **COMMITTED** — `Hitter Master 5340/5340 written, 0 FAILED` · `Pitching Master 5374/5374 written, 0 FAILED` · `0 write errors`. |
+| **D32** `_reg` split | **COMMITTED** — `Hitter Master 5322/5322` · `Pitching Master 5372/5372`. |
+| **D33** | folded into D29b (it IS the `team_drs` producer). |
+| **D34** | **PASSED — all 9 checks below.** |
+| *(unplanned)* | **Camden Kozeal's 2026 Hitter Master row CREATED** → 5,340 → **5,341** D1 hitters. |
+
+## D34 RESULT (prod, Season 2026, division='D1') — the numbers to compare against next time
+```
+✅ hitters desc_owar/d_war/bsr_war/total_desc_war   5340/5340/5340/5340 of 5341
+✅ hitters _reg set                                 5322/5322/5322/5322
+✅ pitchers desc_pwar/desc_ra9/drs_behind           5374/5374/5374 of 5375
+✅ pitchers _reg                                    5372/5372
+✅ avg d_war      0.0103   (≈0.010)
+✅ avg bsr_war    0.0000   (≈0.000)
+✅ avg desc_owar  0.3458   (≈0.346)
+✅ sum identity   0.001000 (≤0.002)   max|total_desc_war − (desc_owar+d_war+bsr_war)|
+✅ drs_behind range  −5.26 … 6.84
+ℹ  avg total_desc_war 0.3562 · _reg 0.3354 · avg desc_pwar 0.5108 · _reg 0.5385
+```
+The one uncovered hitter and pitcher are the pre-existing `sheet-miss 1`; the 19 hitter / 3 pitcher `_reg` shortfalls
+are players absent from `hitter_accrued.csv` / the line file — **matching staging exactly (5,322 and 5,372)**. Expected.
+
+## ⚠ KNOWN GAP CARRIED FORWARD — `populate_descriptive_war_reg.mjs` STILL SWALLOWS WRITE ERRORS
+The error-counting fix (count failures, summarise per table, `exit 1`) was applied to **`populate_descriptive_war.mjs`
+ONLY**. `_reg` still logs errors without counting them and prints a bare `done.` — so a partial `_reg` write would
+still look clean. It happened to succeed here (`5322/5322`, `5372/5372` progress counters reached full), but
+**apply the same fix to `_reg` before it is ever re-run.** ⬜ OPEN.
+
+## ▶️ NEXT PER THE CORRECTED ORDER (NOT the topic order)
+`E2` park factors seasonal → **★ re-run `derive_conf_opr_htp --apply --prod`** (E2 rewrites `rg_factor`, invalidating
+C28's `run_env_factor`/`hitter_talent_plus` at 30/30 — a count check will PASS either way) → `D33b` lock-regular-season
+(`regular_season_ip` is 0/5,375 and `refresh_team_season_stats` divides by it) → **`F44` MOVED UP** (Phase E reads
+`team_season_stats.faced_*`) → `E35` TWP → `E36/37/38` precomputes → `F39`… See
+`docs/AUDIT_dependency_order_vs_topic_order_2026_08_30.md`.
