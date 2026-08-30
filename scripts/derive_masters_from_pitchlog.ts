@@ -394,8 +394,20 @@ async function main() {
       console.log(`  ${table}: ${Math.min(i + BATCH, deduped.length)}/${deduped.length}`);
     }
   };
-  await upsertBatch("Hitter Master", [...hitterPatches, ...newHitterRows]);
-  await upsertBatch("Pitching Master", [...pitcherPatches, ...newPitcherRows]);
+  // ★ SAFETY GATE (2026-08-30, Trevor): new-row creation is now OPT-IN and OFF by default.
+  // It used to be spread into this same upsert, so --apply silently INSERTED invented Master rows.
+  // Why that is dangerous: the Masters are the TruMedia season-stat source of truth and this script only
+  // marries pitch-log derivations onto EXISTING rows — it never writes ERA/IP/G/GS/Role. A row created from
+  // pitch_log alone is therefore a HALF-POPULATED player that downstream code treats as real with missing
+  // stats. Worse, these are exactly the pitchers present in pitch_log but absent from the Master, i.e. the
+  // identity-resolution gaps and non-TruMedia teams you least want silently materialized.
+  const CREATE_NEW = process.argv.includes("--create-new");
+  if (!CREATE_NEW && (newHitterRows.length || newPitcherRows.length)) {
+    console.log(`\n  ⛔ SKIPPING new-row creation: ${newHitterRows.length} hitters + ${newPitcherRows.length} pitchers NOT inserted.`);
+    console.log(`     Only EXISTING rows are being patched. Pass --create-new to also insert them (review the list first).`);
+  }
+  await upsertBatch("Hitter Master", CREATE_NEW ? [...hitterPatches, ...newHitterRows] : hitterPatches);
+  await upsertBatch("Pitching Master", CREATE_NEW ? [...pitcherPatches, ...newPitcherRows] : pitcherPatches);
   console.log("APPLY complete.\n");
 }
 
