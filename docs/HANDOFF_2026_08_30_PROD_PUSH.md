@@ -36,8 +36,8 @@ Two different pitch populations → the same numbers. That is **independent repl
 3. ~~**C26** `computeAndStoreScores` (propagate=false)~~ ✅ **DONE 2026-08-30** — pitchers 8,071 / hitters 8,244,
    0 errors, `player_predictions` untouched. Added the missing double-keyed `--prod` guard to
    `_run_store_no_propagate.ts` first (its banner had claimed "staging" while writing prod).
-4. **C29 NJCAA_D1 re-tag — BEFORE C28.** Prod has **10 `NJCAA%` rows still tagged `division='D1'`** and both C28
-   producers filter on it → running C28 first writes D1 values into the JUCO overlay.
+4. ~~**C29 NJCAA_D1 re-tag**~~ ✅ **DONE 2026-08-30** — 10 rows re-tagged; prod now `D1 30 · NJCAA_D1 10 · D2 2`,
+   0 NJCAA rows remain tagged D1 (matches staging). C28 is now safe to run.
 5. **C28** conference stats — G-GATE on staging first · bucketA **PASTE, never `--linked`** · `compute_conf_pitcher_env_plus`
    · `derive_conf_opr_htp`. ⛔ **NEVER run `populate-conf-stats`** (overwrites the hand-calibrated JUCO overlay).
 6. **Phase D** dWAR/bsrWAR (D30–34). Pagination fixed. ⚠ enable RLS on `player_season_defense`/`_baserunning` FIRST.
@@ -127,3 +127,15 @@ documented in the wrong ORDER. **Every one was caught by inspecting the step bef
 run a remaining step (C28/C29, D, E, F) without first checking: (1) which LANE does it read from — pitch_log or the
 legacy PSP-I? (2) does it have a working double-keyed `--prod` guard? (3) is its position in the sequence right, and
 does anything it depends on fall back to defaults SILENTLY?
+
+---
+# ✅ C29 NJCAA_D1 RE-TAG — APPLIED TO PROD 2026-08-30 (MUST run BEFORE C28)
+**BEFORE:** prod `Conference Stats` 2026 = `D1 40 · D2 2`, of which **10 were `NJCAA%` districts wrongly tagged
+`division='D1'`** (Appalachian, East, Mid-South, Midwest, Plains, South Atlantic, South Central, South, Southwest, West).
+**APPLIED:** `update "Conference Stats" set division='NJCAA_D1' where season=2026 and division='D1' and
+"conference abbreviation" like 'NJCAA%'` → **10 rows re-tagged**.
+**AFTER (verified):** `D1 30 · NJCAA_D1 10 · D2 2` — **0 NJCAA rows remain tagged D1**. Matches staging exactly.
+⚠ **ORDER IS LOAD-BEARING — C29 BEFORE C28.** Both C28 producers (`compute_conf_pitcher_env_plus`,
+`derive_conf_opr_htp`) filter on `division`. Running C28 first writes D1-derived values into the JUCO overlay and
+CONTAMINATES the JUCO baselines silently — the same "keep JUCO and true NCAA D1 separate" principle applied in C24.
+Also: with 10 JUCO rows counted as D1, the D1 conference SDs were inflated (JUCO FIP runs 6.4–8.0).

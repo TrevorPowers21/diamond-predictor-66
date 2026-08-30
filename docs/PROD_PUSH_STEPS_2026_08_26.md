@@ -1034,3 +1034,15 @@ documented in the wrong ORDER. **Every one was caught by inspecting the step bef
 run a remaining step (C28/C29, D, E, F) without first checking: (1) which LANE does it read from — pitch_log or the
 legacy PSP-I? (2) does it have a working double-keyed `--prod` guard? (3) is its position in the sequence right, and
 does anything it depends on fall back to defaults SILENTLY?
+
+---
+# ✅ C29 NJCAA_D1 RE-TAG — APPLIED TO PROD 2026-08-30 (MUST run BEFORE C28)
+**BEFORE:** prod `Conference Stats` 2026 = `D1 40 · D2 2`, of which **10 were `NJCAA%` districts wrongly tagged
+`division='D1'`** (Appalachian, East, Mid-South, Midwest, Plains, South Atlantic, South Central, South, Southwest, West).
+**APPLIED:** `update "Conference Stats" set division='NJCAA_D1' where season=2026 and division='D1' and
+"conference abbreviation" like 'NJCAA%'` → **10 rows re-tagged**.
+**AFTER (verified):** `D1 30 · NJCAA_D1 10 · D2 2` — **0 NJCAA rows remain tagged D1**. Matches staging exactly.
+⚠ **ORDER IS LOAD-BEARING — C29 BEFORE C28.** Both C28 producers (`compute_conf_pitcher_env_plus`,
+`derive_conf_opr_htp`) filter on `division`. Running C28 first writes D1-derived values into the JUCO overlay and
+CONTAMINATES the JUCO baselines silently — the same "keep JUCO and true NCAA D1 separate" principle applied in C24.
+Also: with 10 JUCO rows counted as D1, the D1 conference SDs were inflated (JUCO FIP runs 6.4–8.0).
