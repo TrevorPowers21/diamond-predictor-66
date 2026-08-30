@@ -1618,3 +1618,43 @@ Residual vs the old staging values: **mean |Δ| 0.100**, max ~0.54 — prod's D1
 5,343 hitters), shifting the centering rate. Expected, not a defect.
 **Also on prod:** Camden Kozeal's 2026 Hitter Master row INSERTED (5,340 → **5,341** D1 hitters) — 31 seed columns,
 **all 29 derived columns deliberately omitted** so C26 and Phase D compute them on prod.
+
+---
+# ✅ D31 DESCRIPTIVE WAR — APPLIED TO PROD 2026-08-30. Verified IN THE DATABASE, not from the log.
+`node scripts/drs/populate_descriptive_war.mjs --prod --commit` (run under `caffeinate -dimsu`, full output captured).
+`Hitter Master: 5340/5340 written, 0 FAILED` · `Pitching Master: 5374/5374 written, 0 FAILED` · `done. 0 write errors.`
+★ **That "0 FAILED" line only exists because of the fix made earlier the same day** — write errors were previously
+`console.error`'d but **NOT counted and NOT fatal** inside a ~10,715-update loop that then exited 0, so a partial write
+was indistinguishable from a clean one. Now counted, summarised per table, and `exit 1` on any failure.
+
+## PHASE GATE — PROD vs STAGING REFERENCE (2026, D1)
+| metric | PROD | staging ref | ✓ |
+|---|---|---|---|
+| `desc_owar` mean | **0.3458** | 0.3456 | ✅ |
+| `d_war` mean | **0.0103** | 0.0103 | ✅ |
+| `bsr_war` mean | **0.0000** | 0.0000 | ✅ |
+| `total_desc_war` mean | **0.3562** | 0.3559 | ✅ |
+| `desc_pwar` mean | **0.5108** | — | ✅ |
+| sum identity `max abs(total_desc_war − (desc_owar+d_war+bsr_war))` | **0.001000** | ≤ 0.002 | ✅ |
+| coverage | hitters **5,340 / 5,341** · pitchers **5,374 / 5,375** | — | ✅ |
+| `drs_behind` | **5,374** populated · range **−5.26 … 6.84** · **7** exact zeros | — | ✅ |
+`bsr_war` (= `wsb_runs / RPW 13.1`, from `player_season_baserunning`) range **−0.386 … 0.502**, centered at 0.
+The single missing hitter and pitcher are the pre-existing `sheet-miss 1` — players absent from the source CSV,
+unchanged from before this run. NOT a defect.
+
+## ★★ THE STRONGEST VALIDATION OF THE DAY — INDEPENDENT REPLICATION ON CAMDEN KOZEAL
+```
+PROD    Camden Kozeal — desc_owar 2.404 · d_war 0.649 · bsr_war -0.051 · total_desc_war 3.002
+STAGING Camden Kozeal — desc_owar 2.404 · d_war 0.649 · bsr_war -0.051 · total_desc_war 3.002
+```
+**IDENTICAL to three decimals.** A player who had **no Master row and no numbers at all on prod** hours earlier now
+matches the reference exactly — computed from **prod's own** pitch log, **prod's own** Master row (31 seed columns,
+zero derived columns copied), **prod's own** `player_season_defense`, and a `team_drs` **derived on prod**. Nothing was
+copied from staging except the seed stat line, which was itself cross-checked against prod's pitch log (.321/.411/.658).
+★ This closes the loop opened by the Arkansas `team_drs` discrepancy: detector → missing player → root-cause bug →
+row created → `team_drs` re-derived → descriptive WAR matches. **Every link verified, none assumed.**
+
+## ORDER NOTE FOR THE NEXT STEP (D32) — THE SILENT ONE
+`populate_descriptive_war_reg.mjs:79` reads `"Pitching Master".drs_behind` and coerces **`NULL → 0`**, so running it
+before D31 commits yields wrong `desc_ra9_reg` / `desc_pwar_reg` with **NO error**. Gate satisfied: `drs_behind` is
+**5,374/5,375 non-null** on prod. **Verify this count, never "D31 exited cleanly".**
