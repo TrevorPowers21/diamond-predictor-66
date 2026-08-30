@@ -136,3 +136,60 @@ Track B specification.** Three requirements fall directly out of it:
 
 **The one-line lesson:** *the runbook answered "what kind of work is this?" when the only question that matters is
 "what does this read, and who wrote it last?"*
+
+---
+# 🔬 ORDER AUDIT PART 2 — PHASES A, B, C (THE WORK ALREADY DONE). Was any of it run out of order, or since invalidated?
+Trevor: *"you audited everything we already did as well included in that correct?"* — **Initially NO. Now yes.**
+Part 1 audited only the REMAINING steps. This part runs the same read/write graph over the COMPLETED work and asks the
+question that actually matters: **is anything we already ran now STALE because of something else we ran after it, or
+something we are about to run?** Verified against prod, not reasoned.
+
+## ✅ RESULT: EVERY COMPLETED STEP IS STILL VALID. Nothing already run needs redoing. Two near-misses, both clean.
+| edge | verified | verdict |
+|---|---|---|
+| chain 1→2 | `derive_stuff_plus_pop_baseline` reads `_reclass_pf` + `pitch_log_corrected` (reclassifier outputs) | ✅ correct order |
+| chain 2→3 | `compute_pitch_log_stuff_plus` reads `pitcher_stuff_plus_ncaa` (chain 2) | ✅ |
+| chain 3→4 | aggregation reads scored `pitch_log` | ✅ |
+| chain 4→**C27** | `computeNcaaAverages:347` reads **`pitch_log_pitcher_totals`** and weights Stuff+ by `stuff_plus_data_pitches` (`:24-26` — the LIVE pitch_log lane, explicitly NOT the legacy PSP-I) | ✅ correct lane AND correct order |
+| C24→C28-4 | Conference Stuff+ = `Σ(Pitching Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)` — needs C24's `trackman_pitches` AND the chain-5 `stuff_plus` | ✅ both were run first |
+| C27→C26 | `computeAndStoreScores` reads `ncaa_averages`, silently defaults if absent | ✅ C27 ran first (this was CORRECTED earlier this push) |
+| C29→C28 | both C28 producers filter on `division` | ✅ C29 ran first |
+| C26→C28-2 | `compute_conf_pitcher_env_plus` reads `"Pitching Master"` + `ncaa_averages` | ✅ |
+| C27→C28b | `conferenceScoutingAverages` reads `ncaa_averages`, errors loudly if missing | ✅ |
+
+## ✅ NEAR-MISS 1 — **PHASE D DOES NOT INVALIDATE PHASE C.** (Checked because it easily could have.)
+If `computeNcaaAverages` (C27) or `computeAndStoreScores` (C26) read any `desc_*` / WAR column, then Phase D writing
+those columns would make C26/C27 stale and force a re-run of the whole back half of Phase C.
+**Grepped both for `desc_owar|desc_pwar|d_war|bsr_war|total_desc_war|drs_behind|regular_season_*`: ZERO hits.**
+→ **Phase D and Phase C touch DISJOINT Master columns. No re-run needed.** ✅
+
+## ✅ NEAR-MISS 2 — **D31 DOES NOT CLOBBER C26's POWER RATINGS.** (The dangerous shape would be a full-row upsert.)
+`populate_descriptive_war.mjs:156` is **`.update(cols).eq("source_player_id",…).eq("Season",…)`** — a **PARTIAL column
+UPDATE**, not `.upsert()` of a whole row. It writes only its own `desc_*` columns and leaves C26's
+`ba/obp/iso_power_rating`, `pRV+`, `era⁺…` untouched. ✅
+⚠ **BUT NOTE ITS ERROR HANDLING:** `:157` is `if (error) { console.error(…) }` — errors are **printed, not counted,
+and not fatal**, inside a 10,715-update loop that then **exits 0**. Another "validate by CONTENT, not exit code" case.
+**Gate D31 on the non-null counts, never on the exit code.**
+
+## ✅ NEAR-MISS 3 — **C27 DID NOT OVERWRITE PHASE B's TUNED CONFIG.** (C27 upserts `model_config`, so this was real.)
+`computeNcaaAverages:428` upserts `model_config` `onConflict: model_type,season,config_key` — it would silently
+overwrite any Phase-B key it shares. **Verified on prod AFTER C27 ran:** `nil_tier_sec = 4.0` ✅ ·
+`r_obp_std_pr = 31.89504` ✅ · **220 keys** (unchanged) ✅ · **6** `_sd_good`/`_sd_bad` keys with **0** still reset to 0 ✅.
+C27's keys (`p_ncaa_avg_*` / `p_sd_*`, e.g. `p_ncaa_avg_stuff_plus = 100.0141`) are **DISJOINT** from Phase B's tuned
+weights. **Phase B survived C27 intact.** ✅
+
+## 🛑 DEFECT FOUND IN THE ALREADY-DONE WORK — THE VERIFICATION GATE ITSELF USES KEY NAMES THAT DO NOT EXIST
+The documented Phase-B gate reads `obp_std_pr=31.89504, whip_pr_sd=37.19844, owar_repl_600`. **None of those key names
+exist on prod.** The gate query returns **ZERO ROWS** — and a zero-row result reads as *"the config is missing"*, which
+would send the next person chasing a non-existent Phase-B failure.
+**REAL KEY NAMES (verified on prod, values all CORRECT):**
+`r_obp_std_pr` = **31.89504** · `t_obp_std_pr` = **31.89504** · `p_whip_pr_sd` = **37.19844** ·
+`owar_replacement_runs_per_600` = **21.22** · `pwar_replacement_runs_per_9` = **1.92** · `nil_tier_sec` = **4.0**.
+✅ **Corrected INLINE** at the gate in `PROD_PUSH_STEPS` and at RUNBOOK rows 1–2 (which additionally carried the
+superseded VALUES 37.13 / 32.41).
+
+## 🧠 THE PATTERN ACROSS BOTH AUDIT PARTS
+Part 1 (remaining steps) found **2 structural defects**. Part 2 (completed steps) found **0 invalidations but 1 broken
+gate** — the verification query itself was wrong, which is the most expensive kind of error because it makes correct
+work *look* broken and broken work *look* fine.
+→ **Audit the GATES with the same rigour as the steps.** A gate that cannot fail, or cannot pass, is not a gate.

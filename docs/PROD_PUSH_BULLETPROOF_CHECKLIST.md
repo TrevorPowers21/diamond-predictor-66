@@ -167,7 +167,7 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | # | Step | Inputs | Producer | R/C | Staging-match gate | I/R | Reversible | DS | Trevor |
 |---|---|---|---|---|---|---|---|---|---|
 | D1 | Apply `team_drs_store.sql` to prod (adds team_war_snapshots.team_drs) | migration | scripts/sql/team_drs_store.sql (fold into migration) | — | column exists | — | drop col | y | n |
-| D2 | Run team_drs producer against prod — ⚠ `derive_team_drs.mjs:13` hardcoded staging (`VITE_SUPABASE_URL` only), NO --prod. 🛑 **ORDER WRONG: run this LAST in Phase D (after D3/D4/D5), not before** — it reads the Masters that D4/D5 write. ✅ Low risk: it writes only `scripts/drs/output/team_drs.csv`, no DB write, and there is no `team_drs` table on prod | player_season_defense, D4/D5 | scripts/drs/derive_team_drs.mjs *(FIX: add --prod + env guard)* | R | 308 D1 rows sum ~0; re-run staging too (empty there) | y | snapshot | y | n |
+| D2 | ⛔ **SKIP — superseded 2026-08-30.** `derive_team_drs.mjs` writes a **CSV only**, never the DB, and `scripts/sql/team_drs_store.sql` (new step **D29b**) supplies the values directly. Historical: run team_drs producer against prod — ⚠ `derive_team_drs.mjs:13` hardcoded staging (`VITE_SUPABASE_URL` only), NO --prod. 🛑 **ORDER WRONG: run this LAST in Phase D (after D3/D4/D5), not before** — it reads the Masters that D4/D5 write. ✅ Low risk: it writes only `scripts/drs/output/team_drs.csv`, no DB write, and there is no `team_drs` table on prod | player_season_defense, D4/D5 | scripts/drs/derive_team_drs.mjs *(FIX: add --prod + env guard)* | R | 308 D1 rows sum ~0; re-run staging too (empty there) | y | snapshot | y | n |
 | D3 | load-drs-wsb-staging --prod — **RUN THIS FIRST IN PHASE D, BEFORE D2** | defense/bsr | scripts/load-drs-wsb-staging.ts (--prod ✓) 🛑 unordered `.range()` at `:53` pages the 31,467-row `players` table — add `.order("id")` or the uuid map silently loses players | R | 13454 def / ~10432 bsr | y | tables | y | n |
 | D4 | populate_descriptive_war.mjs --prod | D3 (NOT D2) | **scripts/drs/populate_descriptive_war.mjs** 🛑 path was missing `drs/`; 🛑 unordered `.range()` at `:57`,`:58` — add `.order("id")` first | R | matches staging | y | Master backup | y | n |
 | D5 | populate_descriptive_war_reg.mjs --prod | D4 | **scripts/drs/populate_descriptive_war_reg.mjs** 🛑 path was missing `drs/`; 🛑 unordered `.range()` at `:33`,`:34` | R | matches staging | y | backup | y | n |
@@ -189,7 +189,7 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | F2 | populate_hitter_run_values(2026) | pitch_log_hitter_totals refreshed | migration 20260826150500 fn | R | batting_rv ~6053 non-null | y | col nullable | y (nulls hide chip) | n |
 | F3 | 🛑 **ORDER CORRECTED 2026-08-30 — this row was scrambled and listed 42b twice.** Canonical Phase-F order is STEPS 40→43: **backfill-snapshot-total-hitter-war → TWP markets (F4) → market resyncs → 42b recompute-snapshot-hitter-market → backfill-neutral → heal-stale.** (Was: neutral/heal FIRST, 42b in both F3 and F4, resyncs on both sides of 42b.) ✅ **FIXED 2026-08-30** — `resync-build-snapshot-markets.ts` was HARDCODED to `rd(".env.local", …)` (silently wrote STAGING on a "prod" run). It is now env-driven (`process.env` first, env-file fallback) with a double-keyed guard: prod URL without `--prod` refuses, `--prod` without a prod URL refuses. All 4 refuse/allow paths smoke-tested on both projects. ⚠ Its default scope is a **staging** build id (`7429b448…`, 0 rows on prod) — on prod pass `--all` | F1, E precomputes | scripts/backfill-snapshot-total-hitter-war.ts (ordered ✓) etc. | R | 0 snapshots with o_war-but-null-total; known player reads snapshot | y | snapshots | n (window) | n |
 | F4 | TWP markets → market resyncs → 42b re-price (see the corrected single order in F3 — do not run 42b twice). ✅ **FIXED 2026-08-30** — `rebake-twp-markets.ts` + `fix-returner-twp-hitter-market.ts` (bare `process.env.SUPABASE_URL`, no guard) and `rebuild-twp-target-rows.ts` + `resync-target-snapshots.ts` (env-file, no guard) all now carry the same double-keyed guard. **Run them as `npx tsx --env-file .env.production.local scripts/<x>.ts --prod --apply`** — `--env-file` alone now REFUSES, and `--prod` against staging REFUSES | F3 | committed | R | staging dist | y | pp | n | n |
-| F5 | **refresh_team_season_stats(2026) LAST** — ⛔ **BLOCKED: none of the three migrations are on prod** (probed 2026-08-30: `to_regclass('public.team_season_stats')` = NULL, no `refresh_team_season_stats` in `pg_proc`). Apply **20260819000000 (create) → 20260821010000 (war cols) → 20260819010000 (fn)** — that order is load-bearing: fn-before-ALTER `DELETE`s the season then aborts on `hitter_war_total does not exist`, leaving the table EMPTY. Full copy-pasteable plan + verification query = **`PROD_PUSH_STEPS_2026_08_26.md` Phase-A step 10a**. Needs Trevor's explicit "prod, now?" | E3–E6 conf, E2 park, team_war_snapshots | supabase/migrations + refresh_team_season_stats() | R | 308 D1 rows, 0-null WAR, AVG ~.277, wRC+ ~100, pwar matches snapshots | y (DELETE-season-then-rebuild atomic) | old rows persist until commit | y | n |
+| F5 | **refresh_team_season_stats(2026) LAST** — ✅ **UNBLOCKED 2026-08-30 — all three migrations ARE on prod** (re-probed: `team_season_stats` EXISTS, `refresh_team_season_stats` EXISTS in `pg_proc`; table is 0 rows, which is this step's job). 🔴 **BUT THIS STEP IS IN THE WRONG PLACE — it must run BEFORE Phase E, not LAST.** Phase E's `precompute-transfer-projections.ts:225` / `precompute-pitchers.ts:279` READ `team_season_stats.faced_stuff_plus`/`.faced_htp` and swallow the error, so Phase-E-first silently drops the faced-competition adjustment for Independents (`docs/AUDIT_dependency_order_vs_topic_order_2026_08_30.md`). Its own prereqs: Phase D + **new D33b lock-season** (`regular_season_ip` is 0/5,375 → NULL rates) + E2 park + C28. Historical note: Apply **20260819000000 (create) → 20260821010000 (war cols) → 20260819010000 (fn)** — that order is load-bearing: fn-before-ALTER `DELETE`s the season then aborts on `hitter_war_total does not exist`, leaving the table EMPTY. Full copy-pasteable plan + verification query = **`PROD_PUSH_STEPS_2026_08_26.md` Phase-A step 10a**. Needs Trevor's explicit "prod, now?" | E3–E6 conf, E2 park, team_war_snapshots | supabase/migrations + refresh_team_season_stats() | R | 308 D1 rows, 0-null WAR, AVG ~.277, wRC+ ~100, pwar matches snapshots | y (DELETE-season-then-rebuild atomic) | old rows persist until commit | y | n |
 | F6 | Reseed team_war_snapshots | F5 | committed | R | staging | y | snapshots | n | n |
 
 ### PHASE G/H — DEPLOY + FLIP
@@ -197,7 +197,7 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | # | Step | Producer | Trevor |
 |---|---|---|---|
 | G1 | Apply RLS migration 20260823000000 (cross-team read leak; deps resolve on prod) | supabase/migrations/20260823000000_player_predictions_rls_team_scope.sql | n |
-| G2 | Deploy edge fn **`process-precompute-jobs` ONLY** — 🛑 `recalculate-prediction` is **DEAD, do NOT deploy or run** (STEPS step 47). **AFTER F5 team_season_stats exists AND is populated** (the fn reads `team_season_stats.faced_htp`/`faced_stuff_plus` at `index.ts:1095`,`:1419`; the table does not exist on prod today) | supabase functions deploy | **y** |
+| G2 | Deploy edge fn **`process-precompute-jobs` ONLY** — 🛑 `recalculate-prediction` is **DEAD, do NOT deploy or run** (STEPS step 47). **AFTER F5 team_season_stats exists AND is populated** (the fn reads `team_season_stats.faced_htp`/`faced_stuff_plus` at `index.ts:1095`,`:1419`; the table **DOES exist** on prod as of 2026-08-30 — it is simply **0 rows** until F5/F44 runs, so the real gate is "F44 has POPULATED it") | supabase functions deploy | **y** |
 | G3 | PREVIEW-VERIFY on Vercel preview (= PROD Supabase) | — | n |
 | G4 | **MERGE feature/war-recalibration → main** via `gh pr create`, Trevor clicks merge | — | **y** |
 | H | Gated drops (Phase H) — never drop team_war_snapshots; enforce landmine list | — | n |
@@ -219,7 +219,7 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | G9 | ✅ **RESOLVED** | C24 `backfill_trackman` unordered `.range()` + gated on the legacy PSP-I aggregation | runbook-order-safety, precomputes | **`.order(PK)` added** (plus the same fix on `derive_masters_from_pitchlog.ts` and `compute_conf_pitcher_env_plus.ts`). Re-gated on the **pitch_log** aggregation (C7b), not PSP-I. | 5, 3, 4 |
 | G10 | HIGH | Prod `player_predictions.d_war`/`bsr_war` on superseded ÷10 scale (staging + migration 20260810 = ÷13.1) | war-defense-composite | After E o_war reprecompute, fire `refresh_composite_war()` (÷13.1); verify d_war=Σdrs_floor/13.1 — never before | 3 |
 | G11 | HIGH | `team_war_snapshots.team_drs` MISSING on prod + `derive_team_drs.mjs` hardcoded staging, no --prod | war-defense-composite | Add --prod+env guard to producer; apply team_drs_store.sql; run BEFORE populate_descriptive_war; re-run staging (empty) | 2, 5 |
-| G12 | HIGH | `team_season_stats` table absent on prod — needed by refresh_team_season_stats AND read by `process-precompute-jobs` edge fn | schema-diff, edgefn, team-conf-park-env | Apply create→war-cols→fn migrations + populate BEFORE edge-fn deploy; add edge-fn soft-fail guard | 5 |
+| G12 | ✅ **RESOLVED 2026-08-30 — table AND function now exist on prod (0 rows until F44).** Historical: `team_season_stats` table absent on prod — needed by refresh_team_season_stats AND read by `process-precompute-jobs` edge fn | schema-diff, edgefn, team-conf-park-env | Apply create→war-cols→fn migrations + populate BEFORE edge-fn deploy; add edge-fn soft-fail guard | 5 |
 | G13 | HIGH | Park Factors seasonal producer `backfill_park_factors_seasonal.ts` hardwired STAGING URL + off-repo CSVs; prod rg_factor_seasonal 0/309 | team-conf-park-env | Read env URL/key (run with .env.production.local); commit source CSVs; run + DIFF | 2, 1 |
 | G14 | HIGH | D1 Conference Stats `Stuff_plus` — no committed producer (present on prod only as paused-push COPY); feeds HTP/faced_stuff_plus/pitcher env | team-conf-park-env | Build PA/IP-weighted D1 rollup from prod Masters OR document committed import path | 2, 1 |
 | G15 | HIGH | `model_config` admin_ui 2026 returner constants DIVERGE prod vs staging (baselines + SDs); edge fns + engine read at runtime → different projections | edgefn-code-deploy | Surface to Trevor which set is canonical (committed code+prod agree on SD 29.99699, contradicts staging-source premise); sync both DBs; re-run returner producers | 3, 8 |
@@ -1296,3 +1296,60 @@ re-bakes), NOT by what-feeds-what. A full read/write graph audit of every remain
 F39 → F40 → F41 → F42 → F42b → F43 → G46`
 **Edges the topic order got RIGHT (do not churn):** F39-after-E · F40→F41→F42 · E35-before-precomputes · C27→C26→C28 ·
 G46 last. Full evidence, per-step reads/writes, and the three Track B requirements are in the audit doc.
+
+---
+# 🔬 ORDER AUDIT PART 2 — PHASES A, B, C (THE WORK ALREADY DONE). Was any of it run out of order, or since invalidated?
+Trevor: *"you audited everything we already did as well included in that correct?"* — **Initially NO. Now yes.**
+Part 1 audited only the REMAINING steps. This part runs the same read/write graph over the COMPLETED work and asks the
+question that actually matters: **is anything we already ran now STALE because of something else we ran after it, or
+something we are about to run?** Verified against prod, not reasoned.
+
+## ✅ RESULT: EVERY COMPLETED STEP IS STILL VALID. Nothing already run needs redoing. Two near-misses, both clean.
+| edge | verified | verdict |
+|---|---|---|
+| chain 1→2 | `derive_stuff_plus_pop_baseline` reads `_reclass_pf` + `pitch_log_corrected` (reclassifier outputs) | ✅ correct order |
+| chain 2→3 | `compute_pitch_log_stuff_plus` reads `pitcher_stuff_plus_ncaa` (chain 2) | ✅ |
+| chain 3→4 | aggregation reads scored `pitch_log` | ✅ |
+| chain 4→**C27** | `computeNcaaAverages:347` reads **`pitch_log_pitcher_totals`** and weights Stuff+ by `stuff_plus_data_pitches` (`:24-26` — the LIVE pitch_log lane, explicitly NOT the legacy PSP-I) | ✅ correct lane AND correct order |
+| C24→C28-4 | Conference Stuff+ = `Σ(Pitching Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)` — needs C24's `trackman_pitches` AND the chain-5 `stuff_plus` | ✅ both were run first |
+| C27→C26 | `computeAndStoreScores` reads `ncaa_averages`, silently defaults if absent | ✅ C27 ran first (this was CORRECTED earlier this push) |
+| C29→C28 | both C28 producers filter on `division` | ✅ C29 ran first |
+| C26→C28-2 | `compute_conf_pitcher_env_plus` reads `"Pitching Master"` + `ncaa_averages` | ✅ |
+| C27→C28b | `conferenceScoutingAverages` reads `ncaa_averages`, errors loudly if missing | ✅ |
+
+## ✅ NEAR-MISS 1 — **PHASE D DOES NOT INVALIDATE PHASE C.** (Checked because it easily could have.)
+If `computeNcaaAverages` (C27) or `computeAndStoreScores` (C26) read any `desc_*` / WAR column, then Phase D writing
+those columns would make C26/C27 stale and force a re-run of the whole back half of Phase C.
+**Grepped both for `desc_owar|desc_pwar|d_war|bsr_war|total_desc_war|drs_behind|regular_season_*`: ZERO hits.**
+→ **Phase D and Phase C touch DISJOINT Master columns. No re-run needed.** ✅
+
+## ✅ NEAR-MISS 2 — **D31 DOES NOT CLOBBER C26's POWER RATINGS.** (The dangerous shape would be a full-row upsert.)
+`populate_descriptive_war.mjs:156` is **`.update(cols).eq("source_player_id",…).eq("Season",…)`** — a **PARTIAL column
+UPDATE**, not `.upsert()` of a whole row. It writes only its own `desc_*` columns and leaves C26's
+`ba/obp/iso_power_rating`, `pRV+`, `era⁺…` untouched. ✅
+⚠ **BUT NOTE ITS ERROR HANDLING:** `:157` is `if (error) { console.error(…) }` — errors are **printed, not counted,
+and not fatal**, inside a 10,715-update loop that then **exits 0**. Another "validate by CONTENT, not exit code" case.
+**Gate D31 on the non-null counts, never on the exit code.**
+
+## ✅ NEAR-MISS 3 — **C27 DID NOT OVERWRITE PHASE B's TUNED CONFIG.** (C27 upserts `model_config`, so this was real.)
+`computeNcaaAverages:428` upserts `model_config` `onConflict: model_type,season,config_key` — it would silently
+overwrite any Phase-B key it shares. **Verified on prod AFTER C27 ran:** `nil_tier_sec = 4.0` ✅ ·
+`r_obp_std_pr = 31.89504` ✅ · **220 keys** (unchanged) ✅ · **6** `_sd_good`/`_sd_bad` keys with **0** still reset to 0 ✅.
+C27's keys (`p_ncaa_avg_*` / `p_sd_*`, e.g. `p_ncaa_avg_stuff_plus = 100.0141`) are **DISJOINT** from Phase B's tuned
+weights. **Phase B survived C27 intact.** ✅
+
+## 🛑 DEFECT FOUND IN THE ALREADY-DONE WORK — THE VERIFICATION GATE ITSELF USES KEY NAMES THAT DO NOT EXIST
+The documented Phase-B gate reads `obp_std_pr=31.89504, whip_pr_sd=37.19844, owar_repl_600`. **None of those key names
+exist on prod.** The gate query returns **ZERO ROWS** — and a zero-row result reads as *"the config is missing"*, which
+would send the next person chasing a non-existent Phase-B failure.
+**REAL KEY NAMES (verified on prod, values all CORRECT):**
+`r_obp_std_pr` = **31.89504** · `t_obp_std_pr` = **31.89504** · `p_whip_pr_sd` = **37.19844** ·
+`owar_replacement_runs_per_600` = **21.22** · `pwar_replacement_runs_per_9` = **1.92** · `nil_tier_sec` = **4.0**.
+✅ **Corrected INLINE** at the gate in `PROD_PUSH_STEPS` and at RUNBOOK rows 1–2 (which additionally carried the
+superseded VALUES 37.13 / 32.41).
+
+## 🧠 THE PATTERN ACROSS BOTH AUDIT PARTS
+Part 1 (remaining steps) found **2 structural defects**. Part 2 (completed steps) found **0 invalidations but 1 broken
+gate** — the verification query itself was wrong, which is the most expensive kind of error because it makes correct
+work *look* broken and broken work *look* fine.
+→ **Audit the GATES with the same rigour as the steps.** A gate that cannot fail, or cannot pass, is not a gate.

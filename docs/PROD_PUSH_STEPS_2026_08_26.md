@@ -324,8 +324,7 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
     prod** (probe 2026-08-30) ≈ 32 unordered pages. Dropped/duplicated pages corrupt the `source_player_id → uuid`
     identity map, so dRS/wSB for the missed players resolves to nothing. The "unresolved rows are logged, never
     dropped" promise **does not protect you** — the row is logged as unresolved and its defense silently never lands,
-    so `d_war` stays NULL for those players through D31/D32 and F39. **Add `.order("id", { ascending: true })` to
-    `fetchAll` before running.** Prod path itself is sound: `:29-31` asserts the `trbvxuoliwrfowibatkm` ref both ways ✅.
+    so `d_war` stays NULL for those players through D31/D32 and F39. ✅ **ALREADY FIXED 2026-08-30** — `fetchAll` now takes an `orderCol` (default `id`) and orders ascending; the rationale comment is in the file. No action needed. Prod path itself is sound: `:29-31` asserts the `trbvxuoliwrfowibatkm` ref both ways ✅.
 31. **Descriptive WAR (total)** — `node scripts/drs/populate_descriptive_war.mjs --prod` (dry-run) → `… --prod --commit`.
     Writes Master `desc_owar` / `d_war` (=Σ drs_floor pos≠P /RPW) / `bsr_war` (=wsb_runs/RPW) / `total_desc_war`. REGEN
     🛑 **Unordered `.range()`** — `scripts/drs/populate_descriptive_war.mjs:57` (`all`) and `:58` (`allNoSeason`) both
@@ -389,7 +388,7 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
     ⚠ **None of these three are npm scripts** — there is no `rebuild-twp-target-rows` / `rebake-twp-markets` /
     `fix-returner-twp-hitter-market` entry in `package.json`. Invoke the files directly.
     - `scripts/rebuild-twp-target-rows.ts:13` — honours `--prod` (picks `.env.production.local`) ✅.
-    - 🛑 `scripts/rebake-twp-markets.ts:15` and `scripts/fix-returner-twp-hitter-market.ts:16` take
+    - ✅ **RESOLVED 2026-08-30 — BOTH now carry the prod ref assert (`grep -c trbvxuoliwrfowibatkm` = 1) and handle `--prod`.** Still invoke them directly (they are NOT npm scripts) — that half stands. Historical defect: they took
       `process.env.SUPABASE_URL` with **no `--prod` flag and no ref assert**. `--prod` on their command line is
       **silently ignored**. They hit whatever env file you loaded — so they MUST be run as
       `npx tsx --env-file=.env.production.local scripts/<name>.ts --apply`. Get the `--env-file` wrong and they write
@@ -399,7 +398,7 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
       `Teams Table` (774) — all under the 1000-row page size, so single-page (counts probed 2026-08-30). Re-check if
       `target_board` or `Teams Table` ever crosses 1000.
 42. Market resyncs: `resync-build-snapshot-markets.ts --all --apply` · `resync-target-snapshots.ts --all --apply` (prod). IDEM
-    🛑 **MUST READ — `resync-build-snapshot-markets.ts` HAS NO PROD PATH AND WILL WRITE STAGING.**
+    ✅ **RESOLVED 2026-08-30 — this blocker is STALE. `resync-build-snapshot-markets.ts` IS now prod-capable** (env-driven `process.env`-first with an env-file fallback, plus the standard double-keyed guard). The historical defect is preserved below for context ONLY — do not act on it:
     `scripts/resync-build-snapshot-markets.ts:17` is **hardcoded**:
     `createClient(rd(".env.local", "VITE_SUPABASE_URL"), rd(".env.local", "SUPABASE_SERVICE_ROLE_KEY"))`.
     It reads the **literal string `.env.local`** — it does not consult `--prod`, does not consult `process.env`, and
@@ -412,7 +411,7 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
 42b. **Snapshot hitter market RE-PRICE (stale-PTM fix)** — `recompute-snapshot-hitter-market.ts --prod --apply`. Re-derives every hitter snapshot's `market_value` (TWP → `twp_hitter_market_value`) as `total_hitter_war × $25k × PTM(build-program conference) × PVF(players.position)`, writing ONLY the dollar field — every dev_agg/depth/nil toggle preserved. **Why:** snapshots baked before the SEC-4.0 re-price still hold the OLD SEC 1.5 PTM (~$42.5k/win); nothing re-baked them (the profile/TB pure-read the snapshot, so stale $ shows verbatim — e.g. Souza $50,983 for 1.20 WAR). Re-prices SEC builds ~2.6× up, other tiers barely move. **PVF is CORRECT in the market** (pricing layer, spec §7.2) — it is only removed from the Player SCORE (`calcPlayerScore`, spec §1). ⚠ **GOTCHA (must keep):** filter null/non-UUID pids before the `players` position lookup + error-check each `.in` batch — a single literal-`null` player_id (portal-search add) makes Postgres reject the WHOLE `.in("id",batch)` as invalid-uuid, silently dropping ~200 real players' positions → PVF wrongly flattens to 1.0 (Souza $119,839 instead of $131,823). Idempotent. Staging verified: 472 rows then 38 position-corrections; Souza both builds $110k/win (SEC 4.0×IF 1.10); 0 markets >$130k/win; 0 negative; re-dry-run 0. IDEM
 43. Snapshots: `backfill-neutral-snapshot.ts --prod --apply` → `heal-stale-snapshots.ts --prod --apply --yes` (ordered-`.range()` versions only). IDEM
 44. `select refresh_team_season_stats(2026);` — **LAST**; reads PROD's own `team_war_snapshots` (2025 LSU champ + 39 conf — never drop). REGEN
-    🛑 **MUST READ — THIS STEP CANNOT RUN TODAY. MISSING PREREQUISITE → see new Phase-A step 10a.** Re-probed
+    🛑 **MUST READ — TWO CORRECTIONS (2026-08-30).** (a) ✅ **The "cannot run" blocker is STALE** — `team_season_stats` **EXISTS** on prod and `refresh_team_season_stats` **EXISTS** in `pg_proc` (all three migrations were applied in dependency order as Phase-C prereqs). The table is 0 rows, which is this step's JOB. (b) 🔴 **THIS STEP MUST MOVE — it belongs BEFORE Phase E, not last in Phase F.** `precompute-transfer-projections.ts:225` and `precompute-pitchers.ts:279` READ `team_season_stats.faced_stuff_plus` / `.faced_htp`, and they discard `error` + coerce to `[]`, so running Phase E first silently drops the faced-competition adjustment for every Independent program. See `docs/AUDIT_dependency_order_vs_topic_order_2026_08_30.md`. Its own prereqs are Phase D (Masters `desc_*` + `_reg`), **D33b lock-season** (`regular_season_ip`, currently 0/5,375 → NULL rates), **E2** (park snapshot) and C28. Historical note follows: Re-probed
     read-only 2026-08-30 (`information_schema` / `pg_proc`, direct pg): on prod
     `to_regclass('public.team_season_stats')` is **NULL** and `pg_proc` has **no** `refresh_team_season_stats`.
     **THREE** migrations are unapplied — `20260819000000_team_season_stats.sql` (CREATE TABLE),
@@ -425,7 +424,7 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
 46. `supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm` — two-sided SD + HR9 floor + TWP-aware + per-conference PTM + faced-competition. Deploy AFTER prod has conf env+ / `ba/obp/iso_plus` + model_config transfer weights. (Staging is at v27; prod is v12.)
     🛑 **MUST READ — ADD THE MISSING `team_season_stats` PREREQUISITE.** The deployed function reads
     `team_season_stats.faced_htp` / `faced_stuff_plus` at `supabase/functions/process-precompute-jobs/index.ts:1095`
-    and `:1419` (faced-competition for Independents). That table **does not exist on prod today** (see F44). So the
+    and `:1419` (faced-competition for Independents). ✅ **CORRECTED 2026-08-30: the table DOES exist on prod** (as does the function). It is simply **0 rows** until F44 runs. So the gate is "F44 has RUN and POPULATED it", not "the table must be created". So the
     full gate is: conf env+ ✅ · `ba/obp/iso_plus` ✅ · model_config transfer weights ✅ · **AND Phase-A step 10a is
     applied AND F44 has run and `team_season_stats` is populated.** Deploy G46 before that and Independent-team projections silently lose their
     faced-competition adjustment. `RUNBOOK:236` and `PROD_MIGRATIONS_TODO.md:482,492,508,599-602` all state the deploy
@@ -460,7 +459,7 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
 - **Config present:** model_config season 2026 = **220 rows** (probed on prod 2026-08-30; the old "201 keys" figure is
   stale-low — treat 220 as the floor, not a ceiling). ⚠ The column is **`config_key` / `config_value`**, not `key` —
   `model_config` has no `key` column, so a gate query written as `select key …` errors out.
-  `obp_std_pr`=31.89504, `whip_pr_sd`=37.19844; nil_tier_sec=4.0. (`RUNBOOK:118` still carries the superseded
+  🛑 **CORRECTED KEY NAMES 2026-08-30 — the old names return ZERO ROWS and read as "config missing".** Real keys on prod: **`r_obp_std_pr` / `t_obp_std_pr` = 31.89504** (NOT `obp_std_pr`) · **`p_whip_pr_sd` = 37.19844** (NOT `whip_pr_sd`) · **`owar_replacement_runs_per_600` = 21.22** (NOT `owar_repl_600`) · `pwar_replacement_runs_per_9` = 1.92. All VERIFIED present on prod; nil_tier_sec=4.0. (`RUNBOOK:118` still carries the superseded
   `whip_pr_sd` 37.13 / `obp_std_pr` 32.41 — ignore those.)
 - **Global NULL-count (server-side, not sampling):** `count(*) FILTER (WHERE park_code IS NULL)` on pitch_log = 0; per-pitcher `count(DISTINCT pitcher_full_name)=1`.
 - **dWAR/bsrWAR:** player_season_defense/baserunning populated; Master `d_war`/`bsr_war` non-null + centered; `total_desc_war=desc_owar+d_war+bsr_war`.
@@ -1555,3 +1554,60 @@ re-bakes), NOT by what-feeds-what. A full read/write graph audit of every remain
 F39 → F40 → F41 → F42 → F42b → F43 → G46`
 **Edges the topic order got RIGHT (do not churn):** F39-after-E · F40→F41→F42 · E35-before-precomputes · C27→C26→C28 ·
 G46 last. Full evidence, per-step reads/writes, and the three Track B requirements are in the audit doc.
+
+---
+# 🔬 ORDER AUDIT PART 2 — PHASES A, B, C (THE WORK ALREADY DONE). Was any of it run out of order, or since invalidated?
+Trevor: *"you audited everything we already did as well included in that correct?"* — **Initially NO. Now yes.**
+Part 1 audited only the REMAINING steps. This part runs the same read/write graph over the COMPLETED work and asks the
+question that actually matters: **is anything we already ran now STALE because of something else we ran after it, or
+something we are about to run?** Verified against prod, not reasoned.
+
+## ✅ RESULT: EVERY COMPLETED STEP IS STILL VALID. Nothing already run needs redoing. Two near-misses, both clean.
+| edge | verified | verdict |
+|---|---|---|
+| chain 1→2 | `derive_stuff_plus_pop_baseline` reads `_reclass_pf` + `pitch_log_corrected` (reclassifier outputs) | ✅ correct order |
+| chain 2→3 | `compute_pitch_log_stuff_plus` reads `pitcher_stuff_plus_ncaa` (chain 2) | ✅ |
+| chain 3→4 | aggregation reads scored `pitch_log` | ✅ |
+| chain 4→**C27** | `computeNcaaAverages:347` reads **`pitch_log_pitcher_totals`** and weights Stuff+ by `stuff_plus_data_pitches` (`:24-26` — the LIVE pitch_log lane, explicitly NOT the legacy PSP-I) | ✅ correct lane AND correct order |
+| C24→C28-4 | Conference Stuff+ = `Σ(Pitching Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)` — needs C24's `trackman_pitches` AND the chain-5 `stuff_plus` | ✅ both were run first |
+| C27→C26 | `computeAndStoreScores` reads `ncaa_averages`, silently defaults if absent | ✅ C27 ran first (this was CORRECTED earlier this push) |
+| C29→C28 | both C28 producers filter on `division` | ✅ C29 ran first |
+| C26→C28-2 | `compute_conf_pitcher_env_plus` reads `"Pitching Master"` + `ncaa_averages` | ✅ |
+| C27→C28b | `conferenceScoutingAverages` reads `ncaa_averages`, errors loudly if missing | ✅ |
+
+## ✅ NEAR-MISS 1 — **PHASE D DOES NOT INVALIDATE PHASE C.** (Checked because it easily could have.)
+If `computeNcaaAverages` (C27) or `computeAndStoreScores` (C26) read any `desc_*` / WAR column, then Phase D writing
+those columns would make C26/C27 stale and force a re-run of the whole back half of Phase C.
+**Grepped both for `desc_owar|desc_pwar|d_war|bsr_war|total_desc_war|drs_behind|regular_season_*`: ZERO hits.**
+→ **Phase D and Phase C touch DISJOINT Master columns. No re-run needed.** ✅
+
+## ✅ NEAR-MISS 2 — **D31 DOES NOT CLOBBER C26's POWER RATINGS.** (The dangerous shape would be a full-row upsert.)
+`populate_descriptive_war.mjs:156` is **`.update(cols).eq("source_player_id",…).eq("Season",…)`** — a **PARTIAL column
+UPDATE**, not `.upsert()` of a whole row. It writes only its own `desc_*` columns and leaves C26's
+`ba/obp/iso_power_rating`, `pRV+`, `era⁺…` untouched. ✅
+⚠ **BUT NOTE ITS ERROR HANDLING:** `:157` is `if (error) { console.error(…) }` — errors are **printed, not counted,
+and not fatal**, inside a 10,715-update loop that then **exits 0**. Another "validate by CONTENT, not exit code" case.
+**Gate D31 on the non-null counts, never on the exit code.**
+
+## ✅ NEAR-MISS 3 — **C27 DID NOT OVERWRITE PHASE B's TUNED CONFIG.** (C27 upserts `model_config`, so this was real.)
+`computeNcaaAverages:428` upserts `model_config` `onConflict: model_type,season,config_key` — it would silently
+overwrite any Phase-B key it shares. **Verified on prod AFTER C27 ran:** `nil_tier_sec = 4.0` ✅ ·
+`r_obp_std_pr = 31.89504` ✅ · **220 keys** (unchanged) ✅ · **6** `_sd_good`/`_sd_bad` keys with **0** still reset to 0 ✅.
+C27's keys (`p_ncaa_avg_*` / `p_sd_*`, e.g. `p_ncaa_avg_stuff_plus = 100.0141`) are **DISJOINT** from Phase B's tuned
+weights. **Phase B survived C27 intact.** ✅
+
+## 🛑 DEFECT FOUND IN THE ALREADY-DONE WORK — THE VERIFICATION GATE ITSELF USES KEY NAMES THAT DO NOT EXIST
+The documented Phase-B gate reads `obp_std_pr=31.89504, whip_pr_sd=37.19844, owar_repl_600`. **None of those key names
+exist on prod.** The gate query returns **ZERO ROWS** — and a zero-row result reads as *"the config is missing"*, which
+would send the next person chasing a non-existent Phase-B failure.
+**REAL KEY NAMES (verified on prod, values all CORRECT):**
+`r_obp_std_pr` = **31.89504** · `t_obp_std_pr` = **31.89504** · `p_whip_pr_sd` = **37.19844** ·
+`owar_replacement_runs_per_600` = **21.22** · `pwar_replacement_runs_per_9` = **1.92** · `nil_tier_sec` = **4.0**.
+✅ **Corrected INLINE** at the gate in `PROD_PUSH_STEPS` and at RUNBOOK rows 1–2 (which additionally carried the
+superseded VALUES 37.13 / 32.41).
+
+## 🧠 THE PATTERN ACROSS BOTH AUDIT PARTS
+Part 1 (remaining steps) found **2 structural defects**. Part 2 (completed steps) found **0 invalidations but 1 broken
+gate** — the verification query itself was wrong, which is the most expensive kind of error because it makes correct
+work *look* broken and broken work *look* fine.
+→ **Audit the GATES with the same rigour as the steps.** A gate that cannot fail, or cannot pass, is not a gate.

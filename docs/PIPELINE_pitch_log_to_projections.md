@@ -179,12 +179,22 @@ flowchart TD
 | 4 | Power ratings (Masters) | hitter ba/obp/iso ratings (+pull_air) → desc WAR; pitcher pRV+/era⁺/… → desc pWAR | `Hitter Master` + `Pitching Master` (ratings + `desc_*` / `total_desc_war` cols) | Player/Pitcher Profile, Rankings |
 | 5 | Conference baselines | Conf Stuff+ (depth), wRC+, park factors, HTP | `Conference Stats` | Team Builder context |
 | 5.5 | **Projection calibration (NEW, 2026-08-24)** | per-stat mean + TWO-SIDED SD (`sd_good`/`sd_bad`) on the qualified pop (min IP/AB) + `pr_sd` from stage-4 ratings — fixes the z-shift over-projecting elite (impossible HR9/ERA) | `model_config` (per-stat `*_sd_good`/`*_sd_bad`/`*_ncaa_avg`/`*_qual_min`) | (feeds stage 6) — see `AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md`. NOT built yet. |
-| 6 | Projections | returner + transfer engine (blend → competition translation via Stuff+/HTP/park → class/dev → depth-role → WAR → market); **reads stage-5.5 two-sided SDs, directional (sd_good toward elite, sd_bad toward poor)** | `player_predictions` (o_war, p_war, total_hitter_war, market_value, rates) | Rankings, Profiles, Team Builder, Transfer Portal |
+| 6 | Projections | returner + transfer engine (blend → competition translation via Stuff+/HTP/park → class/dev → depth-role → WAR → market); **reads stage-5.5 two-sided SDs, directional**. 🛑 **ORDER: this stage READS `team_season_stats.faced_stuff_plus`/`.faced_htp`** (`precompute-transfer-projections.ts:225`, `precompute-pitchers.ts:279`) for Independent from-programs, and **swallows the error / coerces to `[]`** — so `refresh_team_season_stats` MUST run BEFORE it or Independents silently lose the faced-competition adjustment. | `player_predictions` (o_war, p_war, total_hitter_war, market_value, rates) | Rankings, Profiles, Team Builder, Transfer Portal |
 | 7 | NIL + need | score = total_WAR × PTM → allocateNil curve + need premium | (computed live; GM `gm_budget.nil_allocation_mode`) | Team Builder, GM, Target Board |
 
 ## Current vs target
 - **Current:** stages 2–5 (+ **3b**) are **scattered one-off scripts run by hand** (`reclassify_prod`, `compute_pitch_log_stuff_plus`, `derive_masters_from_pitchlog`, `conferenceStuffPlusV2`, `populate-conference-stats-env-plus`, `aggregate_pitch_log_dimensions` (3b, season-stats splits), the Master rating stores, the conf-stats Bucket-A/OPR/HTP producers, …) — easy to forget → stale baselines/conference/season-stats values.
 - **Target (Track B):** ONE function fires on pitch-log ingest and runs stages 2→3→**3b**→4→5→6 in order, stamped `classification_version` + `constants_version`, re-deriving every downstream aggregate in the same pass (no old-taxonomy means survive). 3b (season-stats splits) runs after Stuff+ (3), independent of projections (6). Stage 1 Master-CSV ingest stays a separate upload; the pipeline marries its pitch-log derivations onto the Masters.
+- **★ SEQUENCING RULE (the whole point of Track B) — ORDER BY DATA DEPENDENCY, NEVER BY TOPIC.** The prod runbook was
+  organized by *kind of work* (schema / config / producers / defense / precomputes / re-bakes) and that ordering was
+  **provably wrong**: it put `refresh_team_season_stats` in the LAST phase while the projection stage six steps earlier
+  READS the table it creates. See `docs/AUDIT_dependency_order_vs_topic_order_2026_08_30.md`. **Track B must encode the
+  read/write graph, not the phase names.** Known hard edges: chain 1→2→3→4 · chain 4 → `computeNcaaAverages` (weights
+  Stuff+ by `pitch_log_pitcher_totals.stuff_plus_data_pitches`) · `computeNcaaAverages` → power ratings (silent
+  hardcoded defaults if absent) · division re-tag → conference producers · `trackman_pitches` + Master `stuff_plus` →
+  Conference Stuff+ · park factors → `derive_conf_opr_htp` (park rewrite invalidates HTP) · descriptive WAR → its `_reg`
+  pass (`NULL → 0`, no error) · lock-regular-season → `team_season_stats` (`nullif(sum,0)` → NULL rates) →
+  **projections** · TWP detector → every precompute.
 - **Sequencing rule:** Stuff+ (stage 3) must be FINAL before the transfer recompute (stage 6, Step 6b) so projections land once. NIL's `total_hitter_war` + need-premium wiring rides the 6b/7c recompute.
 
 ---
@@ -1200,3 +1210,60 @@ re-bakes), NOT by what-feeds-what. A full read/write graph audit of every remain
 F39 → F40 → F41 → F42 → F42b → F43 → G46`
 **Edges the topic order got RIGHT (do not churn):** F39-after-E · F40→F41→F42 · E35-before-precomputes · C27→C26→C28 ·
 G46 last. Full evidence, per-step reads/writes, and the three Track B requirements are in the audit doc.
+
+---
+# 🔬 ORDER AUDIT PART 2 — PHASES A, B, C (THE WORK ALREADY DONE). Was any of it run out of order, or since invalidated?
+Trevor: *"you audited everything we already did as well included in that correct?"* — **Initially NO. Now yes.**
+Part 1 audited only the REMAINING steps. This part runs the same read/write graph over the COMPLETED work and asks the
+question that actually matters: **is anything we already ran now STALE because of something else we ran after it, or
+something we are about to run?** Verified against prod, not reasoned.
+
+## ✅ RESULT: EVERY COMPLETED STEP IS STILL VALID. Nothing already run needs redoing. Two near-misses, both clean.
+| edge | verified | verdict |
+|---|---|---|
+| chain 1→2 | `derive_stuff_plus_pop_baseline` reads `_reclass_pf` + `pitch_log_corrected` (reclassifier outputs) | ✅ correct order |
+| chain 2→3 | `compute_pitch_log_stuff_plus` reads `pitcher_stuff_plus_ncaa` (chain 2) | ✅ |
+| chain 3→4 | aggregation reads scored `pitch_log` | ✅ |
+| chain 4→**C27** | `computeNcaaAverages:347` reads **`pitch_log_pitcher_totals`** and weights Stuff+ by `stuff_plus_data_pitches` (`:24-26` — the LIVE pitch_log lane, explicitly NOT the legacy PSP-I) | ✅ correct lane AND correct order |
+| C24→C28-4 | Conference Stuff+ = `Σ(Pitching Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)` — needs C24's `trackman_pitches` AND the chain-5 `stuff_plus` | ✅ both were run first |
+| C27→C26 | `computeAndStoreScores` reads `ncaa_averages`, silently defaults if absent | ✅ C27 ran first (this was CORRECTED earlier this push) |
+| C29→C28 | both C28 producers filter on `division` | ✅ C29 ran first |
+| C26→C28-2 | `compute_conf_pitcher_env_plus` reads `"Pitching Master"` + `ncaa_averages` | ✅ |
+| C27→C28b | `conferenceScoutingAverages` reads `ncaa_averages`, errors loudly if missing | ✅ |
+
+## ✅ NEAR-MISS 1 — **PHASE D DOES NOT INVALIDATE PHASE C.** (Checked because it easily could have.)
+If `computeNcaaAverages` (C27) or `computeAndStoreScores` (C26) read any `desc_*` / WAR column, then Phase D writing
+those columns would make C26/C27 stale and force a re-run of the whole back half of Phase C.
+**Grepped both for `desc_owar|desc_pwar|d_war|bsr_war|total_desc_war|drs_behind|regular_season_*`: ZERO hits.**
+→ **Phase D and Phase C touch DISJOINT Master columns. No re-run needed.** ✅
+
+## ✅ NEAR-MISS 2 — **D31 DOES NOT CLOBBER C26's POWER RATINGS.** (The dangerous shape would be a full-row upsert.)
+`populate_descriptive_war.mjs:156` is **`.update(cols).eq("source_player_id",…).eq("Season",…)`** — a **PARTIAL column
+UPDATE**, not `.upsert()` of a whole row. It writes only its own `desc_*` columns and leaves C26's
+`ba/obp/iso_power_rating`, `pRV+`, `era⁺…` untouched. ✅
+⚠ **BUT NOTE ITS ERROR HANDLING:** `:157` is `if (error) { console.error(…) }` — errors are **printed, not counted,
+and not fatal**, inside a 10,715-update loop that then **exits 0**. Another "validate by CONTENT, not exit code" case.
+**Gate D31 on the non-null counts, never on the exit code.**
+
+## ✅ NEAR-MISS 3 — **C27 DID NOT OVERWRITE PHASE B's TUNED CONFIG.** (C27 upserts `model_config`, so this was real.)
+`computeNcaaAverages:428` upserts `model_config` `onConflict: model_type,season,config_key` — it would silently
+overwrite any Phase-B key it shares. **Verified on prod AFTER C27 ran:** `nil_tier_sec = 4.0` ✅ ·
+`r_obp_std_pr = 31.89504` ✅ · **220 keys** (unchanged) ✅ · **6** `_sd_good`/`_sd_bad` keys with **0** still reset to 0 ✅.
+C27's keys (`p_ncaa_avg_*` / `p_sd_*`, e.g. `p_ncaa_avg_stuff_plus = 100.0141`) are **DISJOINT** from Phase B's tuned
+weights. **Phase B survived C27 intact.** ✅
+
+## 🛑 DEFECT FOUND IN THE ALREADY-DONE WORK — THE VERIFICATION GATE ITSELF USES KEY NAMES THAT DO NOT EXIST
+The documented Phase-B gate reads `obp_std_pr=31.89504, whip_pr_sd=37.19844, owar_repl_600`. **None of those key names
+exist on prod.** The gate query returns **ZERO ROWS** — and a zero-row result reads as *"the config is missing"*, which
+would send the next person chasing a non-existent Phase-B failure.
+**REAL KEY NAMES (verified on prod, values all CORRECT):**
+`r_obp_std_pr` = **31.89504** · `t_obp_std_pr` = **31.89504** · `p_whip_pr_sd` = **37.19844** ·
+`owar_replacement_runs_per_600` = **21.22** · `pwar_replacement_runs_per_9` = **1.92** · `nil_tier_sec` = **4.0**.
+✅ **Corrected INLINE** at the gate in `PROD_PUSH_STEPS` and at RUNBOOK rows 1–2 (which additionally carried the
+superseded VALUES 37.13 / 32.41).
+
+## 🧠 THE PATTERN ACROSS BOTH AUDIT PARTS
+Part 1 (remaining steps) found **2 structural defects**. Part 2 (completed steps) found **0 invalidations but 1 broken
+gate** — the verification query itself was wrong, which is the most expensive kind of error because it makes correct
+work *look* broken and broken work *look* fine.
+→ **Audit the GATES with the same rigour as the steps.** A gate that cannot fail, or cannot pass, is not a gate.
