@@ -520,3 +520,33 @@ Phase H lists the Stuff+ `_reclass_*` temp tables as drop candidates. **EXCLUDE 
 - **`_reclass_pf` (4,804 rows)** — per-pitcher primary-FB velo (the v2 staging run materialized 5,364 rows of it).
 - **`team_war_snapshots`** — holds prod's irreplaceable 2025 champions (309 rows). NEVER drop.
 Safe to drop: **`_reclass_fix`** (transient writer staging table only).
+
+---
+# ✅ MANDATORY PHASE-GATE CHECK — "column exists" ≠ "column is populated" (added 2026-08-30)
+The 2026-08-30 audit measured that A8/A9-era columns **EXIST** on prod. It did NOT measure whether their producers
+actually FILL them. Those are different failures and only the second one is silent.
+**RULE: after EVERY producer step, verify the VALUE landed — not just that the column/table is there.**
+A producer that runs, exits 0, and writes nothing looks identical to success. We hit this exact shape twice already:
+`vs_top_hitters` left 5,349 STALE rows that made a row-count check PASS, and `compute_pitch_log_stuff_plus` was
+filtered to a version string that matched 0 rows while appearing to succeed.
+
+## KNOWN-EMPTY ON PROD TODAY (columns present, values absent) — each must be re-checked AFTER its producer runs
+| column / field | table | prod state (2026-08-30) | filled by | GATE: re-check after |
+|---|---|---|---|---|
+| `hitter_talent_plus` | Conference Stats | **0 / 42** non-null | C28 conf-stats work | C28 |
+| `run_env_factor` | Conference Stats | absent values | C28 (`compute_conf_pitcher_env_plus` / `derive_conf_opr_htp`) | C28 |
+| `rg_factor_seasonal` (+ the other 9 `*_seasonal`) | Park Factors | **0 / 309** | E2 park-factor producer | E2 |
+| `desc_owar` (+ `desc_*` / `total_desc_war`) | Hitter/Pitching Master | **0 / 5,340** | D31 `populate_descriptive_war.mjs` · D32 `_reg` | D31/D32 |
+| `preseason_proj_total_war` | (staging-only col, 127 vs 128) | absent on prod | some precompute/snapshot call — NOT a migration | E/F precomputes |
+| `trackman_pitches` | Pitching Master | **1,126** vs staging **6,458** | C24 | C24 |
+| `stuff_plus` | Pitching Master | 5,251 vs staging 6,011 | C25 `derive_masters_from_pitchlog` | C25 |
+
+## HOW TO GATE (do this at every phase boundary, not at the end)
+1. **Count non-null BEFORE and AFTER** the producer. `after > before` and `after ≈ staging's count` — record both numbers.
+2. **Compare to STAGING** (the source of truth) for the same season. ⚠ **SEASON KEYS DIFFER BY PURPOSE:
+   2026 = completed season / descriptive WAR · 2027 = projections.** A query on the wrong season returns a misleading
+   ZERO. (This already produced a false "staging has no WAR data" alarm on 2026-08-30.)
+3. **Validate by CONTENT, not exit code** — several producers exit 0 having written nothing.
+4. **Verify FRESHNESS, not row count** — a failed step can leave stale rows that a count check passes.
+5. If a value is STILL empty after its producer ran, that is a SEPARATE BUG. Stop and diagnose; do NOT proceed to the
+   next phase assuming it fills later.
