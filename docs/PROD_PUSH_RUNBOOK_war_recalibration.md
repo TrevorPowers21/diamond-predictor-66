@@ -935,3 +935,22 @@ Two of the three "problems" were not problems, and the third was nearly mis-diag
 (calling a live-but-unrun column deprecated). **Diff the environments FIRST, then grep for a producer, and only then
 conclude.** A column being empty means one of: (a) expected/no data to pool, (b) its producer has not run, or
 (c) genuinely dead — and those are indistinguishable from the fill count alone.
+
+---
+# ✅ C28b — CONFERENCE SCOUTING AVERAGES RUN (prod, 2026-08-30). `pitcher_ev_score` 0/30 → 30/30
+**WHY:** `pitcher_ev_score` / `pitcher_iz_score` were 0/30 on **BOTH** prod and staging. They are **NOT deprecated** —
+`src/savant/lib/conferenceScoutingAverages.ts` writes them at `:453` / `:455` and reads them at `:520-522`. The
+producer had simply **never been run for 2026 on either environment**.
+**NEW RUNNER:** `scripts/run_conference_scouting_averages.ts` — the library function had no env guard and no runner
+existed, so the runner carries the standard double-keyed guard (URL and `--prod` must AGREE). Refuse path verified:
+`✗ URL is PROD but --prod was not passed — refusing.`
+**PRE-FLIGHT (all five, before running):** LANE ✅ reads `ncaa_averages` (C27) + the Masters (C25/C26), no legacy PSP-I ·
+PAGINATION ✅ `fetchAll` already orders by `source_player_id` · ORDER ✅ needs `ncaa_averages`, C27 done · SILENT
+FALLBACK ✅ **none** — it errors explicitly ("run Compute NCAA Averages first") if baselines are missing ·
+BACKUP ✅ `_confstats_backup` (162 rows) + `_c28_before`.
+**RESULT ON PROD (verified in the DB, not from the log):** `pitcher_ev_score` **30/30, avg 53.22** ·
+`pitcher_iz_score` **30/30**.
+⚠ **The console printed `conferences computed: 0` while successfully writing 30 rows** — my runner reads the wrong
+field off the report object. Harmless, but a reminder of the standing rule: **verify in the database, never from the
+log line.** (Fix the field name if this runner is reused.)
+⬜ **STAGING still has these at 0/30** — run the same command there (without `--prod`) when catching staging up.
