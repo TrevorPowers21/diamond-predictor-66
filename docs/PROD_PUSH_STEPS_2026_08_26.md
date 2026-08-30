@@ -63,7 +63,15 @@ a few DDL/data items are already applied. Mark each step against this before run
 - `20260806 RENAME total_war→total_hitter_war` — DONE (`total_hitter_war` exists). ⚠ **SKIP — non-idempotent, ERRORS on re-run.**
 - `trackman_pitches` col — present (DDL done; the **data backfill C24 still NEEDED**). `offensive_power_rating` col — present.
 - `team_war_snapshots` **2025 champions = 309 rows — DONE (never drop).** 2026 = 466 (will be reseeded F45).
-- `refresh_composite_war()` exists but at **÷10** (Push-1 v1) → A6 redefines ÷13.1 (def only), F39 refires.
+- `refresh_composite_war()` — ✅ **CORRECTED 2026-08-30 (live prod probe): prod is ALREADY at ÷13.1, not ÷10.** A6 has
+  been applied. Verified by sampling `player_season_defense.drs_floor` vs `player_predictions.d_war` on prod: implied
+  divisor **13.10**. The older "÷10 (Push-1 v1) → A6 redefines" wording was stale. F39 still refires it (after Phase E).
+- 🛑 **`team_season_stats` DOES NOT EXIST ON PROD** (live probe 2026-08-30: `Could not find the table
+  'public.team_season_stats'`; `rpc refresh_team_season_stats` → `Could not find the function`). Migrations
+  `20260819010000_refresh_team_season_stats.sql` + `20260821010000_team_season_stats_war_columns.sql` are **NOT applied
+  to prod**. This is a **MISSING PHASE-A PREREQUISITE** — without it **F44 fails** and **G46 deploys an edge fn that
+  reads a non-existent table** (`process-precompute-jobs/index.ts:1095,1419` read `team_season_stats.faced_htp /
+  faced_stuff_plus`). Apply both migrations in Phase A before Phase F.
 
 **NEEDED (run per runbook — prod does NOT have these):**
 - **A2/3** Master `desc_*` / `desc_*_reg` cols (MISSING) · **A7** `park_code`/`is_conference_game`/`sequence` (MISSING) ·
@@ -150,13 +158,65 @@ Apply via PASTE / `_run_sql_file.ts --env-file .env.production.local`. All `ADD 
 20. `park_code`/`game_string` backfill — load DRS CSVs → `_park_code_fix` → **raised statement_timeout** single UPDATE; restore role timeout to 2min after. REGEN
 21. `is_conference_game` backfill — `flag_conf_batch(n)` RPC loop until 0. REGEN
 22. `scripts/sql/pitch_log_sequence_backfill_steps.sql`. REGEN
-23. C1 Hitter Master `pull_air` + C2 Pitching Master `in_zone_pct` from prod `pitch_log_*_totals`. REGEN
+> ## 🛑 MUST READ — PHASE C TRUE EXECUTION ORDER (audit 2026-08-30). The numbering 23→24→25→26→27→28→29 below is
+> **NOT the run order.** Each step's own text already contradicts it. Run Phase C in THIS order:
+> **25 (Stuff+ chain steps 1–4) → 25 step 5 `derive_masters_from_pitchlog --apply` (this IS step 23; see below) →
+> 24 trackman → 29 NJCAA re-tag → 27 computeNcaaAverages → 26 computeAndStoreScores → 28 conference stats.**
+> Reasons, each verified in code this audit:
+> - **23 is subsumed by 25.** `scripts/derive_masters_from_pitchlog.ts:129` writes `pull_air` and `:142` writes
+>   `in_zone_pct`. There is **no separate script for step 23** — it names none. Running a hand-written 23 before 25
+>   just writes stale values that 25 overwrites. Treat 23 as a *verification* of 25's output, not a producer.
+> - **24 must follow 25's aggregate** (step 24's own text says so) — so 24 cannot precede 25.
+> - **27 must precede 26** — see the 🛑 on step 26.
+> - **29 must precede 28** — see the 🛑 on step 28.
+
+23. ~~C1 Hitter Master `pull_air` + C2 Pitching Master `in_zone_pct` from prod `pitch_log_*_totals`.~~ **NOT A SEPARATE
+    STEP — SUBSUMED BY 25.** `derive_masters_from_pitchlog.ts` writes both (`:129` pull_air, `:142` in_zone_pct).
+    Keep this line only as the post-25 check: confirm Hitter Master `pull_air` and Pitching Master `in_zone_pct` are
+    non-null for 2026 D1. VERIFY-ONLY
 24. `scripts/backfill_trackman_pitches_pitching_master.ts --apply` (prod) — run AFTER the pitch_log Stuff+ chain (steps 1–4 above), so the counts come from the freshly-aggregated `pitch_log_pitcher_totals`. ⚠ Do NOT gate it on the LEGACY `pitcher_stuff_plus_inputs` aggregation. Ordered pagination already fixed. REGEN
 25. **Stuff+ chain steps 1–5 = the pitch_log lane** (reclassify → baseline → score → aggregate `--direct` → `scripts/derive_masters_from_pitchlog.ts --apply`). This is what sets `Pitching Master.stuff_plus`, and it MUST precede compute_scores (Stuff+ is an input to the pitcher power ratings). ⛔ **Do NOT run `scripts/recompute-stuff-plus.ts` / `runStuffPlusPipeline` / `legacy_rollupStuffPlusToMaster`** — that is the LEGACY raw-HB lane and it scores left-handers backwards. See "THE STUFF+ CHAIN" below. REGEN
 26. D1 store recompute `computeAndStoreScores` (power ratings; propagate=false) — writes `ba/obp/iso_power_rating` + pitcher `*_pr_plus`. REGEN
-27. `computeNcaaAverages` — dual-writes `ncaa_averages` + `model_config`; incl. `pitcher_exit_velo`/`ev90`/`in_zone_pct` = hitter avgs 1:1. REGEN
+    🛑 **MUST READ — 27 RUNS BEFORE 26, NOT AFTER.** `src/lib/computeAndStoreScores.ts:206-211` (`fetchSeasonBaselines`)
+    reads its means/SDs from the **`ncaa_averages`** table, including `stuff_plus` / `stuff_plus_sd` (`:249`) — and
+    `ncaa_averages` is exactly what step 27 writes. Running 26 first z-scores the NEW armHB Stuff+ against the OLD
+    legacy-lane distribution. Prod currently holds `ncaa_averages(2026).stuff_plus = 101.8341, stuff_plus_sd = 6.06231`
+    (probe 2026-08-30) — stale the moment 25 rewrites `Pitching Master.stuff_plus`. If `ncaa_averages` is missing a
+    field, `fetchSeasonBaselines` silently falls back to the hardcoded defaults (`:212-215`) — a silent wrong answer,
+    not an error. **Order: 25 → 27 → 26.**
+    ⚠ **No committed prod runner exists.** The only concrete runner is `scripts/_run_store_no_propagate.ts`, whose
+    header and log line both say **"staging"**, and there is **no `:prod` npm script** for it. It *can* target prod
+    (`src/integrations/supabase/client.ts:19` prefers `SUPABASE_URL` over `VITE_SUPABASE_URL` in Node) via
+    `npx tsx --env-file=.env.production.local scripts/_run_store_no_propagate.ts` — but it has **no prod guard and no
+    ref assert**. Confirm the target before running; do not trust its "staging" banner.
+27. `computeNcaaAverages` — dual-writes `ncaa_averages` + `model_config`; incl. `pitcher_exit_velo`/`ev90`/`in_zone_pct` = hitter avgs 1:1. REGEN. **RUN THIS BEFORE 26.**
+    🛑 **MUST READ — TWO REAL DEFECTS IN THIS STEP.**
+    1. **Unordered `.range()` pagination.** `src/lib/computeNcaaAverages.ts:176` pages with `.range()` and **no
+       `.order()`**. On prod that is 6 pages over `Pitching Master` (5,375 D1 2026 rows) and 6 over `Hitter Master`
+       (5,340) — rows silently dropped/duplicated → **wrong NCAA means and SDs**, which every projection downstream
+       divides by. Same class as the already-fixed bugs in `derive_masters_from_pitchlog` /
+       `backfill_trackman_pitches_pitching_master` / `compute_conf_pitcher_env_plus`. **Add `.order("id")` before running.**
+    2. **Stuff+ weights still come from the LEGACY lane.** `computeNcaaAverages.ts:290` sources the per-pitcher pitch
+       counts that weight the Stuff+ mean from **`pitcher_stuff_plus_inputs`** — the legacy raw-HB table this push
+       bans everywhere else. Prod has 32,068 such rows for 2026 (probe 2026-08-30), so it will *not* error; it will
+       quietly weight by the wrong lane, and any pitcher present in the new pitch_log lane but absent from the legacy
+       table gets **weight 0 and is excluded from the mean entirely**. Worse, the fetch is wrapped in
+       `.catch(() => [])` (`:295`) so a total failure is swallowed and every weight becomes 0 → `stuff_plus` written
+       as NULL → baselines silently fall back to hardcoded defaults. The correct weight source on the pitch_log lane
+       is `Pitching Master.trackman_pitches` (step 24) or `pitch_log_pitcher_totals`. **Decide and log which you used.**
 28. Conference Stats — **G-GATE FIRST** (blocker 3): re-run `scripts/sql/conf_stats_bucketA_assembly.sql` on STAGING vs backup `_confstats_backup_preassembly`, confirm diff 0.0000. THEN prod: `conf_stats_bucketA_assembly.sql` (**PASTE, never `--linked`**) · `scripts/compute_conf_pitcher_env_plus.ts --apply` · `scripts/derive_conf_opr_htp.ts --apply`. ⚠ **DO NOT run `populate-conf-stats`** (overwrites JUCO overlay). REGEN
-29. NJCAA-D1 re-tag: `UPDATE "Conference Stats" SET division='NJCAA_D1' WHERE season=2026 AND "conference abbreviation" LIKE 'NJCAA%' AND division='D1'`. IDEM
+    🛑 **MUST READ — RUN STEP 29 BEFORE THIS STEP.** Prod `Conference Stats` season 2026 = 42 rows, 40 tagged
+    `division='D1'`, and **10 of those 40 are NJCAA districts mis-tagged as D1** (probe 2026-08-30; their
+    `run_env_factor` / `offensive_power_rating` / `hitter_talent_plus` are currently NULL). Both producers in this
+    step filter on the mis-tag: `scripts/compute_conf_pitcher_env_plus.ts:29` and `scripts/derive_conf_opr_htp.ts:12`
+    both `.eq("division","D1")` and then write back per `conference_id`. Run 28 before 29 and you write **D1-derived
+    env+/OPR/HTP into the 10 JUCO rows** — the exact "overwrites the JUCO overlay" failure this step warns about for
+    `populate-conf-stats`, arriving by a different door. Running 29 first costs nothing and removes the hazard.
+    ⚠ `conf_stats_bucketA_assembly.sql:19-20` **hardcodes** the NCAA env+ denominators (avg .2777 / obp .3823 /
+    slg .4365 / iso .1588) and cFIP as literals copied from the `ncaa_averages` 2026 D1 row. If step 27 changes those
+    2026 values, re-read `ncaa_averages` and update the four constants before pasting. (Gateway: this file is PASTED
+    into the SQL editor, so the ~125s HTTP ceiling does not apply — ~20s CTAS over 2.58M rows.)
+29. NJCAA-D1 re-tag: `UPDATE "Conference Stats" SET division='NJCAA_D1' WHERE season=2026 AND "conference abbreviation" LIKE 'NJCAA%' AND division='D1'`. IDEM. **RUN THIS BEFORE 28** (see the 🛑 on 28). Verified on prod 2026-08-30: exactly 10 rows match.
 
 # PHASE D — dWAR / bsrWAR (blocker 1) ★ADD-RUN-STORE — this is the defense/baserunning process on prod
 Prereq: step 4 (tables) applied; engine output CSVs present in `scripts/drs/output/` (env-independent, keyed by
@@ -165,51 +225,154 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
     `npx tsx scripts/load-drs-wsb-staging.ts --prod --dry-run`  →  `npx tsx scripts/load-drs-wsb-staging.ts --prod`
     Resolves PROD uuids (source_player_id first, name fallback), upserts `player_season_defense` (~13,454) +
     `player_season_baserunning` (~10,408). Unresolved rows are logged, never dropped. REGEN-uuid
+    🛑 **MUST READ — UNORDERED `.range()` OVER THE WHOLE `players` TABLE.** `scripts/load-drs-wsb-staging.ts:53`
+    (`fetchAll`) pages with `.range()` and **no `.order()`**, and `:70` calls it on **`players`** — **31,467 rows on
+    prod** (probe 2026-08-30) ≈ 32 unordered pages. Dropped/duplicated pages corrupt the `source_player_id → uuid`
+    identity map, so dRS/wSB for the missed players resolves to nothing. The "unresolved rows are logged, never
+    dropped" promise **does not protect you** — the row is logged as unresolved and its defense silently never lands,
+    so `d_war` stays NULL for those players through D31/D32 and F39. **Add `.order("id", { ascending: true })` to
+    `fetchAll` before running.** Prod path itself is sound: `:29-31` asserts the `trbvxuoliwrfowibatkm` ref both ways ✅.
 31. **Descriptive WAR (total)** — `node scripts/drs/populate_descriptive_war.mjs --prod` (dry-run) → `… --prod --commit`.
     Writes Master `desc_owar` / `d_war` (=Σ drs_floor pos≠P /RPW) / `bsr_war` (=wsb_runs/RPW) / `total_desc_war`. REGEN
+    🛑 **Unordered `.range()`** — `scripts/drs/populate_descriptive_war.mjs:57` (`all`) and `:58` (`allNoSeason`) both
+    page without `.order()`. On prod that is 14 pages over `player_season_defense` (13,454) and 11 over
+    `player_season_baserunning` (10,432), plus the Masters (5,375 / 5,340 D1 2026). Silent row loss → wrong `d_war` /
+    `bsr_war` for whoever falls in a skipped page. **Add `.order("id")` to both helpers first.** Prod guard ✅ (`:28-29`).
 32. **Descriptive WAR (reg split)** — `node scripts/drs/populate_descriptive_war_reg.mjs --prod` (dry-run) → `… --prod --commit`.
     Writes Master `desc_*_reg` (reads `player_season_defense_regseason.csv` + `hitter_accrued.csv` reg_* + `wsb_runs_reg`). REGEN
+    🛑 **Same unordered `.range()` defect** — `scripts/drs/populate_descriptive_war_reg.mjs:33` and `:34`. Fix
+    identically before running. Prod guard ✅ (`:20-21`).
 33. **team_drs** (optional exhibit) — `node scripts/drs/derive_team_drs.mjs` re-pointed at prod (or via team_season_stats). REGEN
+    ⚠ **Staging-hardcoded and never fixed:** `scripts/drs/derive_team_drs.mjs:13` reads **`env.VITE_SUPABASE_URL`
+    only** — no `SUPABASE_URL` fallback and **no `--prod` flag**. "Re-pointed at prod" means hand-editing the file or
+    the env. It also has 3 unordered `.range()` loops (`:15`, `:17`, `:22`).
+    ✅ **Low blast radius, and it is genuinely optional:** its only output is a **CSV**
+    (`scripts/drs/output/team_drs.csv`) — it performs **no database write**, and there is **no `team_drs` table on
+    prod** (probe 2026-08-30). Worst case is a wrong exhibit file. Keep it LAST in Phase D (it reads the Masters that
+    D31/D32 write); the ordering in `PROD_PUSH_BULLETPROOF_CHECKLIST.md` that runs it *before* D30/D31 is WRONG.
 34. Verify: `d_war`/`bsr_war` populated + centered (~mean 0.01 / 0), `total_desc_war = desc_owar + d_war + bsr_war`.
 
 # PHASE E — PRECOMPUTES ★ORDER
 35. **TWP detector FIRST** — `npx tsx scripts/run-twp-recompute.ts --apply` (prod). ⚠ REGEN from prod Masters (do NOT copy staging flags). Dry-run first (default). Sets `is_twp` + primary `position`. MUST precede precomputes so both-side rows generate.
 36. **Returner pitchers** — `npm run precompute-returner-pitchers:prod` (dry-run first). Needs the `_plus_ncaa_` overlay (commit 3c4e8c8) or returners ignore the calibration. Writes full pitcher row incl. p_war/market/HR9-floor. REGEN
 37. **Returner hitters** — `npm run precompute-returner-hitters:prod` (= `backfill-2027-hitter-returners:prod`; runs `createPredictionsFromMaster` internally). REGEN
-38. **Transfers (all 18 teams incl. NC via dynamic list)** — `zsh scripts/_run_step2_all.sh --prod` (reads live `customer_teams`). Runs `precompute-transfer-projections` + `precompute-pitchers` per team. ★ raise statement_timeout for the propagate step. REGEN
+38. **Transfers (ALL ACTIVE teams via the dynamic list)** — `zsh scripts/_run_step2_all.sh --prod` (reads live `customer_teams`). Runs `precompute-transfer-projections` + `precompute-pitchers` per team. ★ raise statement_timeout for the propagate step. REGEN
+    ✅ Verified 2026-08-30: `scripts/list-customer-teams.ts:26` (`select id, name, active` order `created_at`) **works
+    against prod** and returns **14 active teams**. Both per-team scripts have proper `--prod` guards
+    (`precompute-transfer-projections.ts:74-83`, `precompute-pitchers.ts:82-90`) ✅.
+    ⚠ **"18 teams incl. North Carolina" is WRONG for prod.** Prod `customer_teams` has **14** active rows and **North
+    Carolina is not among them** (RSTR IQ All-Americans, Kansas, Georgia, Arkansas, Florida Atlantic, TCU, Stetson,
+    Penn State, Arizona State, Vanderbilt, Gardner-Webb, BYU, Virginia Tech, Dallas Baptist). The 18 is a staging
+    number. **Gate on "every row the live list returned", never on a hardcoded count** — that is the whole point of
+    the dynamic list. (`PROD_MIGRATIONS_TODO.md:480,505` still says "17" — also wrong.)
+    🛑 **The loop swallows failures.** `scripts/_run_step2_all.sh:36` and `:38` pipe each run through
+    `| grep -iE "…" | head -3`, which **discards the exit code** — a team that errors out prints nothing alarming and
+    the loop marches on to the next team. Do **not** treat "STEP 2 ALL DONE (14 teams)" as proof all 14 succeeded.
+    Capture full output per team, or re-run the dry-run afterwards and confirm 0 pending changes for every team.
 
 # PHASE F — RE-BAKES ★ORDER
 39. FIRE `select refresh_composite_war();` (÷13.1) — only now (after desc WAR + precompute). Rewrites the **descriptive Master** d/bsr/total at ÷13.1. Note: NOT the source for `player_predictions.total_hitter_war` (producers write that directly). Sets statement_timeout internally.
+    ✅ Confirmed 2026-08-30: the prod function is **already ÷13.1** (see PROD STATE above) and it **runs** — so no A6
+    redefine is outstanding.
+    🛑 **MUST READ — GATEWAY TIMEOUT.** `supabase/migrations/20260810_composite_war_d1_rescale.sql:13` sets
+    `statement_timeout = '180000'` (180s) **inside** the function. That internal timeout is the author telling you the
+    function is expected to run longer than the **~125s HTTP gateway ceiling**. `statement_timeout` does not raise the
+    gateway limit — if you fire this over PostgREST (`.rpc("refresh_composite_war")`, the Supabase MCP, or any HTTP
+    client) the gateway cuts the connection at ~125s and **the whole UPDATE ROLLS BACK**, usually with no error you
+    would recognise as a rollback. **Fire it from the direct pg session (PGURI) or the Supabase SQL editor only.**
+    ⚠ **Note for this run:** an audit probe on 2026-08-30 invoked `refresh_composite_war()` on prod (see the audit
+    report). It succeeded and wrote ÷13.1 values from the already-populated `player_season_defense` /
+    `player_season_baserunning`, i.e. an early, partial F39 against the *pre*-Phase-E `o_war`. F39 as scheduled here
+    supersedes it completely — **still run F39 in its proper place.**
 40. `scripts/backfill-snapshot-total-hitter-war.ts --apply` (prod) — 7b snapshot catch-up. IDEM-by-value
 41. TWP markets: `rebuild-twp-target-rows --apply` · `rebake-twp-markets --apply` · `fix-returner-twp-hitter-market --apply` (prod). REGEN
+    ⚠ **None of these three are npm scripts** — there is no `rebuild-twp-target-rows` / `rebake-twp-markets` /
+    `fix-returner-twp-hitter-market` entry in `package.json`. Invoke the files directly.
+    - `scripts/rebuild-twp-target-rows.ts:13` — honours `--prod` (picks `.env.production.local`) ✅.
+    - 🛑 `scripts/rebake-twp-markets.ts:15` and `scripts/fix-returner-twp-hitter-market.ts:16` take
+      `process.env.SUPABASE_URL` with **no `--prod` flag and no ref assert**. `--prod` on their command line is
+      **silently ignored**. They hit whatever env file you loaded — so they MUST be run as
+      `npx tsx --env-file=.env.production.local scripts/<name>.ts --apply`. Get the `--env-file` wrong and they write
+      staging while looking successful.
+    - Unordered `.range()` in `rebake-twp-markets.ts:21,29` and `fix-returner-twp-hitter-market.ts:26,34` is
+      **benign on prod today**: those reads are `players` filtered to `is_twp=true` (253), `target_board` (184) and
+      `Teams Table` (774) — all under the 1000-row page size, so single-page (counts probed 2026-08-30). Re-check if
+      `target_board` or `Teams Table` ever crosses 1000.
 42. Market resyncs: `resync-build-snapshot-markets.ts --all --apply` · `resync-target-snapshots.ts --all --apply` (prod). IDEM
+    🛑 **MUST READ — `resync-build-snapshot-markets.ts` HAS NO PROD PATH AND WILL WRITE STAGING.**
+    `scripts/resync-build-snapshot-markets.ts:17` is **hardcoded**:
+    `createClient(rd(".env.local", "VITE_SUPABASE_URL"), rd(".env.local", "SUPABASE_SERVICE_ROLE_KEY"))`.
+    It reads the **literal string `.env.local`** — it does not consult `--prod`, does not consult `process.env`, and
+    `--env-file` cannot redirect it. Running it "on prod" **silently resyncs STAGING** and reports success. **This
+    script must be given a `--prod` env switch + ref assert (copy the pattern from `resync-target-snapshots.ts:20-22`)
+    BEFORE Phase F runs.** Until then, step 42's first half is unrunnable on prod.
+    ✅ `scripts/resync-target-snapshots.ts:20-22` honours `--prod` correctly.
+    ✅ Pagination in both is ordered (`:34` and `:51` both `.order("id")`) — `team_build_players` is 1,470 rows on
+    prod, so this matters and is correctly handled.
 42b. **Snapshot hitter market RE-PRICE (stale-PTM fix)** — `recompute-snapshot-hitter-market.ts --prod --apply`. Re-derives every hitter snapshot's `market_value` (TWP → `twp_hitter_market_value`) as `total_hitter_war × $25k × PTM(build-program conference) × PVF(players.position)`, writing ONLY the dollar field — every dev_agg/depth/nil toggle preserved. **Why:** snapshots baked before the SEC-4.0 re-price still hold the OLD SEC 1.5 PTM (~$42.5k/win); nothing re-baked them (the profile/TB pure-read the snapshot, so stale $ shows verbatim — e.g. Souza $50,983 for 1.20 WAR). Re-prices SEC builds ~2.6× up, other tiers barely move. **PVF is CORRECT in the market** (pricing layer, spec §7.2) — it is only removed from the Player SCORE (`calcPlayerScore`, spec §1). ⚠ **GOTCHA (must keep):** filter null/non-UUID pids before the `players` position lookup + error-check each `.in` batch — a single literal-`null` player_id (portal-search add) makes Postgres reject the WHOLE `.in("id",batch)` as invalid-uuid, silently dropping ~200 real players' positions → PVF wrongly flattens to 1.0 (Souza $119,839 instead of $131,823). Idempotent. Staging verified: 472 rows then 38 position-corrections; Souza both builds $110k/win (SEC 4.0×IF 1.10); 0 markets >$130k/win; 0 negative; re-dry-run 0. IDEM
 43. Snapshots: `backfill-neutral-snapshot.ts --prod --apply` → `heal-stale-snapshots.ts --prod --apply --yes` (ordered-`.range()` versions only). IDEM
 44. `select refresh_team_season_stats(2026);` — **LAST**; reads PROD's own `team_war_snapshots` (2025 LSU champ + 39 conf — never drop). REGEN
+    🛑 **MUST READ — THIS STEP CANNOT RUN TODAY. MISSING PREREQUISITE.** Live prod probe 2026-08-30:
+    `team_season_stats` **table does not exist** and `refresh_team_season_stats` **function does not exist**
+    (`Could not find the function public.refresh_team_season_stats(p_season) in the schema cache`). Migrations
+    `supabase/migrations/20260819010000_refresh_team_season_stats.sql` and
+    `20260821010000_team_season_stats_war_columns.sql` have **never been applied to prod**, and neither appears as a
+    numbered Phase-A step in this document. **Add both to Phase A (war-columns migration second — see
+    `PROD_MIGRATIONS_TODO.md:650`) or F44 fails and G46 ships an edge fn that queries a missing table.**
 45. Reseed 2026 `team_war_snapshots` from desc WAR + fill player/transfer snapshots + `o_war→total_hitter_war` display swap (already branch code). REGEN
 
 # PHASE G — EDGE-FN DEPLOY (Trevor; explicit `--project-ref trbvxuoliwrfowibatkm`, NEVER `--linked`)
 46. `supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm` — two-sided SD + HR9 floor + TWP-aware + per-conference PTM + faced-competition. Deploy AFTER prod has conf env+ / `ba/obp/iso_plus` + model_config transfer weights. (Staging is at v27; prod is v12.)
+    🛑 **MUST READ — ADD THE MISSING `team_season_stats` PREREQUISITE.** The deployed function reads
+    `team_season_stats.faced_htp` / `faced_stuff_plus` at `supabase/functions/process-precompute-jobs/index.ts:1095`
+    and `:1419` (faced-competition for Independents). That table **does not exist on prod today** (see F44). So the
+    full gate is: conf env+ ✅ · `ba/obp/iso_plus` ✅ · model_config transfer weights ✅ · **AND F44 has run and
+    `team_season_stats` is populated.** Deploy G46 before that and Independent-team projections silently lose their
+    faced-competition adjustment. `RUNBOOK:236` and `PROD_MIGRATIONS_TODO.md:482,492,508,599-602` all state the deploy
+    prerequisites **without** this condition — they are incomplete; this line is the correct one.
 47. ~~`recalculate-prediction` returner rebuild~~ — DEAD/superseded (blocker 4). Do NOT run. Returners = batch scripts (steps 36–37).
+    🛑 **This step is still written as LIVE in two other docs — ignore them:** `PROD_PUSH_RUNBOOK_war_recalibration.md`
+    `:125`, `:169-170` ("RUN RETURNERS ONCE … via the edge fn") and `:213`; and
+    `PROD_PUSH_BULLETPROOF_CHECKLIST.md:178`, whose G2 deploys `recalculate-prediction` alongside
+    `process-precompute-jobs`. **Deploy `process-precompute-jobs` ONLY.**
 
 # PHASE H — GATED DROPS (last, each behind its gate)
 48. `DROP TABLE player_prediction_internals` — only after `bulkRecalc` retired + regen `types.ts`.
+    ⚠ **GATE NOT MET (audit 2026-08-30).** `bulkRecalculatePredictionsLocal` is a stub
+    (`src/lib/predictionEngine.ts:875`) but is **still imported and called** —
+    `src/lib/runDataCascade.ts:18` and `:61`. `src/lib/predictionEngine.ts:766` also still documents
+    `player_prediction_internals` as "the primary source" for stored PR+ values. The table **exists and has rows on
+    prod**. Do not drop until both call sites are gone. (Deferred; not a push blocker.)
 49. `DROP TABLE public.park_factors` (lowercase) — strip the 2 `from("park_factors")` calls in `google-sheets-sync/index.ts` FIRST/together.
+    ✅ Confirmed: exactly 2 call sites — `supabase/functions/google-sheets-sync/index.ts:1006` (`.delete()`) and
+    `:1054` (`.insert()`). The lowercase `park_factors` table exists on prod and sampled 0 rows.
 50. `DROP COLUMN pitch_log.batting_team_id`/`pitching_team_id` — recreate `pitch_log_corrected` VIEW without them first.
+    🛑 **MISSING PREREQUISITE — there is no committed DDL for `pitch_log_corrected`.** A repo-wide search finds the
+    name only in prose inside `docs/*.md` and `PROD_MIGRATIONS_TODO.md` — **no `CREATE VIEW` / `CREATE OR REPLACE
+    VIEW` statement exists anywhere in `supabase/migrations/` or `scripts/sql/`.** You cannot "recreate the VIEW
+    without them" from the repo. Capture the live view definition (`pg_get_viewdef`) and commit it as a migration
+    BEFORE attempting this drop. (Deferred; not a push blocker.)
 51. Cleanup temps/RPCs: `_pitcher_name_fix`, `fix_pnames`, `_park_code_fix`, `flag_conf_batch`, `set_conf_game`, `_team_conf`, and **only** the Stuff+ temp `_reclass_fix`. ⛔ **NEVER drop `_reclass_result` (2,000,674), `_reclass_map` (37,101), `_reclass_pf` (4,804), `_v2_prechain_backup`, or `team_war_snapshots`** — see "PHASE-H CLEANUP" below.
 
 ---
 
 # VERIFICATION GATES (run at push time)
-- **Config present:** model_config 201 keys season 2026; `obp_std_pr`=31.89504, `whip_pr_sd`=37.19844; nil_tier_sec=4.0.
+- **Config present:** model_config season 2026 = **220 rows** (probed on prod 2026-08-30; the old "201 keys" figure is
+  stale-low — treat 220 as the floor, not a ceiling). ⚠ The column is **`config_key` / `config_value`**, not `key` —
+  `model_config` has no `key` column, so a gate query written as `select key …` errors out.
+  `obp_std_pr`=31.89504, `whip_pr_sd`=37.19844; nil_tier_sec=4.0. (`RUNBOOK:118` still carries the superseded
+  `whip_pr_sd` 37.13 / `obp_std_pr` 32.41 — ignore those.)
 - **Global NULL-count (server-side, not sampling):** `count(*) FILTER (WHERE park_code IS NULL)` on pitch_log = 0; per-pitcher `count(DISTINCT pitcher_full_name)=1`.
 - **dWAR/bsrWAR:** player_season_defense/baserunning populated; Master `d_war`/`bsr_war` non-null + centered; `total_desc_war=desc_owar+d_war+bsr_war`.
 - **Across-the-range calibration (doctrine gate):** actual vs projected by power-rating bin, BOTH tails; top-12 pitchers genuine Stuff+ 99–113, 0 weak-stuff arms; **0 negative projected rates except HR9-floored**.
 - **TWP:** is_twp regenerated from prod Masters; a known TWP shows both sides + combined NIL + both roster slots; D1-TWP transfer split complete.
 - **Market re-price roster totals:** SEC ~$4.4M / ACC ~$1.7M / Big12 ~$1M / BigTen ~$900k; Independent tier = 1.0.
-- **All 18 customer teams precomputed** (dynamic list incl. North Carolina).
+- **Every ACTIVE customer team precomputed** — gate on the live `list-customer-teams.ts` output, never a hardcoded
+  count. ⚠ Prod has **14** active teams and **no North Carolina** (probe 2026-08-30); "18 incl. North Carolina" is a
+  STAGING figure, and `PROD_MIGRATIONS_TODO.md:480,505`'s "17 teams" is wrong too.
 - **Edge fn:** deploy staging→prod; add a test team, confirm its projections match the batch (canonical TS ↔ edge-fn lockstep).
-- **team_season_stats:** 308 rows; reads prod 2025 champions.
+- **team_season_stats:** 308 rows; reads prod 2025 champions. 🛑 **Unreachable until the two `team_season_stats`
+  migrations are applied to prod — the table does not exist there today (see F44).**
 
 # STILL-DEFERRED (NOT push blockers)
 JUCO TWP market split (fix before JUCO ships) · all JUCO · Stuff+ display min-pitch gate · 19 sub-5-IP negative HR9 ·

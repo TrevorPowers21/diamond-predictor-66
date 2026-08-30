@@ -167,7 +167,7 @@ Then re-run TRANSFER projections (deferred until this lands).
 ## PART E — PHASED PLAN
 
 - **Phase 1 — Repair + lock the RETURNER path (steps 1–12):** SD fixes (1,2,4,10), env+ ratio (3), edge-fn returner rebuild + model_config rewire + pitcher consolidation + dead-code delete + IP fix (5–9), ncaa 1:1 fill (11), lockstep verify (12).
-- **Phase 2 — RUN RETURNERS ONCE (step 13a):** full returner recompute (hitters + pitchers) via the edge fn, improved data/SDs. **Transfer NOT run here.**
+- **Phase 2 — RUN RETURNERS ONCE (step 13a):** full returner recompute (hitters + pitchers) ~~via the edge fn~~ 🛑 **DEAD — via the BATCH SCRIPTS** (`precompute-returner-pitchers:prod`, then `precompute-returner-hitters:prod`; STEPS steps 36–37). The `recalculate-prediction` edge-fn path is superseded — do NOT run it. **Transfer NOT run here.**
 - **Phase 3 — Finish + verify the TRANSFER equation, THEN run it (step 13b):** settle the transfer SD + weighted-impact (env+ ratio conversion + weights) — deliberate, separate work — then run transfer.
 - **Phase 4 — Prod push:** execute Parts A/B in execution order; Trevor drives merge. Reconcile A3 legacy columns (display check) before any drop.
 - **Deferred / separate sessions:** JUCO audit + equation (out of scope now); vaa/classification backfill; edge-fn structural cleanup beyond unification; C9 duplicate-copy cleanup.
@@ -210,7 +210,7 @@ ALTER TABLE "Pitching Master" ADD CONSTRAINT pitching_master_src_season_uniq UNI
 
 **G2. `createPredictionsFromMaster.ts` (Step 3) — CODE.** commit `1ff06b7`. Writes per-stat `from_avg_plus/from_obp_plus/from_slg_plus` (= `ba/obp/iso_power_rating`) on insert+update; guard also fires on `from_obp_plus==null` so existing rows backfill. **PROD RUN:** re-run create_predictions so `from_obp_plus` (returner SD-blend input) populates.
 
-**G3. Edge-fn returner rebuild (Step 4) — CODE, NOT YET BUILT.** Rewrite `recalculate-prediction` `recalc()` to the SD-blend (per-stat `from_obp_plus`, `+0.011` wRC intercept, tiered damp), READ `model_config` `r_*`/`p_sd_*` (fix the `model_type='returner'`→0-rows + bare-key bugs), delete dead `bulkRecalc`/`fetchAllPredictionsForReturnerMode`. **PROD RUN:** recompute returners (H+P) once after code merges. Transfer deferred.
+**G3. Edge-fn returner rebuild (Step 4) — 🛑 DEAD / DO NOT BUILD OR RUN (confirmed 2026-08-30).** Superseded by the batch returner scripts (STEPS 36–37); `recalculate-prediction` is never deployed in this push. Retained below for history only. ~~CODE, NOT YET BUILT.~~ Rewrite `recalculate-prediction` `recalc()` to the SD-blend (per-stat `from_obp_plus`, `+0.011` wRC intercept, tiered damp), READ `model_config` `r_*`/`p_sd_*` (fix the `model_type='returner'`→0-rows + bare-key bugs), delete dead `bulkRecalc`/`fetchAllPredictionsForReturnerMode`. **PROD RUN:** recompute returners (H+P) once after code merges. Transfer deferred.
 
 **G0. Stuff+ → `Pitching Master.stuff_plus` (MUST precede compute_scores) — REWRITTEN 2026-08-30 onto the pitch_log lane.**
 Stuff+ is an INPUT to the pitcher power ratings (k9⁺/era⁺/whip⁺), so it must be FINAL before `compute_scores`.
@@ -223,7 +223,24 @@ stores/passes RAW hb into armHB-expecting equations and scores LEFT-HANDERS BACK
 Stuff+ from the totals; verified to match to 0.01). Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 ⚠ Prod's `stuff_plus` is OLD (pre-venue-fixture, old CASE labels) → the full chain MUST run on prod, not just a rollup.
 
-**G4. Execution order (prod, pipeline pivot):** F1/F2 (ip col + constraints) → **G0 = the full Stuff+ chain on the pitch_log lane (steps 1–5), which ENDS in F3 (`derive_masters_from_pitchlog.ts` → Masters, incl. `stuff_plus`)** → G1 (ncaa_averages+model_config) → compute_scores → G2 (create_predictions) → G3 (recompute returners). ⚠ Stuff+ is NOT a separate rollup bolted after the derive — the derive IS chain step 5, so the chain must complete before compute_scores. North star: fold all into ONE edge fn, autonomous on upload — with Stuff+ as a wired step.
+**G4. Execution order (prod, pipeline pivot):** F1/F2 (ip col + constraints) → **G0 = the full Stuff+ chain on the pitch_log lane (steps 1–5), which ENDS in F3 (`derive_masters_from_pitchlog.ts` → Masters, incl. `stuff_plus`)** → G1 (ncaa_averages+model_config) → compute_scores → G2 (create_predictions) → ~~G3 (recompute returners)~~ **[G3 is DEAD — see below]**.
+
+> ✅ **AUDIT 2026-08-30 — THIS ORDER IS THE CORRECT ONE. `ncaa_averages` BEFORE `compute_scores`.** Verified in code:
+> `src/lib/computeAndStoreScores.ts:206-211` (`fetchSeasonBaselines`) reads its means/SDs — including `stuff_plus` /
+> `stuff_plus_sd` (`:249`) — out of the **`ncaa_averages`** table that `computeNcaaAverages` writes. Run
+> `compute_scores` first and you z-score the new armHB Stuff+ against the stale legacy distribution (prod currently
+> holds `stuff_plus 101.8341 / sd 6.06231`), and any missing field falls back to hardcoded defaults **silently**
+> (`:212-215`). `docs/PROD_PUSH_STEPS_2026_08_26.md` listed these as 26 computeAndStoreScores → 27 computeNcaaAverages,
+> which was **backwards**; that doc has been corrected to match this line. Order = **derive_masters → computeNcaaAverages → computeAndStoreScores**.
+> ⚠ Before running `computeNcaaAverages` on prod, read the 🛑 on step 27 in `PROD_PUSH_STEPS_2026_08_26.md`: it has an
+> unordered `.range()` (`computeNcaaAverages.ts:176`) and still weights Stuff+ off the **legacy** `pitcher_stuff_plus_inputs` (`:290`).
+
+> 🛑 **G3 / "recompute returners via the edge fn" is DEAD (2026-08-30).** Everything in this doc that tells you to run
+> the `recalculate-prediction` returner rebuild — this G4 line, **G3 at the paragraph above**, PART C step 5, and
+> **PART E Phase 1/Phase 2 ("RUN RETURNERS ONCE (step 13a) … via the edge fn")** — is SUPERSEDED. See
+> `docs/PROD_PUSH_STEPS_2026_08_26.md` step 47 and `PROD_MIGRATIONS_TODO.md:619`. **Returners are rebuilt by the batch
+> scripts** (`precompute-returner-pitchers:prod`, `precompute-returner-hitters:prod` — STEPS steps 36–37). The only
+> edge fn deployed in this push is `process-precompute-jobs`. ⚠ Stuff+ is NOT a separate rollup bolted after the derive — the derive IS chain step 5, so the chain must complete before compute_scores. North star: fold all into ONE edge fn, autonomous on upload — with Stuff+ as a wired step.
 
 ---
 
@@ -233,7 +250,7 @@ Stuff+ from the totals; verified to match to 0.01). Full step detail + the 🛑 
 - **From-team resolution** → id-first via `source_team_id` (hitter + pitcher; was name-only).
 - **D1 pitcher eq** → overlays `model_config` `transfer_*` (was hardcoded defaults). Hitter weights + pitcher env+ were already model_config/stored.
 
-**PROD ACTION (Trevor deploys):** redeploy `supabase/functions/process-precompute-jobs` to prod AFTER the prod DB has: (1) Conference Stats `era_plus…hr9_plus` + `ba/obp/iso_plus` populated, (2) model_config `transfer_*`/`t_*` weights stored. Otherwise a team added on prod gets OLD-logic projections. Pre-existing Deno literal-type warnings are non-blocking. Deploy staging first, add a test team, confirm its projections match the batch.
+**PROD ACTION (Trevor deploys):** redeploy `supabase/functions/process-precompute-jobs` to prod AFTER the prod DB has: (1) Conference Stats `era_plus…hr9_plus` + `ba/obp/iso_plus` populated, (2) model_config `transfer_*`/`t_*` weights stored, **(3) 🛑 ADDED 2026-08-30 — `team_season_stats` EXISTS AND IS POPULATED** (i.e. `refresh_team_season_stats(2026)` has run). The function reads `team_season_stats.faced_htp` / `faced_stuff_plus` at `supabase/functions/process-precompute-jobs/index.ts:1095` and `:1419` for Independent faced-competition. **That table does not exist on prod today** (probe 2026-08-30) — deploy before F44 and Independents silently lose the faced-competition adjustment. Conditions (1) and (2) alone are NOT sufficient. Otherwise a team added on prod gets OLD-logic projections. Pre-existing Deno literal-type warnings are non-blocking. Deploy staging first, add a test team, confirm its projections match the batch.
 
 ---
 ## PART I — SNAPSHOT REFRESH (Step 6) — MUST run on prod after the transfer re-run + protections
@@ -246,7 +263,9 @@ After the prod transfer/returner re-run, refresh saved-build + target snapshots 
 **Must have a committed, reproducible producer for EACH before prod (verify each runs on prod, in this order):**
 1. **Raw rates** (AVG/OBP/ISO/SLG/ERA/FIP/WHIP/K9/BB9/HR9) — ✅ NOW committed (GAP 3, a960334): `scripts/sql/conf_stats_bucketA_assembly.sql` (runnable, idempotent, txn-wrapped; inlines `_team_conf`). Intra-conf (`is_conference_game=true`).
 2. **WRC_plus** — ✅ NOW committed: same file (C1 `(0.011+0.691·OBP+0.235·SLG)/0.3782×100`).
-3. **Stuff_plus / Overall_Power_Rating / env+** — mostly have producers (V1 cascade / `populate-conference-stats-env-plus.ts` / `compute_conf_pitcher_env_plus.ts`), but reconcile V1↔V2 + the duplicate env+.
+3. **Stuff_plus / Overall_Power_Rating / env+** — mostly have producers (V1 cascade / ~~`populate-conference-stats-env-plus.ts`~~ / `compute_conf_pitcher_env_plus.ts`), but reconcile V1↔V2 + the duplicate env+.
+   🛑 **NEVER run `populate-conf-stats` (= `scripts/populate-conference-stats-env-plus.ts`) ON PROD — it overwrites the JUCO overlay.** It is listed above only as an inventory of what exists, not as a prod producer. The prod conference-stats producers are exactly: `scripts/sql/conf_stats_bucketA_assembly.sql` (PASTE) → `scripts/compute_conf_pitcher_env_plus.ts --apply` → `scripts/derive_conf_opr_htp.ts --apply`. See `docs/PROD_PUSH_STEPS_2026_08_26.md` step 28.
+   🛑 **Run the NJCAA re-tag (STEPS step 29) BEFORE those two `.ts` producers.** Prod has 10 NJCAA district rows still tagged `division='D1'` for season 2026 (probe 2026-08-30), and both scripts filter `.eq("division","D1")` — so running them first writes D1-derived env+/OPR/HTP straight into the JUCO rows.
 4. **run_env_factor** (conf park) — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (conf-avg member `rg_factor`).
 5. **offensive_power_rating (OPR)** — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (= Overall_Power_Rating).
 6. **hitter_talent_plus (HTP)** — ✅ NOW committed: `scripts/derive_conf_opr_htp.ts` (canonical park-swap, stored + read-only).

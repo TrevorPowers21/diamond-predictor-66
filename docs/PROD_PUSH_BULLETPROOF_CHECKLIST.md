@@ -116,6 +116,18 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | C2 | **Chain step 1 — reclassify** `pitch_log.pitch_type_reclassified` + `classification_version` + `needs_review`; also materializes `_reclass_pf` | C0, C1 | `scripts/reclassify_prod.ts --dry-run` → `--go` | R | distribution vs staging; needs_review ≈ 8.1% | y (keyset + is-distinct) | C1b backup | y |
 | C3 | ~~Re-aggregate `pitcher_stuff_plus_inputs`~~ | — | — | — | ⛔ **CANCELLED — LEGACY LANE. Do not run.** | — | — | — |
 | C4 | **Chain step 2 — re-derive `pitcher_stuff_plus_ncaa`** (per pitch_type × hand, armHB, D1-only). MANDATORY after any reclass. | C2 | baseline deriver | R | armHB sign check passes; 18 buckets | y | 71-row backup | y |
+> 🛑 **MUST READ — THE C-ROW ORDER BELOW IS NOT THE RUN ORDER (audit 2026-08-30).** Three defects in these rows:
+> 1. **C5 (=C24 trackman) is printed before C7b**, its own stated dependency. It must run after the aggregation.
+> 2. **C9 (=C23 pull_air/in_zone_pct) is a non-step** — `scripts/derive_masters_from_pitchlog.ts:129` writes `pull_air`
+>    and `:142` writes `in_zone_pct`, so C8 already did it. Treat C9 as a verification, not a producer.
+> 3. **C10 duplicates C8** — both are `derive_masters_from_pitchlog`. Run it once (as chain step 5).
+> 4. **C11/C12 are inverted.** `computeNcaaAverages` (C12) MUST run **before** `computeAndStoreScores` (C11):
+>    `src/lib/computeAndStoreScores.ts:206-211` reads its baselines, incl. `stuff_plus`/`stuff_plus_sd` (`:249`), out of
+>    the `ncaa_averages` table C12 writes; missing fields fall back to hardcoded defaults **silently** (`:212-215`).
+> **True order: C6 → C7 → C7b → C8 (=derive_masters, chain step 5) → C5 (trackman) → E8 (NJCAA re-tag) → C12
+> (computeNcaaAverages) → C11 (computeAndStoreScores) → E3–E6 (conference stats).**
+> See `docs/PROD_PUSH_STEPS_2026_08_26.md` Phase C for the full reasoning and the 🛑 defects inside C12 itself.
+
 | C5 | **C24** `backfill_trackman_pitches_pitching_master.ts` — run AFTER the pitch_log aggregation (C7b), off `pitch_log_pitcher_totals`, **NOT** off the legacy PSP-I aggregation | C7b | script (`.order()` fixed ✓) | R | NOT-NULL ~8,027/8,072 | y | rebuildable | y |
 | C6 | NULL old `pitch_log.stuff_plus` (one-shot, **never re-run after C7 starts**) | — | runbook SQL | R | all IS NULL | n (destructive one-shot) | C1b backup | y |
 | C7 | 🛑 **MUST READ before running — Chain step 3: compute `pitch_log.stuff_plus`.** The filter is NO LONGER `v1-anchor-2026-08-17` (that silently matched 0 rows = new labels + old scores); it is now `--class-version=`, defaulting to the v2 stamp. Idempotent but **does NOT resume** — every attempt costs the full runtime (~36 min staging, longer on prod). Run DETACHED with `caffeinate -dimsu -w <pid>`. | C2 stamp, C4, `_reclass_pf`, A6 RPC | `scripts/compute_pitch_log_stuff_plus.ts` | R | unscored drains to 0; every (type×hand) bucket recenters to exactly 100.0 | idempotent, NOT resumable | C6/C1b backup | y |
@@ -135,6 +147,14 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | E2 | **Park Factors seasonal/rolling** — ⚠ producer hardwired to STAGING URL + off-repo CSVs | local CSVs, Park Factors | scripts/backfill_park_factors_seasonal.ts *(FIX: env URL/key; commit CSVs)* | R | 309 rows rg_factor_seasonal populated; DIFF sane | needs fix (delete+reinsert, not is-distinct) | _park_factors_backup (staging only — add prod) | n (destructive replace) | n |
 | E3 | **Conference Stats Bucket-A** (rates+env+ +WRC_plus+pitching rates) | E1 (is_conference_game) | scripts/sql/conf_stats_bucketA_assembly.sql | R | ~30 D1 rows, env+ ~100, WRC_plus shifts off stale | y (temp _conf_agg, keyed UPDATE) | backup conf | n (rewrites stale conf) | n |
 | E4 | **D1 Conference Stats Stuff_plus** — ⚠ NO committed producer (present only as paused-push copy) | prod Masters | **MISSING** (build PA/IP-weighted rollup, or document import path) | R (currently copy) | matches staging (40/40) | y | conf backup | n | n |
+> 🛑 **CONFERENCE-STATS GUARDS (added 2026-08-30, they were missing from this doc entirely):**
+> - **NEVER run `populate-conf-stats` (`scripts/populate-conference-stats-env-plus.ts`) on prod — it overwrites the JUCO overlay.**
+> - **Run E8 (NJCAA re-tag) BEFORE E5/E6.** Prod has 10 NJCAA district rows still tagged `division='D1'` for 2026, and
+>   `compute_conf_pitcher_env_plus.ts:29` + `derive_conf_opr_htp.ts:12` both filter `.eq("division","D1")` — run them
+>   first and you write D1-derived env+/OPR/HTP into the JUCO rows.
+> - **E3 bucketA carries a G-GATE** (blocker 3): re-run on STAGING vs `_confstats_backup_preassembly` and confirm diff
+>   0.0000 before touching prod. On prod it is **PASTED** into the SQL editor, never `--linked`.
+
 | E5 | **conf_pitcher_env_plus** (era+/fip+/hr9+) | E3 rates | scripts/compute_conf_pitcher_env_plus.ts | R | 30 D1 rows, SEC era+>100 hr9+<100 | y (keyed) | conf backup | n | n |
 | E6 | **run_env_factor + hitter_talent_plus + OPR** | E2 (rg_factor), E4 (Stuff_plus), E3 (WRC_plus) | scripts/derive_conf_opr_htp.ts --apply | R | run_env ~100, HTP matches staging | y | conf backup | n | n |
 | E7 | Re-run pitcher transfers on stored HTP | E6 | transfer producer (ledger 416) | R | staging tol | y | player_predictions | n | n |
@@ -145,10 +165,10 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | # | Step | Inputs | Producer | R/C | Staging-match gate | I/R | Reversible | DS | Trevor |
 |---|---|---|---|---|---|---|---|---|---|
 | D1 | Apply `team_drs_store.sql` to prod (adds team_war_snapshots.team_drs) | migration | scripts/sql/team_drs_store.sql (fold into migration) | — | column exists | — | drop col | y | n |
-| D2 | Run team_drs producer against prod — ⚠ `derive_team_drs.mjs` hardcoded staging, NO --prod | player_season_defense | scripts/drs/derive_team_drs.mjs *(FIX: add --prod + env guard)* | R | 308 D1 rows sum ~0; re-run staging too (empty there) | y | snapshot | y | n |
-| D3 | load-drs-wsb-staging --prod | defense/bsr | scripts/load-drs-wsb-staging.ts (--prod ✓) | R | 13454 def / ~10432 bsr | y | tables | y | n |
-| D4 | populate_descriptive_war.mjs --prod (reads team_drs) | D2 | scripts/populate_descriptive_war.mjs | R | matches staging | y | Master backup | y | n |
-| D5 | populate_descriptive_war_reg.mjs --prod | D4 | scripts/populate_descriptive_war_reg.mjs | R | matches staging | y | backup | y | n |
+| D2 | Run team_drs producer against prod — ⚠ `derive_team_drs.mjs:13` hardcoded staging (`VITE_SUPABASE_URL` only), NO --prod. 🛑 **ORDER WRONG: run this LAST in Phase D (after D3/D4/D5), not before** — it reads the Masters that D4/D5 write. ✅ Low risk: it writes only `scripts/drs/output/team_drs.csv`, no DB write, and there is no `team_drs` table on prod | player_season_defense, D4/D5 | scripts/drs/derive_team_drs.mjs *(FIX: add --prod + env guard)* | R | 308 D1 rows sum ~0; re-run staging too (empty there) | y | snapshot | y | n |
+| D3 | load-drs-wsb-staging --prod — **RUN THIS FIRST IN PHASE D, BEFORE D2** | defense/bsr | scripts/load-drs-wsb-staging.ts (--prod ✓) 🛑 unordered `.range()` at `:53` pages the 31,467-row `players` table — add `.order("id")` or the uuid map silently loses players | R | 13454 def / ~10432 bsr | y | tables | y | n |
+| D4 | populate_descriptive_war.mjs --prod | D3 (NOT D2) | **scripts/drs/populate_descriptive_war.mjs** 🛑 path was missing `drs/`; 🛑 unordered `.range()` at `:57`,`:58` — add `.order("id")` first | R | matches staging | y | Master backup | y | n |
+| D5 | populate_descriptive_war_reg.mjs --prod | D4 | **scripts/drs/populate_descriptive_war_reg.mjs** 🛑 path was missing `drs/`; 🛑 unordered `.range()` at `:33`,`:34` | R | matches staging | y | backup | y | n |
 
 ### PHASE E — TWP + PRECOMPUTES
 
@@ -163,10 +183,10 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 
 | # | Step | Inputs | Producer | R/C | Staging-match gate | I/R | Reversible | DS | Trevor |
 |---|---|---|---|---|---|---|---|---|---|
-| F1 | **Fire `refresh_composite_war()` (÷13.1)** — ONLY after E o_war reprecompute (prod d/bsr currently on superseded ÷10) | migration 20260810, E precomputes | supabase/migrations/20260810_composite_war_d1_rescale.sql | R | prod d_war = Σdrs_floor/13.1; total = o+d+bsr | y | pp backup | n (flip) | n |
+| F1 | **Fire `refresh_composite_war()` (÷13.1)** — ONLY after E o_war reprecompute. ✅ CORRECTED 2026-08-30: prod is **already ÷13.1** (probed implied divisor 13.10), not the superseded ÷10. 🛑 **GATEWAY:** the fn sets `statement_timeout=180000` internally, which exceeds the ~125s HTTP gateway ceiling — fire from the **direct pg session (PGURI) or the SQL editor**, never `.rpc()`/MCP, or it cuts at ~125s and ROLLS BACK | migration 20260810, E precomputes | supabase/migrations/20260810_composite_war_d1_rescale.sql | R | prod d_war = Σdrs_floor/13.1; total = o+d+bsr | y | pp backup | n (flip) | n |
 | F2 | populate_hitter_run_values(2026) | pitch_log_hitter_totals refreshed | migration 20260826150500 fn | R | batting_rv ~6053 non-null | y | col nullable | y (nulls hide chip) | n |
-| F3 | Snapshot backfills: backfill-neutral → heal-stale → backfill-snapshot-total-hitter-war (reads FRESH d/bsr, covers 1470 tbp/184 board) → recompute-snapshot-hitter-market → resync-* | F1, E precomputes | scripts/backfill-snapshot-total-hitter-war.ts (ordered ✓) etc. | R | 0 snapshots with o_war-but-null-total; known player reads snapshot | y | snapshots | n (window) | n |
-| F4 | TWP markets → market resyncs → 42b re-price | F3 | committed | R | staging dist | y | pp | n | n |
+| F3 | 🛑 **ORDER CORRECTED 2026-08-30 — this row was scrambled and listed 42b twice.** Canonical Phase-F order is STEPS 40→43: **backfill-snapshot-total-hitter-war → TWP markets (F4) → market resyncs → 42b recompute-snapshot-hitter-market → backfill-neutral → heal-stale.** (Was: neutral/heal FIRST, 42b in both F3 and F4, resyncs on both sides of 42b.) 🛑 `resync-build-snapshot-markets.ts:17` is HARDCODED to `.env.local` — **no prod path, will silently write STAGING**; fix before Phase F | F1, E precomputes | scripts/backfill-snapshot-total-hitter-war.ts (ordered ✓) etc. | R | 0 snapshots with o_war-but-null-total; known player reads snapshot | y | snapshots | n (window) | n |
+| F4 | TWP markets → market resyncs → 42b re-price (see the corrected single order in F3 — do not run 42b twice). 🛑 `rebake-twp-markets.ts:15` + `fix-returner-twp-hitter-market.ts:16` ignore `--prod` (bare `process.env.SUPABASE_URL`) — must be run with `--env-file=.env.production.local` | F3 | committed | R | staging dist | y | pp | n | n |
 | F5 | **refresh_team_season_stats(2026) LAST** — apply 20260819000000 (create) → 20260821010000 (war cols) → 20260819010000 (fn) first | E3–E6 conf, E2 park, team_war_snapshots | supabase/migrations + refresh_team_season_stats() | R | 308 D1 rows, 0-null WAR, AVG ~.277, wRC+ ~100, pwar matches snapshots | y (DELETE-season-then-rebuild atomic) | old rows persist until commit | y | n |
 | F6 | Reseed team_war_snapshots | F5 | committed | R | staging | y | snapshots | n | n |
 
@@ -175,7 +195,7 @@ Full step detail + the 🛑 markers: "THE STUFF+ CHAIN" below.
 | # | Step | Producer | Trevor |
 |---|---|---|---|
 | G1 | Apply RLS migration 20260823000000 (cross-team read leak; deps resolve on prod) | supabase/migrations/20260823000000_player_predictions_rls_team_scope.sql | n |
-| G2 | Deploy edge fns (`process-precompute-jobs`, `recalculate-prediction`) — **AFTER F5 team_season_stats exists** | supabase functions deploy | **y** |
+| G2 | Deploy edge fn **`process-precompute-jobs` ONLY** — 🛑 `recalculate-prediction` is **DEAD, do NOT deploy or run** (STEPS step 47). **AFTER F5 team_season_stats exists AND is populated** (the fn reads `team_season_stats.faced_htp`/`faced_stuff_plus` at `index.ts:1095`,`:1419`; the table does not exist on prod today) | supabase functions deploy | **y** |
 | G3 | PREVIEW-VERIFY on Vercel preview (= PROD Supabase) | — | n |
 | G4 | **MERGE feature/war-recalibration → main** via `gh pr create`, Trevor clicks merge | — | **y** |
 | H | Gated drops (Phase H) — never drop team_war_snapshots; enforce landmine list | — | n |
