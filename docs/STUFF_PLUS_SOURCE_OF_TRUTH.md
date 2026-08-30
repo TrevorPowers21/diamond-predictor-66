@@ -249,3 +249,16 @@ add aggressive retry loops.
 ⚠ STEP 3 (`compute_pitch_log_stuff_plus.ts`) is idempotent but does **NOT** resume — `:185` re-scores ALL rows matching
 the class version rather than filtering `stuff_plus IS NULL`, so every attempt costs the FULL runtime (~36 min on
 staging). A mid-run failure leaves **v2 labels + STALE scores**, the one state every doc says must never exist.
+
+---
+## 🔁 FUTURE WORK — MAKE THE CHAIN RESUMABLE (Trevor 2026-08-30). Not blocking, but valuable on PROD.
+Resumability differs per step today:
+| step | resumable? | why |
+|---|---|---|
+| 1 `reclassify_prod.ts` | ✅ FULLY | keyset on PK + `is distinct from` guards + `_reclass_fix` upserted by PK. Survives interruption; a re-run skips completed rows. |
+| 4 `aggregate_pitch_log_dimensions.ts` | ⚠ MANUALLY | the 48 dims are independent and `--skip=` exists (:953-954, :1029), but you must pass the completed keys BY HAND. **FIX: auto-skip** — detect dims already written for this run-generation (e.g. compare a run marker / `updated_at` on the totals rows) and skip without being told. On staging each dim is ~60-72s so redoing 47 was cheap; on PROD it will not be. |
+| 3 `compute_pitch_log_stuff_plus.ts` | ❌ NO — and it's the costliest to lose | :185 re-scores ALL rows matching the class version instead of filtering `stuff_plus IS NULL`. Every attempt costs the FULL runtime (~36 min staging, longer on prod), and a mid-run failure leaves **v2 labels + STALE scores**. |
+**Why step 3 can't naively resume, and the fix:** the recenter pass must see the WHOLE population to shift each
+(pitch_type × hand) bucket to mean 100 — scoring only the gaps would recenter against a partial set and be wrong.
+Correct design = **two phases: (a) score only rows where `stuff_plus IS NULL`, then (b) ALWAYS run the recenter across
+the full population.** That turns a 36-min restart into a few minutes while keeping the recenter exact.
