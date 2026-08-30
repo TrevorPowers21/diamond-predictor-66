@@ -66,23 +66,26 @@ CONTENT not exit code · verify FRESHNESS not row count. "Column exists" ≠ "co
 
 
 ---
-## 📍 WHERE WE ARE RIGHT NOW (updated 2026-08-30, end of session)
-**PROD — everything through C29 is DONE, verified, and logged:**
+## 📍 WHERE WE ARE (updated end of 2026-08-30) — **PHASE C IS COMPLETE ON PROD**
 | step | result on PROD |
 |---|---|
-| prereqs | `team_season_stats` (3 migrations, dependency order) · `pitch_log_corrected` view rebuilt 94→102 cols · backups `_v2_prechain_backup` 2,576,146 / `_hm_prestep5_backup` 30,025 / `_pm_prestep5_backup` 29,238 |
-| Stuff+ 1 classify | 2,013,005 stamped `v2-ranges-2026-08-28`, needs_review 8.1% |
-| Stuff+ 2 baseline | armHB sign check **18/18** |
-| Stuff+ 3 score | 2,013,005 scored + recentered, **0 unscored**, every bucket 100.0 |
-| **GATE** | per-pitcher Stuff+ **mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7 — IDENTICAL to staging** |
-| Stuff+ 4 aggregate | 48/48 + `populate_hitter_run_values`, 24.3 min (`--direct`) |
-| Stuff+ 5 Masters | 4,772 pitchers + 4,373 hitters, **0 new rows**; `pull_air` 0 → 4,366 |
-| C24 trackman_pitches | 5,618 rows; **D1 5,375/5,375 from pitch_log · NJCAA_D1 2,695/2,695 from legacy** |
-| C27 ncaa_averages | 72 fields / 40 config rows; `p_ncaa_avg_stuff_plus` 101.8341 → **100.0141** |
-| C26 power ratings | pitchers 8,071 · hitters 8,244 · 0 errors · `propagate=false` |
-| C29 NJCAA re-tag | 10 rows → `D1 30 · NJCAA_D1 10 · D2 2` |
-**STAGING:** the same 5-step chain is complete (2,015,321 pitches). Staging has NOT had C24/C26/C27/C29 applied.
-**NEXT: C28 — the riskiest remaining step. Full prep plan below.**
+| prereqs | `team_season_stats` (3 migrations, DEPENDENCY order) · `pitch_log_corrected` view rebuilt 94→102 cols · backups `_v2_prechain_backup` 2,576,146 / `_hm_prestep5_backup` 30,025 / `_pm_prestep5_backup` 29,238 / `_confstats_backup` 162 / `_parkfactors_backup` 615 / `_c28_before` |
+| Stuff+ 1–5 | 2,013,005 classified + scored + recentered (0 unscored) · sign check 18/18 · 48/48 aggregations · Masters 4,772 P + 4,373 H, 0 new rows · **GATE: mean 99.3 / p50 99.3 / p10 93.1 / p90 105.7 — IDENTICAL to staging** |
+| C24 | `trackman_pitches` 5,618 rows — **D1 from pitch_log 5,375/5,375 · NJCAA_D1 from legacy 2,695/2,695** |
+| C27 | `ncaa_averages` 72 fields / 40 config rows · `p_ncaa_avg_stuff_plus` 101.8341 → **100.0141** |
+| C26 | power ratings — pitchers 8,071 · hitters 8,244 · 0 errors · `propagate=false` |
+| C29 | NJCAA re-tag — `D1 30 · NJCAA_D1 10 · D2 2` |
+| C28 | 4 steps (runbook had 3) — **`Stuff_plus` 101.17 → 99.15, 30/30 rows changed**, matches staging 99.16 |
+| C28b | conference scouting averages — `pitcher_ev_score` 0/30 → **30/30** (avg 53.22) · `pitcher_iz_score` 30/30 |
+**G-GATE PASSED** (bucketA idempotent: 77 numeric cols, 0 changed, worst diff 0.000000).
+**KNOWN-GOOD NON-ISSUES:** `OPS`/`SLG` 29/30 — the missing conference is **Independent**, identical on staging, correct
+by design (no conference-mates to pool). Do NOT "fix" it.
+⚠ **STAGING HAS DRIFTED BEHIND PROD** — it received only the Stuff+ chain and the Conference Stuff+ lane fix. It has
+NOT had C24 / C26 / C27 / C28 / C28b / C29. Prod is now AHEAD on several conference columns
+(`pitcher_ev90`, `pitcher_exit_velo`, `pitcher_in_zone_pct`, `pitcher_iz_whiff_pct` = 30/30 prod vs 0/30 staging).
+**Do NOT treat a prod↔staging mismatch as a prod defect without checking which env is actually behind.**
+
+**NEXT: PHASE D (dWAR / bsrWAR).** Investigation + plan below.
 
 ---
 ## 🛑 C28 PREP PLAN — CONFERENCE STATS (do NOT run any of this without working the plan)
