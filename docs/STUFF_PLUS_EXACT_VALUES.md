@@ -1,4 +1,6 @@
 # STUFF+ — EXACT VALUES (single source of truth). 2026-08-28.
+
+> ▶️ **START HERE for the prod push: `docs/HANDOFF_2026_08_30_PROD_PUSH.md`** (current state, next actions in order, mistakes not to repeat, standing rules).
 > ## ★ CURRENT STATE — READ FIRST (2026-08-30). This supersedes every older statement in this file.
 > - **LANE (TOP DOG):** the only correct Stuff+ lane is the **pitch_log lane** —
 >   `pitch_log.pitch_type_reclassified` → `compute_pitch_log_stuff_plus.ts` → `pitch_log.stuff_plus` →
