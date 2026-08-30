@@ -2120,15 +2120,13 @@ take their constants from LOCAL JSON fixtures (`RPW 13.1`, E2T, replacement RA9,
 ## 🛑 THE ONE HARD BLOCKER — `team_war_snapshots.team_drs` DOES NOT EXIST ON PROD
 `populate_descriptive_war.mjs:76` reads `team_war_snapshots(source_team_id, team_drs)`; the error branch at `:65` is
 `process.exit(1)`. **D31 dies before writing a single row** (no partial-write risk, but it will not run).
-**THE FIX ALREADY EXISTS AND IS NOT A MIGRATION:** `scripts/sql/team_drs_store.sql` — it lives in `scripts/sql/`, NOT in
-`supabase/migrations/`, which is exactly why staging got it (2026-08-09) and prod never did. `PROD_MIGRATIONS_TODO.md:234`
-records it as "APPLIED STAGING … PROD pending."
-**VERIFIED it lands cleanly on prod:** 308 hardcoded `(source_team_id, drs)` values, **sum = −0.007** (correctly centered) ·
-**308/308 match prod `team_war_snapshots` season 2026** (prod has 466 rows; the 158 non-D1 correctly stay NULL) ·
-**5,375/5,375** prod D1 pitchers with IP>0 resolve `TeamID → Teams Table.source_id → team_drs` (full coverage, zero
-fallthrough to `drs_behind = 0`). `:2` is `add column if not exists` → idempotent.
-⚠ **DO NOT source these values from staging** — staging's `team_war_snapshots.team_drs` is now **0/308 non-null** (the
-table was rebuilt after the 2026-08-09 populate). `scripts/sql/team_drs_store.sql` is the ONLY surviving source of truth.
+🛑 **CORRECTION 2026-08-30 (late) — MY EARLIER "just paste `scripts/sql/team_drs_store.sql`" INSTRUCTION WAS WRONG AND IS REVERTED.** I was only supposed to reorder the steps, not change WHAT they do. The documented process — which predates this session and stands — is to **REGENERATE the value on prod, never copy it**:
+- `AGENT_LEARNINGS_stuff_plus_2026_08_16.md:802-803`: *"regenerate team_drs via `scripts/drs/derive_team_drs.mjs` if needed. **PROD: run against PROD `team_war_snapshots`**"*
+- `PROD_PUSH_BULLETPROOF_CHECKLIST.md` row **D2**: *"Run team_drs producer against prod … (FIX: add `--prod` + env guard)"*, gate **308 D1 rows sum ~0**
+- `AGENT_LEARNINGS:859,:869` list **`team_drs_store.sql` under "script writers to RETIRE"** — it is a FROZEN SNAPSHOT of a computation, not the computation. Pasting it into prod is exactly the copy-instead-of-derive the project rule forbids ([[feedback_derive_over_copy]]).
+**WHAT `derive_team_drs.mjs` ACTUALLY COMPUTES** (`:1-9`, B-R method): per-team `Σ drs_floor` from `player_season_defense`, grouped to a team via the Masters' `TeamID`, then **innings-weighted centering per division** — `team_drs = Σdrs_floor(team) − (division Σdrs_floor / division ΣIP) × team_IP`, so `dRS_behind(pitcher) = team_drs × pitcher_IP / team_IP` and Σ over all pitchers = 0 exactly.
+**THE FIX THE DOCS CALL FOR (code, not data):** `:13` reads `./.env.local` only — no `SUPABASE_URL` fallback, no `--prod`. Add the standard double-keyed guard. ⚠ It also has **three unordered `.range()` loops** (`:15`, `:17`, `:22`) which on prod page over the Masters (30,025 rows ≈ 31 pages) and `player_season_defense` (13,454 ≈ 14 pages) — dropped rows silently understate a team's `Σ drs_floor`. Both must be fixed before the prod run.
+⚠ **OPEN, NOT RESOLVED:** a read-only check on 2026-08-30 found prod's own data and staging's stored values agree for 303/308 teams (mean |Δ| 0.124) but differ on **Arkansas: 32.800 vs 41.060 (Δ −8.26)**. Which is correct is **UNDETERMINED** — prod resolves more players than staging (31,467 vs 15,561), so prod may well be the better sum. **Do not reconcile prod TO staging.** Run the producer on prod, sum per player under the team, and then investigate the difference on its own merits.
 
 ## ✅ ALREADY DONE / NOT NEEDED — do not add these to the plan
 - **RLS: audit finding H3 is OUT OF DATE.** `relrowsecurity = true` with **0 policies** on `player_season_defense` AND
@@ -2158,11 +2156,15 @@ table was rebuilt after the 2026-08-09 populate). `scripts/sql/team_drs_store.sq
 
 ## ▶️ ORDERED SEQUENCE
 ```
-D29b (NEW)  PASTE scripts/sql/team_drs_store.sql in the Supabase SQL editor. ⛔ never `--linked`
-            (config.toml still names a third ref kfkuhdmpchxyffmnowgj). Idempotent.
-            GATE: select count(*) filter (where team_drs is not null), round(sum(team_drs)::numeric,2)
-                  from team_war_snapshots where season=2026;   EXPECT 308 and ~-0.01
-            Then tick PROD_MIGRATIONS_TODO.md:234.
+D29b (NEW)  DERIVE team_drs ON PROD — the documented producer, NOT a paste.
+            (a) add the double-keyed --prod guard + ordered pagination to scripts/drs/derive_team_drs.mjs
+            (b) alter table team_war_snapshots add column if not exists team_drs numeric;   (DDL only)
+            (c) run the producer against PROD; it prints the storage SQL for its OWN derived values
+            GATE: 308 D1 rows, Σ centered = 0 per division (the script asserts this itself), then
+                  select count(*) filter (where team_drs is not null), round(sum(team_drs)::numeric,2)
+                  from team_war_snapshots where season=2026;
+            ⛔ do NOT paste scripts/sql/team_drs_store.sql — it holds STAGING's frozen values and is
+               listed for retirement. Then tick PROD_MIGRATIONS_TODO.md:234.
 D30         npx tsx scripts/load-drs-wsb-staging.ts --prod --dry-run
             EXPECT "13454 would upsert, 11 unresolved" / "10432 would upsert, 30 unresolved" → then SKIP the apply.
             ⛔ NEVER scripts/load-drs-wsb-prod.ts
@@ -2179,9 +2181,11 @@ D32         node scripts/drs/populate_descriptive_war_reg.mjs --prod      (dry-r
                drs_behind = 5,375/5,375 non-null on prod FIRST.
             GATE: staging has 5,322/5,343 hitter _reg and 5,372/5,377 pitcher _reg — the ~20 shortfall is players absent
             from hitter_accrued.csv, expected.
-D33         ⛔ SKIP. CSV-only output (`:36` writes team_drs.csv), no DB write anywhere, and `:13` hardcodes
-            `./.env.local`. D29b already supplies the values it would derive. If ever run it must be LAST (it reads the
-            Masters that D31/D32 write) — the checklist ordering that puts it before D30/D31 is WRONG.
+D33         ⛔ FOLDED INTO D29b — this IS the team_drs producer (`derive_team_drs.mjs`), so by DATA
+            ORDER it must run BEFORE D31 (which reads `team_war_snapshots.team_drs`), not last.
+            My earlier "SKIP — CSV only" note was wrong in substance: the CSV is a by-product, and the
+            script also PRINTS the team_war_snapshots storage SQL (`:8`). It needs the --prod guard and
+            the 3 unordered .range() loops fixed first.
 D34         VERIFY on prod, 2026, division='D1':
             d_war / bsr_war / desc_owar / total_desc_war = 5,340 non-null each ·
             desc_pwar / desc_ra9 / drs_behind = 5,375 each · avg(d_war) ≈ 0.010 · avg(bsr_war) ≈ 0.000 ·

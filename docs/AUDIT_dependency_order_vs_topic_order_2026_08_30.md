@@ -87,7 +87,8 @@ weighted by this column, so lock-season must precede F44 but its relationship to
 ---
 ## 5. THE CORRECTED ORDER, DERIVED FROM THE GRAPH (not from topic)
 ```
-D29b  team_drs_store.sql .................... team_war_snapshots.team_drs     → needed by D31 and F44 step 7
+D29b  DERIVE team_drs on prod (derive_team_drs.mjs)  team_war_snapshots.team_drs  → needed by D31 and F44 step 7
+      ★ reads player_season_defense + Masters, so it must follow D30 and precede D31. NOT a paste of stored values.
 D30   dRS/wSB load (no-op on prod) ......... player_season_{defense,baserunning}
 D31   populate_descriptive_war ............. Masters desc_owar/d_war/bsr_war/total_desc_war/desc_ra9/drs_behind
 D32   populate_descriptive_war_reg ......... Masters desc_*_reg          ★ must follow D31 (reads drs_behind, NULL→0)
