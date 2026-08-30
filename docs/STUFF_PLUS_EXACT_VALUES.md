@@ -654,3 +654,66 @@ finite `query_timeout` sized to the slowest known dimension with headroom (stagi
 set on prod rather than cherry-picking with `--only`/`--skip`: dimension rows that already exist may be STALE from the
 pre-v2 process, and "rows exist" does NOT mean "rows are fresh". Steps 1-3 are unaffected — do NOT redo them.
 **Nothing was corrupted by this stall.**
+
+---
+# 🧭 TRACK B — EXECUTION LESSONS FROM THE FIRST REAL RUN (staging + prod, 2026-08-29/30)
+The 5-step chain has now been run END-TO-END on BOTH environments. Track B automates exactly this chain on ingest,
+so every failure mode below WILL recur unattended unless Track B is built to handle it. This section is the
+requirements list, written from what actually happened — not theory.
+
+## ✅ WHAT WORKED (keep these properties)
+- **Per-pitcher classification is deterministic.** Prod and staging produced an IDENTICAL label distribution to the
+  tenth of a percent (4S 37.8 · SI 16.0 · SL 10.3 · GY 10.2 · CH 9.1 · CB 5.6 · SW 5.2 · FC 3.7 · SPL 2.1) and an
+  IDENTICAL per-pitcher Stuff+ gate (mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7). Two independent datasets, same
+  numbers ⇒ the classifier + scorer are reproducible. **Track B should assert this gate after every run.**
+- **A hard SIGN CHECK that refuses to write** caught nothing because nothing was wrong — but it is the reason we can
+  TRUST the armHB convention on both envs (18/18 buckets, twice). **Keep abort-before-write invariants.**
+- **`is distinct from` + keyset + per-batch commit** made step 1 resumable and cheap to retry.
+- **Backups before every destructive step** (`_v2_prechain_backup`, `_hm_prestep5_backup`, `_pm_prestep5_backup`) made
+  the whole chain reversible. **Track B must snapshot before it writes, every run.**
+- **Halt-on-failure between steps** stopped a quoting bug from cascading (it died before writing anything).
+
+## ❌ WHAT BROKE — AND WHAT TRACK B MUST DO ABOUT IT
+1. **STEP 3 DOES NOT RESUME.** `compute_pitch_log_stuff_plus.ts:185` re-scores every row matching the class version
+   rather than filtering `stuff_plus IS NULL`, so each attempt costs the FULL runtime (staging 35.7 min, prod 29.9)
+   and a mid-run failure leaves **v2 labels + STALE scores** — the one state that must never exist.
+   → **TRACK B FIX: two phases — (a) score only `stuff_plus IS NULL`, (b) ALWAYS recenter across the FULL population**
+   (the recenter needs every row to shift each bucket to mean 100, which is why naive resume is wrong).
+2. **`--direct` REMOVES THE FAILURE SIGNAL.** `statement_timeout=0` + long `query_timeout` defeats the gateway's ~125s
+   cut (required: `vs_top_hitters` needs 151-255s) but a dropped pooler connection then becomes an INFINITE HANG.
+   Prod stage 4 sat **39 minutes with no output**, no active query, no locks. Nothing retried because nothing failed.
+   → **TRACK B FIX: `keepAlive: true`, a FINITE `query_timeout` (~20-30 min, sized off the slowest dimension), and
+   per-dimension progress logging.** Unattended automation CANNOT have an unbounded wait.
+3. **EXIT CODE 0 ≠ SUCCESS.** `aggregate_pitch_log_dimensions.ts` exits 0 even when a dimension FAILED, and it HALTS
+   on that failure so the 8 dimensions behind it never run. A run was wrongly marked COMPLETE this way.
+   → **TRACK B FIX: validate by CONTENT (grep for the per-item success line + `FAILED`), never by exit code.**
+4. **"ROWS EXIST" ≠ "ROWS ARE FRESH".** When `vs_top_hitters` failed, its table still showed 5,349 rows from the
+   PRE-v2 run. A row-count check PASSES on stale data.
+   → **TRACK B FIX: stamp a run/version marker on aggregate rows and verify FRESHNESS, not count.**
+5. **`select *` VIEWS GO STALE SILENTLY.** Prod's `pitch_log_corrected` was frozen at 94/99 columns and did not expose
+   `classification_version`, so the scorer hard-failed on prod while passing on staging. `create or replace` cannot
+   fix it — it needs drop+create.
+   → **TRACK B FIX: after ANY `ALTER TABLE pitch_log ADD COLUMN`, rebuild the view. Assert the view's column count
+   matches the base table before the chain starts.**
+6. **A LABEL CHANGE INVALIDATES EVERYTHING BELOW IT.** The §4.5 gyro floor moved 6-8% of breaking-ball volume, so every
+   mix-dependent baseline/SD/percentile was invalid until regenerated.
+   → **TRACK B FIX: steps 1→5 are ONE transaction-of-work. Never emit "done" between them.**
+7. **ORDERING IS LOAD-BEARING AND WAS WRONG IN THE DOCS.** C26 must follow C27 (it reads `ncaa_averages` and falls back
+   to hardcoded defaults SILENTLY when fields are missing); C29 must precede C28 (10 NJCAA rows are still tagged
+   `division='D1'` and both C28 producers filter on it). Migration order for `team_season_stats` is by DEPENDENCY, not
+   timestamp — the filenames sort wrong and fn-before-ALTER empties the table.
+8. **UNORDERED `.range()` SILENTLY DROPS/DUPES ROWS.** Found in 6+ producers. A blanket `order("id")` is NOT the fix —
+   `pitch_log_*_totals`, `player_season_defense` and `player_season_baserunning` have NO `id` column.
+   → **TRACK B FIX: per-table PK map; refuse to paginate an unregistered table.**
+9. **NEW-ROW CREATION WAS UNGATED.** `derive_masters_from_pitchlog` spread invented Master rows into the same upsert as
+   the patches. The Masters are the TruMedia source of truth; a pitch-log-only row is a half-populated player.
+   → **TRACK B FIX: never create Master rows implicitly. Opt-in only (`--create-new`), default OFF.**
+10. **ENV GUARDS WERE MISSING OR WRONG.** One market script hardcoded `.env.local` (would resync STAGING while
+    reporting success on a prod run); two others had NO guard at all and would write prod with zero opt-in; one had a
+    STAGING build-id as its default scope, returning 0 rows on prod.
+    → **TRACK B FIX: double-keyed guard everywhere — the URL and the `--prod` flag must AGREE, or refuse to run.**
+11. **SEASON KEYS DIFFER BY PURPOSE.** 2026 = completed season (descriptive WAR), 2027 = projections. A query on the
+    wrong season returns a misleading ZERO — this produced a false "staging has no WAR data" alarm.
+    → **TRACK B FIX: every gate query must state its season explicitly and assert a non-zero denominator.**
+12. **MACHINE SLEEP KILLED LONG RUNS.** Distinguish: environmental failures die at a DIFFERENT point each run;
+    structural ones die at the SAME place with the SAME duration. Run detached with `caffeinate -dimsu -w <pid>`.
