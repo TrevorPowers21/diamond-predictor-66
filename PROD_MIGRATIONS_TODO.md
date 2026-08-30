@@ -1718,3 +1718,59 @@ Part 1 (remaining steps) found **2 structural defects**. Part 2 (completed steps
 gate** — the verification query itself was wrong, which is the most expensive kind of error because it makes correct
 work *look* broken and broken work *look* fine.
 → **Audit the GATES with the same rigour as the steps.** A gate that cannot fail, or cannot pass, is not a gate.
+
+---
+# 🔴 PROD DATA GAP FOUND VIA team_drs — **CAMDEN KOZEAL (Arkansas) IS MISSING FROM PROD'S 2026 HITTER MASTER**
+**CONFIRMED BY TREVOR 2026-08-30: Kozeal is a real player.** This is a genuine prod defect, not a reconciliation artifact.
+
+## HOW IT SURFACED (the detector was not the defect)
+Prod-derived `team_drs` disagreed with staging's stored value on exactly one team — **Arkansas 32.800 vs 41.060
+(Δ −8.26)** — while 303/308 teams agreed within 0.5. Chasing it down:
+1. **Per-player dRS is IDENTICAL across environments.** `player_season_defense` 2026: prod 13,454 / staging 13,454,
+   both `drs-engine-0.11.0`; matched on `(source_player_id, position)` → **13,453 in both, 13,453 identical, ZERO
+   different.** The engine output is env-independent (loaded from the same CSVs, per `PROD_PUSH_STEPS:316-317`), so
+   **dRS drift is RULED OUT.**
+2. **Arkansas roll-up:** prod **41** defense rows Σ **35.255** · staging **43** rows Σ **43.757**. Prod loses 2 rows.
+3. **Both rows are ONE player — `source_player_id` 1925267789: SS 7.959 + 2B 0.543 = 8.502 runs.** That is the whole Δ.
+
+## THE DEFECT
+| | |
+|---|---|
+| STAGING `"Hitter Master"` 2026 | `Camden Kozeal` · Team **Arkansas** · **pa 289** · D1 |
+| **PROD `"Hitter Master"` 2026** | **ABSENT** |
+| PROD `"Pitching Master"` 2026 | absent |
+| PROD `players` | **row EXISTS** — `Cam Kozeal` · 1B · **`team` = NULL** · D1 · NOT IN PORTAL |
+| STAGING `players` | `Camden Kozeal` · 1B · team `Arkansas` |
+Prod **knows the player** (same `source_player_id`) but stores him as "**Cam**" with a **NULL team**, and has **no 2026
+Master stat row**. His dRS rows sit in prod's `player_season_defense` with nothing to join them to.
+⚠ Note the name form differs (**Cam** vs **Camden**) and prod's `team` is NULL — consistent with
+[[project_players_team_id_null]] (prod carries ~15,706 team-less stubs). **If the Master import resolves on NAME
+anywhere rather than `source_player_id`, that is the root cause and is far broader than one player**
+([[feedback_id_over_name]]). NOT yet investigated — do not assume.
+
+## SCOPE — SMALL AND BOUNDED (this is NOT a systemic Masters gap)
+2026 **D1** Master id sets: **prod 10,406 · staging 10,408** · in staging not prod **4** · in prod not staging **2**.
+Of the 4 staging-only ids only two carry defense: **Camden Kozeal 8.502** and **LJ Layhew (Rice, 1 PA) 0.002** —
+**total prod loses 8.50 runs, essentially all Kozeal.**
+
+## BLAST RADIUS ON PROD (everything below is currently wrong or missing for this player)
+- **no `desc_owar` / `d_war` / `bsr_war` / `total_desc_war`** — D31 iterates the Masters, so he is simply not computed
+- **no power ratings, no projection, no market value, no NIL** — every producer keys off a Master row
+- **Arkansas `team_drs` understated by 8.26** ⇒ every Arkansas pitcher's `drs_behind` is wrong
+  (`drs_behind = team_drs × IP/team_IP`) ⇒ wrong `desc_ra9` / `desc_pwar` for the whole staff
+- **Arkansas team WAR roll-ups** (`team_war_snapshots`, later `team_season_stats`) understated
+- ⚠ **Arkansas is one of the 14 ACTIVE customer teams.**
+
+## ★ WHY NO GATE WOULD HAVE CAUGHT THIS
+Prod has **5,340** D1 hitters and every count check passes on 5,340. A missing row is invisible to a count — you can
+only see it by **diffing the id SET against a reference**, which nothing in the runbook does.
+→ **ADD A MEMBERSHIP GATE, not just a count gate:** diff 2026 Master `source_player_id` sets prod-vs-staging (or vs the
+source CSV) and require the difference to be explained by name, never merely small. Same lesson as the C28
+`Stuff_plus` catch: **populated ≠ correct**, and now **count-correct ≠ complete**.
+
+## ⬜ OPEN — NOT FIXED, NEEDS TREVOR'S CALL
+1. How the missing Master row gets added (Masters are TruMedia CSV imports → [[feedback_csv_import_prod_direct]]
+   `npm run import:prod`; a hand-INSERT is NOT the documented path).
+2. Whether the Master import matches on name anywhere (the Cam/Camden + NULL-team signal) — root-cause question.
+3. Whether Phase D proceeds now and Kozeal is patched after, or the gap is closed first.
+⛔ **DO NOT "fix" this by copying the row from staging** — same copy-instead-of-derive error as the team_drs paste.
