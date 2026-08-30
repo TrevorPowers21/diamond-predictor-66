@@ -1,4 +1,17 @@
 # FULL PIPELINE — pitch-log ingest → refresh snapshot (confirmed 2026-08-21)
+> ⚠️ **STUFF+ CONTENT IN THIS FILE IS SUPERSEDED — see `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md` (2026-08-30).**
+> The rest of this document may still be valid; only its Stuff+/reclassification statements are out of date:
+> • **LIVE lane = pitch_log**: `pitch_type_reclassified` → `compute_pitch_log_stuff_plus.ts` → `pitch_log.stuff_plus`
+>   → `aggregate_pitch_log_dimensions.ts` → totals/by_pitch_type. ⛔ `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline`
+>   → `legacy_rollupStuffPlusToMaster` is **LEGACY** (≤2025 + JUCO only) and scores **left-handers BACKWARDS** on 2026.
+> • Classifier = `src/savant/lib/stuffPlusClassifierV2.ts` @ **95.2% per-pitch / 95.3% arsenal-mix**. Any 92.6% / 94.3% /
+>   95.1% / "~85%" figure here is superseded.
+> • `breakingBallReclassification.ts` → renamed **`legacy_breakingBallReclassification.ts`**; `rollupStuffPlusToMaster.ts`
+>   → **`legacy_rollupStuffPlusToMaster.ts`**. DELETED: `reclassify_pitch_log.ts`, `_run_reclassify_{bare,chunked}.ts`,
+>   `_reclass_rollout.ts`, `ReclassificationRunner/StuffPlusRunner/StuffPlusRollupRunner.tsx` (+ npm `reclassify-pitch-log*`,
+>   `recompute-stuff:prod`, `recompute-stuff-scoped:prod`). `reclassify_anchor_prod.ts` never existed — it is `reclassify_prod.ts`.
+> • Step 4 on PROD **must** use `--direct` (gateway cuts at ~125s; `vs_top_hitters` needs 253s).
+
 
 The end-to-end process, every step CONFIRMED on `feature/war-recalibration` (staging). This IS the spec for the ONE unified edge function (Track B): each numbered step is a module that folds into the on-upload edge fn. D1 only, JUCO out of scope (separate fn). Nothing is live-computed downstream — every displayed value reads a STORED column.
 
