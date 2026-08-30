@@ -168,6 +168,45 @@ flowchart TD
   **Season Stats display**; every stat, filter, and visual there must be pitch-log-derived + stored up-to-date.
 - **Park factors = re-evaluate AFTER Stuff+ (quick).** [[project_park_factor_rework]] — next-after-Stuff+, small pass.
 
+## ★★ CANONICAL RUN ORDER — THE ORDER TRACK B MUST EXECUTE (derived from the read/write graph, 2026-08-30)
+🛑 **THIS LIST, NOT THE STAGE TABLE BELOW, IS THE EXECUTION ORDER.** The stage table is grouped by *kind of work* and
+is a reference for what each stage computes/stores/displays — it is **not** a runnable sequence, and three required
+stages do not appear in it at all (park factors, lock-regular-season, `team_season_stats`). Ordering by topic is the
+exact mistake the prod runbook made; see `docs/AUDIT_dependency_order_vs_topic_order_2026_08_30.md`.
+
+| # | stage | reads | writes | ⚠ the trap if run out of order |
+|---|---|---|---|---|
+| 1 | **Reclassify** (`stuffPlusClassifierV2`) | `pitch_log` | `pitch_type_reclassified`, `classification_version`, `needs_review`, **`_reclass_pf`** | §4.5 gyro floor MUST precede the step-4 backfill |
+| 2 | **Re-derive pop baseline** | `_reclass_pf`, `pitch_log_corrected` | `pitcher_stuff_plus_ncaa` (armHB, D1) | ⛔ never from legacy PSP-I (RAW hb ⇒ LHP backwards). Mandatory after ANY reclass |
+| 3 | **Score + recenter** | `pitcher_stuff_plus_ncaa`, `pitch_log` | `pitch_log.stuff_plus` | 🛑 version filter must equal the stamp from 1, else **0 rows scored, exit 0** |
+| 4 | **Aggregate dimensions** + `populate_hitter_run_values` | scored `pitch_log`, `Hitter Master` | `pitch_log_{hitter,pitcher}_totals` (+`_by_pitch_type`) | validate by LOG CONTENT — one dimension can fail while exit=0 |
+| 5 | **Masters rollup** | `pitch_log_pitcher_totals` | `"Pitching Master".stuff_plus` | never create Master rows implicitly (`--create-new` OFF) |
+| 6 | **`trackman_pitches`** | totals `dimension_key='all'` (D1) / PSP-I (JUCO) | `"Pitching Master".trackman_pitches` | keep D1 and JUCO lanes separate |
+| 7 | **dRS / wSB load** | engine output | `player_season_{defense,baserunning}` | ordered pagination over `players` |
+| 8 | **`team_drs`** | — | `team_war_snapshots.team_drs` | 9 hard-exits without it |
+| 9 | **Descriptive WAR** | 7, 8, Masters | Masters `desc_owar/d_war/bsr_war/total_desc_war/desc_ra9/drs_behind` | partial `.update()` only — never upsert whole rows over the power ratings |
+| 10 | **Descriptive WAR `_reg`** | **9's `drs_behind`** | Masters `desc_*_reg` | ★★ `num(NULL) → 0` ⇒ wrong values, **NO error**, if 9 has not committed |
+| 11 | **Lock regular season** | — | `regular_season_pa` / `regular_season_ip` | ★ 15 divides by `sum(regular_season_ip)`; empty ⇒ `nullif(...,0)` ⇒ **NULL rates, silently** |
+| 12 | **Park factors** | park CSVs | `"Park Factors"` `*_seasonal` **AND the MAIN factor cols** | destructive delete+reinsert; **rewrites `rg_factor`** ⇒ invalidates 14 |
+| 13 | **`computeNcaaAverages`** | Masters + `pitch_log_pitcher_totals` | `ncaa_averages`, `model_config` | ★ MUST precede 14/16 — they fall back to HARDCODED defaults **silently** |
+| 14 | **Conference stats** — bucketA → pitcher env+ → **`derive_conf_opr_htp`** → **`conferenceStuffPlusV2`** → scouting averages | Masters, `ncaa_averages`, **`"Park Factors".rg_factor`** | `"Conference Stats"` | ★ `derive_conf_opr_htp` must be the **LAST** thing to touch park-derived conf columns (12 invalidates it). Conf Stuff+ = `Σ(Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)` — **never** PSP-I. ⛔ never `populate-conf-stats` |
+| 15 | **`refresh_team_season_stats`** | 9, 10, **11**, **12**, 14, `team_war_snapshots` | `team_season_stats` incl. `faced_stuff_plus` / `faced_htp` | ★ **MUST precede 17** — 17 reads it and coerces a miss to `[]` |
+| 16 | **Power ratings** | `ncaa_averages` (13) | Masters ratings | silent hardcoded defaults if 13 missing |
+| 17 | **TWP detector** | Masters | `players.is_twp`, `position` | must precede 18 so both-side rows generate |
+| 18 | **Projections** (returner + transfer) | Masters, `model_config`, `"Conference Stats"`, **`team_season_stats.faced_*`** | `player_predictions` | ★ empty `team_season_stats` ⇒ Independents silently lose faced-competition |
+| 19 | **Composite WAR / markets / snapshots** | `player_predictions` | predictions, snapshots, `target_board` | after 18, never before |
+
+### 🅱️ THE THREE NON-NEGOTIABLE RULES FOR TRACK B
+1. **Order by the graph, never by topic.** Stages 11, 12 and 15 exist ONLY because the graph demanded them; a
+   topic-grouped reading loses all three.
+2. **Gate every stage on a VALUE, never a count or an exit code.** Each of these passed a count check while wrong:
+   Conference `Stuff_plus` 30/30 stale · `trackman_pitches` fully populated from the wrong lane · `run_env_factor`
+   30/30 about to go stale under 12 · `team_season_stats` lookups returning an empty Map.
+3. **A missing upstream is a HARD STOP, never a coerced default.** The three shapes that bit us — `const { data } =`
+   with `error` discarded, `(rows || [])`, and `num(NULL) → 0` — each turned a missing input into a plausible wrong
+   number. Copy `derive_stuff_plus_pop_baseline.ts` (sign check aborts before writing) and
+   `conferenceScoutingAverages` ("run Compute NCAA Averages first") — those two already do it right.
+
 ## Stage table (compute → store → display)
 
 | # | Stage | Computes | Stores (DB) | Displays |
