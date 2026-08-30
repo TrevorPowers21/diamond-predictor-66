@@ -1,14 +1,13 @@
 # STUFF+ RECLASSIFICATION — COMPREHENSIVE HANDOFF (2026-08-28)
-> ⛔ **SUPERSEDED IN PART — READ `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md` FIRST (2026-08-29).**
-> Stuff+ statements in this file were written before the lanes were untangled and contain WRONG conclusions.
-> Corrected facts: (1) the LIVE Stuff+ is the **pitch_log lane** (armHB, self-consistent) — `pitch_log.stuff_plus` →
-> `pitch_log_pitcher_totals` → Season Stats/PitcherProfile. (2) `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline` →
-> `rollupStuffPlusToMaster` → `"Pitching Master".stuff_plus` is the **LEGACY lane**, not read for 2026 (fallback for
-> ≤2025 + JUCO only), and carries a latent raw-HB bug from `e5dec2f`. (3) `breakingBallReclassification.ts` never
-> touched `pitch_log` — it is NOT the anchor classifier. (4) v2 is a re-runnable reconstruction for PROD + Track B; it is
-> **NOT** an upgrade to staging's existing `pitch_type_reclassified` labels — do not overwrite them. (5) `A5 aggregator
-> missing`, `baseline deriver missing`, and `pop/row convention mismatch` claims are FALSE — all verified present/consistent.
-
+> ⛔ **HISTORICAL / SUPERSEDED — READ `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md` FIRST (updated 2026-08-30).**
+> This file documents the 2026-08-28 reconstruction period and its conclusions are OUT OF DATE. Current truth:
+> (1) FINAL classifier accuracy is **95.2% per-pitch / 95.3% arsenal-mix** — any 92.6% / 94.3% / 95.1% / "~85%" here is superseded.
+> (2) The LIVE lane is the **pitch_log lane**; `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline` → `legacy_rollupStuffPlusToMaster`
+>     is LEGACY (<=2025 + JUCO only) and scores left-handers backwards if run on 2026.
+> (3) ✅ **DECISION REVERSED — DO overwrite staging's labels.** We standardize on v2 in BOTH environments. Any text below
+>     saying "do NOT overwrite staging" is WRONG.
+> (4) Claims here that "A5 aggregator / baseline deriver is missing", "the v2 writer does not exist", or "pop convention
+>     mismatch" were DISPROVEN — all are built and working; staging is fully reclassified + rescored.
 
 **START HERE for the Stuff+ reclassification rebuild.** Single source of truth for where we are, the shortcomings, and what
 we're chasing. Companions: `STUFF_PLUS_RECLASS_REBUILD_PLAN.md`, `HANDOFF_STUFF_PLUS_2026_08_16.md` (§"THE PARTITION" + line
