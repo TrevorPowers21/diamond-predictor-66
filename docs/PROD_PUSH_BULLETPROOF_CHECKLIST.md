@@ -1413,3 +1413,65 @@ source CSV) and require the difference to be explained by name, never merely sma
 2. Whether the Master import matches on name anywhere (the Cam/Camden + NULL-team signal) — root-cause question.
 3. Whether Phase D proceeds now and Kozeal is patched after, or the gap is closed first.
 ⛔ **DO NOT "fix" this by copying the row from staging** — same copy-instead-of-derive error as the team_drs paste.
+
+---
+# 🅱️ TRACK B REQUIREMENT — MASTER ROWS MUST BE CREATED FROM THE PITCH LOG, INDEPENDENT OF RETURNER STATUS
+**Status: NOT DONE. Deliberately SKIPPED during the 2026-08-30 prod push (Trevor) — must be handled by Track B in the
+full upload.** Do not fix by hand; do not copy the row from staging.
+
+## THE RULE (Trevor, 2026-08-30)
+> *"He's not a returner in 2027 but should be in there based on the process."*
+**A player's presence in the season's Master is determined by whether he PLAYED that season — i.e. by his pitch-log
+record — NEVER by whether he returns the following season.** The Master is the **descriptive record of 2026**.
+Returner/transfer status is a *projection-side* concept (season 2027) and must have **zero** influence on whether a
+2026 Master row exists. Any stage that skips creating a Master row because a player is not a returner is WRONG.
+
+## THE CONCRETE CASE THAT EXPOSED IT — Camden Kozeal (Arkansas)
+Found only because prod-derived `team_drs` disagreed with staging on exactly one team. Full detail in the
+"PROD DATA GAP" block; the short version:
+| | |
+|---|---|
+| PROD `pitch_log` 2026 | **1,103 pitches** |
+| PROD `pitch_log_hitter_totals` (`all`) | **PA 287 · AB 243 · 20 HR · 36 BB · 54 K · 193 BIP · 59 barrels** |
+| PROD `"Hitter Master"` 2026 | ❌ **NO ROW** |
+| PROD `players` | exists as `Cam Kozeal`, **`team` = NULL** |
+| STAGING `"Hitter Master"` 2026 | ✅ `Camden Kozeal` · Arkansas · pa 289 |
+A full everyday season with 20 HR, on an **active customer team**, with **no Master row on prod** — therefore no
+`desc_owar` / `d_war` / `total_desc_war`, no power ratings, no projection, no market value, and 8.5 runs of his
+defense orphaned out of Arkansas's `team_drs`.
+
+## ★ SCOPE IS MEASURED AND TIGHT — he is the ONLY real one
+| 2026 hitter orphans (pitch-log totals, no Master row) | PROD | STAGING |
+|---|---|---|
+| all | 763 | 759 |
+| **PA ≥ 50** | **1 (Kozeal, 287 PA)** | **0** |
+| PA ≥ 150 | 1 | 0 |
+The other ~762 orphans top out at **18 PA** and staging has 759 of the same — that is normal Master-inclusion
+background, **NOT** a defect. Pitchers: 135 prod orphans, same character.
+→ **Do NOT "fix" this by running `--create-new` unscoped: it would create ~763 rows, 762 of which SHOULD NOT EXIST.**
+
+## WHAT TRACK B MUST DO (stage 5, the Masters rollup)
+`scripts/derive_masters_from_pitchlog.ts` already builds Master rows from `pitch_log_*_totals` and already has the
+`--create-new` flag (default OFF, per the standing rule "never create Master rows implicitly"). Track B must:
+1. **Create missing Master rows from the pitch log** as part of the normal upload — gated by the **Master's own
+   inclusion threshold** (a PA/IP qualifier), **NOT** by returner status, roster status, or portal status.
+2. **Establish what that threshold actually is** before enabling creation — it is currently UNDETERMINED. The data
+   says any cutoff between ~20 and ~250 PA isolates Kozeal from the background, but a hand-picked number is not an
+   answer: find the rule the Master import itself uses and mirror it. ⬜ **OPEN QUESTION.**
+3. Preserve the existing safety: never create rows implicitly/silently; log every row created, with name + PA/IP.
+4. **Run BEFORE anything that iterates the Masters** — descriptive WAR, `team_drs`, power ratings, `computeNcaaAverages`,
+   `refresh_team_season_stats`. A row created after those have run is a row that is missing from all of them.
+
+## ★ THE GATE THIS NEEDS (a COUNT GATE CANNOT SEE THIS)
+Prod has 5,340 D1 hitters and **every count check passes on 5,340** — a missing row is invisible to a count.
+**MEMBERSHIP GATE, per season, after the Masters rollup:**
+```sql
+-- must return 0 rows; anything here PLAYED but has no Master record
+select plt.batter_id, plt.pa from pitch_log_hitter_totals plt
+where plt.season = :season and plt.dimension_key = 'all' and plt.pa >= :qualifier
+  and not exists (select 1 from "Hitter Master" hm where hm."Season" = :season and hm.source_player_id = plt.batter_id);
+```
+(and the `pitch_log_pitcher_totals` / `"Pitching Master"` equivalent by IP).
+**Require it to be EMPTY, or every exception explained BY NAME — never merely "small".** This is the third distinct
+shape of the same lesson: *populated ≠ fresh* (Conference Stuff+), *populated ≠ right lane* (`trackman_pitches`), and
+now ***count-correct ≠ complete***.
