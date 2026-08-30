@@ -1446,3 +1446,40 @@ prior prod work was a read-only dry run. v2 vs prod's existing labels = **70.9% 
 pitches = 29.1%)**, and v2 is far closer to the validated set (distribution deviation from anchor **38.7 → 21.6**),
 correcting prod's Cutter 10.3%→3.7% (anchor 2.4%) and Splitter 0.7%→2.1% (anchor 2.2%). Prod run is GATED on PGURI +
 an explicit "prod, now?" and MUST be followed immediately by the Stuff+ recompute chain.
+
+---
+# 🔴 STEP 4 (aggregate_pitch_log_dimensions) — GATEWAY TIMEOUT ON `vs_top_hitters`. Found on staging 2026-08-29/30.
+**EVERY aggregation in this script runs through `exec_sql` over the HTTP gateway** (`aggregate_pitch_log_dimensions.ts:1035`
+`await supabase.rpc("exec_sql", { sql })`). The gateway cuts the client at ~125s and the work is LOST.
+
+## The deterministic failure
+`[40/48] vs_top_hitters → pitcher_totals — FAILED after 125.3s: upstream request timeout`
+**Reproduced EXACTLY twice** — same dimension, same error, same 125.3s duration. Not a dropped connection: that query
+must resolve the top-quartile hitter set (~967 IDs) and filter ~2M pitches against it, which exceeds the gateway ceiling.
+47 of 48 aggregations complete fine (~60-72s each); only this one is structurally too heavy for `exec_sql`.
+⚠ **The script HALTS on the failure**, so dimensions 41-48 never ran either — one bad dimension blocks 9.
+
+## WORKAROUND USED ON STAGING (Trevor's call)
+1. `--skip=vs_top_hitters` to clear the other 47 (the `--skip` flag exists at `:953-954`, matched at `:1029`).
+2. Run `vs_top_hitters` SEPARATELY over the **direct pg session** (`PGURI`) where there is no gateway timeout —
+   the same pattern the reclassifier already uses for its big writes.
+
+## ⚠⚠ PROD IMPLICATION — THIS WILL BE WORSE ON PROD, PLAN FOR IT
+Prod is on a smaller compute tier with a more throttled disk, and prod's `exec_sql` has ALREADY been observed timing
+out on far lighter queries. Do NOT assume the other 47 will clear on prod just because they did on staging.
+**Recommended prod approach: run stage 4 over the direct pg session from the start**, not through `exec_sql`.
+Budget generously and run it detached/unattended-safe.
+
+## SEPARATE, ENVIRONMENTAL FAILURES SEEN THE SAME NIGHT (do not confuse with the above)
+Three earlier failures were the LOCAL MACHINE sleeping / dropping its connection overnight, NOT script defects:
+- staging insert during the v2 test: `TypeError: fetch failed`
+- STEP 3 scoring died at 1,665,000/2,015,321 (~83%): `read ECONNRESET`
+- STEP 4 first run died at 13/48, second reached 39/48
+**Symptom that distinguishes them:** environmental failures die at DIFFERENT points each run; the `vs_top_hitters`
+failure dies at the SAME dimension with the SAME duration every time.
+✅ **PROVEN PROCESS (Trevor): run long steps DETACHED in the background and let them take however long they need,**
+with `caffeinate -dimsu -w <pid>` tied to the process so the machine cannot sleep mid-run. Do not babysit, do not
+add aggressive retry loops.
+⚠ STEP 3 (`compute_pitch_log_stuff_plus.ts`) is idempotent but does **NOT** resume — `:185` re-scores ALL rows matching
+the class version rather than filtering `stuff_plus IS NULL`, so every attempt costs the FULL runtime (~36 min on
+staging). A mid-run failure leaves **v2 labels + STALE scores**, the one state every doc says must never exist.
