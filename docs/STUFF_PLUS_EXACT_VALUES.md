@@ -434,3 +434,45 @@ add aggressive retry loops.
 ⚠ STEP 3 (`compute_pitch_log_stuff_plus.ts`) is idempotent but does **NOT** resume — `:185` re-scores ALL rows matching
 the class version rather than filtering `stuff_plus IS NULL`, so every attempt costs the FULL runtime (~36 min on
 staging). A mid-run failure leaves **v2 labels + STALE scores**, the one state every doc says must never exist.
+
+---
+# ▶️ RESUME HERE — STAGING CHAIN 95% DONE (2026-08-30). Read this block first.
+
+## ✅ DONE + VERIFIED ON STAGING (do NOT redo)
+| step | result |
+|---|---|
+| 0 backup | `_v2_prechain_backup` = 2,579,655 rows / 2,191,583 labeled / 2,014,152 scored. **DO NOT DROP until the chain is signed off.** Reverses everything via one UPDATE…FROM join on `uniq_pitch_id`. |
+| 1 classify | **2,015,321** stamped `v2-ranges-2026-08-28`, needs_review 8.1%, 101 batches, updated 1,995,321. `_reclass_pf` materialized (**5,364** pitchers) — NEW producer, first ever run, works. |
+| 2 baseline | **✓ armHB SIGN CHECK PASSED ON ALL 18 BUCKETS** → upserted 18/18. The armHB convention is now PROVEN, not assumed (the deriver aborts before writing if it fails). |
+| 3 score | **2,015,321 scored + recentered** (35.7 min). unscored=0. Every (type×hand) bucket recenters to **exactly 100.0**. |
+| 4 aggregate | **45 of 48** refreshed + `populate_hitter_run_values(2026)` ✓. Tables: pitcher_totals 37,575 · hitter_totals 50,633 · pitcher_by_pitch_type 186,622 · hitter_by_pitch_type 301,957 · hitter run values 6,053. |
+
+**★ PROD-GATE TOLERANCE (pre-registered): per-pitcher Stuff+ mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7 · 4,234 pitchers.**
+Prod must land within tolerance of this or ABORT.
+
+## ⚠ OUTSTANDING ON STAGING
+1. **3 × `vs_top_hitters` aggregations are STALE** — they failed twice (deterministic 125.3s gateway timeout) and were
+   skipped on the successful run. ⚠ **`pitch_log_pitcher_totals` SHOWS `vs_top_hitters: 5,349` rows so the table LOOKS
+   populated — those rows predate the v2 chain and are computed from OLD labels + OLD scores.** Must be re-run over the
+   DIRECT pg session (`PGURI` in `.env.local`), not `exec_sql`.
+2. **Step 5 `derive_masters_from_pitchlog.ts` — DRY RUN ONLY so far.** Dry run: **0 hitters** / **4,675 pitchers** would
+   change (of 4,772 above-gate). Has NEVER been applied on ANY environment. Review the diff before `--apply`.
+
+## ▶️ NEXT ACTIONS, IN ORDER
+1. Run the 3 `vs_top_hitters` aggregations over the direct pg session (also = the PROD recipe for stage 4).
+2. Review + apply step 5 (Masters) on staging.
+3. **PROD BLOCKER FIRST — rebuild the stale view:** prod `pitch_log_corrected` is `select pl.*` frozen at **94 of 99
+   columns** and is MISSING `classification_version`, so the scorer hard-fails there. Needs
+   `drop view pitch_log_corrected cascade; create view …`. **DDL — needs its own explicit go, separate from "prod, now?".**
+4. Apply migration `20260829120000_gm_budget_nil_allocation_mode.sql` to BOTH envs (committed, never run).
+5. Prod chain: reclassify → baseline → score → aggregate (**direct session from the start**) → Masters. Then C23→C29,
+   Phase D→H per the runbook, on the CORRECTED pitch_log lane.
+
+## ⏱ REALISTIC TIME ESTIMATE FOR THE PROD RUN
+Staging actuals: step 1 ≈ **75 min** (load+classify+2M keyset UPDATE) · step 3 ≈ **36 min** · step 4 ≈ **50 min**.
+**Staging total ≈ 2.5-3 h.** Prod is a SMALLER compute tier with a MORE throttled disk and its `exec_sql` already times
+out on lighter queries → **budget 4-6 h for the prod Stuff+ block alone**, plus C23-C29 and Phases D-H after it.
+Do it in ONE sitting with the machine pinned awake (`caffeinate -dimsu -w <pid>`) — steps 1→5 must not be split, because
+a gap leaves prod with **v2 labels + STALE scores**.
+⚠ **Step 3 does NOT resume** (re-scores everything matching the class version), so any interruption costs the FULL
+runtime again. Consider building the two-phase fix (score only NULLs → always recenter all) BEFORE the prod run.
