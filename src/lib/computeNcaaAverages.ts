@@ -21,8 +21,9 @@ const HITTER_METRICS: Array<{ ncaa: string; col: string }> = [
 ];
 
 // Pitcher metric → Pitching Master column. Weighted by IP.
-// stuff_plus is handled separately — weighted by total pitches per pitcher,
-// summed from pitcher_stuff_plus_inputs (per pitch type × hand).
+// stuff_plus is handled separately — weighted by each pitcher's SCORED pitch count
+// from the LIVE pitch_log lane (pitch_log_pitcher_totals.stuff_plus_data_pitches at
+// dimension_key='all'). NOT from the legacy pitcher_stuff_plus_inputs table.
 const PITCHER_METRICS: Array<{ ncaa: string; col: string }> = [
   { ncaa: "era", col: "ERA" },
   { ncaa: "fip", col: "FIP" },
@@ -154,6 +155,36 @@ function calcQualifiedSd(values: number[]): number | null {
   return Math.sqrt(variance);
 }
 
+/**
+ * Deterministic pagination key per table — the table's ACTUAL primary key.
+ *
+ * ⚠ Do NOT replace these with a blanket `.order("id")`. Verified against both
+ * projects' `information_schema.columns` on 2026-08-30: `pitch_log_*_totals` and
+ * `player_season_defense`/`player_season_baserunning` have **no `id` column at
+ * all**, and a blanket `order("id")` has already broken this class of fix twice
+ * today. PKs as probed (identical on staging slrxowawbijbjrkozqlj and prod
+ * trbvxuoliwrfowibatkm):
+ *   "Hitter Master"             → id
+ *   "Pitching Master"           → id
+ *   pitcher_stuff_plus_inputs   → id
+ *   pitch_log_pitcher_totals    → (pitcher_id, season, dimension_key)
+ *   pitch_log_hitter_totals     → (batter_id, season, dimension_key)
+ *   player_season_defense       → (player_id, season, position)   [no id]
+ *   player_season_baserunning   → (player_id, season)             [no id]
+ */
+const PAGINATION_KEYS: Record<string, string[]> = {
+  "Hitter Master": ["id"],
+  "Pitching Master": ["id"],
+  pitcher_stuff_plus_inputs: ["id"],
+  // season + dimension_key are pinned by the query's own filters, so pitcher_id
+  // alone is already unique within a page set — order by all three anyway so the
+  // ordering is total regardless of how the caller filters.
+  pitch_log_pitcher_totals: ["pitcher_id", "season", "dimension_key"],
+  pitch_log_hitter_totals: ["batter_id", "season", "dimension_key"],
+  player_season_defense: ["player_id", "season", "position"],
+  player_season_baserunning: ["player_id", "season"],
+};
+
 async function fetchAllRows(
   table: string,
   select: string,
@@ -166,13 +197,25 @@ async function fetchAllRows(
    * Default 'D1' so NCAA averages stay D1-only after JUCO data lands.
    */
   divisionFilter: string | null = "D1",
+  /** Extra equality filters (e.g. { dimension_key: "all" }). */
+  extraEq: Record<string, string | number> = {},
 ): Promise<any[]> {
   const PAGE = 1000;
+  const orderCols = PAGINATION_KEYS[table];
+  if (!orderCols) {
+    // Fail loud rather than paginate unordered — an unordered `.range()` silently
+    // drops/duplicates rows and corrupts every mean/SD downstream.
+    throw new Error(
+      `fetchAllRows: no pagination key registered for "${table}". Add its ACTUAL primary key to PAGINATION_KEYS (verify via information_schema.columns — several of these tables have no "id" column).`,
+    );
+  }
   const all: any[] = [];
   let offset = 0;
   while (true) {
     let q = (supabase as any).from(table).select(select).eq(seasonCol, season);
     if (divisionFilter) q = q.eq("division", divisionFilter);
+    for (const [k, v] of Object.entries(extraEq)) q = q.eq(k, v);
+    for (const c of orderCols) q = q.order(c, { ascending: true });
     q = q.range(offset, offset + PAGE - 1);
     const { data, error } = await q;
     if (error) throw new Error(`${table} fetch failed: ${error.message}`);
@@ -277,28 +320,45 @@ export async function computeAndStoreNcaaAverages(
   }
   console.timeEnd("[NcaaAvg] 4. compute pitcher stats");
 
-  // ─── Stuff+ — weighted by total pitches per pitcher ──────────────────
-  // Sum pitches from pitcher_stuff_plus_inputs (per pitch type × hand) to get
-  // each pitcher's total pitch count, then use that as the weight on the
-  // pitcher-level stuff_plus value in Pitching Master.
+  // ─── Stuff+ — weighted by scored pitches per pitcher (LIVE pitch_log lane) ──
+  // The Stuff+ VALUE comes from "Pitching Master".stuff_plus, which the pitch_log
+  // chain (C25 `derive_masters_from_pitchlog`) writes. The WEIGHT must come from
+  // the SAME lane: `pitch_log_pitcher_totals.stuff_plus_data_pitches` at
+  // dimension_key='all' (the per-pitcher count of pitches that actually received a
+  // Stuff+ score), joined pitcher_id ↔ Pitching Master.source_player_id.
+  //
+  // ⚠ 2026-08-30 FIX. This previously summed `pitcher_stuff_plus_inputs.pitches` —
+  // the LEGACY raw-HB lane this push bans everywhere else. Two failure modes:
+  //   • any pitcher present in the pitch_log lane but absent from the legacy table
+  //     got weight 0 and was dropped from the mean entirely;
+  //   • the fetch was wrapped in `.catch(() => [])`, so a total failure became
+  //     "every weight 0" → `stuff_plus` written as NULL → `computeAndStoreScores`
+  //     `fetchSeasonBaselines` silently falls back to hardcoded defaults.
+  // Measured impact of the lane swap on the 2026 D1 pitch-weighted mean
+  // (read-only probe 2026-08-30): staging legacy 102.0846 vs live 102.0846 (no
+  // change — the two tables happen to agree there); PROD legacy 101.8361 vs live
+  // 102.3337 (+0.4976 — prod's legacy table is stale/JUCO-contaminated). Prod's
+  // stored ncaa_averages(2026).stuff_plus = 101.8341, i.e. the legacy value.
+  // The `.catch` is REMOVED on purpose: a fetch failure must be loud.
   console.time("[NcaaAvg] 4b. stuff+ weighted by pitches");
-  // pitcher_stuff_plus_inputs doesn't have a division column yet (added
-  // separately later). Pass null to skip the division filter; the join via
-  // source_player_id below naturally restricts to D1 pitchers because the
-  // outer `pitchers` set is already D1-filtered.
-  const pitchInputs = await fetchAllRows(
-    "pitcher_stuff_plus_inputs",
-    "source_player_id, pitches",
+  // pitch_log_pitcher_totals has no `division` column — pass null. The join via
+  // source_player_id below naturally restricts to D1 pitchers because the outer
+  // `pitchers` set is already D1-filtered.
+  const pitchTotals = await fetchAllRows(
+    "pitch_log_pitcher_totals",
+    "pitcher_id, stuff_plus_data_pitches",
     season,
     "season",
     null,
-  ).catch(() => [] as any[]);
+    { dimension_key: "all" },
+  );
   const pitchesByPitcher = new Map<string, number>();
-  for (const r of pitchInputs) {
-    const sid = (r as any).source_player_id;
-    const p = Number((r as any).pitches);
+  for (const r of pitchTotals) {
+    const sid = (r as any).pitcher_id;
+    const p = Number((r as any).stuff_plus_data_pitches);
     if (!sid || !Number.isFinite(p) || p <= 0) continue;
-    pitchesByPitcher.set(sid, (pitchesByPitcher.get(sid) ?? 0) + p);
+    const k = String(sid);
+    pitchesByPitcher.set(k, (pitchesByPitcher.get(k) ?? 0) + p);
   }
   const stuffWeighted: Array<{ value: number; weight: number }> = [];
   const stuffQualified: number[] = [];
@@ -307,7 +367,9 @@ export async function computeAndStoreNcaaAverages(
     const v = (r as any).stuff_plus;
     if (v == null || !Number.isFinite(Number(v))) continue;
     const value = Number(v);
-    const w = sid ? (pitchesByPitcher.get(sid) ?? 0) : 0;
+    // pitch_log_pitcher_totals.pitcher_id is TEXT; Master.source_player_id may be
+    // numeric — normalise both sides to string before the lookup.
+    const w = sid != null ? (pitchesByPitcher.get(String(sid)) ?? 0) : 0;
     const ip = Number((r as any).IP);
     if (w > 0) stuffWeighted.push({ value, weight: w });
     if (Number.isFinite(ip) && ip >= QUALIFIED_IP) stuffQualified.push(value);

@@ -120,9 +120,13 @@ Then re-run TRANSFER projections (deferred until this lands).
 | 4 | **Remove** the NaN fallback (dead path; "shouldn't be used") | `pitcherProjection.ts:301-339` |
 
 ### B. Edge-fn returner fix + unification (the real C5 — a rebuild, not a cutover)
+> 🛑 **THIS WHOLE SECTION IS SUPERSEDED FOR THIS PUSH (2026-08-30).** Steps 5, 6, 7 and 9 all target
+> `recalculate-prediction`, which is **DEAD** — see `PROD_PUSH_STEPS_2026_08_26.md` ~~step 47~~ and G3 below.
+> Returners are rebuilt by the batch scripts (STEPS steps 36–37). Only **step 8** (delete dead `bulkRecalc` /
+> `fetchAllPredictionsForReturnerMode` from `src/`) is still live work. Retained below for history.
 | S | Step | Where |
 |---|---|---|
-| 5 | **Rewrite edge `recalc` (returner hitter) to the SD-blended model** — `ScaledOBP = NCAAAvgOBP + ((OBPPR+ − NCAAAvgPR)/StdDevOBPPR)×StdDevNCAAOBP` → `Blended = LastOBP×(1−PRWeight) + ScaledOBP×PRWeight` → `×(1 + ClassAdj + DevAgg·0.06)`. **Must use the power rating.** | `recalculate-prediction/index.ts` |
+| 5 | 🛑 **DEAD / DO NOT BUILD OR RUN (2026-08-30).** ~~Rewrite edge `recalc` (returner hitter) to the SD-blended model … `recalculate-prediction/index.ts`~~ — superseded by the BATCH scripts (`precompute-returner-pitchers:prod` → `precompute-returner-hitters:prod`; `PROD_PUSH_STEPS_2026_08_26.md` steps 36–37 and the ~~step 47~~ DEAD marker). `recalculate-prediction` is **never deployed in this push**; the only edge fn deployed is `process-precompute-jobs`. See G3 below. | ~~`recalculate-prediction/index.ts`~~ |
 | 6 | **Rewire edge fn to READ ALL of model_config** — `r_*` returner + `t_*` transfer + `p_*` pitcher keys under `admin_ui`; correct key names; include the SDs. **No hardcoded fallbacks.** | edge fn config loader |
 | 7 | **Consolidate returner *pitchers* into the edge fn** (logged goal — one edge fn runs everything) — SD model, pitcher SDs from model_config | edge fn |
 | 8 | **Delete dead** `bulkRecalc` + `fetchAllPredictionsForReturnerMode` (removes ReferenceError). Edge fn runs autonomously → **no local-path repoint/rebuild needed**; optionally leave a manual button that just calls the edge fn | `predictionEngine.ts`, `AdminDashboard.tsx`, `runDataCascade.ts` |
@@ -166,7 +170,7 @@ Then re-run TRANSFER projections (deferred until this lands).
 
 ## PART E — PHASED PLAN
 
-- **Phase 1 — Repair + lock the RETURNER path (steps 1–12):** SD fixes (1,2,4,10), env+ ratio (3), edge-fn returner rebuild + model_config rewire + pitcher consolidation + dead-code delete + IP fix (5–9), ncaa 1:1 fill (11), lockstep verify (12).
+- **Phase 1 — Repair + lock the RETURNER path (steps 1–12):** SD fixes (1,2,4,10), env+ ratio (3), ~~edge-fn returner rebuild + model_config rewire + pitcher consolidation + IP fix (5–7, 9)~~ 🛑 **DEAD — `recalculate-prediction` is not deployed in this push (STEPS ~~step 47~~); returners = batch scripts (STEPS 36–37)**, dead-code delete (8, still live), ncaa 1:1 fill (11), lockstep verify (12).
 - **Phase 2 — RUN RETURNERS ONCE (step 13a):** full returner recompute (hitters + pitchers) ~~via the edge fn~~ 🛑 **DEAD — via the BATCH SCRIPTS** (`precompute-returner-pitchers:prod`, then `precompute-returner-hitters:prod`; STEPS steps 36–37). The `recalculate-prediction` edge-fn path is superseded — do NOT run it. **Transfer NOT run here.**
 - **Phase 3 — Finish + verify the TRANSFER equation, THEN run it (step 13b):** settle the transfer SD + weighted-impact (env+ ratio conversion + weights) — deliberate, separate work — then run transfer.
 - **Phase 4 — Prod push:** execute Parts A/B in execution order; Trevor drives merge. Reconcile A3 legacy columns (display check) before any drop.
@@ -232,8 +236,18 @@ Stuff+ from the totals; verified to match to 0.01). Full step detail + the 🛑 
 > holds `stuff_plus 101.8341 / sd 6.06231`), and any missing field falls back to hardcoded defaults **silently**
 > (`:212-215`). `docs/PROD_PUSH_STEPS_2026_08_26.md` listed these as 26 computeAndStoreScores → 27 computeNcaaAverages,
 > which was **backwards**; that doc has been corrected to match this line. Order = **derive_masters → computeNcaaAverages → computeAndStoreScores**.
-> ⚠ Before running `computeNcaaAverages` on prod, read the 🛑 on step 27 in `PROD_PUSH_STEPS_2026_08_26.md`: it has an
-> unordered `.range()` (`computeNcaaAverages.ts:176`) and still weights Stuff+ off the **legacy** `pitcher_stuff_plus_inputs` (`:290`).
+> ✅ **Both `computeNcaaAverages` defects are FIXED IN CODE (2026-08-30) — no hand-patching before the prod run.**
+> (a) pagination now orders by each table's ACTUAL primary key (`PAGINATION_KEYS` map; **not** a blanket `.order("id")`
+> — `pitch_log_*_totals` and `player_season_*` have no `id` column) and throws for any unregistered table;
+> (b) the Stuff+ weight moved off legacy `pitcher_stuff_plus_inputs` onto
+> `pitch_log_pitcher_totals.stuff_plus_data_pitches` (`dimension_key='all'`), and the silent `.catch(() => [])` is gone.
+> Expected prod effect: `ncaa_averages(2026).stuff_plus` 101.8341 → **~102.33**. Full detail + the measured
+> staging/prod comparison: step 27 in `PROD_PUSH_STEPS_2026_08_26.md`.
+
+> ⛔ **BLOCKER — `team_season_stats` is absent on prod** (table AND `refresh_team_season_stats`; probed 2026-08-30).
+> Blocks F44 and the G46 edge-fn deploy. THREE migrations must be applied, in order: `20260819000000` (create) →
+> `20260821010000` (war cols) → `20260819010000` (fn). Copy-pasteable plan + verification query:
+> **`PROD_PUSH_STEPS_2026_08_26.md` Phase-A step 10a.** Needs Trevor's explicit "prod, now?".
 
 > 🛑 **G3 / "recompute returners via the edge fn" is DEAD (2026-08-30).** Everything in this doc that tells you to run
 > the `recalculate-prediction` returner rebuild — this G4 line, **G3 at the paragraph above**, PART C step 5, and

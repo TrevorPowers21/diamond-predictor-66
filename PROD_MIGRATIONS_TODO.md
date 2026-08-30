@@ -837,3 +837,76 @@ Phase H lists the Stuff+ `_reclass_*` temp tables as drop candidates. **EXCLUDE 
 - **`_reclass_pf` (4,804 rows)** — per-pitcher primary-FB velo (the v2 staging run materialized 5,364 rows of it).
 - **`team_war_snapshots`** — holds prod's irreplaceable 2025 champions (309 rows). NEVER drop.
 Safe to drop: **`_reclass_fix`** (transient writer staging table only).
+
+---
+
+## ★ PRE-PUSH DEFECT PASS — 2026-08-30 (feature/war-recalibration). NO DB WRITES MADE.
+All findings below come from READ-ONLY probes (`information_schema`, `pg_proc`, `select`) against BOTH projects.
+
+### ⛔ NEEDS TREVOR'S GO — `team_season_stats` migrations (the biggest remaining blocker)
+- [ ] **THREE migrations are absent from prod** — not two. Probe 2026-08-30: prod
+  `to_regclass('public.team_season_stats')` = **NULL**, and `pg_proc` has **no** `refresh_team_season_stats`.
+  Staging has the table (128 cols, PK `(source_id, season)`, 4 indexes, 308 rows for 2026) and the function
+  `(p_season integer, p_reg_end date)`.
+  **Apply in EXACTLY this order:**
+  1. `supabase/migrations/20260819000000_team_season_stats.sql` — CREATE TABLE + 3 indexes + RLS
+  2. `supabase/migrations/20260821010000_team_season_stats_war_columns.sql` — 10 `ADD COLUMN IF NOT EXISTS`
+  3. `supabase/migrations/20260819010000_refresh_team_season_stats.sql` — CREATE OR REPLACE FUNCTION
+  **Order is load-bearing:** the function's body writes the step-2 columns, and its first statement is
+  `DELETE FROM team_season_stats WHERE season = p_season`. Apply 3 before 2 and the first `refresh_team_season_stats(2026)`
+  deletes the season and then **aborts** on `column "hitter_war_total" does not exist` — table left EMPTY.
+  All three are `IF NOT EXISTS` → idempotent.
+  **Verification query + the full copy-pasteable plan: `docs/PROD_PUSH_STEPS_2026_08_26.md` Phase-A step 10a.**
+  Blocks **F44** (`select refresh_team_season_stats(2026);`) and **G46** (edge fn reads the table at
+  `supabase/functions/process-precompute-jobs/index.ts:1095`,`:1419`).
+  ⚠ Known drift, deliberately NOT in the plan: staging has a 128th column `preseason_proj_total_war` from a hand-run
+  ALTER that no committed migration contains and **zero** code references (grepped migrations/functions/scripts/src).
+  Prod-after-plan = 127 columns. Do not hand-add it; if wanted, write a committed migration first.
+
+### ✅ CODE FIXES LANDED THIS SESSION (no DB writes)
+- [x] **`scripts/resync-build-snapshot-markets.ts` was hardcoded to `rd(".env.local", …)`** — neither `--prod` nor
+  `--env-file` could redirect it, so an F42 "prod resync" would silently resync **STAGING** and report success.
+  Now env-driven (`process.env` first, env-file fallback) + double-keyed guard. Same guard added to
+  `resync-target-snapshots.ts`, `rebuild-twp-target-rows.ts`, `rebake-twp-markets.ts`,
+  `fix-returner-twp-hitter-market.ts` (the last two were bare `process.env.SUPABASE_URL` with **no** guard at all).
+  Invoke on prod as `npx tsx --env-file .env.production.local scripts/<x>.ts --prod --apply`.
+  All 10 refuse paths + both allow paths smoke-tested against both projects.
+  ⚠ `resync-build-snapshot-markets`'s default scope is the **staging** build id `7429b448-17be-42a1-9434-86f54ab24e49`,
+  which returns **0 rows on prod** — use `--all` there. Script now warns on a 0-row non-`--all` scope.
+- [x] **`src/lib/computeNcaaAverages.ts` unordered `.range()`** — corrupted the means/SDs every projection divides by.
+  Fixed with a `PAGINATION_KEYS` map of each table's ACTUAL primary key; unregistered tables now **throw** rather than
+  paginate unordered. ⛔ **Never replace this with a blanket `.order("id")`**: `pitch_log_pitcher_totals`,
+  `pitch_log_hitter_totals`, `player_season_defense`, `player_season_baserunning` have **no `id` column** on either
+  project. Smoke-tested `.order(key).range(0,2)` — 7/7 ✓ on staging AND prod.
+- [x] **`computeNcaaAverages` Stuff+ weight moved off the LEGACY lane.** Was summing
+  `pitcher_stuff_plus_inputs.pitches`; now sums `pitch_log_pitcher_totals.stuff_plus_data_pitches` at
+  `dimension_key='all'`, joined `pitcher_id` ↔ `Pitching Master.source_player_id`. The silent `.catch(() => [])` is
+  REMOVED — a fetch failure used to become `stuff_plus = NULL`, which makes `computeAndStoreScores`
+  `fetchSeasonBaselines` fall back to hardcoded defaults **silently**.
+  Measured (read-only `dryRun` of `computeAndStoreNcaaAverages(2026)`): staging 102.0846 → **102.0846** (unchanged);
+  **prod 101.8361 → 102.3337** (+0.4976). Prod's stored `ncaa_averages(2026).stuff_plus` is 101.8341 today, so expect
+  it to move to ≈102.33 when C27 runs. **Log the value you actually get.**
+
+### ✅ DOC ORDERING CORRECTIONS (each now carries a one-line reason so it isn't "corrected" back)
+- [x] **C26 `computeAndStoreScores` runs AFTER C27 `computeNcaaAverages`** — `computeAndStoreScores.ts:206-211` reads
+  its baselines (incl. `stuff_plus`/`stuff_plus_sd`, `:249`) from `ncaa_averages`; missing fields fall back to
+  hardcoded defaults silently (`:212-215`). Fixed in `PROD_PUSH_HANDOFF_RESUME_2026_08_26.md` (was still 26→27) and
+  annotated on the C11/C12 rows of `PROD_PUSH_BULLETPROOF_CHECKLIST.md`. STEPS + RUNBOOK already agreed.
+- [x] **C29 NJCAA_D1 re-tag runs BEFORE C28 conference stats** — verified read-only 2026-08-30: prod season 2026 has
+  40 `division='D1'` Conference Stats rows of which **10 are `NJCAA%`**; staging is already 30 `D1` + 10 `NJCAA_D1`.
+  Both C28 producers (`compute_conf_pitcher_env_plus.ts:29`, `derive_conf_opr_htp.ts:12`) filter `.eq("division","D1")`.
+  Fixed in RESUME; annotated on the E5/E6/E8 rows of the CHECKLIST.
+- [x] **Dead step 47 (`recalculate-prediction` returner rebuild)** marked DEAD at `RUNBOOK` PART C step 5,
+  the PART B section header (steps 5/6/7/9 — only step 8 is still live work), and PART E Phase 1.
+  `RUNBOOK:213` (G3), `RUNBOOK:239`, `CHECKLIST` G2 and `STEPS` step 47 were already marked.
+- [x] **Bad `.order("id")` advice removed** from `STEPS` step 31 and `RESUME` Phase D — `player_season_defense` /
+  `player_season_baserunning` have no `id` column; use their real PKs.
+
+### ⚠ CONTRADICTIONS FOUND IN THE EXISTING DOCS (corrected in place)
+- `STEPS` "ALREADY ON PROD" listed **`team_season_stats` … DONE** while a 🛑 twelve lines below said it does not exist.
+  The 🛑 is right; the DONE line was struck through.
+- `STEPS` "NEEDED" list calls A8 (`Conference Stats.hitter_talent_plus`/`run_env_factor`) and A9
+  (`Park Factors.*_seasonal`) **MISSING** on prod. Probed: the **columns exist on prod**; it is the **values** that are
+  absent (`hitter_talent_plus` 0/42 non-null, `rg_factor_seasonal` 0/309). Same for the Master `desc_*` columns
+  (present; 0/5,340 populated). Documented as a table on Phase-A step 10a. The distinction matters — no DDL is needed
+  for those, only the E2/E5/E6 and D31/D32 producers.

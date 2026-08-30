@@ -13,7 +13,17 @@ import { createClient } from "@supabase/supabase-js";
 import { computeHitterMarketValue } from "../src/lib/depthRoles";
 
 const APPLY = process.argv.includes("--apply");
-const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+// Double-keyed prod guard (added 2026-08-30). Already env-driven (no literal .env path),
+// but it had NO guard: `--env-file .env.production.local` wrote prod with no opt-in.
+const PROD_REF = "trbvxuoliwrfowibatkm";
+const WANT_PROD = process.argv.includes("--prod");
+const SB_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+const URL_IS_PROD = new RegExp(PROD_REF).test(SB_URL);
+if (!SB_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) { console.error("✗ SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set (use --env-file). Refusing."); process.exit(1); }
+if (URL_IS_PROD && !WANT_PROD) { console.error(`✗ target is PROD (${PROD_REF}) but --prod was NOT passed. Refusing.`); process.exit(1); }
+if (WANT_PROD && !URL_IS_PROD) { console.error(`✗ --prod passed but target is NOT prod: ${SB_URL}. Refusing.`); process.exit(1); }
+console.log(`[target] ${URL_IS_PROD ? "PROD" : "STAGING"} ${SB_URL}`);
+const sb = createClient(SB_URL, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
 const norm = (s: string | null | undefined) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 

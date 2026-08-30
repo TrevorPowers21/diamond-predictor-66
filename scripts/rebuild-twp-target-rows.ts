@@ -10,9 +10,19 @@
 import { createClient } from "@supabase/supabase-js";
 import * as fs from "fs";
 import { resolveActiveBuildId } from "../src/lib/activeBuild";
-const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.local";
-const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
-const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
+// Env-driven + double-keyed prod guard (added 2026-08-30, matching resync-build-snapshot-markets.ts).
+const PROD_REF = "trbvxuoliwrfowibatkm";
+const WANT_PROD = process.argv.includes("--prod");
+const ENV = WANT_PROD ? ".env.production.local" : ".env.local";
+const rd = (f: string, k: string) => { try { return (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, ""); } catch { return ""; } };
+const SB_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL");
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || rd(ENV, "SUPABASE_SERVICE_ROLE_KEY");
+const URL_IS_PROD = new RegExp(PROD_REF).test(SB_URL || "");
+if (!SB_URL || !SB_KEY) { console.error(`✗ no Supabase URL/key resolved (env vars or ${ENV}). Refusing.`); process.exit(1); }
+if (URL_IS_PROD && !WANT_PROD) { console.error(`✗ target is PROD (${PROD_REF}) but --prod was NOT passed. Refusing.`); process.exit(1); }
+if (WANT_PROD && !URL_IS_PROD) { console.error(`✗ --prod passed but target is NOT prod: ${SB_URL}. Refusing.`); process.exit(1); }
+console.log(`[target] ${URL_IS_PROD ? "PROD" : "STAGING"} ${SB_URL}`);
+const sb = createClient(SB_URL, SB_KEY);
 const APPLY = process.argv.includes("--apply");
 const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 const hitterFromRoster = (ps: any) => ({ is_twp: true, nil_valuation: null, p_avg: ps.p_avg ?? null, p_obp: ps.p_obp ?? null, p_slg: ps.p_slg ?? null, p_wrc_plus: ps.p_wrc_plus ?? null, owar: ps.o_war ?? null, o_war: ps.o_war ?? null, hitter_depth_role: ps.hitter_depth_role ?? null, twp_hitter_market_value: ps.twp_hitter_market_value ?? null });

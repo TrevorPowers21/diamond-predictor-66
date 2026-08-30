@@ -58,7 +58,10 @@ a few DDL/data items are already applied. Mark each step against this before run
 
 **ALREADY DONE on prod (SKIP or idempotent-re-run only):**
 - `pitch_log.runs` attribution widen (A5) — DONE (Push-1). The dedup gate's `runs IS NULL` detection depends on it.
-- `team_season_stats` table + **war columns** (A10, incl. hitter_war/rotation_pwar) — DONE. But the table is **EMPTY for 2026** → Phase F populate still NEEDED.
+- ~~`team_season_stats` table + **war columns** (A10, incl. hitter_war/rotation_pwar) — DONE. But the table is **EMPTY for 2026** → Phase F populate still NEEDED.~~
+  🛑 **THIS LINE WAS WRONG — CORRECTED 2026-08-30 by direct `information_schema`/`pg_proc` probe of prod.**
+  `to_regclass('public.team_season_stats')` on prod = **NULL** (table absent), and `pg_proc` has **no**
+  `refresh_team_season_stats`. Nothing in A10 is applied. See the 🛑 block below and **new Phase-A step 10a**.
 - `player_season_defense` (13,454) + `player_season_baserunning` (10,432) — DONE, **current engine 0.11.0**. Loader (D30) is idempotent upsert → re-run harmless or SKIP. **desc-WAR Master cols are still MISSING → D31/32 populate NEEDED.**
 - `20260806 RENAME total_war→total_hitter_war` — DONE (`total_hitter_war` exists). ⚠ **SKIP — non-idempotent, ERRORS on re-run.**
 - `trackman_pitches` col — present (DDL done; the **data backfill C24 still NEEDED**). `offensive_power_rating` col — present.
@@ -66,12 +69,20 @@ a few DDL/data items are already applied. Mark each step against this before run
 - `refresh_composite_war()` — ✅ **CORRECTED 2026-08-30 (live prod probe): prod is ALREADY at ÷13.1, not ÷10.** A6 has
   been applied. Verified by sampling `player_season_defense.drs_floor` vs `player_predictions.d_war` on prod: implied
   divisor **13.10**. The older "÷10 (Push-1 v1) → A6 redefines" wording was stale. F39 still refires it (after Phase E).
-- 🛑 **`team_season_stats` DOES NOT EXIST ON PROD** (live probe 2026-08-30: `Could not find the table
-  'public.team_season_stats'`; `rpc refresh_team_season_stats` → `Could not find the function`). Migrations
-  `20260819010000_refresh_team_season_stats.sql` + `20260821010000_team_season_stats_war_columns.sql` are **NOT applied
-  to prod**. This is a **MISSING PHASE-A PREREQUISITE** — without it **F44 fails** and **G46 deploys an edge fn that
+- 🛑 **`team_season_stats` DOES NOT EXIST ON PROD.** Re-probed read-only 2026-08-30 via direct pg
+  (`information_schema` / `pg_proc`, both projects):
+  | probe | staging `slrxowawbijbjrkozqlj` | prod `trbvxuoliwrfowibatkm` |
+  |---|---|---|
+  | `to_regclass('public.team_season_stats')` | `team_season_stats` | **NULL** |
+  | column count | **128** | — |
+  | PK | `(source_id, season)` | — |
+  | indexes | `_pkey`, `_season_idx`, `_conference_idx`, `_team_season_idx` | — |
+  | `pg_proc` `refresh_team_season_stats` | present, `(p_season integer, p_reg_end date)` | **absent** |
+  | 2026 rows | **308** | — |
+  **THREE** migrations are unapplied, not two — `20260819000000_team_season_stats.sql` (the CREATE TABLE) as well.
+  This is a **MISSING PHASE-A PREREQUISITE** — without it **F44 fails** and **G46 deploys an edge fn that
   reads a non-existent table** (`process-precompute-jobs/index.ts:1095,1419` read `team_season_stats.faced_htp /
-  faced_stuff_plus`). Apply both migrations in Phase A before Phase F.
+  faced_stuff_plus`). Full copy-pasteable plan = **Phase-A step 10a** below. ⛔ NOT APPLIED — needs Trevor's go.
 
 **NEEDED (run per runbook — prod does NOT have these):**
 - **A2/3** Master `desc_*` / `desc_*_reg` cols (MISSING) · **A7** `park_code`/`is_conference_game`/`sequence` (MISSING) ·
@@ -140,7 +151,78 @@ Apply via PASTE / `_run_sql_file.ts --env-file .env.production.local`. All `ADD 
 7. `20260808_pitch_log_add_sequence.sql` · `20260818000000_pitch_log_park_code.sql` · `20260818010000_pitch_log_is_conference_game.sql`. IDEM
 8. Conference Stats ALTERs: `hitter_talent_plus`, `run_env_factor`, `updated_at`, `offensive_power_rating` + `20260821000000_conf_pitcher_env_plus.sql` (era_plus…hr9_plus, ratio scale). IDEM
 9. Park Factors: `*_seasonal` (10 cols) + `era_factor`/`fip_factor` (=rg_factor). IDEM
-10. `20260819000000_team_season_stats.sql` (117 cols + 3 idx + RLS ENABLE + `preseason_proj_total_war`) + `20260819010000_refresh_team_season_stats.sql` (the rebuild fn). IDEM
+10. ~~`20260819000000_team_season_stats.sql` (117 cols + 3 idx + RLS ENABLE + `preseason_proj_total_war`) + `20260819010000_refresh_team_season_stats.sql` (the rebuild fn). IDEM~~ **SUPERSEDED BY 10a** (this line named only 2 of the 3 files and got the order/column count wrong).
+
+10a. ⛔ **`team_season_stats` — THE BIGGEST REMAINING BLOCKER. NOT APPLIED. NEEDS TREVOR'S EXPLICIT "prod, now?".**
+    Blocks **F44** (`select refresh_team_season_stats(2026);`) and **G46** (the edge fn reads the table at
+    `supabase/functions/process-precompute-jobs/index.ts:1095`,`:1419`). Confirmed read-only 2026-08-30: the table
+    and the function are BOTH absent on prod; staging has the table (128 cols, PK `(source_id, season)`, 4 indexes,
+    308 rows for 2026) and the function `(p_season integer, p_reg_end date)`.
+
+    **Apply in EXACTLY this order** — the order matters: the CREATE must precede the ALTER, and the function body
+    references the ALTER's columns, so applying the function before the ALTER leaves a function that
+    `DELETE`s the season and then **aborts** on `column "hitter_war_total" does not exist`, emptying the table
+    (this is the exact failure `20260821010000`'s own header documents). All three are `IF NOT EXISTS` → idempotent.
+
+    ```
+    # PASTE each file into the prod SQL editor, in this order, one at a time:
+    #   1. supabase/migrations/20260819000000_team_season_stats.sql        (CREATE TABLE + 3 idx + RLS)
+    #   2. supabase/migrations/20260821010000_team_season_stats_war_columns.sql   (10 ALTER ADD IF NOT EXISTS)
+    #   3. supabase/migrations/20260819010000_refresh_team_season_stats.sql (CREATE OR REPLACE FUNCTION)
+    #
+    # or, file-driven against prod via the exec_sql RPC (note: --env-file belongs to tsx and must come
+    # BEFORE the script path; _run_sql_file.ts reads VITE_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY and
+    # has NO prod guard, so confirm the target before each call):
+    #   npx tsx --env-file .env.production.local scripts/_run_sql_file.ts supabase/migrations/20260819000000_team_season_stats.sql
+    #   npx tsx --env-file .env.production.local scripts/_run_sql_file.ts supabase/migrations/20260821010000_team_season_stats_war_columns.sql
+    #   npx tsx --env-file .env.production.local scripts/_run_sql_file.ts supabase/migrations/20260819010000_refresh_team_season_stats.sql
+    ```
+
+    **VERIFICATION QUERY (run on prod AFTER all three, before F44):**
+    ```sql
+    select
+      (select to_regclass('public.team_season_stats')::text)                                as table_exists,   -- expect 'team_season_stats'
+      (select count(*) from information_schema.columns
+        where table_schema='public' and table_name='team_season_stats')                     as n_cols,         -- expect 127
+      (select string_agg(kcu.column_name, ',' order by kcu.column_name)
+         from information_schema.table_constraints tc
+         join information_schema.key_column_usage kcu on kcu.constraint_name = tc.constraint_name
+        where tc.table_schema='public' and tc.table_name='team_season_stats'
+          and tc.constraint_type='PRIMARY KEY')                                             as pk,            -- expect 'season,source_id'
+      (select count(*) from pg_indexes
+        where schemaname='public' and tablename='team_season_stats')                        as n_indexes,     -- expect 4
+      (select count(*) from information_schema.columns
+        where table_schema='public' and table_name='team_season_stats'
+          and column_name in ('hitter_war_reg','hitter_war_total','rotation_pwar_reg','rotation_pwar_total',
+                              'bullpen_pwar_reg','bullpen_pwar_total','ra9_reg','ra9_total',
+                              'fip_ra9_reg','fip_ra9_total'))                               as n_war_cols,    -- expect 10 (the ALTER)
+      (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='public' and p.proname='refresh_team_season_stats')                 as fn_exists;     -- expect 1
+    ```
+    All six must match before F44. If `n_war_cols < 10`, migration 2 did not land — **do NOT run F44**, it will
+    empty the table.
+
+    ⚠ **Known staging drift, deliberately NOT in the plan:** staging has 128 columns, prod-after-plan will have 127.
+    The extra column is **`preseason_proj_total_war`** — a hand-run `ALTER` on staging that was never captured in any
+    committed migration (grepped `supabase/migrations`, `supabase/functions`, `scripts`, `src`: **zero** references,
+    including inside `refresh_team_season_stats`). Nothing reads or writes it, so it is not required for F44/G46.
+    Do not "fix" the count mismatch by hand-adding it; if it is genuinely wanted, add a committed migration first.
+
+    ⚠ **Downstream prereqs of the FUNCTION.** The DDL above is safe to apply on its own, but F44 will write NULLs
+    for any block whose inputs are empty. Probed read-only on prod 2026-08-30 — **every column below already EXISTS
+    on prod; it is the VALUES that are missing** (this contradicts the "A8/A9 … (MISSING)" wording in the NEEDED list
+    above, which conflates columns with data — the columns are there):
+    | fn block | prod input | staging | prod |
+    |---|---|---|---|
+    | 1 / 1b WAR matrix | `Hitter Master` 2026 D1 `desc_owar`/`d_war`/`bsr_war` non-null | 5,343 / 5,343 | **0 / 5,340** → D31/D32 |
+    | 1 / 1b WAR matrix | `Pitching Master` 2026 D1 `desc_pwar` non-null | 5,377 | **0 / 5,375** → D31/D32 |
+    | 8 / 9 faced_* | `"Conference Stats"` 2026 `hitter_talent_plus` non-null | 30 | **0 / 42** → E5/E6 |
+    | 10 park | `"Park Factors"` 2026 `rg_factor_seasonal`/`avg_factor_seasonal` non-null | 308 | **0 / 309** → E2 |
+    | 5 records / 8–9 faced | `pitch_log.opponent_id` + `team_id` columns | present | present ✅ (A5 widen) |
+    | 7 champions | `team_war_snapshots` | present | present ✅ |
+    This is exactly why F44 is scheduled **LAST** in Phase F, not right after this DDL. Applying 10a early is fine and
+    unblocks G46's schema dependency; running F44 early is not.
+
 11. `pitch_log_pitcher_totals.ip` column + Masters UNIQUE `(source_player_id,"Season")` (dedup-check prod first). IDEM
 12. ✅ **BLOCKER 2 — venue corrections (producer BUILT).** After GATES 0+1 above: `npx tsx scripts/compute_venue_corrections.ts --prod --apply` — computes the LOO + empirical-Bayes fixture from PROD pitch_log, creates `venue_movement_corrections` (game_venue_id/ivb_corr/hb_corr/b_ivb/b_hb/n_pitchers/n_pitches, RLS enabled) + the full-passthrough `pitch_log_corrected` VIEW (`ivb_corrected=ivb−ivb_corr`, `hb_corrected=hb−hb_corr`), stamped `venue_correction_version='v1-2026-loo-eb'`. Dry-run first (default). REGEN from prod pitch_log (venue ids + τ differ). **VERIFY:** τ ≈ 0.6–0.7, centering golden ≈0, ~310 venues, view readable by `compute_pitch_log_stuff_plus.ts`. Runs BEFORE any prod Stuff+.
 13. `20260823000000_player_predictions_rls_team_scope.sql` — RLS tighten. PASTE. IDEM
@@ -190,20 +272,30 @@ Apply via PASTE / `_run_sql_file.ts --env-file .env.production.local`. All `ADD 
     `npx tsx --env-file=.env.production.local scripts/_run_store_no_propagate.ts` — but it has **no prod guard and no
     ref assert**. Confirm the target before running; do not trust its "staging" banner.
 27. `computeNcaaAverages` — dual-writes `ncaa_averages` + `model_config`; incl. `pitcher_exit_velo`/`ev90`/`in_zone_pct` = hitter avgs 1:1. REGEN. **RUN THIS BEFORE 26.**
-    🛑 **MUST READ — TWO REAL DEFECTS IN THIS STEP.**
-    1. **Unordered `.range()` pagination.** `src/lib/computeNcaaAverages.ts:176` pages with `.range()` and **no
-       `.order()`**. On prod that is 6 pages over `Pitching Master` (5,375 D1 2026 rows) and 6 over `Hitter Master`
-       (5,340) — rows silently dropped/duplicated → **wrong NCAA means and SDs**, which every projection downstream
-       divides by. Same class as the already-fixed bugs in `derive_masters_from_pitchlog` /
-       `backfill_trackman_pitches_pitching_master` / `compute_conf_pitcher_env_plus`. **Add `.order("id")` before running.**
-    2. **Stuff+ weights still come from the LEGACY lane.** `computeNcaaAverages.ts:290` sources the per-pitcher pitch
-       counts that weight the Stuff+ mean from **`pitcher_stuff_plus_inputs`** — the legacy raw-HB table this push
-       bans everywhere else. Prod has 32,068 such rows for 2026 (probe 2026-08-30), so it will *not* error; it will
-       quietly weight by the wrong lane, and any pitcher present in the new pitch_log lane but absent from the legacy
-       table gets **weight 0 and is excluded from the mean entirely**. Worse, the fetch is wrapped in
-       `.catch(() => [])` (`:295`) so a total failure is swallowed and every weight becomes 0 → `stuff_plus` written
-       as NULL → baselines silently fall back to hardcoded defaults. The correct weight source on the pitch_log lane
-       is `Pitching Master.trackman_pitches` (step 24) or `pitch_log_pitcher_totals`. **Decide and log which you used.**
+    ✅ **BOTH DEFECTS FIXED IN CODE 2026-08-30 — nothing to do by hand before running. Kept for the record:**
+    1. ~~**Unordered `.range()` pagination.**~~ **FIXED.** `fetchAllRows` now orders by each table's ACTUAL primary
+       key via a `PAGINATION_KEYS` map, and **throws** for any unregistered table rather than paginating unordered.
+       ⚠ **Do NOT "simplify" this to a blanket `.order("id")`** — verified against BOTH projects'
+       `information_schema.columns` on 2026-08-30, `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` /
+       `player_season_defense` / `player_season_baserunning` have **no `id` column at all**; a blanket `order("id")`
+       has already broken this class of fix twice. Registered keys: Masters + `pitcher_stuff_plus_inputs` → `id`;
+       `pitch_log_pitcher_totals` → `(pitcher_id, season, dimension_key)`; `pitch_log_hitter_totals` →
+       `(batter_id, season, dimension_key)`; `player_season_defense` → `(player_id, season, position)`;
+       `player_season_baserunning` → `(player_id, season)`. Smoke-tested `.order(key).range(0,2)` on staging AND prod:
+       7/7 ✓ on each.
+    2. ~~**Stuff+ weights still come from the LEGACY lane.**~~ **FIXED — switched to the LIVE pitch_log lane.** The
+       weight is now `pitch_log_pitcher_totals.stuff_plus_data_pitches` at `dimension_key='all'`, joined
+       `pitcher_id` ↔ `Pitching Master.source_player_id` (string-normalised: `pitcher_id` is TEXT). The VALUE was
+       already correct (`Pitching Master.stuff_plus`, written by C25). The `.catch(() => [])` is **REMOVED** — a
+       fetch failure is now loud instead of silently becoming NULL.
+       **Measured impact of the lane swap (read-only `dryRun` of `computeAndStoreNcaaAverages(2026)`, 2026-08-30):**
+       | env | legacy weight | live weight | pitchers weighted |
+       |---|---|---|---|
+       | staging | 102.0846 | **102.0846** (no change) | 5,255 → 5,256 |
+       | **prod** | 101.8361 | **102.3337** (+0.4976) | 5,250 → 5,248 |
+       Prod's stored `ncaa_averages(2026).stuff_plus` today is **101.8341** — i.e. the legacy value. Expect it to move
+       to ≈102.33 (and `stuff_plus_sd` to stay 6.06231) when C27 runs, **before** C25 rewrites `Master.stuff_plus`;
+       after C25 it will move again. **Log the value you get.**
 28. Conference Stats — **G-GATE FIRST** (blocker 3): re-run `scripts/sql/conf_stats_bucketA_assembly.sql` on STAGING vs backup `_confstats_backup_preassembly`, confirm diff 0.0000. THEN prod: `conf_stats_bucketA_assembly.sql` (**PASTE, never `--linked`**) · `scripts/compute_conf_pitcher_env_plus.ts --apply` · `scripts/derive_conf_opr_htp.ts --apply`. ⚠ **DO NOT run `populate-conf-stats`** (overwrites JUCO overlay). REGEN
     🛑 **MUST READ — RUN STEP 29 BEFORE THIS STEP.** Prod `Conference Stats` season 2026 = 42 rows, 40 tagged
     `division='D1'`, and **10 of those 40 are NJCAA districts mis-tagged as D1** (probe 2026-08-30; their
@@ -237,7 +329,13 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
     🛑 **Unordered `.range()`** — `scripts/drs/populate_descriptive_war.mjs:57` (`all`) and `:58` (`allNoSeason`) both
     page without `.order()`. On prod that is 14 pages over `player_season_defense` (13,454) and 11 over
     `player_season_baserunning` (10,432), plus the Masters (5,375 / 5,340 D1 2026). Silent row loss → wrong `d_war` /
-    `bsr_war` for whoever falls in a skipped page. **Add `.order("id")` to both helpers first.** Prod guard ✅ (`:28-29`).
+    `bsr_war` for whoever falls in a skipped page. Prod guard ✅ (`:28-29`).
+    ⛔ **DO NOT "add `.order("id")`" here — that advice was WRONG and is corrected 2026-08-30.**
+    `player_season_defense` and `player_season_baserunning` have **NO `id` column** on either project (verified via
+    `information_schema.columns`); `.order("id")` errors out (or, worse, is dropped) rather than fixing anything.
+    Use each table's ACTUAL primary key: `player_season_defense` → `.order("player_id").order("season").order("position")`,
+    `player_season_baserunning` → `.order("player_id").order("season")`, Masters → `.order("id")`.
+    Same rule as the `PAGINATION_KEYS` map now in `src/lib/computeNcaaAverages.ts` — copy it, don't re-derive it.
 32. **Descriptive WAR (reg split)** — `node scripts/drs/populate_descriptive_war_reg.mjs --prod` (dry-run) → `… --prod --commit`.
     Writes Master `desc_*_reg` (reads `player_season_defense_regseason.csv` + `hitter_accrued.csv` reg_* + `wsb_runs_reg`). REGEN
     🛑 **Same unordered `.range()` defect** — `scripts/drs/populate_descriptive_war_reg.mjs:33` and `:34`. Fix
@@ -312,13 +410,13 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
 42b. **Snapshot hitter market RE-PRICE (stale-PTM fix)** — `recompute-snapshot-hitter-market.ts --prod --apply`. Re-derives every hitter snapshot's `market_value` (TWP → `twp_hitter_market_value`) as `total_hitter_war × $25k × PTM(build-program conference) × PVF(players.position)`, writing ONLY the dollar field — every dev_agg/depth/nil toggle preserved. **Why:** snapshots baked before the SEC-4.0 re-price still hold the OLD SEC 1.5 PTM (~$42.5k/win); nothing re-baked them (the profile/TB pure-read the snapshot, so stale $ shows verbatim — e.g. Souza $50,983 for 1.20 WAR). Re-prices SEC builds ~2.6× up, other tiers barely move. **PVF is CORRECT in the market** (pricing layer, spec §7.2) — it is only removed from the Player SCORE (`calcPlayerScore`, spec §1). ⚠ **GOTCHA (must keep):** filter null/non-UUID pids before the `players` position lookup + error-check each `.in` batch — a single literal-`null` player_id (portal-search add) makes Postgres reject the WHOLE `.in("id",batch)` as invalid-uuid, silently dropping ~200 real players' positions → PVF wrongly flattens to 1.0 (Souza $119,839 instead of $131,823). Idempotent. Staging verified: 472 rows then 38 position-corrections; Souza both builds $110k/win (SEC 4.0×IF 1.10); 0 markets >$130k/win; 0 negative; re-dry-run 0. IDEM
 43. Snapshots: `backfill-neutral-snapshot.ts --prod --apply` → `heal-stale-snapshots.ts --prod --apply --yes` (ordered-`.range()` versions only). IDEM
 44. `select refresh_team_season_stats(2026);` — **LAST**; reads PROD's own `team_war_snapshots` (2025 LSU champ + 39 conf — never drop). REGEN
-    🛑 **MUST READ — THIS STEP CANNOT RUN TODAY. MISSING PREREQUISITE.** Live prod probe 2026-08-30:
-    `team_season_stats` **table does not exist** and `refresh_team_season_stats` **function does not exist**
-    (`Could not find the function public.refresh_team_season_stats(p_season) in the schema cache`). Migrations
-    `supabase/migrations/20260819010000_refresh_team_season_stats.sql` and
-    `20260821010000_team_season_stats_war_columns.sql` have **never been applied to prod**, and neither appears as a
-    numbered Phase-A step in this document. **Add both to Phase A (war-columns migration second — see
-    `PROD_MIGRATIONS_TODO.md:650`) or F44 fails and G46 ships an edge fn that queries a missing table.**
+    🛑 **MUST READ — THIS STEP CANNOT RUN TODAY. MISSING PREREQUISITE → see new Phase-A step 10a.** Re-probed
+    read-only 2026-08-30 (`information_schema` / `pg_proc`, direct pg): on prod
+    `to_regclass('public.team_season_stats')` is **NULL** and `pg_proc` has **no** `refresh_team_season_stats`.
+    **THREE** migrations are unapplied — `20260819000000_team_season_stats.sql` (CREATE TABLE),
+    `20260821010000_team_season_stats_war_columns.sql` (10 ALTERs), `20260819010000_refresh_team_season_stats.sql`
+    (the function) — and they must be applied **in that order** (see 10a for why, the exact commands, and the
+    verification query). ⛔ **Not applied. Needs Trevor's explicit "prod, now?".**
 45. Reseed 2026 `team_war_snapshots` from desc WAR + fill player/transfer snapshots + `o_war→total_hitter_war` display swap (already branch code). REGEN
 
 # PHASE G — EDGE-FN DEPLOY (Trevor; explicit `--project-ref trbvxuoliwrfowibatkm`, NEVER `--linked`)
@@ -326,8 +424,8 @@ source_player_id — reuse the same CSVs, do NOT re-run the Python engine unless
     🛑 **MUST READ — ADD THE MISSING `team_season_stats` PREREQUISITE.** The deployed function reads
     `team_season_stats.faced_htp` / `faced_stuff_plus` at `supabase/functions/process-precompute-jobs/index.ts:1095`
     and `:1419` (faced-competition for Independents). That table **does not exist on prod today** (see F44). So the
-    full gate is: conf env+ ✅ · `ba/obp/iso_plus` ✅ · model_config transfer weights ✅ · **AND F44 has run and
-    `team_season_stats` is populated.** Deploy G46 before that and Independent-team projections silently lose their
+    full gate is: conf env+ ✅ · `ba/obp/iso_plus` ✅ · model_config transfer weights ✅ · **AND Phase-A step 10a is
+    applied AND F44 has run and `team_season_stats` is populated.** Deploy G46 before that and Independent-team projections silently lose their
     faced-competition adjustment. `RUNBOOK:236` and `PROD_MIGRATIONS_TODO.md:482,492,508,599-602` all state the deploy
     prerequisites **without** this condition — they are incomplete; this line is the correct one.
 47. ~~`recalculate-prediction` returner rebuild~~ — DEAD/superseded (blocker 4). Do NOT run. Returners = batch scripts (steps 36–37).
