@@ -717,3 +717,71 @@ requirements list, written from what actually happened — not theory.
     → **TRACK B FIX: every gate query must state its season explicitly and assert a non-zero denominator.**
 12. **MACHINE SLEEP KILLED LONG RUNS.** Distinguish: environmental failures die at a DIFFERENT point each run;
     structural ones die at the SAME place with the SAME duration. Run detached with `caffeinate -dimsu -w <pid>`.
+
+---
+# 📐 TRACK B — EVERY VALUE THE CHAIN COMPUTES WITH (canonical list + where it lives)
+Track B must not re-derive or guess ANY of these. Where a value lives in code, the code is authoritative and this is
+the pointer + the current value so drift is detectable. Full detail: `docs/STUFF_PLUS_EXACT_VALUES.md`.
+
+## STAGE 1 — CLASSIFIER (`src/savant/lib/stuffPlusClassifierV2.ts`) — 95.2% per-pitch / 95.3% arsenal-mix
+Conventions: `armHB = (hand==="R" ? hb : -hb)` · `rr = ivb - |armHB|` · `gap = primaryFB_velo - pitch_velo`.
+`primaryFB_velo` = mean velo of the pitcher's raw FA/SI if ≥3 such pitches, else mean of all his pitches.
+**Per-pitch SEED (evaluation order is load-bearing):**
+```
+1  ivb <= -8  AND armhb < 4  AND gap >= 4            -> Curveball
+2  armhb <= -12 AND ivb > -8 AND ivb <= 6            -> Sweeper
+3  ivb >= 5 AND gap 2..7 AND armhb <= 2              -> Cutter
+4  gap < 4:  rr > 4 -> 4S FB | rr < -4 -> Sinker | else -> FBSTRIP
+5  |armhb| < 5 AND ivb -4..4                         -> Gyro Slider
+6  armhb >= 5:  spin < 1400 -> Splitter | else -> Change-up      ★ FLOOR = 5
+7  else                                               -> Slider
+```
+**Per-pitcher:** MERGE `|Δarmhb|<4 & |Δivb|<3.5 & |Δvelo|<2.5` **+ fastball-family guard (never merge differing
+4S/Sinker/FBSTRIP seeds)** · FBSTRIP resolve: cluster mean `rr >= 0` -> 4S else Sinker · small-sample `<150` = means
+only · ANCHOR = `n>=60 OR n>=0.10*total` · **§4.5 GYRO FLOOR: cluster labeled Slider with mean armHB >= -3 -> Gyro
+Slider, applied BEFORE the step-4 backfill** · backfill fold: `moveDist<5 & |Δvelo|<3` into a strictly-LARGER anchor,
+else non-anchor -> `needs_review` · tiebreaks: gyro/curve `|ar|<5 & -8<iv<-4` -> gap<=8 Gyro / >=10 Curve; CT/SL
+ride-floor `iv>=5` -> Cutter.
+⛔ NEVER re-derive: `rr > -1.7` FBSTRIP cut and the "arsenal rule" are LOGGED NEGATIVE RESULTS (both lose ~1pp).
+
+## STAGE 2 — POP BASELINE (`pitcher_stuff_plus_ncaa`, per pitch_type × hand, **armHB**, D1-only)
+Producer `scripts/derive_stuff_plus_pop_baseline.ts`. Stores mean + sd for: velocity, ivb, hb(armHB), rel_height,
+rel_side, extension, spin, velo_diff(gap). **Hard sign check: arm-side (4S/SI/CH/SPL) POSITIVE and glove-side
+(SL/SW/CB) NEGATIVE in BOTH hands, or it refuses to write.** MANDATORY after any reclass (the gyro floor moves 6-8% of
+breaking-ball volume).
+
+## STAGE 3 — THE 9 STUFF+ EQUATIONS (`src/savant/lib/stuffPlusEngine.ts`) — `score = 100 + weighted*20`
+`z=(x-μ)/sd` · `zAbs=|x-μ|/sd` · `zMax=(max(x,μ)-μ)/sd`. **hb is armHB** (the `hbSign` multiplier was folded out in e5dec2f).
+```
+4S FB     0.30 z(velo) +0.25 z(ivb) +0.15 zAbs(armHB) +0.10 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext) +0.05 z(spin)
+Sinker    0.30 z(velo) -0.20 z(ivb) +0.30 z(armHB)    +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext)
+Cutter    0.30 zMax(velo) +0.15 z(ivb) -0.25 z(armHB) +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext) +0.10 z(spin)
+Gyro      0.30 zMax(velo) +0.15(-z(ivb)) +0.25((hb_sd-|armHB|)/hb_sd) +0.10 z(fbGap) +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext)
+Slider    0.15 zMax(velo) +0.10(-z(ivb)) -0.35 z(armHB) +0.10 z(fbGap) +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext) +0.10 z(spin)
+Sweeper   0.10 zMax(velo) -0.10 z(ivb) -0.40 z(armHB) +0.10 z(fbGap) +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext) +0.10 z(spin)
+Curveball 0.10 zMax(velo) -0.30 z(ivb) -0.15 z(armHB) +0.10 z(fbGap) +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext) +0.15 z(spin)
+Change-up 0.15 z(fbChVeloDiff) -0.20 z(ivb) +0.35 z(armHB) +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext) +0.10 zAbs(spin)
+Splitter  0.10 zMax(velo) -0.20 z(ivb) +0.25 z(armHB) +0.05 zAbs(relH) +0.05 zAbs(relS) +0.10 z(ext) +0.25(-z(spin))
+```
+Then **RECENTER each (pitch_type × hand) bucket to mean 100** — per-pitcher UNWEIGHTED, outliers (>140 / <60) excluded
+from the calibration (`stuffPlusEngine.ts:450`). Per-pitch scores clamped to [40,160] BEFORE recenter.
+Row filters: drop if `ivb` or `hb` NULL; drop if `ivb=0 AND hb=0 AND pitches<5`; drop if `pitches<5`.
+
+## STAGE 4/5 — DOWNSTREAM CONSTANTS
+Conference Stuff+ (V2, canonical) = pitch-weighted `Σ(pitcher Stuff+ × pitch count)/Σ(pitch count)`, FULL season.
+`HTP = OPR + 1.25(Stuff+ - 100) + 0.75(100 - run_env)`.
+`wRC+ = ((0.011 + 0.691·OBP + 0.235·SLG)/0.3782)·100`
+`oWAR = ((((wRC+-100)/100)·PA·0.3994) + (PA/600·21.22)) / 13.1`
+`pRV+ = 100 + 100·(6.913 - projRA9)/6.913`, `projRA9 = (3.847 - 0.231·K9 + 0.509·BB9 + 1.486·HR9)·1.137`
+`pWAR = (((pRV+ -100)/100)·(IP/9)·6.915 + (IP/9·1.92)) / 13.1`
+`total_hitter_war = o_war + d_war + bsr_war`
+**RPW = 13.1** — VERIFIED stored in BOTH envs' `model_config`: `owar_runs_per_win=13.1`, `pwar_runs_per_win=13.1`
+(and present 4× in the live `refresh_composite_war()` on prod). Do NOT hardcode 10.
+56-game proration: `games_played_est ≈ team IP/9`, `factor = 56/games_played_est` capped **0.7–1.5**.
+⚠ `computeAndStoreScores` reads baselines from `ncaa_averages` and falls back to HARDCODED defaults **silently** when a
+field is missing — so C27 MUST run before C26, and Track B must assert the baselines exist before scoring.
+
+## GATES TRACK B MUST ASSERT EVERY RUN
+per-pitcher Stuff+ **mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7** · every (type × hand) bucket recenters to **100.0**
+· `needs_review ≈ 8.1%` · label distribution 4S 37.8 / SI 16.0 / SL 10.3 / GY 10.2 / CH 9.1 / CB 5.6 / SW 5.2 / FC 3.7
+/ SPL 2.1 · `unscored = 0`.
