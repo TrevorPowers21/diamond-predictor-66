@@ -1,3 +1,195 @@
+# 🅱️🏛️ TRACK B — THE CANONICAL BUILD SPEC
+> **THIS BLOCK IS THE AUTHORITY. Everything below it in this file is EVIDENCE and CHRONOLOGY.**
+> Where anything below contradicts this block, **this block wins.** Consolidated 2026-08-31 at the end of the
+> war-recalibration prod push, from that push's 28 silent-failure findings. Build Track B from THIS.
+> Companion detail: `docs/HANDOFF_RESUME_2026_08_31_SNAPSHOTS.md` (state) · `docs/AUDIT_dependency_order_vs_topic_order_2026_08_30.md` (why order ≠ topic).
+
+## 0. WHAT TRACK B IS
+**ONE edge function, running ONCE PER DAY, that performs the entire ingest→store chain.** Every stage below is a
+hand-run script today. The prod push was its dress rehearsal: **every defect that push found is a Track B requirement**,
+because a daily unattended run has no human to notice that a column is populated but stale.
+
+| source | cadence | role |
+|---|---|---|
+| **Pitch log** | **DAILY, all spring** | **PRIMARY SOURCE OF TRUTH** — the majority of every statistic derives from it |
+| **TruMedia Master sheet** | **~MONTHLY** | **SECOND SOURCE / CHECK.** Overrides ONLY where the pitch log is known-weak: **SB, ERA, G/GS**. Never a daily dependency. |
+⇒ **NO STAGE MAY DEPEND ON A FILE THAT ARRIVES MONTHLY.** Any stage reading `docs/drs-reference/*.csv` or
+`scripts/drs/output/*.csv` is structurally unrunnable in Track B. ⇒ **"Derived then checked" is an ORDER, not a
+preference.** Derive from the pitch log; apply the monthly sheet ON TOP as a narrow override, logging both values.
+★ **The only infrastructure Track B needs that does not exist yet is the TrackMan FTP feed** to land the daily files.
+
+## 1. THE THREE LAYERS — each value lives in EXACTLY ONE place
+```
+LAYER 1  pitch_log                 raw per-pitch. Immutable. Never aggregated in place.
+            │  REBUILT ON EVERY IMPORT
+LAYER 2  pitch_log_*_totals        THE ACCUMULATOR — ALL raw counts, per (player, season, dimension_key)
+            │  DERIVE (rates, ratings, WAR)
+LAYER 3  "Hitter Master" /         DERIVED + DISPLAY — rates, power ratings, stuff_plus, desc_* WAR,
+         "Pitching Master"         plus pa/ab/IP + regular_season_pa/_ip as the DISPLAY + DEPTH-TIER anchors
+                                   ⛔ NO raw component counts here — they live in Layer 2.
+```
+**★ WAR READS LAYER 2 AND WRITES LAYER 3.** Counts come from the accumulator; results land on the Master; every
+consumer reads the Master. **★ `pitch_log_*_totals` is NOT an end-of-season artifact — it rebuilds on every import.**
+
+## 2. THE REGULAR/POSTSEASON SPLIT
+Lock ONCE at the transition, then keep accumulating: `'all'` keeps growing (full season); `'reg'` never changes again.
+**Boundary 2026: `2026-05-18` / postseason `2026-05-19`.**
+🛑 **TYPED IN TWO PLACES TODAY** — `scripts/drs/drs_engine/season_config.py` and `refresh_team_season_stats`'s
+`p_reg_end`. **THERE MUST BE ONE SOURCE.** ⬜ Future: per-team SCHEDULES remove the constant entirely.
+**Policy:** player stats + power ratings = **FULL** · program analytics = **REGULAR** · projections target a
+**REGULAR-season** line. ⛔ **`lock_regular_season` / D33b is OBSOLETE** — the accumulator does this. Retire it.
+
+## 3. THE 19-STAGE CANONICAL RUN ORDER
+🛑 **ORDER BY THE READ/WRITE GRAPH, NEVER BY TOPIC.** The prod runbook was grouped by kind-of-work and was *provably*
+wrong: it put `refresh_team_season_stats` in the LAST phase while a stage six steps earlier READ the table it creates.
+| # | stage | the trap if run out of order |
+|---|---|---|
+| 1 | Reclassify (`stuffPlusClassifierV2`) → `_reclass_pf` | §4.5 gyro floor MUST precede the step-4 backfill; stamp `classification_version` |
+| 2 | Re-derive pop baseline → `pitcher_stuff_plus_ncaa` | ⛔ never from legacy PSP-I (RAW hb ⇒ LHP backwards). Mandatory after ANY reclass |
+| 3 | Score + recenter → `pitch_log.stuff_plus` | 🛑 version filter must equal stage 1's stamp, else **0 rows scored, exit 0** |
+| 4 | Aggregate 48 dims **+ `populate_hitter_run_values`** | validate by LOG CONTENT — one dim can fail while exit=0. Use `--direct` on prod |
+| 5 | Masters rollup **+ create missing rows** | 🐛 `repRows` `:465` — see BLOCKER 5. Gate on the MEMBERSHIP query, never on "0 created" |
+| 6 | `trackman_pitches` | D1 ← totals `dimension_key='all'`; JUCO ← legacy. **Keep the lanes separate** |
+| 7 | dRS / wSB load | ordered pagination over `players` |
+| 8 | `team_drs` | 9 hard-exits without it. Group on **`source_id`**, never per-season `TeamID` |
+| 9 | Descriptive WAR | partial `.update()` only — never upsert whole rows over the power ratings |
+| 10 | Descriptive WAR `_reg` | ★★ reads 9's `drs_behind` and coerces `NULL→0` ⇒ wrong values, **NO error**, if 9 has not committed |
+| 11 | *(reg/post lock — folded into the accumulator, §2)* | — |
+| 12 | Park factors | destructive delete+reinsert; **rewrites `rg_factor`** ⇒ invalidates 14 |
+| 13 | `computeNcaaAverages` | ★ MUST precede 14/16 — they fall back to HARDCODED defaults **silently** |
+| 14 | Conference stats: bucketA → pitcher env+ → **`derive_conf_opr_htp`** → **`conferenceStuffPlusV2`** → scouting avgs | `derive_conf_opr_htp` must be **LAST** to touch park-derived columns. Conf Stuff+ = `Σ(Master.stuff_plus × trackman_pitches)/Σ(trackman_pitches)`. ⛔ never `populate-conf-stats` |
+| 15 | `refresh_team_season_stats` | ★ **MUST precede 18** — 18 reads `faced_*` and coerces a miss to `[]` |
+| 16 | Power ratings | silent hardcoded defaults if 13 missing |
+| 17 | TWP detector | must precede 18 so both-side rows generate |
+| 18 | **Projections** (returner + transfer) | see §4 — the densest stage, 6 hard rules |
+| 19 | **Composite WAR / markets / snapshots** | see §5 — after 18, never before |
+
+## 4. STAGE 18 — THE SIX RULES (every one earned by a defect)
+1. **SIDE ELIGIBILITY IS STATS-DRIVEN, IN THIS ORDER** (`src/lib/sideEligibility.ts`, built, **NOT wired**):
+   **STEP 1 presence** (has PA? has IP?) → **STEP 2 bucket** (PA ≥ 30 / IP ≥ 5) → **STEP 3 tag** (`is_twp` only if
+   BOTH clear; DROP it otherwise) → **STEP 4 equations** (run only the qualifying sides **AND NULL the others**).
+   ⛔ **Never `players.position`** (203 D1 players with real IP carry a non-pitcher position). ⛔ **Never `is_twp` as
+   an INPUT** — it is the OUTPUT of step 3. **NCAA D1 only.** Window = regular season.
+   ⚠ **Skipping a side ≠ clearing it** — 643 players would otherwise freeze with a stale `p_war`.
+2. **ROUTE TWP MARKETS TO `twp_*_market_value` AND NULL THE SHARED COLUMN** — the display layer reads `twp_*`
+   whenever `players.is_twp` and ignores `market_value` entirely. All four paths must do this identically.
+3. **PRICE AT THE DESTINATION PROGRAM'S CONFERENCE.** Only this stage knows it. ⛔ **Never re-derive a market
+   downstream** — re-pricing from the player's own conference under-prices by the full PTM ratio (measured **2.9×**).
+4. **DEPTH ROLE READS THE MASTERS' `regular_season_pa` / `regular_season_ip`** — never `players.pa`/`players.ip`
+   (identity-table copies nothing keeps in sync). **Four scripts derive depth roles; fixing one does NOT fix the others.**
+5. **ONE COLUMN, ONE OWNER.** Two stages writing `market_value` on the same `returner/regular` row = last writer wins.
+   **A stage must NEVER null a field it has no value for** — omit the key.
+6. **`coalesce(d_war, 0)` IS THE INTENDED NEUTRAL PRIOR** — `drs_floor` is runs-ABOVE-average, so 0 IS league average.
+   ⛔ Do NOT "fix" it to NULL. (Opposite of [[feedback_zero_is_missing_not_a_value]] — ask whether 0 is attainable.)
+
+## 5. STAGE 19 — SNAPSHOTS AND MARKETS
+1. **THE BOARD REFRESH IS ONE STAGE:** re-copy WAR from predictions, THEN re-price at the program tier, with **no
+   committed state in between** (split across two steps a TWP board legitimately shows $0).
+2. **BOTH SURFACES, SAME RULES.** `target_board` and `team_build_players` priced together. **GATE: a player on both
+   must price identically.**
+3. ⛔ **NEVER rebuild a snapshot from a hand-listed field set** — round-trip the object, overwrite only what you own.
+4. ⛔ **NEVER branch on a flag embedded in a snapshot.** Join to the owning table. A snapshot records VALUES; it is
+   not a source of truth for IDENTITY.
+5. **The market gate is an IDENTITY, not a threshold:** `market ÷ WAR == 25,000 × PTM × PVM`.
+   **Hitter: ≤3 distinct `$/win` per conference** (PVM tiers 1.0/1.1/1.3). **Pitcher: EXACTLY 1** (no PVM).
+   ⛔ The "$130k/win" figure is just `25,000 × 4.0 × 1.3` — the formula's own maximum, **not a rule**.
+   🛑 **ALWAYS label `total` vs `$/win`.** (Overbeek: **$232,576 total** at **$100,000 per win**.)
+
+## 6. 🔴 THE BUILD BLOCKERS (in dependency order)
+| # | blocker | why it blocks |
+|---|---|---|
+| 1 | `pitch_log_pitcher_totals` needs **`R` / `ER`** | `desc_ra9` needs RA9. ⚠ **NOT a naive count** — the engine accrues it with **inherited-runner attribution, earned+unearned**. That logic must MOVE INTO the totals build. |
+| 2 | **A `reg` window on the accumulator** | kills the last CSV dependency on the hitter side |
+| 3 | **Fold defense + baserunning into the accumulator** | precedent exists (`batting_rv`/`defensive_rv`/`baserunning_rv`). ⬜ sequencing OPEN — dRS is a heavy engine |
+| 4 | **Re-point WAR at the DB** | a daily run has NO TruMedia CSV; today WAR reads CSVs on disk |
+| 5 | **Fix `repRows` `:465`** (`"batting_team_id"` → `"batter_id"`) + stop discarding `error` at `:451` | 2027 opens with mostly NEW players — `--create-new` MUST work, and today it can NEVER create a hitter |
+| 6 | **ONE boundary-date source** | `2026-05-18` typed in two places |
+| 7 | **Wire `sideEligibility.ts`** (8 documented sites) + the invalidation half | §4 rule 1 |
+| 8 | **Absorb `process-precompute-jobs`** | else Track B becomes the FOURTH copy of stage 18 |
+**NOT worth chasing:** `G`/`GS` (no pitch-log source) · SB (Master-override BY DESIGN) · `dob`/`class_year` (roster
+scraper) · `trackman_pitches` on `"Hitter Master"` (vestigial) · **recomputing prod WAR** (values verified correct).
+
+## 7. THE GATE DOCTRINE — a count gate caught NONE of the 28 findings
+| gate | catches |
+|---|---|
+| **VALUE** | did the number CHANGE? (Conference `Stuff_plus` 101.17→99.15 · `run_env_factor` 101.879→99.719 — both **30/30 before AND after**) |
+| **MEMBERSHIP** | diff the ID SET, not the count (caught Kozeal: `5,340 = 5,340` passed everything) |
+| **CARDINALITY** | assert the GROUP count; lean on PRIMARY KEYS (caught the `TeamID` split; Σ-centering held at 309 teams) |
+| **IDENTITY** | `total = o + d + bsr` ≤ 0.002 · `Σ team_drs = 0` · `market ÷ WAR == 25,000 × PTM × PVM` |
+| **LOG-CONTENT** | read the body, never the exit code |
+| **SIGN** | arm-side armHB positive in BOTH hands (18/18) or ABORT before writing |
+| **CROSS-ENV** | only meaningful **AFTER both sides run the same rule** (proved twice: gaps collapsed ~91%) |
+**⛔ NEVER GATE ON:** counts · exit codes · `updated_at` (bumped on 105,093 rows whose values never changed) ·
+a magnitude derived from the model's own constants (it moves with the thing it is meant to check) ·
+**presence of a config key** (assert the EFFECTIVE value = config ?? code default).
+**⛔ SCOPE EVERY GATE TO `division = 'D1'`** unless it exists to test JUCO — a gate that fails forever trains the
+reader to ignore it, and that is how a real D1 failure gets waved through.
+
+## 8. THE MECHANICAL CONTRACT (each cost a run)
+- `statement_timeout` = **2min** on prod and **cannot** be raised via the node-postgres client option. Use
+  `await c.query("set statement_timeout='15min'")` as an EXPLICIT statement — **FINITE, never 0** (a prior session
+  hung prod 39 min).
+- **BATCH every bulk write** — one UPDATE over 2.5M rows blew the timeout and rolled back whole. 25k chunks via
+  `unnest()` ≈ **87,000 rows/min**. **Make the `WHERE` clause RESUMABLE** (`where col is null`).
+- ⛔ **Never `CREATE TEMP TABLE … ON COMMIT DROP`** from node-postgres — autocommit drops it before the next statement.
+- **PostgREST cuts at ~125s** and the whole UPDATE rolls back with no recognisable error → direct pg session for
+  `refresh_composite_war()` and anything long.
+- **Never pipe a long job through `grep`** (log stays 0 bytes) and **detach every prod write from the start**.
+- **Ordered pagination everywhere** — unordered `.range()` silently drops/dupes. Per-table PK map; refuse to
+  paginate an unregistered table. **Filter `.in()` lists to well-formed UUIDs and THROW on batch error** (191 NULL
+  `player_id`s in `team_build_players` silently poisoned a whole batch).
+- **Double-keyed env guard on every writer** — URL and `--prod` must AGREE. ★ **And assert that EVERY client in the
+  process resolves to the SAME project ref**: a script can have two clients aimed by two different mechanisms
+  (its own env-file client + a transitively-imported shared one reading `process.env`).
+- **`npm run …:prod` aliases WRITE.** `-- --dry-run` (the `--` is REQUIRED).
+- **`tsc -p tsconfig.app.json` does NOT cover `scripts/`.** For anything under `scripts/`, the REAL check is
+  executing it with `--dry-run`.
+
+## 9. OUT OF SCOPE — DO NOT "FIX"
+- **JUCO** — a full restructure is coming (databases move, merged with D2/D3). **D1 NCAA is the consistency
+  boundary.** 2,119 JUCO TWP hitter rows render blank **by design**. ⛔ Do not run `--division JUCO`.
+- **G46 / `process-precompute-jobs`** — REMOVED from the push, moved to the Track B branch. Still carries
+  **registry #9** (depth roles from `players.pa`). ⚠ Its onboarding trigger is **ARMED**.
+- **Prod WAR values** — verified correct; wrong wiring, right numbers. Re-point, don't recompute.
+
+## 10. STAGING CATCH-UP — FIVE HARD REQUIREMENTS
+Staging never received **C24 · C26 · C27 · C28 · C28b · C29**, and is **not** a valid reference for TWP markets
+(1,582 of its D1 TWP hitter rows would render blank). The catch-up is **Track B's first real exercise** — never a
+hand-run of six scripts. It MUST carry:
+1. 🔴 the stage-18 **TWP routing fix** · 2. 🔴 **`players.is_twp`** as the branch in both snapshot producers ·
+3. 🔴 **UUID filter + throw** on `.in()` lists · 4. 🔴 **pitcher market re-derivation** on build snapshots ·
+5. 🔴 the **E37 market-stomp fix** (`backfill-2027-hitter-returners.ts:308`).
+
+## 11. 🛑 SUPERSEDED VALUES — IF YOU SEE THE LEFT, THE CURRENT TRUTH IS THE RIGHT
+The chronological blocks below are dated and were CORRECT WHEN WRITTEN. **Do not act on a stale number.** This table
+is the single reconciliation point.
+| you may read (stale / historical) | ✅ CURRENT TRUTH (2026-08-31, verified on prod) |
+|---|---|
+| `RPW ÷ 10` (Push-1 v1) | **RPW = 13.1** — the divisor for EVERY WAR quantity. Stored in both envs' `model_config` (`owar_runs_per_win` / `pwar_runs_per_win`) and present 4× in prod's live `refresh_composite_war()`. |
+| classifier **92.6% / 94.3% / 95.1% / "~85%"** | **95.2% per-pitch · 95.3% arsenal-mix · needs_review 8.1%** on the full 2,000,674-pitch population (§11.13, with §4.5 BEFORE the step-4 backfill) |
+| **SEC PTM 1.5** | **SEC = 4.0** (`nil_tier_sec`). ACC 1.5 · Big 12 1.2 · Big Ten 1.0 · AAC 0.8 · Big South/CUSA/ASUN 0.5 · JUCO 0.35 |
+| `players.is_twp` **137** | **253** (E35, matches staging exactly). D1 = 90. Legacy `position='TWP'` 428 → **34** (34 are DELIBERATELY left alone — do not null them) |
+| `team_season_stats` **0 rows** / "cannot run" | **308 rows** · `faced_stuff_plus`/`faced_htp` **308/308** · `ra9_reg` **308** (F44, 2026-08-31) |
+| `regular_season_ip` **0/5,375** · `regular_season_pa` **0/5,341** | **5,372** and **5,322** filled (Step 1, 2026-08-31). `pa` avg 121.8 → **127.7**; `IP` avg 25.67 → **26.66** |
+| `pitch_log.game_string` **0/2,576,146** | **2,576,146 (100%)** · 8,519 distinct games = 55.3/team |
+| `pitch_log_pitcher_totals.ip` **0/5,509** | **5,415** filled, plus a NEW `ip_reg` column |
+| `"Pitching Master".bf` **0/5,375** | **5,372** filled |
+| `K9/BB9/HR9/WHIP/FIP` "stale TruMedia values" | **pitch-log DERIVED, 5,375/5,375** |
+| Conference `Stuff_plus` **101.17** | **99.15** (D1) · NJCAA_D1 96.00 · D2 93.00 |
+| `run_env_factor` **101.879** | **99.719** — and **EXACTLY identical to staging** |
+| `team_war_snapshots.team_drs` "column absent on prod" | **308 D1 teams, Σ 0.00**, DERIVED on prod (Arkansas 41.272) |
+| Phase-B gate keys `obp_std_pr` / `whip_pr_sd` / `owar_repl_600` | ⛔ **THOSE KEYS DO NOT EXIST** (the gate returns 0 rows). Real: **`r_obp_std_pr` 31.89504 · `p_whip_pr_sd` 37.19844 · `owar_replacement_runs_per_600` 21.22** |
+| `owar_replacement_runs_per_600 = 26.2` (from `wrc_c1_model_config.sql`) | **21.22** on BOTH envs. ⛔ **DO NOT run that SQL — it would REGRESS this.** |
+| "18 active customer teams" | **14 on prod** (18 is a STAGING number). Gate on the live list, never a hardcoded count. |
+| "F39 rewrites the descriptive Master" | ❌ **WRONG.** `refresh_composite_war()` writes **`player_predictions`** only. The Masters are untouched. |
+| "`--create-new` would create ~763 rows" | ❌ **WRONG.** It is gated at **25 PA / 20 BF + D1**; exactly **ONE** prod candidate cleared it. |
+| "no market > $130k/win" as a RULE | ❌ **NOT a rule** — it is `25,000 × 4.0 × 1.3`, the formula's own maximum. Use the **IDENTITY** gate (§5.5). |
+| F43 "SAFE BY CONSTRUCTION — `--env-file` cannot redirect it" | ❌ **FALSE.** It has a SECOND, transitively-imported client reading `process.env`. Align both or it writes prod while reading staging constants. |
+| "G46 is the next step / deploy the edge fn" | 🛑 **REMOVED from this push** → Track B branch. Still carries registry #9. |
+| `lock_regular_season` / **D33b** "deferred" | ⛔ **OBSOLETE — never run it.** The accumulator does this (§2). |
+| "staging is the reference" | ⚠ **PROD IS THE CURRENT SIDE.** Staging lacks C24/C26/C27/C28/C28b/C29, `team_drs`, `bf` and 29 Conference Stats columns. |
+
+---
 > 🚨 **BEFORE ACTING ON ANYTHING IN THIS FILE:**
 > · **`docs/HANDOFF_WHATS_AHEAD_2026_08_31.md`** — what is ahead, the 6 Track B blockers, and the 11 earned rules
 > · **`docs/HANDOFF_2026_08_31_EOD.md`** — current prod state, verified in the DB
@@ -4508,6 +4700,70 @@ OLD:  … F43 → G46 edge-fn deploy → preview-verify → PR → merge → Pha
 NEW:  … F43 → preview-verify → PR staging→main → Trevor merges → Phase H
       G46 MOVED OUT — to the Track B feature branch. ⛔ Do NOT deploy as part of this push.
 ```
+
+---
+# ✅✅ FULL PROD ↔ STAGING AUDIT (2026-08-31) — **VERDICT: PROD IS READY. NO DISPLAY GAPS. NO BLOCKERS.**
+Trevor: *"does every piece of the database that we need — whether it's to get to what we need or to display what we
+need — [exist and is it] correct and consistent… if we push this into prod right now, would the database in prod match
+what needs to be matched in staging and show the correct values."* **Answer: YES.** Method and evidence below.
+
+## ★ THE HEADLINE — ZERO COLUMNS POPULATED ON STAGING BUT EMPTY ON PROD
+Column-by-column coverage diff (every column, `information_schema`-driven, not a hand-picked list):
+| surface | prod / staging rows | columns populated on staging but EMPTY on prod |
+|---|---|---|
+| `"Hitter Master"` 2026 D1 | 5,341 / 5,343 | **NONE** ✅ |
+| `"Pitching Master"` 2026 D1 | 5,374 / 5,377 | **NONE** ✅ (prod AHEAD on `bf`) |
+| `player_predictions` returner | 15,694 / 15,551 | **NONE** ✅ |
+| `player_predictions` transfer | 185,527 / 199,572 | **NONE** ✅ |
+| `"Conference Stats"` D1 | 30 / 30 | **NONE** ✅ (prod AHEAD on **29** columns) |
+| `team_season_stats` 2026 | 308 / 308 | **NONE** ✅ (prod AHEAD on `team_drs`) |
+⇒ **Nothing the UI reads is missing on prod.** Every display path has its data.
+
+## ★ VALUE-LEVEL — THE DESCRIPTIVE WAR CHAIN IS **BIT-IDENTICAL**
+`"Hitter Master"`, per player joined on `source_player_id` (n = 5,340):
+```
+desc_owar · d_war · bsr_war · total_desc_war · woba     mean 0 · median 0 · p90 0   ← EXACTLY IDENTICAL
+pa · regular_season_pa                                  median 0 (mean ~0.9 = TruMedia-vs-engine counting noise)
+```
+`"Pitching Master"` (n = 5,374): `stuff_plus` **median 0.000** · `fip` 0.04 · `whip` 0.04 · `k9` 0.2 ·
+`desc_pwar` **0.001** · `desc_ra9` **0.003** · `drs_behind` **0.008**.
+`"Conference Stats"` (n = 30): **`run_env_factor` mean 0 · median 0 · p90 0 — EXACTLY IDENTICAL** ·
+`WRC_plus` median 0 · `Stuff_plus` median 0.1.
+★ **`run_env_factor` and the whole descriptive WAR chain reproducing to ZERO across two independently-computed
+databases is the strongest evidence in this audit.** The engine is deterministic and prod ran it correctly.
+
+## ⚠ THE SUBTLE DIFFERENCES — ALL ATTRIBUTED, NONE A PROD DEFECT
+| difference | measured | cause — VERIFIED, not assumed |
+|---|---|---|
+| `p_rv_plus` (PR+) | median **1**, p90 6 | ★ **C27 calibration freshness.** Prod re-derived `ncaa_averages`/`model_config` from its OWN population; **staging never ran C27**. Small input deltas measured against different means/SDs AMPLIFY. |
+| `ERA` | median **0.15** | ★ **SOURCE, not window.** Prod's comes from the engine's accrual (inherited-runner, earned+unearned); staging's is TruMedia's official figure. ⚠ ERA is a named Master-sheet OVERRIDE field. |
+| `IP` / `regular_season_ip` | median **0.3** | TruMedia counting vs the engine's pitch-log derivation (`corr 0.9932`, recorded in the F44 migration). |
+| `hitter_talent_plus` | median **0.5** | `OPR` is Master-derived and **staging never got C24/C26/C27/C28/C28b/C29**. |
+| wRC+ / `o_war` (projections) | median **4** / **0.133** | Same C27 chain — the equation and all 11 C1 config keys are **byte-identical** (verified separately). |
+| Hitter Master rows | 5,341 vs 5,343 | Different player populations. Prod carries 31,467 `players` vs staging 15,561 (historical depth). |
+| `player_predictions` 2027 | 201,221 vs 215,123 | **prod 14 active customer teams, staging 18.** Prod has MORE returner rows (15,694 vs 15,551). |
+| `team_war_snapshots.team_drs` | prod **308**, staging **0** | ★ **PROD AHEAD** — staging never ran D29b. |
+| `bf`, `pitcher_ev_score`, 29 Conference Stats columns | prod filled, staging 0 | ★ **PROD AHEAD** — C24/C28b and the Masters fill. |
+🛑 **PROD IS THE CURRENT SIDE ON EVERY AXIS WHERE THEY DIFFER.** ⛔ **NEVER reconcile prod TOWARD staging.**
+
+## 📋 THE C-STEP GAP, STATED ONCE (this is the root of nearly every difference above)
+**STAGING NEVER RECEIVED: C24 · C26 · C27 · C28 · C28b · C29.** Consequences, measured:
+- `ncaa_averages` / `model_config` NCAA means+SDs are STALE on staging (64 keys genuinely differ; 156 more were
+  formatting-only — **compare numerically, never as strings**).
+- `p_ncaa_avg_stuff_plus` prod **100.0141** vs staging 99.4358 · `p_sd_stuff_plus` **5.04577** vs 5.93754.
+- `trackman_pitches` +42 on prod · `pitcher_ev*`/`iz*` **30/30 prod vs 0/30 staging**.
+⇒ **A prod↔staging difference is EXPECTED until staging is caught up THROUGH TRACK B**, and the catch-up carries
+five hard requirements (see "STAGING CATCH-UP — HARD REQUIREMENTS").
+
+## ✅ AUDIT CONCLUSION
+1. **Every column the UI reads is populated on prod.** Zero display gaps on all six surfaces.
+2. **The descriptive WAR chain and `run_env_factor` reproduce EXACTLY** — independent replication across two databases.
+3. **Every remaining difference is attributed to a named, verified cause**, and in every case prod is the fresher side.
+4. ⇒ **Pushing prod as it stands would display CORRECT values.** No blocker found.
+⬜ **Two things remain OUTSIDE the data** (both logged separately, neither a data defect):
+   the **armed onboarding trigger** (`trg_customer_teams_autofire_precompute`) and the **G46 edge function** — removed
+   from this push and moved to the Track B branch.
+
 
 
 

@@ -1,3 +1,16 @@
+# 📚 AGENT LEARNINGS — **WHY things broke, and the rules that came out of it**
+> **ROLE OF THIS FILE:** the *reasoning* record. Every defect, the false hypotheses tested and rejected, the
+> instrument errors, and the rule each one produced. **It is NOT the build spec and NOT the runbook.**
+> · **To BUILD Track B** → `docs/PIPELINE_pitch_log_to_projections.md` → **"TRACK B — THE CANONICAL BUILD SPEC"** (the authority).
+> · **To RUN the push** → `docs/PROD_PUSH_STEPS_2026_08_26.md` (numbered steps) · `docs/HANDOFF_RESUME_2026_08_31_SNAPSHOTS.md` (state).
+> · **Current state** → `docs/HANDOFF_2026_08_31_EOD.md`.
+> ⚠ **28 SILENT-FAILURE REGISTRY entries. NOT ONE raised an error** — every one produced a populated table, a clean
+> exit code and a plausible number. **A stage that "ran fine" tells you nothing.**
+> 🛑 **Where this file contradicts the CANONICAL BUILD SPEC, the spec wins.** Blocks here are dated and chronological;
+> later blocks supersede earlier ones on the same topic.
+> 🛑 **STALE NUMBERS:** this file is chronological and contains values that were correct when written.
+> **Reconcile every number against the SUPERSEDED VALUES table** in `PIPELINE_pitch_log_to_projections.md` §11.
+
 > 🚨 **BEFORE ACTING ON ANYTHING IN THIS FILE:**
 > · **`docs/HANDOFF_WHATS_AHEAD_2026_08_31.md`** — what is ahead, the 6 Track B blockers, and the 11 earned rules
 > · **`docs/HANDOFF_2026_08_31_EOD.md`** — current prod state, verified in the DB
@@ -5545,6 +5558,70 @@ OLD:  … F43 → G46 edge-fn deploy → preview-verify → PR → merge → Pha
 NEW:  … F43 → preview-verify → PR staging→main → Trevor merges → Phase H
       G46 MOVED OUT — to the Track B feature branch. ⛔ Do NOT deploy as part of this push.
 ```
+
+---
+# ✅✅ FULL PROD ↔ STAGING AUDIT (2026-08-31) — **VERDICT: PROD IS READY. NO DISPLAY GAPS. NO BLOCKERS.**
+Trevor: *"does every piece of the database that we need — whether it's to get to what we need or to display what we
+need — [exist and is it] correct and consistent… if we push this into prod right now, would the database in prod match
+what needs to be matched in staging and show the correct values."* **Answer: YES.** Method and evidence below.
+
+## ★ THE HEADLINE — ZERO COLUMNS POPULATED ON STAGING BUT EMPTY ON PROD
+Column-by-column coverage diff (every column, `information_schema`-driven, not a hand-picked list):
+| surface | prod / staging rows | columns populated on staging but EMPTY on prod |
+|---|---|---|
+| `"Hitter Master"` 2026 D1 | 5,341 / 5,343 | **NONE** ✅ |
+| `"Pitching Master"` 2026 D1 | 5,374 / 5,377 | **NONE** ✅ (prod AHEAD on `bf`) |
+| `player_predictions` returner | 15,694 / 15,551 | **NONE** ✅ |
+| `player_predictions` transfer | 185,527 / 199,572 | **NONE** ✅ |
+| `"Conference Stats"` D1 | 30 / 30 | **NONE** ✅ (prod AHEAD on **29** columns) |
+| `team_season_stats` 2026 | 308 / 308 | **NONE** ✅ (prod AHEAD on `team_drs`) |
+⇒ **Nothing the UI reads is missing on prod.** Every display path has its data.
+
+## ★ VALUE-LEVEL — THE DESCRIPTIVE WAR CHAIN IS **BIT-IDENTICAL**
+`"Hitter Master"`, per player joined on `source_player_id` (n = 5,340):
+```
+desc_owar · d_war · bsr_war · total_desc_war · woba     mean 0 · median 0 · p90 0   ← EXACTLY IDENTICAL
+pa · regular_season_pa                                  median 0 (mean ~0.9 = TruMedia-vs-engine counting noise)
+```
+`"Pitching Master"` (n = 5,374): `stuff_plus` **median 0.000** · `fip` 0.04 · `whip` 0.04 · `k9` 0.2 ·
+`desc_pwar` **0.001** · `desc_ra9` **0.003** · `drs_behind` **0.008**.
+`"Conference Stats"` (n = 30): **`run_env_factor` mean 0 · median 0 · p90 0 — EXACTLY IDENTICAL** ·
+`WRC_plus` median 0 · `Stuff_plus` median 0.1.
+★ **`run_env_factor` and the whole descriptive WAR chain reproducing to ZERO across two independently-computed
+databases is the strongest evidence in this audit.** The engine is deterministic and prod ran it correctly.
+
+## ⚠ THE SUBTLE DIFFERENCES — ALL ATTRIBUTED, NONE A PROD DEFECT
+| difference | measured | cause — VERIFIED, not assumed |
+|---|---|---|
+| `p_rv_plus` (PR+) | median **1**, p90 6 | ★ **C27 calibration freshness.** Prod re-derived `ncaa_averages`/`model_config` from its OWN population; **staging never ran C27**. Small input deltas measured against different means/SDs AMPLIFY. |
+| `ERA` | median **0.15** | ★ **SOURCE, not window.** Prod's comes from the engine's accrual (inherited-runner, earned+unearned); staging's is TruMedia's official figure. ⚠ ERA is a named Master-sheet OVERRIDE field. |
+| `IP` / `regular_season_ip` | median **0.3** | TruMedia counting vs the engine's pitch-log derivation (`corr 0.9932`, recorded in the F44 migration). |
+| `hitter_talent_plus` | median **0.5** | `OPR` is Master-derived and **staging never got C24/C26/C27/C28/C28b/C29**. |
+| wRC+ / `o_war` (projections) | median **4** / **0.133** | Same C27 chain — the equation and all 11 C1 config keys are **byte-identical** (verified separately). |
+| Hitter Master rows | 5,341 vs 5,343 | Different player populations. Prod carries 31,467 `players` vs staging 15,561 (historical depth). |
+| `player_predictions` 2027 | 201,221 vs 215,123 | **prod 14 active customer teams, staging 18.** Prod has MORE returner rows (15,694 vs 15,551). |
+| `team_war_snapshots.team_drs` | prod **308**, staging **0** | ★ **PROD AHEAD** — staging never ran D29b. |
+| `bf`, `pitcher_ev_score`, 29 Conference Stats columns | prod filled, staging 0 | ★ **PROD AHEAD** — C24/C28b and the Masters fill. |
+🛑 **PROD IS THE CURRENT SIDE ON EVERY AXIS WHERE THEY DIFFER.** ⛔ **NEVER reconcile prod TOWARD staging.**
+
+## 📋 THE C-STEP GAP, STATED ONCE (this is the root of nearly every difference above)
+**STAGING NEVER RECEIVED: C24 · C26 · C27 · C28 · C28b · C29.** Consequences, measured:
+- `ncaa_averages` / `model_config` NCAA means+SDs are STALE on staging (64 keys genuinely differ; 156 more were
+  formatting-only — **compare numerically, never as strings**).
+- `p_ncaa_avg_stuff_plus` prod **100.0141** vs staging 99.4358 · `p_sd_stuff_plus` **5.04577** vs 5.93754.
+- `trackman_pitches` +42 on prod · `pitcher_ev*`/`iz*` **30/30 prod vs 0/30 staging**.
+⇒ **A prod↔staging difference is EXPECTED until staging is caught up THROUGH TRACK B**, and the catch-up carries
+five hard requirements (see "STAGING CATCH-UP — HARD REQUIREMENTS").
+
+## ✅ AUDIT CONCLUSION
+1. **Every column the UI reads is populated on prod.** Zero display gaps on all six surfaces.
+2. **The descriptive WAR chain and `run_env_factor` reproduce EXACTLY** — independent replication across two databases.
+3. **Every remaining difference is attributed to a named, verified cause**, and in every case prod is the fresher side.
+4. ⇒ **Pushing prod as it stands would display CORRECT values.** No blocker found.
+⬜ **Two things remain OUTSIDE the data** (both logged separately, neither a data defect):
+   the **armed onboarding trigger** (`trg_customer_teams_autofire_precompute`) and the **G46 edge function** — removed
+   from this push and moved to the Track B branch.
+
 
 
 
