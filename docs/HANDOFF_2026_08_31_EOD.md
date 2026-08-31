@@ -51,7 +51,8 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
        🛑 `npm run …:prod` ALIASES **WRITE** — no --dry-run inside. Use `-- --dry-run` (the `--` is REQUIRED).
        🛑 the propagate RPC needs `set statement_timeout = '15min'` as an EXPLICIT statement (client option ignored).
 ✅ E38  zsh scripts/_run_step2_all.sh --prod    DONE · 13 teams x ~14,270 · All-Americans 0 (school_team_id NULL, by design)
-▶ F39  select refresh_composite_war();          NEXT — direct pg session ONLY
+✅ F39  select refresh_composite_war();         DONE · 9.0s · d_war/bsr_war 200,754→201,221 · identity worst 0.000000
+▶ F40  backfill-snapshot-total-hitter-war       NEXT (696 snapshots to fill)
   E38  zsh scripts/_run_step2_all.sh --prod     🛑 the loop pipes through `grep | head -3` and SWALLOWS EXIT CODES.
                                                 "14 teams DONE" is NOT proof — re-run the dry-run, require 0 pending per team.
                                                 customer_teams active = 14 (NOT 18 — that is a staging number)
@@ -672,3 +673,36 @@ never by a failure. **A Track B stage that "ran fine" tells you nothing.**
 4. **LOG-CONTENT** — read the body, never the exit code. (#5, #15)
 Plus: **cross-environment comparison AFTER both run the same rule** — which is how #9 was proven to be a rule change
 rather than a defect (gaps collapsed ~91%).
+
+---
+# ✅ F39 `refresh_composite_war()` — APPLIED TO PROD 2026-08-31 (9.0s)
+Fired from the **DIRECT pg session** with `set statement_timeout = '15min'` (FINITE, never 0).
+| | BEFORE | AFTER |
+|---|---|---|
+| `d_war` populated | 200,754 | **201,221** |
+| `bsr_war` populated | 200,754 | **201,221** |
+| `total_hitter_war` | 112,087 | 112,087 |
+| avg `total_hitter_war` | 0.3517 | **0.3549** |
+Filled **467** rows that lacked `d_war`/`bsr_war` and re-derived every total at ÷13.1.
+
+## GATES — ALL PASS
+```
+identity total_hitter_war = o_war + d_war + bsr_war   worst 0.000000  (n=112,087)   ← EXACT to 6dp
+rows with o_war but NULL total                        0
+d_war / bsr_war centered                              avg d 0.0038 · bsr 0.0000 · range −1.24 … 2.49
+returner totals                                       n=6,806 · avg 0.803 · max 6.86
+```
+★ `max total_hitter_war` **6.86** matches `max o_war` **6.86** on BOTH envs — the top of the distribution carries
+through unchanged.
+
+## 🚨 WHY THE TRANSPORT MATTERED
+`supabase/migrations/20260810_composite_war_d1_rescale.sql:13` sets `statement_timeout = '180000'` **inside** the
+function — the author signalling it can exceed the **~125s HTTP gateway ceiling**. `statement_timeout` does NOT raise
+that ceiling: over PostgREST (`.rpc(...)`, the Supabase MCP, any HTTP client) the gateway cuts the connection and the
+**WHOLE UPDATE ROLLS BACK**, usually with no error you would recognise as a rollback.
+**It ran in 9.0s here — but "it was fast this time" is not a reason to use the wrong transport.**
+
+## ✅ RUNBOOK CORRECTION CONFIRMED IN PRACTICE
+`refresh_composite_war()` writes **`player_predictions`** (`d_war`, `bsr_war`, `total_hitter_war`) — **NOT the
+Masters.** The Masters' Phase-D `d_war`/`bsr_war` are untouched. Older runbook text describing it as rewriting "the
+descriptive Master" is WRONG.

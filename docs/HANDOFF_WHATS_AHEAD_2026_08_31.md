@@ -20,7 +20,8 @@ Plus: Kozeal's real row CREATED, Wiggins' phantom row DELETED, depth-role source
 ---
 # §2 IMMEDIATELY AHEAD — FINISH THE PUSH (~half a day)
 ```
-▶ F39  select refresh_composite_war();
+✅ F39  select refresh_composite_war();          DONE 2026-08-31 · 9.0s · identity exact to 6dp
+▶ F40  backfill-snapshot-total-hitter-war --apply   NEXT
        🚨 DIRECT pg session / SQL editor ONLY. Over PostgREST the ~125s gateway cuts it and the WHOLE UPDATE
           ROLLS BACK with no error you would recognise. Use `set statement_timeout = '15min'` (FINITE, never 0).
        ✅ prod's fn is already ÷13.1. It writes `player_predictions`, NOT the Masters (the runbook says otherwise —
@@ -102,3 +103,36 @@ starting pitcher id"* — Track B flag) · SB (Master-override BY DESIGN) · `do
 `_v2_prechain_backup` (2,576,146).
 ⛔ **NEVER DROP:** `_reclass_result` · `_reclass_map` · `_reclass_pf` · `team_war_snapshots`.
 🔑 Both `PGURI`s are SAVED (`.env.local` / `.env.production.local`) — **never ask for DB passwords**.
+
+---
+# ✅ F39 `refresh_composite_war()` — APPLIED TO PROD 2026-08-31 (9.0s)
+Fired from the **DIRECT pg session** with `set statement_timeout = '15min'` (FINITE, never 0).
+| | BEFORE | AFTER |
+|---|---|---|
+| `d_war` populated | 200,754 | **201,221** |
+| `bsr_war` populated | 200,754 | **201,221** |
+| `total_hitter_war` | 112,087 | 112,087 |
+| avg `total_hitter_war` | 0.3517 | **0.3549** |
+Filled **467** rows that lacked `d_war`/`bsr_war` and re-derived every total at ÷13.1.
+
+## GATES — ALL PASS
+```
+identity total_hitter_war = o_war + d_war + bsr_war   worst 0.000000  (n=112,087)   ← EXACT to 6dp
+rows with o_war but NULL total                        0
+d_war / bsr_war centered                              avg d 0.0038 · bsr 0.0000 · range −1.24 … 2.49
+returner totals                                       n=6,806 · avg 0.803 · max 6.86
+```
+★ `max total_hitter_war` **6.86** matches `max o_war` **6.86** on BOTH envs — the top of the distribution carries
+through unchanged.
+
+## 🚨 WHY THE TRANSPORT MATTERED
+`supabase/migrations/20260810_composite_war_d1_rescale.sql:13` sets `statement_timeout = '180000'` **inside** the
+function — the author signalling it can exceed the **~125s HTTP gateway ceiling**. `statement_timeout` does NOT raise
+that ceiling: over PostgREST (`.rpc(...)`, the Supabase MCP, any HTTP client) the gateway cuts the connection and the
+**WHOLE UPDATE ROLLS BACK**, usually with no error you would recognise as a rollback.
+**It ran in 9.0s here — but "it was fast this time" is not a reason to use the wrong transport.**
+
+## ✅ RUNBOOK CORRECTION CONFIRMED IN PRACTICE
+`refresh_composite_war()` writes **`player_predictions`** (`d_war`, `bsr_war`, `total_hitter_war`) — **NOT the
+Masters.** The Masters' Phase-D `d_war`/`bsr_war` are untouched. Older runbook text describing it as rewriting "the
+descriptive Master" is WRONG.
