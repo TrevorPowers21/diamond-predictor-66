@@ -168,6 +168,38 @@ flowchart TD
   **Season Stats display**; every stat, filter, and visual there must be pitch-log-derived + stored up-to-date.
 - **Park factors = re-evaluate AFTER Stuff+ (quick).** [[project_park_factor_rework]] — next-after-Stuff+, small pass.
 
+## 🅱️ WHAT TRACK B IS *FOR* — TREVOR'S INTENT, IN HIS TERMS (2026-08-30). READ THIS BEFORE THE STAGE LIST.
+Track B is **ONE edge function that runs ONCE PER DAY**. Everything below only makes sense against that cadence:
+
+| source | cadence | role |
+|---|---|---|
+| **Pitch log** | **DAILY, all spring** | **THE PRIMARY SOURCE OF TRUTH.** The majority of every statistic is DERIVED from it. |
+| **TruMedia Master sheet** | **~MONTHLY** | A **SECOND SOURCE / CHECK**. Overrides the derived value ONLY where the pitch log is known-weak — **stolen bases, ERA**. Not the primary, and never a daily dependency. |
+
+> *"the concept is that `derive_masters_from_pitchlog.ts` needs to be the one that writes all the stats, and even if a
+> little off then it needs to be checked and overridden if off by the master sheets. The reason why is because on
+> Track B it is going to be absorbing pitch logs **every day through the spring**, but only ingesting master sheets
+> **once a month or so**, and the only differences should be a check on some of the information as a 2nd source to
+> make sure it is correct — and things like **stolen base and ERA** that aren't always perfect from deriving the pitch
+> log. That is why it has to run in the order I am mentioning and **I am adamant** about making sure it does in fact
+> do that."*
+
+### THE THREE CONSEQUENCES THAT FOLLOW (each has already bitten us)
+1. **NO STAGE MAY DEPEND ON A CSV THAT ONLY ARRIVES MONTHLY.** A daily run has no TruMedia sheet. Any stage reading
+   `docs/drs-reference/*.csv` is structurally unrunnable in Track B — **this is exactly the WAR stage's defect today**
+   (`populate_descriptive_war.mjs:80-81`). See the TRACK B BLOCKER block.
+2. **THE MASTERS ARE THE HANDOFF SURFACE.** Pitch log → **Masters (DB)** → everything downstream reads the Masters.
+   Not CSVs, not the legacy `pitcher_stuff_plus_inputs`. If a consumer reads a file, it cannot run daily.
+3. **"DERIVED THEN CHECKED" IS AN ORDER, NOT A PREFERENCE.** Derive first from the pitch log; apply the monthly sheet
+   *on top* as a narrow override. Inverting it makes the monthly sheet a blocker for the daily run.
+
+### THE ONE PATTERN TRACK B EXISTS TO PREVENT
+Three defects this push were the SAME shape — *the VALUE moved to the pitch_log lane but a supporting INPUT stayed on
+legacy*: C24 `trackman_pitches`, `computeNcaaAverages` weighting, Conference `Stuff_plus`. **All three were invisible
+to count checks.** Track B must derive every input in the same pass, from the same lane, stamped with the same
+`classification_version` + `constants_version`. A partially-refreshed set of aggregates is the failure mode, and it
+always looks like success.
+
 ## ★★ CANONICAL RUN ORDER — THE ORDER TRACK B MUST EXECUTE (derived from the read/write graph, 2026-08-30)
 🛑 **THIS LIST, NOT THE STAGE TABLE BELOW, IS THE EXECUTION ORDER.** The stage table is grouped by *kind of work* and
 is a reference for what each stage computes/stores/displays — it is **not** a runnable sequence, and three required
@@ -1990,3 +2022,78 @@ match the full-season values.
    NULL — a snapshot that only works if `pa` is *already* the regular-season line. It predates the engine's split, has
    **NO unlock**, and running it now would permanently freeze the pre-postseason number into `regular_season_pa` while
    `pa` is about to be rewritten to full-season. **Write both columns from the engine output instead.**
+
+---
+# 📐 SCOPE — MAKE `derive_masters_from_pitchlog.ts` FILL THE MASTERS COMPLETELY (2026-08-30). NOT YET BUILT.
+**Trevor's priority, in his words:** *"what we definitely need to do though is write the derive masters from pitch log
+into the master so it captures everything, recognizes the split between regular season and postseason and how that
+stores into things like the team stats that are important, and just make sure every column in the master is being
+filled properly — then once that is done bring in the master sheet that includes the postseason (so not the full
+regular season named one)."*
+★ **WAR RE-POINTING IS EXPLICITLY *NOT* REQUIRED FIRST.** Trevor: *"I don't necessarily think the WAR needs to be
+reproduced and it will be mapped in Track B as long as we continue to emphasize what the goal is."* The CSV-reading
+WAR stage stays flagged (see the TRACK B BLOCKER block) and is mapped into Track B later. **Do not rebuild it now.**
+
+## THE ORDER (non-negotiable)
+```
+1. derive_masters_from_pitchlog.ts fills the Masters COMPLETELY from the pitch log,
+   with the regular/postseason split, and feeds the team-stat rollups correctly
+2. THEN import the POSTSEASON-INCLUSIVE Master sheet  ⚠ NOT "Full Season Hitting Master Stats.csv"
+   — that file is the regular-season-named export. Use the one that INCLUDES postseason.
+```
+
+## ✅ COLUMN AUDIT — PROD, Season 2026, division='D1' (VERIFIED 2026-08-30)
+### `"Hitter Master"` — 83 columns / 5,341 rows
+| bucket | columns | verdict |
+|---|---|---|
+| **EMPTY (4)** | `regular_season_pa` · `trackman_pitches` · `dob` · `class_year` | `regular_season_pa` = **THE GAP** (build it). `trackman_pitches` on the HITTER table is a **pitcher concept — vestigial, confirm then ignore/drop**. `dob`/`class_year` are **roster/bio data** (roster scraper), NOT stats — out of scope here. |
+| **WRONG WINDOW** | `pa` `ab` (+ the slash line that derives from them) | populated, but holding the **REGULAR-SEASON** line. Must become **FULL season**. Verified: prod `pa` == staging `regular_season_pa` for **5,339/5,339 (100.0%)**. |
+| **PARTIAL — BY DESIGN, NOT DEFECTS** | `line_drive`(5163) `avg_exit_velo`(5082) `barrel`(5078) `ev90`(5151) `pull`(5216) `la_10_30`(5078) `gb`(5163) `pop_up`(5163) + their `*_score` + the 4 power ratings (5122–5130) | gated by **`MIN_TRACKED_BIP`** — legitimately null for low-sample hitters. **Do NOT "fill" these.** |
+| **PARTIAL — BY DESIGN** | all 15 `blended_*` + `combined_pa`/`combined_seasons` (~1,061) | only players with multi-season history. Correct. |
+| **PARTIAL — GATE ARTIFACT** | `k_pct`(4,374) `pull_air`(4,367) `pull_air_score`(4,366) | **5,341 − 4,374 = 967 ≈ the `thin(<25 PA)=963`** skipped by `MIN_PA`. These are written ONLY by this producer, so sub-gate players never get them, while `AVG/OBP/SLG` (written elsewhere) are full. ⬜ **DECIDE: is a 25-PA floor correct for `k_pct`/`pull_air`, or should they follow the same rule as the slash line?** |
+| **FULL (38)** | identity, slash line, conference, division, the `desc_*` set | ✅ |
+### `"Pitching Master"` — 97 columns / 5,375 rows
+| bucket | columns | verdict |
+|---|---|---|
+| **EMPTY (4)** | `regular_season_ip` · **`bf`** · `dob` · `class_year` | `regular_season_ip` = **THE GAP**. ★ **`bf` (batters faced) is 0/5,375 yet `pitcher_line.csv` carries `full_BF` and the producer ALREADY selects `bf`** — a free fill that is simply unwired. |
+| **WRONG WINDOW** | `IP` · `ERA` | `IP` holds the **REGULAR-SEASON** line (prod `IP` == staging `regular_season_ip` for **5,374/5,374 = 100.0%**). `ERA` is from the stale import. Both are in `PITCHER_UNMAPPED` yet BOTH exist as `full_IP` / `full_ERA`. |
+| **PARTIAL — BY DESIGN** | `hard_hit_pct` `barrel_pct` `line_pct` `exit_vel` `ground_pct` `90th_vel` `la_10_30_pct` `stuff_plus`(5251) + scores | sample-gated. Correct. |
+| **PARTIAL — BY DESIGN** | 20 `blended_*` + `combined_ip`/`combined_seasons` (~1,658) | multi-season only. Correct. |
+| **PARTIAL — GATE ARTIFACT** | `k_pct`(4,772) | = the above-gate pitcher count (`MIN_BF=20`). Same open question as the hitter side. |
+| **FULL (56)** | identity, rate stats, `desc_*`, `trackman_pitches` (C24), conference | ✅ |
+
+## 🔧 THE BUILD — WHAT TO WRITE, AND FROM WHERE (every input already exists, all pitch-log-derived)
+| Master column | source | file/table | window |
+|---|---|---|---|
+| `pa` `ab` | `PA` `AB` | `scripts/drs/output/hitter_accrued.csv` | **FULL** |
+| `regular_season_pa` | `reg_PA` | same file | **REG (≤2026-05-18)** |
+| `IP` | `full_IP` | `scripts/drs/output/pitcher_line.csv` *(or `pitch_log_pitcher_totals.ip`)* | **FULL** |
+| `regular_season_ip` | `reg_IP` | `pitcher_line.csv` | **REG** |
+| `ERA` | `full_ERA` | `pitcher_line.csv` (`reg_ERA` also present) | **FULL** |
+| `bf` | `full_BF` | `pitcher_line.csv` | **FULL** |
+| rates + batted-ball | already written | `pitch_log_{hitter,pitcher}_totals` | FULL |
+| `G` `GS` | ⬜ **no pitch-log source found** | — | Master-override only |
+| SB / CS | ⬜ partial | — | **Master-override BY DESIGN** |
+**BOUNDARY (single source of truth):** `scripts/drs/drs_engine/season_config.py` →
+`2026: regular_season_end "2026-05-18", postseason_start "2026-05-19"`. Its own policy, verbatim: *player stat store +
+player TOTAL WAR + POWER RATINGS = **FULL** season · PROGRAM ANALYTICS (team_war_snapshots, YoY/championship) =
+**REGULAR** season · PROJECTIONS target a **regular-season** line.* ⬜ **Mirror this into a DB `season_config` row so
+TS and Python share ONE value** — the file itself flags this as unresolved.
+
+## ⬇️ DOWNSTREAM — "how that stores into things like the team stats"
+`refresh_team_season_stats(p_season, p_reg_end DEFAULT <season>-05-18)` already takes the boundary and already builds
+`_reg` **and** `_total` variants. It reads Master `desc_*`/`_reg` (done ✅) **and divides by `regular_season_ip`**
+(`:143` `nullif(sum(pm.regular_season_ip),0)`) — **currently 0/5,375, so every regular-season rate it computes lands
+NULL, silently.** ⇒ **Filling `regular_season_ip` is a HARD PREREQUISITE for F44.** Per policy, team analytics use the
+REGULAR-season window, which is exactly why this column matters.
+
+## 🛑 GUARDRAILS FOR THE BUILD
+1. **`--create-new` is BROKEN** — `:465` passes `"batting_team_id"` where `repRows`' `idCol` belongs, the query times
+   out over 2,576,146 rows, and `:451` discards the `error`. **Fix before relying on any new-row path.**
+2. **Never create Master rows implicitly** — keep creation behind `--create-new`, log every row by name + PA/IP.
+3. **Adopt the `TeamID` a player's teammates already use** — resolving it independently by season splits the team
+   (proved live: Arkansas 308→309 teams). Prefer the season-stable `source_team_id` for any rollup.
+4. **Do NOT run `lock_regular_season` / D33b.** It is `regular_season_pa = pa` where NULL, has **no unlock**, and would
+   freeze the pre-postseason number. **Write both columns from the engine output instead.**
+5. **Gate on VALUE + MEMBERSHIP + CARDINALITY, never counts.** After the build: `pa` avg must move ~121.8 → ~128.0;
+   `regular_season_pa` must equal the OLD `pa` per player; `regular_season_ip` 0 → 5,374.
