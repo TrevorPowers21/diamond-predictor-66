@@ -23,7 +23,7 @@
 >   pitchers) · baseline armHB SIGN CHECK PASSED 18/18 · 2,015,321 scored + recentered (every type×hand bucket exactly
 >   100.0) · step 4 all 48 dimensions + `populate_hitter_run_values`. **Still open on staging:** step 5
 >   `derive_masters_from_pitchlog.ts` is DRY-RUN ONLY (0 hitters / 4,675 pitchers would change; never applied on ANY env).
-> - **PROD:** still on the OLD per-pitch CASE labels (`"4-Seam Fastball"`, ~2,176,888 labeled of ~2,575,996, no
+> - **PROD (historical):** still on the OLD per-pitch CASE labels (`"4-Seam Fastball"`, ~2,176,888 labeled of ~2,575,996, no
 >   `classification_version`, `needs_review` all null). **v2 has NEVER written to prod.** Prod's DATA is ready (100.00% of
 >   `is_data=true` rows are v2-classifiable; venue corrections present and resolving).
 > - **⛔ THE ONE REMAINING PROD BLOCKER:** prod's `pitch_log_corrected` VIEW is `select pl.*` **FROZEN at 94 of 99
@@ -2323,3 +2323,113 @@ column instead of `team` and briefly reported "all 309 teams would be dropped" (
    its **depth-role tier counts do not move**.
 3. Then **re-run F44** (`refresh_team_season_stats`) so `ra9_r` / `fra9_r` stop landing NULL. Idempotent.
 ⛔ **`lock_regular_season` / D33b remains OBSOLETE** — it snapshots `pa`, which is exactly the wrong mechanism.
+
+---
+# 🔴🔴 PROD GAP — `pitch_log.game_string` WAS **0 / 2,576,146**, AND WHAT IT SILENTLY BROKE (2026-08-31)
+## THE FINDING
+| | PROD | STAGING |
+|---|---|---|
+| `pitch_log` 2026 rows | 2,576,146 | 2,579,655 |
+| **`game_string` populated** | **0 (100% NULL)** | **2,576,146** |
+| `inn` · `outs` · `date` · `pitcher_id` | 2,576,146 each ✅ | ✅ |
+**Every other column is fine.** Only `game_string` is empty — and it is **NOT a derived value**. It is an identifier
+that arrives WITH the export and is written at INGEST: `scripts/ingest_pitch_log.ts:325`
+`game_string: textOrNull(get(row, cols, "gameString"))`. **Prod was loaded from a run that lost that column.**
+
+## 🛑 WHAT IT BREAKS (both silent — neither raises an error)
+1. **PER-PITCHER IP (outs ÷ 3) CANNOT BE DERIVED.** The half-inning key is `(game_string, inn)`.
+   `scripts/fill_pitcher_totals_ip.ts --prod` derived **0 pitchers** on prod vs **5,415** on staging. It returns an
+   empty set, not an error.
+2. **`refresh_team_season_stats` STEP 5 (team W/L RECORDS) HAS NOTHING TO KEY ON.** That step states verbatim:
+   *"game key = game_string = EXACT game id, doubleheader-safe"*. On prod every key is NULL ⇒ records are wrong/empty
+   ⇒ **F44 would have produced a broken records block and reported success.**
+★ **THE PHASE-C GATES ALL PASSED WHILE THIS WAS 100% NULL** — the Stuff+ chain, the 48/48 aggregations, C24–C29 and
+Phase D never touch `game_string`. It only surfaced when something finally needed it as a KEY. **Another instance of
+"a gap stays invisible until a specific consumer needs that exact column."**
+
+## ✅ THE FIX — `scripts/backfill_pitch_log_game_string.ts` (NEW)
+Reads the **source export**, not staging: `docs/drs-reference/*DRS Pitch Log*.csv` — **34 files**, `uniqPitchId` (col 7)
+→ `gameString` (col 4). ⛔ deliberately NOT copied from staging even though `uniq_pitch_id` matches across
+environments — this re-derives from the same source staging was loaded from ([[feedback_derive_over_copy]]).
+**DRY-RUN ON PROD:** `read 34 files · 2,652,166 rows · 2,576,230 distinct uniqPitchId · 0 empty gameString` ·
+**resolvable 2,576,146 / 2,576,146 = 100.00%**. Spot-check `287772425-23-1 → cs-mur01202602280`, and that row's
+`date` is 2026-02-28 — the game string encodes `20260228` ✅.
+**SAFETY:** writes only `where game_string is null` (never overwrites) · idempotent · stages the map into a temp table
+then does ONE set-based UPDATE (2.5M single-row updates would take hours).
+🐛 **FIRST ATTEMPT FAILED — `create temp table … ON COMMIT DROP`.** node-postgres **autocommits every statement**
+unless you open an explicit transaction, so the CREATE committed and the table was dropped before the inserts ran
+(`relation "_gs_map" does not exist`). **It failed loudly and wrote NOTHING** — prod re-verified at `filled 0`.
+✅ Fixed by using a session temp table. **Rule: never use `ON COMMIT DROP` from node-postgres without an explicit BEGIN.**
+
+---
+# 🔬 HOW PER-PITCHER IP IS DERIVED — outs ÷ 3, AND THE FOUR WRONG WAYS
+Trevor: *"IP is outs total divided by 3 anyway. That's what staging did… there is an outs total in the inning that the
+pitch log tracks and you just have to recognize how that changes to get total outs."*
+**THE DATA:** `inn` is **TEXT and ALREADY encodes the half** — `'Top 1'` / `'Bot 1'` — so **`(game_string, inn)` IS a
+half-inning**; no separate top/bottom key is needed. `outs` is the base-out **STATE BEFORE the pitch** and only ever
+holds **0 / 1 / 2** (never 3).
+**THE DERIVATION (committed as `scripts/fill_pitcher_totals_ip.ts`):**
+```sql
+with p as (
+  select pitcher_id, outs,
+         lead(outs) over (partition by game_string, inn order by uniq_pitch_id) nxt
+  from pitch_log where season=2026 and inn is not null and outs is not null)
+select pitcher_id, sum(greatest(coalesce(nxt,3) - outs, 0)) / 3.0 as ip from p group by pitcher_id
+```
+Outs on a play = the NEXT row's `outs` minus this row's, within the half-inning; the final play of a completed
+half-inning takes it to 3. **The out is attributed to whoever threw that pitch, so relief appearances split correctly.**
+## 📊 ACCURACY — MEASURED AGAINST TruMedia `"Pitching Master".IP` (n=5,377, staging)
+| method | mean \|Δ\| | median | verdict |
+|---|---|---|---|
+| engine `pitcher_line.csv` `full_IP` | **0.411** | 0.30 | best, but CSV-dependent |
+| **outs-state delta ÷ 3 (this script)** | **0.476** | **0.33** | ✅ **in-DB, no CSV — chosen** |
+| staging's stored `totals.ip` | 0.486 | 0.33 | ← **NOT more correct than a fresh derivation** |
+| out-events + Sac, DP=2 | 0.596 | 0.33 | close; misses an out category |
+| out-events, DP=2 | 1.260 | 1.00 | |
+| attributable `(max+1−min)/3` | — | 1.33 | |
+| half-inning `(max+1)/3` | — | 2.67 | ⛔ credits relievers with outs recorded BEFORE they entered |
+★ **THE KEY RESULT: this derivation is as accurate as staging's stored column (0.476 vs 0.486, identical medians).**
+Staging's `ip` is an **ad-hoc artifact with NO committed producer** — I burned significant effort trying to reproduce
+it exactly before realising **matching it was never the goal**; reproducing a correct outs÷3 is.
+All methods sit within the ~0.99 correlation this measure carries by design (`refresh_team_season_stats.sql:119`
+records **corr 0.9932 vs Master IP**).
+**GUARD:** the script ABORTS if mean |Δ| vs the Master line exceeds 1.0 IP — a bad derivation cannot write.
+**BOTH WINDOWS IN ONE PASS:** the regular-season split comes from the date parsed out of `game_string`
+(`…20260328…`) vs `regular_season_end` — so `ip` and the new `ip_reg` are produced together, no CSV needed.
+
+---
+# 📋 THE COMPLETE FILL LIST — WHAT MUST BE POPULATED, WHERE IT COMES FROM, AND ITS STATE
+## LAYER 2 — `pitch_log_*_totals` (THE ACCUMULATOR — rebuilt on EVERY import)
+| table.column | source | PROD state | note |
+|---|---|---|---|
+| `pitch_log_pitcher_totals.ip` | outs÷3 from `pitch_log` | ❌ **0 / 5,509** | needs `game_string` first |
+| `pitch_log_pitcher_totals.ip_reg` | same, ≤ boundary | ❌ **column does not exist** | `add column if not exists` |
+| `..._pitcher_totals.R` / `ER` | ⬜ **NOT BUILT** | ❌ absent | ⚠ needs the engine's **inherited-runner attribution, earned+unearned** — NOT a naive count. Blocks pitcher WAR from the DB. |
+| `..._pitcher_totals` counts (`total_bf/pa/k/bb/hbp`, hits, batted-ball, `stuff_plus_sum`) | aggregator | ✅ 5,509 | |
+| `pitch_log_hitter_totals` (`pa ab hits_* k bb hbp sac`, batted-ball, `ev_*`) | aggregator | ✅ 6,099 | full-season `pa`/`ab` verified **median Δ 0.00** vs engine |
+| `pitch_log_hitter_totals.batting_rv / defensive_rv / baserunning_rv` | `populate_hitter_run_values` | ✅ | ★ precedent for folding defense/baserunning INTO the accumulator |
+| a `reg` window for the hitter side | ⬜ **NOT BUILT** | ❌ | either `dimension_key='reg'` or `*_reg` columns |
+## LAYER 3 — the Masters (DERIVED + DISPLAY)
+| column | source | PROD state |
+|---|---|---|
+| `Hitter Master.pa` / `ab` | accumulator (full) | ⚠ holds the **REGULAR-SEASON** line — must become FULL |
+| `Hitter Master.regular_season_pa` | engine `reg_PA` / a reg window | ❌ **0 / 5,341** |
+| `Pitching Master.IP` | `ip` (full) | ⚠ holds the REGULAR-SEASON line |
+| `Pitching Master.regular_season_ip` | `ip_reg` | ❌ **0 / 5,375** |
+| `Pitching Master.ERA` | engine `full_ERA` (until `ER` lands in the accumulator) | ⚠ stale CSV |
+| `Pitching Master.bf` | `total_bf` | ❌ **0 / 5,375** — free fill, already selected by the producer |
+| **`K9` `BB9` `HR9` `WHIP` `FIP`** | `pitcherIpDependent()` — **needs `ip`** | 🔴 **STALE CSV VALUES ON PROD.** `pitcherIpDependent` returns `{}` when `ip` is null, so the producer silently skips them. **Staging derives them; prod does not.** ← *newly discovered, was not in any doc* |
+| `k_pct` / `pull_air` | accumulator | ⚠ 4,374 / 4,367 of 5,341 — the `MIN_PA` PATCH gate (now removed) |
+| rates + batted-ball + `stuff_plus` | accumulator | ✅ (dry-run: 0 changes) |
+| `G` / `GS` | ⬜ no pitch-log source found | Master-override. Trevor: *"almost positive the pitch log import has a starting pitcher id"* — Track B flag |
+| SB / CS | Master sheet | **override BY DESIGN** |
+| `dob` / `class_year` | roster scraper | out of scope |
+
+## ▶️ ORDER (each step unblocks the next — none of these are optional)
+```
+1. game_string backfill        ← unblocks 2 AND F44's records block
+2. fill_pitcher_totals_ip      → ip + ip_reg  (derives 0 pitchers until step 1 lands)
+3. derive_masters_from_pitchlog → K9/BB9/HR9/WHIP/FIP finally derive; pa/IP/ERA/bf + regular_season_* written
+4. F44 refresh_team_season_stats → _reg rates stop landing NULL; records block works
+5. postseason-inclusive Master sheet import = the CROSS-CHECK / OVERRIDE layer
+```

@@ -51,6 +51,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { readFileSync, existsSync } from "node:fs";
 import {
   deriveHitterRates,
   derivePitcherRates,
@@ -181,7 +182,7 @@ const PITCHER_IP_KINDS: Record<string, FieldSpec<any>["kind"]> = {
 // Per the architecture directive (Trevor): THIS script must write ALL stats from the pitch log, with the monthly
 // TruMedia Master sheet acting only as a CHECK/OVERRIDE for the known-weak fields (stolen bases, ERA).
 // See the "WAR MUST READ THE DB MASTERS" block in docs/PIPELINE_pitch_log_to_projections.md.
-const PITCHER_UNMAPPED = ["ERA", "IP", "G", "GS", "Role"];
+const PITCHER_UNMAPPED = ["G", "GS", "Role"];   // ★ 2026-08-30: ERA, IP (and bf) are now WRITTEN from the engine accrual
 
 const eps = (kind: FieldSpec<any>["kind"]) =>
   kind === "rate" ? 0.0005 : kind === "mph" ? 0.05 : kind === "per9" ? 0.05 : 0.05;
@@ -238,6 +239,49 @@ function buildPatch<TRow>(t: TRow, master: Record<string, any>, fields: FieldSpe
 
 const fmt = (v: any) => (v == null ? "—" : String(v));
 
+// ── ENGINE COUNTING-STAT SOURCE (2026-08-30) ─────────────────────────────────
+// The Masters' COUNTING columns (pa/ab/IP/ERA/bf) and the REGULAR-SEASON anchors
+// (regular_season_pa / regular_season_ip) come from the dRS engine's accrual output, which splits the
+// pitch log at the season boundary (scripts/drs/drs_engine/season_config.py → 2026 regular_season_end 2026-05-18).
+//   hitter_accrued.csv : PA AB … + reg_PA reg_AB …
+//   pitcher_line.csv   : full_IP full_ERA full_BF … + reg_IP reg_ERA …
+// ⚠ TEMPORARY FILE DEPENDENCY — TRACK B MUST REPLACE THIS. The long-term source is the accumulator:
+//   • full-season pa/ab ARE already in pitch_log_hitter_totals (verified: median Δ 0.00 vs engine PA/AB)
+//   • full BF is already in pitch_log_pitcher_totals.total_bf (median Δ 0.00)
+//   • ⛔ pitch_log_pitcher_totals.ip is **0/5,509 on PROD** (staging 5,415) and has **NO COMMITTED PRODUCER** —
+//     which is also why K9/BB9/HR9/WHIP/FIP are NOT pitch-log-derived on prod today (the ip-dependent
+//     branch silently returns {} when ip is null). Track B must compute `ip` in the totals build.
+//   • ⛔ there is no `reg` dimension_key yet, so the regular-season split can ONLY come from these files.
+// 🛑 BOTH WINDOWS ARE WRITTEN IN THE SAME UPSERT. Depth-role tiering reads `regular_season_pa ?? pa`
+//    (useTeamBuilderData.ts:239,:254) — a full-season `pa` with a NULL `regular_season_pa` silently feeds
+//    postseason-inflated volume into tier classification and pushes playoff teams up a tier.
+const NO_COUNTS = process.argv.includes("--no-counts");
+function loadEngineCsv(path: string): Map<string, Record<string, string>> {
+  const m = new Map<string, Record<string, string>>();
+  // ★ do NOT blanket-catch here: a missing file is an expected state, but a parse/permission error must be LOUD.
+  // (This loader originally swallowed a ReferenceError from a missing import and reported it as "file not found".)
+  if (!existsSync(path)) { console.warn(`  ⚠ engine CSV absent: ${path}`); return m; }
+  const text = readFileSync(path, "utf8");
+  const lines = text.trim().split("\n");
+  const H = lines[0].split(",").map((s) => s.trim());
+  const idIdx = H.indexOf("source_player_id");
+  if (idIdx < 0) return m;
+  for (const line of lines.slice(1)) {
+    const cells = line.split(",");
+    const id = (cells[idIdx] || "").trim();
+    if (!id) continue;
+    const row: Record<string, string> = {};
+    H.forEach((h, i) => { row[h] = (cells[i] ?? "").trim(); });
+    m.set(id, row);
+  }
+  return m;
+}
+const numOrNull = (v: string | undefined): number | null => {
+  if (v == null || v === "" || v === "None") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 // ── main ─────────────────────────────────────────────────────────────
 async function main() {
   console.log(
@@ -259,6 +303,19 @@ async function main() {
   const hitterTotals = await fetchTotals<PitchLogHitterTotalsRow>("pitch_log_hitter_totals", "batter_id");
   const pitcherTotals = await fetchTotals<PitchLogPitcherTotalsRow>("pitch_log_pitcher_totals", "pitcher_id");
 
+  // engine accrual (counting stats + the regular-season split) — see the ENGINE COUNTING-STAT SOURCE note
+  const hitAcc = NO_COUNTS ? new Map() : loadEngineCsv("scripts/drs/output/hitter_accrued.csv");
+  const pitLine = NO_COUNTS ? new Map() : loadEngineCsv("scripts/drs/output/pitcher_line.csv");
+  const countsAvailable = hitAcc.size > 0 && pitLine.size > 0;
+  console.log(
+    NO_COUNTS
+      ? "counting stats: SKIPPED (--no-counts)"
+      : countsAvailable
+        ? `counting stats: engine accrual loaded — ${hitAcc.size} hitters, ${pitLine.size} pitchers ` +
+          `(writes pa/ab/regular_season_pa · IP/regular_season_ip/ERA/bf)`
+        : "⚠ counting stats: engine CSVs NOT FOUND — pa/IP/ERA/bf/regular_season_* will NOT be written",
+  );
+
   // Detect whether the `ip` column exists on the totals (post-migration).
   const ipColExists = (() => {
     const any = pitcherTotals.values().next().value as any;
@@ -278,8 +335,22 @@ async function main() {
   for (const m of hitterMasters) {
     const t = hitterTotals.get(String(m.source_player_id));
     if (!t) { hitterNoPL++; continue; }
-    if ((t.pa ?? 0) < MIN_PA) { hitterThin++; continue; }
+    // ★ 2026-08-30 — PATCH GATE REMOVED (Trevor: "follow the slashline and fill it for everyone").
+    // MIN_PA still gates NEW-ROW CREATION in buildNewRows() — that floor MUST stay, or --create-new would
+    // manufacture a Master row for every 1-PA appearance (763 candidates on prod instead of 1).
+    // Previously `if ((t.pa ?? 0) < MIN_PA) { hitterThin++; continue; }` skipped ~963 hitters entirely,
+    // leaving their k_pct / pull_air permanently stale while the slash line (written elsewhere) was full.
+    if ((t.pa ?? 0) < MIN_PA) hitterThin++;   // counted for reporting only — NO LONGER SKIPPED
     const built = buildPatch(t, m, HITTER_FIELDS);
+    // counting stats + the regular-season anchor, from the engine accrual (BOTH windows, same upsert)
+    const acc = hitAcc.get(String(m.source_player_id));
+    if (acc) {
+      const pa = numOrNull(acc.PA), ab = numOrNull(acc.AB), regPa = numOrNull(acc.reg_PA);
+      if (pa != null) built.patch.pa = pa;
+      if (ab != null) built.patch.ab = ab;
+      if (regPa != null) built.patch.regular_season_pa = regPa;
+      if (pa != null && pa !== Number(m.pa)) built.changedCols.push("pa");
+    }
     hitterPatches.push(built.patch);
     if (built.changedCols.length) hitterChanged++;
     if (SAMPLE_IDS.includes(String(m.source_player_id))) {
@@ -299,11 +370,26 @@ async function main() {
   for (const m of pitcherMasters) {
     const t = pitcherTotals.get(String(m.source_player_id));
     if (!t) { pitcherNoPL++; continue; }
-    if ((t.total_bf ?? 0) < MIN_BF) { pitcherThin++; continue; }
+    // ★ 2026-08-30 — PATCH GATE REMOVED (see the hitter loop). MIN_BF still gates NEW-ROW creation.
+    if ((t.total_bf ?? 0) < MIN_BF) pitcherThin++;   // counted for reporting only — NO LONGER SKIPPED
     const built = buildPatch(t, m, PITCHER_FIELDS);
-    // IP-dependent fields — only when the ip column is populated.
-    if (ipColExists) {
-      const ipVal = (t as any).ip as number | null;
+    // counting stats + the regular-season anchor, from the engine accrual (BOTH windows, same upsert)
+    const line = pitLine.get(String(m.source_player_id));
+    let ipFromEngine: number | null = null;
+    if (line) {
+      const fullIp = numOrNull(line.full_IP), regIp = numOrNull(line.reg_IP);
+      const era = numOrNull(line.full_ERA), bf = numOrNull(line.full_BF);
+      if (fullIp != null) { built.patch.IP = fullIp; ipFromEngine = fullIp; }
+      if (regIp != null) built.patch.regular_season_ip = regIp;
+      if (era != null) built.patch.ERA = era;
+      if (bf != null) built.patch.bf = bf;
+      if (fullIp != null && Math.abs(fullIp - Number(m.IP)) > 0.01) built.changedCols.push("IP");
+    }
+    // IP-dependent fields (K9/BB9/HR9/WHIP/FIP). Prefer the totals `ip`; fall back to the engine's full_IP.
+    // ⚠ On PROD `pitch_log_pitcher_totals.ip` is 0/5,509 (no committed producer), so WITHOUT this fallback
+    //   these five columns silently stay at their stale CSV values — which is the state prod is in today.
+    {
+      const ipVal = (ipColExists ? ((t as any).ip as number | null) : null) ?? ipFromEngine;
       const ipFields = pitcherIpDependent(t, ipVal);
       for (const [col, v] of Object.entries(ipFields)) {
         if (v == null) continue;
@@ -448,6 +534,7 @@ async function buildNewRows(
   }
 
   // One representative pitch_log row per new id (team source id + abbrev + hand).
+  let repErrors = 0;
   async function repRows(ids: string[], idCol: string, teamCol: string, abbrevCol: string, handCol: string) {
     const map = new Map<string, any>();
     const BATCH = 20; // parallelism
@@ -455,9 +542,12 @@ async function buildNewRows(
       const slice = ids.slice(i, i + BATCH);
       await Promise.all(
         slice.map(async (id) => {
-          const { data } = await (sb as any).from("pitch_log")
+          const { data, error } = await (sb as any).from("pitch_log")
             .select(`${teamCol}, ${abbrevCol}, ${handCol}`)
             .eq("season", SEASON).eq(idCol, id).limit(1);
+          // ★ 2026-08-30: the error was previously DISCARDED, so a statement timeout was indistinguishable from
+          // "this player has no pitch-log row" and the player was silently skipped. Count and surface it.
+          if (error) { repErrors++; if (repErrors <= 5) console.error(`  ✗ repRows ${idCol}=${id}: ${error.message}`); return; }
           if (data && data[0]) map.set(id, data[0]);
         }),
       );
@@ -469,7 +559,11 @@ async function buildNewRows(
   const resolveTeam = (srcId: string | null | undefined) => (srcId ? teamBySource.get(String(srcId)) : undefined);
 
   // ── hitters ──
-  const hitterReps = await repRows(newHitterIds, "batting_team_id", "batting_team_id", "batter_abbrev_name", "batter_hand");
+  // 🐛 FIX 2026-08-30: this passed "batting_team_id" as idCol (the pitcher call at the bottom correctly passes
+  // "pitcher_id"), so it queried pitch_log WHERE batting_team_id = <a player id> — matched nothing, EXCEEDED the
+  // statement timeout over 2.5M rows, and repRows discarded the error ⇒ every hitter silently skipped ⇒ NO hitter
+  // Master row could EVER be created. Track B needs this working (2027 opens with mostly new players).
+  const hitterReps = await repRows(newHitterIds, "batter_id", "batting_team_id", "batter_abbrev_name", "batter_hand");
   const newHitterRows: Record<string, any>[] = [];
   for (const id of newHitterIds) {
     const t = hitterTotals.get(id)!;
