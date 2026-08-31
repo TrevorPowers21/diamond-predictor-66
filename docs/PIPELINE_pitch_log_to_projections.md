@@ -2826,3 +2826,39 @@ F44 consumed, in one call, nearly everything built today — and each would have
 records block has no key) · Masters `desc_*`/`_reg` · `team_drs` · Conference Stuff+/HTP · `"Park Factors".rg_factor`.
 **Track B must run these in dependency order and gate each on a VALUE, because the failure mode is a populated table
 full of NULLs and zeros that passes every count check.**
+
+---
+# ✅ E35 TWP DETECTOR — APPLIED TO PROD 2026-08-31 (11.4s, 606 updates, 0 errors)
+`npx tsx --env-file=.env.production.local scripts/run-twp-recompute.ts --prod --apply`
+(guard ADDED earlier today — it had NONE; backup `_players_pre_twp_backup`, 31,467 rows)
+
+## GATES
+| gate | before | after | staging | ✓ |
+|---|---|---|---|---|
+| `players.is_twp` | 137 | **253** | **253** | ✅ **exact match** |
+| legacy `position='TWP'` | 428 | **34** | **34** | ✅ **exact match** |
+| `position` NULL | 196 | 462 | 94 | ✅ prod carries far more alumni |
+| rows changed | — | **606** | — | ✅ = the dry-run figure |
+| D1 TWPs | — | **90** | — | ℹ |
+**BREAKDOWN:** 124 new · 80 legacy-migrated · 49 unchanged · 28 → hitter · 108 → pitcher · 266 cleared → NULL · 34 left alone.
+★ **`124 + 80 + 49 = 253` — arrived at INDEPENDENTLY from prod's own Masters and landing exactly on staging's 253.**
+Same independent-replication pattern as the Stuff+ gate, `team_drs`, and Kozeal's WAR.
+
+## 🛑 MY GATE EXPECTATION WAS WRONG (again) — THE DATA WAS RIGHT
+I predicted legacy `position='TWP'` would go to **0**. It went to **34** — which is **exactly staging's 34** and
+**exactly the detector's own `left alone: 34` bucket**. Those rows are DELIBERATELY untouched by the detector, not
+missed. **Do not "finish the job" by nulling them.**
+→ Sixth instrument/expectation error this session. **Before calling a number a failure, check whether the producer
+already told you it would be that number** — the report literally printed `left alone: 34`.
+
+## WHAT THE 266 "cleared → NULL" ACTUALLY ARE — NOT DESTRUCTIVE
+Prod carried **428** legacy `position='TWP'` rows vs staging's 34, because prod holds **years of historical players**
+(31,467 vs 15,561 — expected depth, NOT a discrepancy). `'TWP'` is not a position; it is the **old overload the
+detector exists to replace** — its own header: *"Replaces the prior `position = 'TWP'` overload, which destroyed the
+hitter position."* The 266 are **ALUMNI with no 2026 data**, whose real position was already destroyed by that
+overload and is unrecoverable. Setting `position = NULL` is the honest result (rule 6: *"No 2026 data → is_twp=false,
+position = NULL (alumni)"*). **Nothing recoverable was lost.**
+
+## WHY THIS HAD TO PRECEDE THE PRECOMPUTES
+`is_twp` drives BOTH-SIDE row generation. Running E36/E37/E38 first would have produced projections for 137 TWPs
+instead of 253 — **116 two-way players silently missing their second side**, with no error anywhere.

@@ -101,7 +101,7 @@ select refresh_team_season_stats(2026);
 **GATE:** `team_season_stats` 0 → **308 rows** · `faced_stuff_plus` / `faced_htp` populated · `ra9_r` / `fra9_r`
 **NOT NULL** · WAR matrix non-null · AVG ≈ .277 · wRC+ ≈ 100.
 
-## ▶️ STEP 6 — E35 TWP detector — **NEXT**
+## ✅ STEP 6 — E35 TWP detector — **DONE 2026-08-31** (is_twp 137→253 = staging exactly · legacy TWP 428→34 = staging exactly · 606 rows)
 ```
 npx tsx --env-file=.env.production.local scripts/run-twp-recompute.ts --prod          # dry-run
 npx tsx --env-file=.env.production.local scripts/run-twp-recompute.ts --prod --apply
@@ -110,7 +110,7 @@ Guard added + both refuse paths verified ✅. Prod `is_twp` = **137 / 31,467** (
 **MUST precede the precomputes** so both-side TWP rows generate.
 **GATE:** `is_twp` count rises and is sane vs staging's 253; `position` changes reviewed in the report.
 
-## STEP 7 — PRECOMPUTES (read the Masters — hence STEP 2/4 first)
+## ▶️ STEP 7 — PRECOMPUTES — **NEXT** (read the Masters — hence STEP 2/4 first)
 ```
 npm run precompute-returner-pitchers:prod      # dry-run first
 npm run precompute-returner-hitters:prod
@@ -503,3 +503,39 @@ convention is untouched.
 - **`statement_timeout` could NOT be raised via the node-postgres client option** — `show statement_timeout` still
   reported `2min` despite passing `statement_timeout: 900000`. F44 finished in **59.7s** so it did not matter, but for
   anything longer use `set statement_timeout = '15min'` as an explicit statement (a FINITE value — **never 0**).
+
+---
+# ✅ E35 TWP DETECTOR — APPLIED TO PROD 2026-08-31 (11.4s, 606 updates, 0 errors)
+`npx tsx --env-file=.env.production.local scripts/run-twp-recompute.ts --prod --apply`
+(guard ADDED earlier today — it had NONE; backup `_players_pre_twp_backup`, 31,467 rows)
+
+## GATES
+| gate | before | after | staging | ✓ |
+|---|---|---|---|---|
+| `players.is_twp` | 137 | **253** | **253** | ✅ **exact match** |
+| legacy `position='TWP'` | 428 | **34** | **34** | ✅ **exact match** |
+| `position` NULL | 196 | 462 | 94 | ✅ prod carries far more alumni |
+| rows changed | — | **606** | — | ✅ = the dry-run figure |
+| D1 TWPs | — | **90** | — | ℹ |
+**BREAKDOWN:** 124 new · 80 legacy-migrated · 49 unchanged · 28 → hitter · 108 → pitcher · 266 cleared → NULL · 34 left alone.
+★ **`124 + 80 + 49 = 253` — arrived at INDEPENDENTLY from prod's own Masters and landing exactly on staging's 253.**
+Same independent-replication pattern as the Stuff+ gate, `team_drs`, and Kozeal's WAR.
+
+## 🛑 MY GATE EXPECTATION WAS WRONG (again) — THE DATA WAS RIGHT
+I predicted legacy `position='TWP'` would go to **0**. It went to **34** — which is **exactly staging's 34** and
+**exactly the detector's own `left alone: 34` bucket**. Those rows are DELIBERATELY untouched by the detector, not
+missed. **Do not "finish the job" by nulling them.**
+→ Sixth instrument/expectation error this session. **Before calling a number a failure, check whether the producer
+already told you it would be that number** — the report literally printed `left alone: 34`.
+
+## WHAT THE 266 "cleared → NULL" ACTUALLY ARE — NOT DESTRUCTIVE
+Prod carried **428** legacy `position='TWP'` rows vs staging's 34, because prod holds **years of historical players**
+(31,467 vs 15,561 — expected depth, NOT a discrepancy). `'TWP'` is not a position; it is the **old overload the
+detector exists to replace** — its own header: *"Replaces the prior `position = 'TWP'` overload, which destroyed the
+hitter position."* The 266 are **ALUMNI with no 2026 data**, whose real position was already destroyed by that
+overload and is unrecoverable. Setting `position = NULL` is the honest result (rule 6: *"No 2026 data → is_twp=false,
+position = NULL (alumni)"*). **Nothing recoverable was lost.**
+
+## WHY THIS HAD TO PRECEDE THE PRECOMPUTES
+`is_twp` drives BOTH-SIDE row generation. Running E36/E37/E38 first would have produced projections for 137 TWPs
+instead of 253 — **116 two-way players silently missing their second side**, with no error anywhere.
