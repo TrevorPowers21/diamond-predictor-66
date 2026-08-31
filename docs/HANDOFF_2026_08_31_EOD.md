@@ -52,7 +52,8 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
        🛑 the propagate RPC needs `set statement_timeout = '15min'` as an EXPLICIT statement (client option ignored).
 ✅ E38  zsh scripts/_run_step2_all.sh --prod    DONE · 13 teams x ~14,270 · All-Americans 0 (school_team_id NULL, by design)
 ✅ F39  select refresh_composite_war();         DONE · 9.0s · d_war/bsr_war 200,754→201,221 · identity worst 0.000000
-▶ F40  backfill-snapshot-total-hitter-war       NEXT (696 snapshots to fill)
+✅ F40  backfill-snapshot-total-hitter-war      DONE · 696 filled · identity worst 0.000000
+▶ F41  TWP market scripts                      NEXT — invoke DIRECTLY (not npm scripts)
   E38  zsh scripts/_run_step2_all.sh --prod     🛑 the loop pipes through `grep | head -3` and SWALLOWS EXIT CODES.
                                                 "14 teams DONE" is NOT proof — re-run the dry-run, require 0 pending per team.
                                                 customer_teams active = 14 (NOT 18 — that is a staging number)
@@ -762,3 +763,27 @@ legitimately take? If yes, a 0 default is a prior. If no, it is missing data.**
 ✅ **JUCO (5,218) and historical players will never get dWAR/bsrWAR** — coverage begins going forward. Expected.
 ✅ The **38 D1 players with ≥50 PA and no defense row** get a league-average prior. Consistent with everyone else.
 🅱️ **TRACK B:** keep the `coalesce(…, 0)` — it is the intended neutral prior. **Do NOT "fix" it to NULL.**
+---
+# ✅ F40 SNAPSHOT `total_hitter_war` BACKFILL — APPLIED TO PROD 2026-08-31
+`npx tsx --env-file=.env.production.local scripts/backfill-snapshot-total-hitter-war.ts --prod --apply`
+Backups first: `_tbp_pre_f40_backup` (1,470) · `_tb_pre_f40_backup` (184).
+**`APPLIED: filled total_hitter_war on 696 snapshots.`** · d/bsr map resolved **520 of 522** snapshot players.
+
+## GATES — ALL PASS
+```
+team_build_players: o_war present but total NULL   0 / 0   (player_snapshot / neutral_snapshot)
+target_board:       o_war present but total NULL   0 / 0   (transfer_snapshot / neutral_snapshot)
+identity total = o_war + d_war + bsr_war           worst 0.000000  (n=612)
+values                                              n=612 · avg 1.053 · max 4.35
+```
+★ **Zero orphans on ALL FOUR snapshot JSON fields** — that is the documented gate ("0 snapshots with `o_war` but NULL
+`total_hitter_war`"), met on every one.
+✅ The **2 of 522** players absent from the d/bsr map take the **league-average 0 prior** — correct per REGISTRY #17
+(`drs_floor` is runs-above-average, so 0 IS average). **Not a gap.**
+
+## 🚨 THIS STEP WAS ONLY RUNNABLE BECAUSE OF THE MORNING'S GUARD FIX
+`scripts/backfill-snapshot-total-hitter-war.ts` had **NO env guard at all** — `process.env.SUPABASE_URL` with **no
+`--prod` flag anywhere** (`grep -c` = 0/0), so `--env-file` pointed at prod would have written prod with **zero
+opt-in**, and the only signal was a `host` banner printed AFTER the client was constructed. **SIXTH instance** of that
+defect class (after `_run_store_no_propagate`, both C28 producers, the market scripts, `run-twp-recompute` E35 and
+`backfill_park_factors_seasonal` E2). Guard added + all four paths verified before this run.

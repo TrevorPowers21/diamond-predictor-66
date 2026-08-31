@@ -27,7 +27,8 @@ Plus: Kozeal's real row CREATED, Wiggins' phantom row DELETED, depth-role source
           recognisable error. It ran in 9.0s — "it was fast" is NOT a reason to use the wrong transport.
        ✅ writes `player_predictions`, NOT the Masters (older runbook text is WRONG).
 
-▶ F40  backfill-snapshot-total-hitter-war --apply    NEXT · guard ADDED today · dry-run showed 696 snapshots to fill
+✅ F40  backfill-snapshot-total-hitter-war --apply   DONE · 696 snapshots · 0 orphans on all 4 JSON fields
+▶ F41  rebuild-twp-target-rows · rebake-twp-markets · fix-returner-twp-hitter-market   NEXT (invoke DIRECTLY, not npm)
   F41  rebuild-twp-target-rows · rebake-twp-markets · fix-returner-twp-hitter-market   (invoke DIRECTLY, not npm)
   F42  resync-build-snapshot-markets --all --apply · resync-target-snapshots --all --apply
        🚨 `--all` is REQUIRED — the default scope is a STAGING build id (0 rows on prod)
@@ -193,3 +194,27 @@ legitimately take? If yes, a 0 default is a prior. If no, it is missing data.**
 ✅ **JUCO (5,218) and historical players will never get dWAR/bsrWAR** — coverage begins going forward. Expected.
 ✅ The **38 D1 players with ≥50 PA and no defense row** get a league-average prior. Consistent with everyone else.
 🅱️ **TRACK B:** keep the `coalesce(…, 0)` — it is the intended neutral prior. **Do NOT "fix" it to NULL.**
+---
+# ✅ F40 SNAPSHOT `total_hitter_war` BACKFILL — APPLIED TO PROD 2026-08-31
+`npx tsx --env-file=.env.production.local scripts/backfill-snapshot-total-hitter-war.ts --prod --apply`
+Backups first: `_tbp_pre_f40_backup` (1,470) · `_tb_pre_f40_backup` (184).
+**`APPLIED: filled total_hitter_war on 696 snapshots.`** · d/bsr map resolved **520 of 522** snapshot players.
+
+## GATES — ALL PASS
+```
+team_build_players: o_war present but total NULL   0 / 0   (player_snapshot / neutral_snapshot)
+target_board:       o_war present but total NULL   0 / 0   (transfer_snapshot / neutral_snapshot)
+identity total = o_war + d_war + bsr_war           worst 0.000000  (n=612)
+values                                              n=612 · avg 1.053 · max 4.35
+```
+★ **Zero orphans on ALL FOUR snapshot JSON fields** — that is the documented gate ("0 snapshots with `o_war` but NULL
+`total_hitter_war`"), met on every one.
+✅ The **2 of 522** players absent from the d/bsr map take the **league-average 0 prior** — correct per REGISTRY #17
+(`drs_floor` is runs-above-average, so 0 IS average). **Not a gap.**
+
+## 🚨 THIS STEP WAS ONLY RUNNABLE BECAUSE OF THE MORNING'S GUARD FIX
+`scripts/backfill-snapshot-total-hitter-war.ts` had **NO env guard at all** — `process.env.SUPABASE_URL` with **no
+`--prod` flag anywhere** (`grep -c` = 0/0), so `--env-file` pointed at prod would have written prod with **zero
+opt-in**, and the only signal was a `host` banner printed AFTER the client was constructed. **SIXTH instance** of that
+defect class (after `_run_store_no_propagate`, both C28 producers, the market scripts, `run-twp-recompute` E35 and
+`backfill_park_factors_seasonal` E2). Guard added + all four paths verified before this run.
