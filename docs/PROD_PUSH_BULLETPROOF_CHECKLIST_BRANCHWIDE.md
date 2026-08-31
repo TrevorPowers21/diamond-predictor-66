@@ -1681,3 +1681,48 @@ REGULAR-season window, which is exactly why this column matters.
    freeze the pre-postseason number. **Write both columns from the engine output instead.**
 5. **Gate on VALUE + MEMBERSHIP + CARDINALITY, never counts.** After the build: `pa` avg must move ~121.8 → ~128.0;
    `regular_season_pa` must equal the OLD `pa` per player; `regular_season_ip` 0 → 5,374.
+
+---
+# ✅ DECISION — DO **NOT** ADD REGULAR-SEASON STAT COLUMNS. Only `regular_season_pa` / `regular_season_ip`. (Trevor, 2026-08-30)
+> *"We don't really need regular season stats — we kinda just need WARs from them, and I don't think it displays
+> anything except including the postseason data… my main concern was more about what we actually need for the regular
+> season, which was the metrics that go into WAR — which we have."*
+
+## WHAT EXISTS, AND WHY THAT IS ENOUGH
+| table | `_reg` columns | nature |
+|---|---|---|
+| `"Hitter Master"` (7 of 83) | **`regular_season_pa`** · `woba_reg` `wraa_reg` `desc_owar_reg` `d_war_reg` `bsr_war_reg` `total_desc_war_reg` | **1 stat anchor + 6 WAR OUTPUTS** |
+| `"Pitching Master"` (6 of 97) | **`regular_season_ip`** · `desc_ra9_reg` `desc_fip_ra9_reg` `drs_behind_reg` `desc_pwar_reg` `total_desc_war_reg` | **1 stat anchor + 5 WAR OUTPUTS** |
+There is **NO** regular-season `AVG/OBP/SLG/ISO`, no reg `H/2B/3B/HR/BB`, no reg `ERA/FIP/WHIP/K9/BB9/HR9`. **That is
+CORRECT and intentional.** The regular-season WAR is already computed and stored; the reg *inputs* are consumed at
+compute time from the engine output and do not need persisting.
+⚠ The engine produces **28** `reg_*` values that have no Master column and are discarded each run —
+`hitter_accrued.csv` (10): `reg_PA reg_AB reg_H reg_2B reg_3B reg_HR reg_BB reg_HBP reg_SF reg_SH`;
+`pitcher_line.csv` (18): `reg_IP reg_BF reg_K reg_BB reg_HBP reg_H reg_HR reg_ER reg_ERA reg_R reg_RA9 reg_FIP
+reg_WHIP reg_K9 reg_BB9 reg_HR9 reg_K_pct reg_BB_pct`. **Leave it that way unless a display need appears.**
+Downstream already copes: `refresh_team_season_stats(p_season, p_reg_end)` **re-derives** regular-season team rates
+straight from `pitch_log` by date; it only reads `desc_*_reg` + `regular_season_ip` from the Masters.
+
+## 🛑 BUILD HAZARD — WRITE `regular_season_pa`/`_ip` IN THE **SAME OPERATION** THAT MAKES `pa`/`IP` FULL-SEASON
+The three live consumers all use the same fallback:
+```
+useTeamBuilderData.ts:239   Number(r.regular_season_pa ?? r.pa ?? r.ab)     ← hitter depth-role tier volume
+useTeamBuilderData.ts:254   Number(r.regular_season_ip ?? r.IP)             ← pitcher depth-role tier volume
+usePitchingSeedData.ts:124  r.regular_season_ip ?? r.IP
+refresh_team_season_stats.sql:143,145   ÷ sum(regular_season_ip)
+```
+Purpose, per `AdminDashboard.tsx:4072`: *"tier classification … stays anchored to regular-season volume. Postseason
+games keep updating live pa/IP but tiers stay frozen — **playoff teams don't get inflated tier counts.**"*
+**TODAY:** `regular_season_pa` is NULL ⇒ everything falls through to `?? pa` ⇒ and prod's `pa` *happens* to be the
+regular-season line ⇒ **tiers are accidentally correct.**
+**THE TRAP:** the instant `pa`/`IP` become FULL-season while `regular_season_*` is still NULL, that same fallback
+starts using **postseason-inflated volume** ⇒ **deep-run playoff teams get their hitters/pitchers pushed up a depth
+tier**, with **no error anywhere**. It is the exact failure the lock mechanism was built to prevent, re-introduced by
+filling the wrong column first.
+✅ **RULE: one operation, both columns, or neither.** Order within the build: write `regular_season_pa = reg_PA` and
+`regular_season_ip = reg_IP` **BEFORE or ATOMICALLY WITH** `pa = PA` / `IP = full_IP`.
+✅ **GATE:** after the build, `regular_season_pa` must equal the OLD `pa` per player (prod's current values), and `pa`
+must have risen (avg **121.8 → ~128.0**). Spot-check a deep playoff team (LSU / Arkansas) and confirm its depth-role
+tier counts did **not** change.
+⛔ Still **DO NOT** run `lock_regular_season` / D33b — it snapshots `pa → regular_season_pa`, which is only valid while
+`pa` is the regular-season line, and it has **no unlock**.
