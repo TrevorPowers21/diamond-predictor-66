@@ -30,7 +30,7 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 | **E36 returner pitchers** | ✅ RE-RUN after the depth-role fix — 6,632 with `p_war` (avg **0.584**, was 0.607) · `projected_ip` **30.0** · max `p_war` **3.93** = staging · propagate 105,093. |
 | **E37 returner hitters** | ✅ RE-RUN — 6,806 with `o_war` (avg **0.795**) · max `o_war` **6.86** = staging · market max **$673,949** (was $104,110 pre-E37) · cornerstone **1,138**. |
 | **Depth-role source** | ✅ **FIXED + VALIDATED ON BOTH ENVS.** Tiers read the Masters' `regular_season_pa` / `regular_season_ip`. Applying the same code to staging collapsed the gaps ~91% (cornerstone **256 → 23**, weekend_starter **81 → 10**), proving the divergence was the RULE, not a prod defect. Fixed in **4 scripts**: returner hitter+pitcher, transfer hitter (transfer pitcher was already correct). |
-| **E38 transfers** | ▶️ **NEXT — audited.** `RSTR IQ All-Americans` (`school_team_id` NULL, prod-only) will yield **0** rows BY DESIGN; the other 13 ~14,240 each. Loop swallows exit codes — gate PER TEAM in the DB. |
+| **E38 transfers** | ✅ **DONE 2026-08-31** — 13 teams x ~14,270 rows, 0 errors, depth roles 99.9% REG-anchored. Audited first. `RSTR IQ All-Americans` (`school_team_id` NULL, prod-only) will yield **0** rows BY DESIGN; the other 13 ~14,240 each. Loop swallows exit codes — gate PER TEAM in the DB. |
 | **E35 TWP detector** | ✅ `is_twp` **137 → 253** (= staging exactly) · legacy `position='TWP'` **428 → 34** (= staging exactly) · 606 rows · D1 TWPs **90**. |
 
 **Backups on prod:** `_hm_prefill_backup` (8,245) · `_pm_prefill_backup` (8,071) · `_pm_wiggins_backup` (1) ·
@@ -49,7 +49,8 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 ✅ E37  precompute-returner-hitters:prod        DONE (re-run w/ REG anchoring) · avg o_war 0.795 · market max $673,949
        🛑 `npm run …:prod` ALIASES **WRITE** — no --dry-run inside. Use `-- --dry-run` (the `--` is REQUIRED).
        🛑 the propagate RPC needs `set statement_timeout = '15min'` as an EXPLICIT statement (client option ignored).
-▶ E38  zsh scripts/_run_step2_all.sh --prod     NEXT
+✅ E38  zsh scripts/_run_step2_all.sh --prod    DONE · 13 teams x ~14,270 · All-Americans 0 (school_team_id NULL, by design)
+▶ F39  select refresh_composite_war();          NEXT — direct pg session ONLY
   E38  zsh scripts/_run_step2_all.sh --prod     🛑 the loop pipes through `grep | head -3` and SWALLOWS EXIT CODES.
                                                 "14 teams DONE" is NOT proof — re-run the dry-run, require 0 pending per team.
                                                 customer_teams active = 14 (NOT 18 — that is a staging number)
@@ -572,3 +573,57 @@ staging did not) · `IP` 95.30 vs 95.00 (engine vs TruMedia).
   `o_war` differs 0.085; `stuff_plus` agrees to 0.000 while PR+ differs 1.0.
 - **Only investigate as a defect** when an input with a *median* difference of ~0 produces a large output change that
   calibration cannot explain.
+
+---
+# ✅ E38 TRANSFERS — APPLIED TO PROD 2026-08-31. All 14 teams, 0 errors.
+`caffeinate -dimsu zsh scripts/_run_step2_all.sh --prod` · EXIT=0 · **0 error/fail mentions in the log**.
+Per team ~4,990 hitter + ~5,110 pitcher computed (38–39% of ~13,000 candidates) — consistent across all 13 real teams.
+
+## GATE — VERIFIED PER TEAM IN THE DATABASE, **NOT** FROM THE BANNER
+| team | rows | `o_war` | `p_war` |
+|---|---|---|---|
+| Kansas · Penn State · TCU · Florida Atlantic · BYU | 14,274–14,276 | 8,099–8,103 | 6,294–6,296 |
+| Virginia Tech · Arkansas · Dallas Baptist · Arizona State · Stetson | 14,269–14,271 | 8,096–8,099 | 6,293–6,294 |
+| Gardner-Webb · Vanderbilt · Georgia | 14,267–14,268 | 8,096–8,098 | 6,290–6,292 |
+| **RSTR IQ All-Americans** | **0** | 0 | 0 |
+★ **The 9-ROW SPREAD (14,267–14,276) IS THE REAL SIGNAL.** A team cut short by a swallowed failure would sit visibly
+below the others. None does. **Row-count TIGHTNESS across peers is a better completeness gate than any single count.**
+
+## ✅ THE AUDIT'S TWO PREDICTIONS BOTH HELD
+1. **`RSTR IQ All-Americans` produced 0 — SILENTLY.** The log shows both banners with **NO `Result:` line between
+   them**, then the loop moved straight to Kansas:
+   ```
+   ===== [1/14] RSTRIQAll-Americans HITTER =====
+   ===== [1/14] RSTRIQAll-Americans PITCHER =====
+   ===== [2/14] KansasJayhawks HITTER =====
+   ```
+   Correct (`school_team_id` is NULL — no destination program to project INTO). **But a REAL failure would look
+   IDENTICAL.** This is the exit-code-swallowing risk demonstrated live, on a real run. ⛔ Do NOT "fix" this by
+   assigning it a school.
+2. **The transfer-hitter depth-role fix was REQUIRED.** Had E38 run before the audit, ~185,000 transfer rows would
+   carry FULL-season-anchored tiers while the returners carry REGULAR-season — the same players holding different
+   tiers depending on which model row you read, and nearly impossible to spot afterwards.
+
+## ✅ DEPTH ROLES CONFIRMED REGULAR-SEASON ANCHORED
+**885 of 886 transfer cornerstones have `"Hitter Master".regular_season_pa >= 220` (99.9%).** The single exception is
+a null-reg row using the documented full-season fallback.
+| role | RETURNER | TRANSFER | reading |
+|---|---|---|---|
+| everyday_starter | 2,513 | **2,510** | ✅ top tiers agree ±10 |
+| cornerstone | 1,138 | **1,128** | ✅ |
+| platoon_starter | 1,844 | 2,132 | larger transfer CANDIDATE POOL (JUCO/D2/low-PA nationally) |
+| utility | 842 | 1,322 | same |
+| bench | 683 | 1,011 | same |
+
+## ✅ EQUATION INPUTS VERIFIED **BEFORE** THE RUN (single-team prod dry-run, Kansas)
+```
+overlaid 34 pitching weights from model_config      ← config IS read (incl. every *_plus_ncaa_* key)
+308 team_season_stats faced_stuff_plus rows         ← hitter side consumes F44
+308 team_season_stats faced_htp rows                ← pitcher side consumes F44
+```
+★ **Those `308 faced_*` lines are the ORDER-AUDIT INVERSION paying off live** — this is the exact read that would have
+returned an EMPTY MAP (and silently dropped the faced-competition adjustment for every Independent program) had Phase E
+run before F44, as the original topic-ordered runbook specified.
+Two-sided SD reaches the engine: all 6 `*_ncaa_sd_bad` exist in `DEFAULT_PITCHING_WEIGHTS`, so they pass the
+`k in pitchingEq` overlay guard at `precompute-pitchers.ts:156` and are consumed by `dsd()` at
+`transferPitcherProjection.ts:390-395`.
