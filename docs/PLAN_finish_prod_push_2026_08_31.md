@@ -1117,7 +1117,7 @@ Masters.** The Masters' Phase-D `d_war`/`bsr_war` are untouched. Older runbook t
 descriptive Master" is WRONG.
 
 ---
-# 🚨 REGISTRY #17 — `refresh_composite_war()` STORES "UNKNOWN DEFENSE" AS "AVERAGE DEFENSE"
+# ✅ REGISTRY #17 — RESOLVED / NOT A DEFECT: unmeasured defense → 0 IS the correct default
 Found by checking **ACCURACY**, not the identity (Trevor: *"check accuracy not just total"*). The identity
 `total = o + d + bsr` held at **worst 0.000000 across 112,087 rows** — and proved nothing about whether `d` was
 CORRECTLY SOURCED. It holds regardless of where `d` came from. **Exactly the "internally consistent but sourced
@@ -1158,11 +1158,16 @@ bsr_war = 0 with NO baserunning row       58,119
 ★ **D1 players with ≥50 PA and NO defense row: 38** (avg **131.3 PA**, max **270 PA**).
 **Those 38 are real contributors credited with exactly-average defense on no measurement.**
 
-## ⬜ NOT FIXED — needs a decision, and it is Trevor's
-This is **[[feedback_zero_is_missing_not_a_value]]** ("exact-0 scouting % → `—`") surfacing in a NEW table. Options:
-(a) leave as-is — treating unknown defense as average is a defensible modelling choice for a projection;
-(b) distinguish them (NULL, or a `d_war_source` flag) so the UI can show `—` rather than 0.000;
-(c) investigate why 38 D1 regulars have no `player_season_defense` row — the dRS engine covers 13,454 rows, so these
-are genuine gaps in the engine's output, not a join failure.
-🚨 **TRACK B:** whichever is chosen, the accumulator must carry the DISTINCTION (measured-0 vs no-data) rather than
-collapsing both to 0 — a daily unattended run has no human to notice that a 270-PA hitter's defense was never measured.
+## ✅ RESOLVED 2026-08-31 — TREVOR'S CALL: **THIS IS CORRECT, LEAVE IT**
+> *"JUCO and historical will not get dWAR and bsrWAR so we will only be filling that in moving forward. I would say
+> just be consistent. Unmeasured defense should probably just be net 0 which should be league average correct?"*
+**YES — and that resolves it.** `drs_floor` is a **runs-ABOVE-AVERAGE** metric, so **net 0 IS league average**.
+Coalescing an unmeasured player to 0 assigns him **league-average defense**, which is the correct and CONSISTENT
+neutral prior for a projection. It is NOT a wrong value dressed as data.
+🛑 **THIS IS THE OPPOSITE OF [[feedback_zero_is_missing_not_a_value]].** That rule applies where 0 is an IMPOSSIBLE
+measurement (an exact-0 scouting % means "not measured" — nobody has a true 0% chase rate). Here 0 is a **meaningful,
+attainable value** — the centre of the scale. **Distinguish the two cases by asking: is 0 a value the metric can
+legitimately take? If yes, a 0 default is a prior. If no, it is missing data.**
+✅ **JUCO (5,218) and historical players will never get dWAR/bsrWAR** — coverage begins going forward. Expected.
+✅ The **38 D1 players with ≥50 PA and no defense row** get a league-average prior. Consistent with everyone else.
+🅱️ **TRACK B:** keep the `coalesce(…, 0)` — it is the intended neutral prior. **Do NOT "fix" it to NULL.**
