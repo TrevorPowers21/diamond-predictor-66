@@ -147,3 +147,24 @@ its first real exercise. Do NOT hand-run the six scripts.
 | WAR sourced from CSVs | 🟢 **not a push blocker** | values verified correct; re-point in Track B |
 | `repRows` `:465` | 🟢 not a push blocker | fixed opportunistically in STEP 1c |
 | `G`/`GS`, SB, `dob`/`class_year`, hitter `trackman_pitches` | 🟢 out of scope | by design / vestigial |
+
+---
+# ✅ STEP 0 DONE — F40 ENV GUARD ADDED (2026-08-30)
+`scripts/backfill-snapshot-total-hitter-war.ts` had **no guard of any kind** — it read `process.env.SUPABASE_URL` with
+**no `--prod` flag anywhere** (`grep -c` = 0/0), so `--env-file=.env.production.local` wrote PROD with **zero opt-in**;
+the only signal was a `host` banner printed AFTER the client was constructed. It writes `team_build_players` +
+`target_board` snapshots — **coach-visible build/board data.** **SIXTH instance** of this defect class (after
+`_run_store_no_propagate` C26, both C28 producers, the market scripts, `run-twp-recompute` E35, and
+`backfill_park_factors_seasonal` E2).
+**FIX:** standard double-keyed guard (URL and `--prod` must AGREE) + a resolved-env banner printed BEFORE any work,
++ an explicit missing-credentials check.
+**ALL FOUR PATHS VERIFIED:**
+```
+REFUSE  PROD url, no --prod   → ✗ URL is PROD but --prod was not passed — refusing.
+REFUSE  STAGING url, --prod   → ✗ --prod passed but URL is not prod — refusing.
+ALLOW   STAGING, no flag      → [env] STAGING/other (slrxowawbijbjrkozqlj)  mode=DRY-RUN
+ALLOW   PROD + --prod         → [env] 🔴 PROD (trbvxuoliwrfowibatkm)  mode=DRY-RUN
+```
+**PROD DRY-RUN (read-only) — F40's actual workload when it runs at STEP 9:**
+`d/bsr map: 520 players (of 522 snapshot players)` · **`snapshots to fill: 696`**
+⛔ **NOT APPLIED** — F40 runs at STEP 9 of the plan, after the precomputes. This step only added the guard.

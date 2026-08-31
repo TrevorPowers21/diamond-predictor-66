@@ -13,16 +13,35 @@
  *          target_board.{transfer_snapshot,neutral_snapshot}. Pitcher snapshots untouched.
  * Idempotent (skips snapshots that already have total_hitter_war). Dry-run default; --apply to write.
  *
- *   npx tsx --env-file-if-exists=.env.local scripts/backfill-snapshot-total-hitter-war.ts
- *   npx tsx --env-file-if-exists=.env.local scripts/backfill-snapshot-total-hitter-war.ts --apply
+ *   staging: npx tsx --env-file=.env.local            scripts/backfill-snapshot-total-hitter-war.ts [--apply]
+ *   prod:    npx tsx --env-file=.env.production.local scripts/backfill-snapshot-total-hitter-war.ts --prod [--apply]
+ *
+ * ★ ENV GUARD ADDED 2026-08-30 (push step F40). This script had NO guard of any kind — it read
+ *   `process.env.SUPABASE_URL` with **no `--prod` flag anywhere** (`grep -c` = 0/0), so
+ *   `--env-file=.env.production.local` wrote PROD with ZERO opt-in and the only signal was a `host` banner.
+ *   It writes team_build_players + target_board snapshots, i.e. coach-visible build/board data.
+ *   SIXTH instance of this defect class (after _run_store_no_propagate, both C28 producers, the market
+ *   scripts, run-twp-recompute (E35) and backfill_park_factors_seasonal (E2)).
  */
 import { createClient } from "@supabase/supabase-js";
 
 const APPLY = process.argv.includes("--apply");
-const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+
+// ── double-keyed env guard: the URL and the --prod flag must AGREE ────────────
+const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+const isProd = /trbvxuoliwrfowibatkm/.test(url);
+const prodFlag = process.argv.includes("--prod");
+if (!url || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("✗ Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY."); process.exit(1);
+}
+if (isProd && !prodFlag) { console.error("✗ URL is PROD but --prod was not passed — refusing."); process.exit(1); }
+if (!isProd && prodFlag) { console.error("✗ --prod passed but URL is not prod — refusing."); process.exit(1); }
+
+const sb = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false },
 });
-const host = (process.env.SUPABASE_URL || "").replace(/https:\/\//, "").split(".")[0];
+const host = url.replace(/https:\/\//, "").split(".")[0];
+console.log(`[env] ${isProd ? "🔴 PROD" : "STAGING/other"} (${host})  mode=${APPLY ? "APPLY" : "DRY-RUN"}`);
 
 const num = (v: any): number | null => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 
