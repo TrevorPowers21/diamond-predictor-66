@@ -67,6 +67,8 @@ full-season line keeps growing. **`lock_regular_season` / D33b is OBSOLETE — r
 
 ---
 # §3 THE NEXT CONCRETE TASK
+**▶ FULL STEP-BY-STEP: `docs/PLAN_finish_prod_push_2026_08_31.md`** — 12 steps, each with a VALUE gate.
+
 **Extend `derive_masters_from_pitchlog.ts`** to write, in ONE operation per player:
 `pa`/`ab` ← `PA`/`AB` (FULL) · `regular_season_pa` ← `reg_PA` · `IP` ← `full_IP` · `regular_season_ip` ← `reg_IP` ·
 `ERA` ← `full_ERA` · `bf` ← `full_BF`. Plus: **remove the PATCH gate** (`:274`) so `k_pct`/`pull_air` fill for
