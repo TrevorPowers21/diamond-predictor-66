@@ -1070,6 +1070,62 @@ safety net.**
 alarm* — was violated four more times in a single step. **When a comparison spans two surfaces, state which row you are
 joining to BEFORE reading the result.**
 
+---
+# 🅱️ G46 IS **NOT** TRACK B — IT IS A THIRD COPY OF STAGE 18. TRACK B MUST ABSORB IT. (2026-08-31)
+Trevor: *"Isn't that what track b is? Why does it need to be run again?"* — **The right instinct. They are not the same
+thing, and the overlap is itself the problem.**
+
+## WHAT `process-precompute-jobs` ACTUALLY IS
+| | `process-precompute-jobs` (G46) | **Track B** |
+|---|---|---|
+| trigger | a **customer team is ADDED** (`trg_customer_teams_autofire_precompute` → `pg_net.http_post`), or the Admin "Re-run" button | **DAILY, on pitch-log ingest** |
+| scope | ONE team's transfer projections | the WHOLE chain |
+| stages | **stage 18 ONLY** | stages 1–19 |
+⇒ It is **one stage, for one team, fired by onboarding** — not a pipeline. Track B is the daily run that should
+*contain* stage 18.
+
+## 🚨 WHY IT STILL HAD TO BE DEPLOYED — A LIVE REGRESSION, NOT A FEATURE
+```
+precompute_jobs (prod):  197 completed · 669,292 rows written · last fired 2026-07-06
+trigger trg_customer_teams_autofire_precompute:  ENABLED
+```
+**The trigger is ARMED and the deployed copy is STALE.** The next `customer_teams` INSERT — or one press of Admin
+"Re-run" — fires the OLD function and writes projections using **SEC PTM 1.5, no `total_hitter_war`, the old park
+resolution and the pre-unification NIL tiers** directly into `player_predictions`, **silently undoing this entire
+push for that team.** It has already written 669k rows historically, so this is not hypothetical.
+★ **G46 does not enable anything. It closes a regression that fires on the next onboarding.**
+
+## 🚨 THE REAL DEFECT — THE PROJECTION MATH NOW EXISTS IN **THREE** PLACES
+The function's own header states it: *"The math (computeTransferProjection, computeHitterPowerRatings, JUCO
+regression, weight defaults) is duplicated from `src/lib/`. Supabase Edge Functions run on Deno and can't `import`
+from the Vite src tree."*
+| copy | where |
+|---|---|
+| 1 | `scripts/precompute-*.ts` (the batch path) |
+| 2 | `supabase/functions/process-precompute-jobs/` (the Deno mirror) |
+| 3 | whatever **Track B** builds |
+**This is the SAME defect shape as every entry in the registry — one value computed in two places that drift — except
+ACROSS A LANGUAGE BOUNDARY, which makes it strictly worse:** `tsc` cannot see it, and **five commits on this branch had
+to hand-mirror changes into it** (PTM unification to SEC 4.0, writing `total_hitter_war` directly, `source_team_id`
+park resolution, the faced-competition logic, the dWAR/bsr path).
+⚠ The wRC+ constants are a live example: `src/lib/wrc.ts` warns that each edge fn keeps a LOCAL copy grep-linked by
+`// canonical: src/lib/wrc.ts`. **Four copies verified correct on 2026-08-31 — by hand.** Nothing enforces it.
+
+## 🅱️ THE DIRECTIVE
+1. 🔴 **TRACK B MUST ABSORB `process-precompute-jobs`, NOT RUN ALONGSIDE IT.** Otherwise Track B becomes the
+   **FOURTH** copy of stage 18 and the drift problem gets worse, not better.
+2. **Until it is absorbed, treat the deployed function as a REGRESSION SURFACE.** Any change to the projection math,
+   the NIL tiers, the park resolution or the wRC+ constants **must be mirrored into it and redeployed in the same
+   session**, or the next onboarding writes stale values.
+3. **ADD A DRIFT ASSERTION** — the deployed function should compare its own constants (`WRC_C1`, the NIL tier map,
+   `DEFAULT_NIL_BASE_PER_WAR`, RPW 13.1) against `model_config` at startup and **fail loudly** on a mismatch, rather
+   than silently computing with a stale local default. **This is the only mechanical defence available across the
+   Deno/Vite boundary.**
+4. ⬜ **OPEN QUESTION for the Track B build:** does the onboarding path stay event-triggered (a team is added ⇒
+   project immediately) or fold into the daily run (a new team simply gets picked up tomorrow)? Event-triggered is
+   better UX; the daily run is one less copy. **Not decided.**
+
+
 
 
 
