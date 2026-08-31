@@ -926,3 +926,54 @@ LABEL was wrong and would have misled a later reader.
 wrong CSV column · exact-equality between derivations · `Number(null)` passing `isFinite` · raw-mean over a
 tiny-denominator tail · guessed column names (×3) · this mislabeled aggregate. **Every one was MY measurement, never
 the data.** Against ONE guard that fired correctly (the IP check at 1.827), where the disagreement WAS the finding.
+
+---
+# 📊 REFERENCE — WHY PROD AND STAGING PROJECTIONS DIFFER (measured 2026-08-31). Use this to attribute, not guess.
+Measured across **n = 3,861** D1 pitchers with `IP > 10`, `|prod − staging|` on every `"Pitching Master"` input the
+projection engine reads:
+| input | mean \|Δ\| | **median** | p90 | reading |
+|---|---|---|---|---|
+| **`stuff_plus`** | 0.027 | **0.000** | 0.100 | ✅ **IDENTICAL — the v2 chain reproduces exactly** |
+| `HR9` | 0.038 | 0.030 | 0.080 | negligible |
+| `WHIP` | 0.057 | 0.050 | 0.120 | negligible |
+| `FIP` | 0.076 | 0.050 | 0.180 | negligible |
+| `BB9` | 0.177 | 0.120 | 0.390 | small |
+| `K9` | 0.259 | 0.230 | 0.500 | small |
+| **`ERA`** | **0.290** | **0.180** | **0.710** | ★ largest RAW-RATE difference |
+| `IP` | 0.533 | 0.367 | 1.333 | ~0.4 IP |
+| **`p_rv_plus` (PR+)** | **2.500** | **1.000** | **7.000** | ★★ **LARGEST — and larger than any of its own inputs** |
+
+## THE CAUSAL RANKING (dominant → negligible)
+1. **★★ C27 CALIBRATION FRESHNESS — the dominant driver, via PR+.** PR+ is a z-score composite against
+   `ncaa_averages` means/SDs. **Prod ran C27 and re-derived them from prod's own population; staging never did.**
+   Small input deltas measured against *different* means/SDs **AMPLIFY**: PR+ moves a median 1.0 (p90 **7.0**) on a
+   ~100 scale — bigger than any input that feeds it. **PR+ is what the projection engine actually consumes**, so this
+   is where prod↔staging projection differences come from.
+   Evidence: `p_ncaa_avg_stuff_plus` prod **100.0141** vs staging **99.4358**; `p_sd_stuff_plus` **5.04577** vs **5.93754**.
+2. **★ ERA SOURCE — not window.** BOTH envs hold FULL-season ERA. Prod's now comes from the **engine's accrual**
+   (`pitcher_line.csv` `full_ERA` — inherited-runner attribution, earned+unearned); staging's is still **TruMedia's
+   official** figure. Worked example — **Dylan Volantis: prod ERA 1.98 vs staging 2.08.**
+   ⚠ **ERA is a field the monthly Master sheet is meant to OVERRIDE** if the pitch-log derivation is off — it is one of
+   the named weak-derivation fields (with SB and G/GS).
+3. K9 / BB9 / FIP / WHIP / HR9 — all median ≤ 0.23. Same pitch-log derivation both sides.
+4. **`stuff_plus` — ZERO (median 0.000).** Whatever differs, it is never Stuff+.
+
+## 🛑 THE MISATTRIBUTION THIS TABLE PREVENTS
+Trevor: *"I even noticed that Dylan Volantis Stuff+ went down"* — reasonably attributed to C27.
+**IT WAS NOT C27.** `stuff_plus` is **102.60 in BOTH envs**, from **1,525 scored pitches averaging 102.58 in BOTH**.
+**C27 writes `ncaa_averages` / `model_config` — POPULATION CONSTANTS — never per-player `stuff_plus`.**
+The drop Trevor remembers is **107.6 → 102.60**, which is the **Stuff+ v2 RECLASSIFICATION + RECENTER** — the change
+he himself challenged at the time (*"I find it hard to believe Dylan Volantis would be a 107.6 stuff+"*). His instinct
+was right and v2 corrected it. For context, 102.60 sits ~4 points above the Master population mean
+(**98.59 prod / 98.82 staging**) — a far more defensible placement than 107.6.
+★ **RULE: before attributing a per-player change to a producer, confirm that producer WRITES that column.**
+Volantis' other prod↔staging deltas are separately explained: `trackman_pitches` 1,530 vs 1,406 (**prod ran C24**,
+staging did not) · `IP` 95.30 vs 95.00 (engine vs TruMedia).
+
+## ✅ HOW TO USE THIS
+- A prod↔staging **projection** difference is **EXPECTED** until staging is caught up through Track B. Attribute it to
+  PR+/C27 first.
+- **Input agrees but output differs ⇒ CALIBRATION.** Demonstrated twice: `regular_season_pa` agrees to 0.3 PA while
+  `o_war` differs 0.085; `stuff_plus` agrees to 0.000 while PR+ differs 1.0.
+- **Only investigate as a defect** when an input with a *median* difference of ~0 produces a large output change that
+  calibration cannot explain.
