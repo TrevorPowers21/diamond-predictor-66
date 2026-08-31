@@ -2273,7 +2273,7 @@ championship-benchmark displays, not projections. **Run it, note the gap, re-run
           re-run the dry-run afterwards and require 0 pending per team.
 4.  F39  refresh_composite_war()  (direct pg session ONLY)
 5.  F40 → F41 → F42 (--all) → F42b → F43
-6.  G46  edge-fn deploy (Trevor)  →  preview-verify  →  gh pr create staging→main  →  Trevor merges
+6.  🛑 G46 REMOVED (Track B branch)  →  preview-verify  →  gh pr create staging→main  →  Trevor merges
 7.  H    gated drops  →  THEN staging catch-up, run THROUGH Track B
 8.  LATER: re-run F44 once derive_masters fills regular_season_ip (idempotent)
 ```
@@ -4292,6 +4292,83 @@ park resolution, the faced-competition logic, the dWAR/bsr path).
 4. ⬜ **OPEN QUESTION for the Track B build:** does the onboarding path stay event-triggered (a team is added ⇒
    project immediately) or fold into the daily run (a new team simply gets picked up tomorrow)? Event-triggered is
    better UX; the daily run is one less copy. **Not decided.**
+
+---
+# 🛑 G46 IS **REMOVED FROM THIS PUSH** — DECISION (Trevor, 2026-08-31)
+> *"This is an unnecessary… another function that could disrupt a lot of the data we've already accumulated and
+> should not be a part of this push to prod. We should be able to acknowledge where it's imperfect and how it fits
+> into the overarching Track B goal that we will feature on the next feature branch."*
+
+## ✅ THE DECIDING EVIDENCE — G46 DELIVERS **NOTHING** THIS PUSH NEEDS
+Every fix in the branch copy of `process-precompute-jobs` **was already delivered to prod DATA by the batch path**:
+| fix in the edge fn (branch) | already in prod? | delivered by |
+|---|---|---|
+| NIL tiers SEC 4.0 | ✅ | E36/E37/E38 batch + F42 re-price |
+| `total_hitter_war` written directly | ✅ | F39 `refresh_composite_war` + batch |
+| park resolution by `source_team_id` | ✅ | E2 park factors + batch precomputes |
+| `faced_htp` / `faced_stuff_plus` for Independents | ✅ | F44 → E38 consumed 308/308 |
+| dWAR / bsrWAR path | ✅ | Phase D + F39 |
+**AND THE QUEUE IS EMPTY:** `precompute_jobs` = **0 pending · 0 running · last job 2026-07-06**.
+⇒ **The edge function has no outstanding work and writes nothing prod is missing. It only matters for FUTURE
+onboarding events.** Deploying it now adds risk and delivers zero value to this push.
+
+## 🚨 WHERE IT IS IMPERFECT — ACKNOWLEDGED, MEASURED, NOT FIXED
+### 1. 🔴 IT STILL CARRIES **REGISTRY #9** — depth roles from `players.pa` / `players.ip`
+```
+:1214  const hitterDepthRole  = defaultHitterDepthRoleFromActualPa((p as any).pa ?? null);
+:1601  const pitcherDepthRole = defaultPitcherDepthRoleFromIp((p as any).ip ?? null, …);
+```
+**ZERO references to `regular_season_pa` / `regular_season_ip`.** These are the IDENTITY-table columns that nothing
+keeps in sync with the Masters — the exact defect fixed in **four batch scripts** this session. **The edge function is
+the FIFTH caller and was never fixed.** Measured on prod:
+```
+5,341 D1 hitters:  players.pa == Master regular_season_pa on only 3,347 (63%) · mean |Δ| 2.34 PA
+crossing the 220-PA cornerstone line:  players.pa 847  vs  Master regular_season_pa 896   ⇒ ~49 players mis-tiered
+```
+⚠ **Depth role is NOT cosmetic** — it sets `projected_pa` → WAR → market value. Deploying would silently re-introduce
+registry #9 on a surface this push just cleaned.
+### 2. ✅ BUT IT IS **AHEAD** OF THE BATCH ON TWP ROUTING — DRIFT RUNS BOTH WAYS
+```
+:1228  const isTwpRow = !!(p as any).is_twp          ← reads players.is_twp, the SOURCE OF TRUTH (correct, #21)
+:1253  market_value: isTwpRow ? null : marketValue,
+:1254  twp_hitter_market_value: isTwpRow ? marketValue : null    ← the exact fix the BATCH was missing
+```
+★ **The edge function had the stage-18 TWP routing right ALL ALONG; the batch script was the outlier.** ⇒ **A
+hand-mirrored copy does not drift in one direction — each copy can be ahead on some axes and behind on others.**
+Never assume the mirror is the stale one.
+
+## ⚠ THE EXPOSURE THAT REMAINS EITHER WAY — **THE TRIGGER IS ARMED**
+`trg_customer_teams_autofire_precompute` on `customer_teams` is **ENABLED**, and `pg_net.http_post`s the DEPLOYED
+(older) function on every INSERT. History: **197 completed jobs · 669,292 rows written.** So:
+- **Deploy** ⇒ a less-stale function that still mis-tiers depth roles (registry #9).
+- **Don't deploy** ⇒ the MORE stale function fires instead (SEC PTM 1.5, no `total_hitter_war`, old park resolution).
+🛑 **NOT DEPLOYING DOES NOT REMOVE THE RISK — IT ONLY CHANGES WHICH STALE COPY FIRES.**
+⬜ **OPEN — NEEDS A DECISION BEFORE ANY TEAM IS ONBOARDED:** disable/neutralise
+`trg_customer_teams_autofire_precompute` until Track B absorbs the function, so no stale copy can write
+`player_predictions` on onboarding. **Not done — do not onboard a customer team until this is settled.**
+
+## 🅱️ HOW IT FITS INTO TRACK B — NEXT FEATURE BRANCH
+`process-precompute-jobs` is **stage 18 for ONE team, event-triggered** — a fragment of Track B, not a parallel system.
+It is the **THIRD** implementation of the projection math (batch `scripts/`, this Deno mirror, and whatever Track B
+builds). Its own header admits the duplication: *"the math is duplicated from `src/lib/`. Supabase Edge Functions run
+on Deno and can't `import` from the Vite src tree."*
+1. 🔴 **TRACK B MUST ABSORB IT — NOT RUN BESIDE IT.** Otherwise Track B is the **FOURTH** copy.
+2. 🔴 **BEFORE IT IS EVER DEPLOYED, MIRROR THE DEPTH-ROLE FIX** (`regular_season_pa ?? pa`, `regular_season_ip ?? IP`)
+   — one line per side. It is the only known defect blocking it.
+3. **ADD A STARTUP DRIFT ASSERTION** — compare the function's local constants (`WRC_C1`, NIL tier map,
+   `DEFAULT_NIL_BASE_PER_WAR`, RPW 13.1) against `model_config` and **fail loudly** on mismatch. Across the Deno/Vite
+   boundary this is the ONLY mechanical defence; `tsc` cannot see the copy.
+4. ⬜ **DESIGN QUESTION FOR THE BUILD:** does onboarding stay event-triggered (add a team ⇒ project immediately) or
+   fold into the daily run (a new team is picked up tomorrow)? Event-triggered is better UX; the daily run is one
+   fewer copy. **Undecided.**
+
+## ▶️ WHAT THIS CHANGES IN THE PUSH SEQUENCE
+```
+OLD:  … F43 → G46 edge-fn deploy → preview-verify → PR → merge → Phase H
+NEW:  … F43 → preview-verify → PR staging→main → Trevor merges → Phase H
+      G46 MOVED OUT — to the Track B feature branch. ⛔ Do NOT deploy as part of this push.
+```
+
 
 
 

@@ -73,7 +73,7 @@ must update BOTH the offline batches AND the edge fn (parallel implementations �
 - **DEPLOYED STAGING** (`slrxowawbijbjrkozqlj`, a persistent branch of prod `main`): version 26→27. **Prod `main` version 12 UNCHANGED.**
   Auth note: no separate token needed — the prod-account CLI login owns the parent project, so it reaches both branches;
   the explicit `--project-ref slrxowawbijbjrkozqlj` targets staging (NEVER `--linked`, which = prod main).
-- **PROD:** `supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm` (Trevor drives) — part of the ordered prod push.
+🛑 **SUPERSEDED 2026-08-31 — G46 was REMOVED from the push (Track B branch). DO NOT DEPLOY.** - **PROD:** `supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm` (Trevor drives) — part of the ordered prod push.
 
 ## ⏳ REMAINING (this pass)
 - [ ] Nothing on staging — the TWP pass + edge-fn mirror are complete + verified. Prod push (detector → precomputes →

@@ -68,8 +68,8 @@ Full detail: **REGISTRY #24**.
                land on top of an unexplained blank. Both verified: UUID-filtered, `is_twp` read from `players`,
                safe-by-construction on env (`--prod` SELECTS the env file; `--env-file` cannot redirect).
              ⚠ `heal-stale-snapshots --all` is SHOW_ALL — a DISPLAY flag, NOT scope. Different meaning from F42's --all.
-   2.  G46   supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm   (Trevor)
-             ⛔ NEVER --linked (config.toml names a THIRD ref kfkuhdmpchxyffmnowgj) · ⛔ do NOT deploy recalculate-prediction
+   🛑 2.  G46  REMOVED FROM THIS PUSH (2026-08-31) — moved to the Track B feature branch.
+             Delivers nothing prod lacks; still carries REGISTRY #9. ⚠ onboarding trigger ARMED.
    3.  preview-verify (Vercel preview points at PROD) → gh pr create staging→main → **Trevor merges** → Phase H drops
    4.  postseason-inclusive Master sheet import — the CROSS-CHECK/OVERRIDE layer (SB, ERA, G/GS). Derive-then-override.
    5.  STAGING CATCH-UP, run THROUGH TRACK B — see §5, it now has HARD REQUIREMENTS.

@@ -1823,7 +1823,7 @@ championship-benchmark displays, not projections. **Run it, note the gap, re-run
           re-run the dry-run afterwards and require 0 pending per team.
 4.  F39  refresh_composite_war()  (direct pg session ONLY)
 5.  F40 → F41 → F42 (--all) → F42b → F43
-6.  G46  edge-fn deploy (Trevor)  →  preview-verify  →  gh pr create staging→main  →  Trevor merges
+6.  🛑 G46 REMOVED (Track B branch)  →  preview-verify  →  gh pr create staging→main  →  Trevor merges
 7.  H    gated drops  →  THEN staging catch-up, run THROUGH Track B
 8.  LATER: re-run F44 once derive_masters fills regular_season_ip (idempotent)
 ```

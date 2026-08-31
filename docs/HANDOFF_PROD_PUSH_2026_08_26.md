@@ -47,7 +47,7 @@ Every DATA step **regenerates on prod** (prod resolves its own UUIDs/venue ids);
 7. **Phase F — Re-bakes** ★order: FIRE `refresh_composite_war()` (÷13.1, only now) → snapshot total_hitter_war catch-up
    → TWP markets → market resyncs → neutral + heal snapshots → `refresh_team_season_stats(2026)` LAST (reads prod's own
    team_war_snapshots) → reseed 2026 snapshots + display swap.
-8. **Phase G — Edge fn deploy** (Trevor): `supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm`.
+🛑 **SUPERSEDED 2026-08-31 — G46 was REMOVED from the push (Track B branch). DO NOT DEPLOY.** 8. **Phase G — Edge fn deploy** (Trevor): `supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm`.
 9. **Phase H — Gated drops** (last): park_factors lowercase (strip google-sheets-sync calls first), corrupt pitch_log
    team-id cols, player_prediction_internals, one-off RPCs/temps. **NEVER drop team_war_snapshots.**
 
