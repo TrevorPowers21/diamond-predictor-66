@@ -2573,3 +2573,50 @@ records **corr 0.9932 vs Master IP**).
 4. F44 refresh_team_season_stats → _reg rates stop landing NULL; records block works
 5. postseason-inclusive Master sheet import = the CROSS-CHECK / OVERRIDE layer
 ```
+
+---
+# 🐛 TWO node-postgres TRAPS THAT EACH COST A PROD RUN (2026-08-31). Exact reproductions.
+Both hit while backfilling `pitch_log.game_string` (2,576,146 rows). **Both failed LOUDLY and wrote NOTHING** — prod
+re-verified at `game_string filled 0` after each. Recording them precisely because neither is obvious and both will
+recur in Track B, which does bulk writes by definition.
+
+## TRAP 1 — `CREATE TEMP TABLE … ON COMMIT DROP` IS DESTROYED IMMEDIATELY
+```ts
+await c.query(`create temp table _gs_map (…) on commit drop`);   // ← commits, and DROPS, right here
+await c.query(`insert into _gs_map …`);                           // ✗ relation "_gs_map" does not exist
+```
+**WHY:** node-postgres runs every `query()` in its own implicit transaction (autocommit) unless you open an explicit
+`BEGIN`. `ON COMMIT DROP` therefore fires the instant the CREATE statement commits — before any INSERT can run.
+**FIX:** either wrap the whole sequence in an explicit `BEGIN … COMMIT`, or use a plain session temp table
+(`drop table if exists x; create temp table x (…)`), which lives until the connection closes.
+**RULE: never use `ON COMMIT DROP` from node-postgres without an explicit transaction.**
+
+## TRAP 2 — A SINGLE BULK `UPDATE` EXCEEDS PROD'S `statement_timeout` AND ROLLS BACK WHOLE
+```
+FATAL: canceling statement due to statement timeout
+```
+**PROD `statement_timeout` = `2min`** (verified: `show statement_timeout`). One set-based UPDATE joining 2.5M rows
+blew straight through it. Because it is a SINGLE statement it rolled back **entirely** — no partial write, but ~4
+minutes of staging work thrown away.
+**FIX — batch it, and prefer `unnest()` over a temp table:**
+```sql
+update pitch_log p set game_string = m.gs
+from unnest($1::text[], $2::text[]) as m(upid, gs)
+where p.uniq_pitch_id = m.upid and p.season = $3 and p.game_string is null
+```
+25,000 rows per chunk → **~103 statements, each ~0.25 min**, comfortably under the 2-minute ceiling. This also
+removes the temp table entirely, so TRAP 1 cannot recur.
+**MEASURED THROUGHPUT ON PROD:** ≈ **87,000 rows/min** (1,175,000 rows in 13.5 min) ⇒ ~30 min for the full 2.58M.
+★ **DESIGN THE `WHERE` CLAUSE SO A PARTIAL RUN IS RESUMABLE.** `where game_string is null` means an interrupted run
+can simply be re-run — it only touches what is still empty. **A batched write without a resumable predicate is worse
+than a single statement**, because a single statement at least rolls back cleanly.
+
+## ⚠ RELATED, ALREADY LOGGED — DO NOT "SOLVE" THIS WITH `statement_timeout = 0`
+A previous session set `statement_timeout = 0` for a `--direct` run and **prod hung for 39 minutes with no active
+query** — removing the ceiling also removes the failure signal. **Use a FINITE timeout and BATCH.** Same reasoning as
+the ~125s PostgREST gateway ceiling that silently rolls back `refresh_composite_war()`.
+
+## 🅱️ TRACK B REQUIREMENT
+Track B writes in bulk on every ingest. It MUST: batch every write under the statement timeout · use a resumable
+predicate · never rely on `ON COMMIT DROP` · report per-batch progress and a final written count · treat a
+swallowed error as a hard stop. All four of these were violated by code found in this push.

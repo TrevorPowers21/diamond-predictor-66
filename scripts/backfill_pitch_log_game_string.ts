@@ -97,28 +97,30 @@ async function main() {
     if (!APPLY) { console.log("\nDRY-RUN — no writes. Re-run with --apply."); return; }
     if (resolvable === 0) { console.error("✗ nothing resolvable — ABORT"); process.exit(1); }
 
-    // stage the mapping, then one set-based UPDATE (2.5M individual updates would take hours)
-    // ⚠ NO `on commit drop`: node-postgres autocommits each statement, so the CREATE would commit and drop the
-    // table before the inserts ran ("relation _gs_map does not exist"). A session temp table is dropped on close.
-    await c.query(`drop table if exists _gs_map`);
-    await c.query(`create temp table _gs_map (uniq_pitch_id text primary key, game_string text)`);
-    const ids = [...map.keys()];
-    const CHUNK = 20000;
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      const slice = ids.slice(i, i + CHUNK);
-      await c.query(
-        `insert into _gs_map (uniq_pitch_id, game_string)
-         select * from unnest($1::text[], $2::text[]) on conflict do nothing`,
-        [slice, slice.map((k) => map.get(k)!)]);
-      if ((i / CHUNK) % 25 === 0) process.stdout.write(`\r  staging map… ${Math.min(i + CHUNK, ids.length).toLocaleString()}/${ids.length.toLocaleString()}`);
+    // ★ BATCHED UPDATE. Two earlier failures shaped this:
+    //   1. `create temp table … ON COMMIT DROP` — node-postgres autocommits every statement, so the CREATE committed
+    //      and dropped the table before the inserts ran ("relation _gs_map does not exist").
+    //   2. ONE set-based UPDATE over 2.5M rows exceeded prod's `statement_timeout` (2min) and rolled back whole.
+    // So: no temp table at all — feed each chunk straight into the UPDATE via unnest(). Each chunk autocommits, stays
+    // well under the timeout, and a mid-run failure leaves a PARTIAL fill that is safe to resume (the WHERE clause is
+    // `game_string is null`, so re-running only touches what is still empty).
+    const entries = [...map.entries()];
+    const CHUNK = 25000;
+    let updated = 0, done = 0;
+    const t0 = Date.now();
+    for (let i = 0; i < entries.length; i += CHUNK) {
+      const slice = entries.slice(i, i + CHUNK);
+      const res = await c.query(
+        `update pitch_log p set game_string = m.gs
+         from unnest($1::text[], $2::text[]) as m(upid, gs)
+         where p.uniq_pitch_id = m.upid and p.season = $3 and p.game_string is null`,
+        [slice.map((e) => e[0]), slice.map((e) => e[1]), SEASON]);
+      updated += res.rowCount ?? 0;
+      done += slice.length;
+      const pct = (100 * done / entries.length).toFixed(1);
+      process.stdout.write(`\r  ${done.toLocaleString()}/${entries.length.toLocaleString()} (${pct}%) · updated ${updated.toLocaleString()} · ${((Date.now() - t0) / 60000).toFixed(1)}m   `);
     }
-    console.log(`\r  staged ${ids.length.toLocaleString()} mappings                    `);
-
-    const res = await c.query(
-      `update pitch_log p set game_string = m.game_string
-       from _gs_map m
-       where p.uniq_pitch_id = m.uniq_pitch_id and p.season = $1 and p.game_string is null`, [SEASON]);
-    console.log(`✓ updated ${Number(res.rowCount).toLocaleString()} rows`);
+    console.log(`\n✓ updated ${updated.toLocaleString()} rows`);
 
     const after = (await c.query(
       `select count(*) total, count(game_string) filled, count(distinct game_string) games from pitch_log where season=$1`, [SEASON])).rows[0];
