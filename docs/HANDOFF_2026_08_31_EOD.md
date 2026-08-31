@@ -27,7 +27,9 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 | **F44 `team_season_stats`** | ✅ **0 → 308.** `faced_*` 308/308 · `ra9_reg` 308 · W/L **27.6-27.4 over 55.0 games** · AVG .277 · wRC+ 98.8. |
 | *(unplanned)* Kozeal / Wiggins | ✅ Kozeal's real row CREATED (D1 hitters 5,341); Wiggins' phantom row DELETED. |
 | **Equations / calibration** | ✅ **VERIFIED live and IN USE on prod** — all 6 `*_ncaa_sd_bad` keys present (`sd_good` = the existing `*_ncaa_sd`, by design); `dsd()` in `transferPitcherProjection:390-395` and `ncaaSdBad` in `pitcherProjection:455` consume them; `precompute-returner-pitchers:133` overlays the stage-5.5 two-sided SD — **so E36's 6,632 projections used it**. `model_config` 220/220 keys, zero missing either way. |
-| **E36 returner pitchers** | ✅ 6,632 with `p_war` (avg 0.607) · per-player vs staging **median Δ 0.004** · `$/WAR` ratio **1.000** · propagate 105,093 rows. |
+| **E36 returner pitchers** | ✅ RE-RUN after the depth-role fix — 6,632 with `p_war` (avg **0.584**, was 0.607) · `projected_ip` **30.0** · max `p_war` **3.93** = staging · propagate 105,093. |
+| **E37 returner hitters** | ✅ RE-RUN — 6,806 with `o_war` (avg **0.795**) · max `o_war` **6.86** = staging · market max **$673,949** (was $104,110 pre-E37) · cornerstone **1,138**. |
+| **Depth-role source** | ✅ **FIXED** — tiers now read the Masters' `regular_season_pa` / `regular_season_ip`, not `players.pa`/`ip`. Matches TeamBuilder. ⚠ **prod and staging now DIFFER on depth roles BY DESIGN** until staging gets the same fix. |
 | **E35 TWP detector** | ✅ `is_twp` **137 → 253** (= staging exactly) · legacy `position='TWP'` **428 → 34** (= staging exactly) · 606 rows · D1 TWPs **90**. |
 
 **Backups on prod:** `_hm_prefill_backup` (8,245) · `_pm_prefill_backup` (8,071) · `_pm_wiggins_backup` (1) ·
@@ -42,11 +44,11 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 # §2 WHAT'S LEFT — dependency order, NOT the runbook's topic order
 ```
 ✅ E35  run-twp-recompute --prod --apply       DONE 2026-08-31 · is_twp 137→253 (= staging) · legacy TWP 428→34 (= staging) · 606 rows
-✅ E36  precompute-returner-pitchers:prod       DONE · 6,632 p_war · median Δ 0.004 vs staging · propagate re-run (105,093)
-▶ E37  precompute-returner-hitters:prod        IN FLIGHT · 8,231 rows · 7,018 computed / 1,418 all-null
+✅ E36  precompute-returner-pitchers:prod       DONE (re-run w/ REG anchoring) · avg p_war 0.584 · projected_ip 30.0
+✅ E37  precompute-returner-hitters:prod        DONE (re-run w/ REG anchoring) · avg o_war 0.795 · market max $673,949
        🛑 `npm run …:prod` ALIASES **WRITE** — no --dry-run inside. Use `-- --dry-run` (the `--` is REQUIRED).
-       ⚠ hitter markets on prod are PRE-SEC-4.0 (max $104,110 vs staging $613,259) — E37 should close this.
-       ⚠ hitter calibration differs from staging (C27 re-derived) — compare SHAPE, not staging's literals.
+       🛑 the propagate RPC needs `set statement_timeout = '15min'` as an EXPLICIT statement (client option ignored).
+▶ E38  zsh scripts/_run_step2_all.sh --prod     NEXT
   E38  zsh scripts/_run_step2_all.sh --prod     🛑 the loop pipes through `grep | head -3` and SWALLOWS EXIT CODES.
                                                 "14 teams DONE" is NOT proof — re-run the dry-run, require 0 pending per team.
                                                 customer_teams active = 14 (NOT 18 — that is a staging number)
