@@ -20,13 +20,14 @@ Plus: Kozeal's real row CREATED, Wiggins' phantom row DELETED, depth-role source
 ---
 # §2 IMMEDIATELY AHEAD — FINISH THE PUSH (~half a day)
 ```
-✅ F39  select refresh_composite_war();          DONE 2026-08-31 · 9.0s · identity exact to 6dp
-▶ F40  backfill-snapshot-total-hitter-war --apply   NEXT
-       🚨 DIRECT pg session / SQL editor ONLY. Over PostgREST the ~125s gateway cuts it and the WHOLE UPDATE
-          ROLLS BACK with no error you would recognise. Use `set statement_timeout = '15min'` (FINITE, never 0).
-       ✅ prod's fn is already ÷13.1. It writes `player_predictions`, NOT the Masters (the runbook says otherwise —
-          the runbook is WRONG).
-  F40  backfill-snapshot-total-hitter-war --apply     guard ADDED today · dry-run showed 696 snapshots to fill
+✅ F39  select refresh_composite_war();          DONE 2026-08-31 · 9.0s · d_war/bsr_war 200,754→201,221
+       · identity total = o+d+bsr worst **0.000000** across 112,087 rows · avg total 0.3517→0.3549
+       🚨 the transport is the point: DIRECT pg session / SQL editor ONLY, `set statement_timeout='15min'`
+          (FINITE, never 0). Over PostgREST the ~125s gateway cuts it and the WHOLE UPDATE ROLLS BACK with no
+          recognisable error. It ran in 9.0s — "it was fast" is NOT a reason to use the wrong transport.
+       ✅ writes `player_predictions`, NOT the Masters (older runbook text is WRONG).
+
+▶ F40  backfill-snapshot-total-hitter-war --apply    NEXT · guard ADDED today · dry-run showed 696 snapshots to fill
   F41  rebuild-twp-target-rows · rebake-twp-markets · fix-returner-twp-hitter-market   (invoke DIRECTLY, not npm)
   F42  resync-build-snapshot-markets --all --apply · resync-target-snapshots --all --apply
        🚨 `--all` is REQUIRED — the default scope is a STAGING build id (0 rows on prod)
