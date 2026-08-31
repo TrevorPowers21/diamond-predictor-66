@@ -14,6 +14,7 @@ import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjectio
 import {
   calcPitchingPlus as _calcPitchingPlusFromLib,
   toPitchingClassAdj as _toPitchingClassAdjFromLib,
+  type PitchingEquationWeights,
 } from "@/lib/pitchingEquations";
 import {
   TRANSFER_WEIGHT_DEFAULTS,
@@ -232,7 +233,10 @@ interface UseTeamBuilderSimulationParams {
   remoteEquationValues: Record<string, number>;
 
   // local memos that STAY in TeamBuilder (also used elsewhere in TB)
-  pitchingEq: Record<string, number>;
+  // ⛔ Do NOT widen to Record<string, number>. TeamBuilder passes readPitchingWeights(), which IS a
+  //    PitchingEquationWeights; widening it here silently drops all 121 required keys and lets a
+  //    partial/wrong weights object reach the projection helpers with no compiler complaint.
+  pitchingEq: PitchingEquationWeights;
   pitchingConfLookup: Map<string, any>;
   pitchingStatsByNameTeam: {
     byKey: Map<string, any>;
@@ -962,6 +966,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         bb: seed.bb, chase: seed.chase,
         barrel: seed.barrel, ev90: seed.ev90,
         pull: seed.pull, la10_30: seed.la10_30, gb: seed.gb,
+        pullAir: null, // ★ 2026-08-31 — this surface has no pitch-log `pull_air`; powerRatings falls back to raw pull% (`pullAirEff = pullAirScore ?? pullScore`). Explicit null == the previous omission (scoreFromNormal guards `x == null`).
       });
       return computed;
     })();

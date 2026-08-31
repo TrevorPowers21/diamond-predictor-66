@@ -943,7 +943,11 @@ function EquationConstantsTab() {
         // default. Once the user intentionally sets a different value, it sticks.
         for (const [key, canonical] of Object.entries(TRANSFER_WEIGHT_DEFAULTS)) {
           const dbVal = Number(next[key]);
-          if (dbVal === 1 && canonical !== 1) {
+          // `canonical` narrows to a literal union (TRANSFER_WEIGHT_DEFAULTS is `as const`), and no
+          // current default is 1.0 — so TS proves `canonical !== 1` always true. Keep the guard anyway:
+          // it is what stops a future weight whose canonical IS 1.0 from being treated as the stale
+          // placeholder. Widen to number so the check stays live instead of being deleted as dead code.
+          if (dbVal === 1 && (canonical as number) !== 1) {
             next[key] = String(canonical);
           }
         }

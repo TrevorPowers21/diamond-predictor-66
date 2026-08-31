@@ -829,6 +829,8 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
     pull: seedPowerRow.pull,
     la10_30: seedPowerRow.la10_30,
     gb: seedPowerRow.gb,
+    // ★ 2026-08-31 — seedPowerRow carries no pull_air; powerRatings falls back to raw pull%.
+    pullAir: null,
   }) : null;
 
   // Season-aware scouting grades + power ratings from Hitter Master

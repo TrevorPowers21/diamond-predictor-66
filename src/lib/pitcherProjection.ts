@@ -118,7 +118,10 @@ const toPitchingClassAdj = (
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
-export const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
+// ★ 2026-08-31 — `readonly number[]`: these arrays are only READ. Accepting readonly lets callers pass
+//   `as const` fixtures (and any frozen config array) without a cast. Widening the INPUT type is correct;
+//   casting at 16 call sites to satisfy a needlessly-mutable signature would not be.
+export const dampFactorForProjected = (projected: number, thresholds: readonly number[], impacts: readonly number[]) => {
   for (let i = 0; i < thresholds.length; i++) {
     if (projected < thresholds[i]) return impacts[i] ?? 1;
   }
@@ -150,8 +153,9 @@ export const projectPitchingRate = ({
   prSd: number;
   classAdjustment: number;
   devAggressiveness: number;
-  thresholds: number[];
-  impacts: number[];
+  /** read-only: accepts `as const` / frozen arrays. See dampFactorForProjected. */
+  thresholds: readonly number[];
+  impacts: readonly number[];
   lowerIsBetter: boolean;
   // When true, returns lastStat instead of null if PR+ inputs are missing
   // (TeamBuilder's previous behavior — carry the season's actual rate
