@@ -841,6 +841,88 @@ UX COMPLETENESS (D1): hitter_BLANK 0 / 0 / 0 / 0 · pitcher_BLANK 74 (all explai
 5. **A stale value on a blocked player never expires.** Track B should either refresh or explicitly invalidate rows
    whose source row has disappeared for the current season.
 
+---
+# 🏛️🅱️ ARCHITECTURE DIRECTIVE — **SIDE ELIGIBILITY IS STATS-DRIVEN, IN THIS ORDER** (Trevor, 2026-08-31)
+## SILENT-FAILURE REGISTRY #25. **BUILD THIS INTO TRACK B. It is NOT wired into the push — deliberately.**
+
+> *"Does a player have stats in the pitching master or hitting master? Then it should showcase returner and transfer
+> equations. It should recognize PA and IP, not anything else."*
+> *"It needs to FIRST recognize players who have BOTH, then identify the buckets of each, and drop the TWP tag from
+> players under the minimum. **Not start there.**"*
+> *"Just make it **ncaa only**."*
+
+## ★ THE ORDER IS LOAD-BEARING — DO NOT START AT THE MINIMUM
+```
+STEP 1  PRESENCE   does he have PA at all? IP at all?      ← identifies the two-way CANDIDATE
+STEP 2  BUCKET     does each side clear its minimum?         PA >= 30  /  IP >= 5
+STEP 3  TAG        is_twp = TRUE only if BOTH clear;         under the minimum on a side ⇒ DROP the tag
+STEP 4  EQUATIONS  run ONLY the sides that cleared …         ⚠ AND invalidate the sides that did not
+```
+**Starting at the minimum destroys STEP 1:** you can no longer distinguish a genuine two-way who fell short on one
+side from a player who never had that side at all — and that distinction is exactly what decides the tag.
+⚠ **SCOPE: NCAA D1 ONLY.** JUCO keeps its own floors (`JUCO_PA_THRESHOLD = 75`, `JUCO_IP_THRESHOLD = 20`) and is
+being restructured — [[project_juco_restructure_planned]].
+
+## 📊 MEASURED ON PROD 2026-08-31 (D1, regular-season window)
+| step | result |
+|---|---|
+| **STEP 1** — has BOTH PA and IP | **309** |
+| **STEP 3** — `is_twp` TRUE (both clear) | **88** |
+| **STEP 3** — **DROP the tag** (under minimum) | **221** |
+| STEP 2 · pitcher who batted a little → PITCHER only | **106** (avg PA 7, IP 27.3) |
+| STEP 2 · hitter who threw a little → HITTER only | **82** (avg PA 138, IP 2.1) |
+| STEP 2 · token on both sides → NEITHER runs | **33** (avg PA 10, IP 1.8) |
+| reconcile vs today's flag | **2 should DROP · 0 should ADD** |
+★★ **THE TAG IS ALREADY ESSENTIALLY CORRECT — THE EQUATIONS ARE NOT.** Only 2 D1 players are mis-tagged. The real
+defect is that **the minimum lives in the detector and NOWHERE ELSE**, so all 221 get BOTH sides' equations run on
+them. A 138-PA hitter with 2.1 IP receives pitcher equations, a junk `p_war`, and that write then competes for the
+single shared `market_value` column — **REGISTRY #24, 221 times over.**
+
+## ✅ BUILT: `src/lib/sideEligibility.ts` (NEW, committed, NOT yet wired)
+`classifySides(hitterMasterRow, pitcherMasterRow)` → `{ hasBothStats, hitter, pitcher, isTwp, dropTwpTag, pa, ip }`
+plus `SIDE_MIN_PA = 30`, `SIDE_MIN_IP = 5`, `isNcaaD1()`, `hitterMarketField()`, `pitcherMarketField()`.
+**Window = regular season with a full-season fallback** (`regular_season_pa ?? pa`), matching the depth-role anchor.
+Trevor: *"for the sake of consistency just use regular season."* Measured: only **32 of 10,406** D1 players change
+side under a full-season window, all boundary cases (Brett Denby would become "two-way" on **2.7 postseason relief
+innings**).
+
+## 🔧 EVERY WIRE-IN POINT — EXACT FILE AND LINE (verified 2026-08-31)
+| # | file | line | today | must become |
+|---|---|---|---|---|
+| 1 | `scripts/precompute-returner-pitchers.ts` | **:190** | `pitcherTest = /^(SP\|RP\|CL\|P\|LHP\|RHP\|SM)/i` | keep only as a cheap pre-filter |
+| 2 | `scripts/precompute-returner-pitchers.ts` | **:195** | `allPlayers.filter(p => pitcherTest(p.position) \|\| p.is_twp)` | `classifySides(null, pm).pitcher` — **after** `pmBySourceId` is built (~`:222`) |
+| 3 | `scripts/precompute-returner-pitchers.ts` | **:196-201** | `--source-ids` scoping | **MOVE below the gate** — it currently filters the POSITION list, so a miscategorised pitcher scoped by id matches 0 and the run aborts |
+| 4 | `scripts/precompute-pitchers.ts` (transfer) | **:304-312** | `if (!pitcherTest(p.position) && !p.is_twp) return false` | `classifySides(...).pitcher` |
+| 5 | `scripts/precompute-transfer-projections.ts` (transfer hitter) | **:247-256** | `if (isPitcher(p.position) && !p.is_twp) return false` | `classifySides(...).hitter` |
+| 6 | `scripts/backfill-2027-hitter-returners.ts` (returner hitter) | **~:218-222** | JUCO PA floor only; **no D1 PA gate at all** | `classifySides(...).hitter` |
+| 7 | `scripts/run-twp-recompute.ts` | **:21** | `const PA = 30, IP = 5` — **the ONLY place the minimum exists today** | import `SIDE_MIN_PA` / `SIDE_MIN_IP` so it cannot drift |
+| 8 | `src/lib/recomputeTwpStatus.ts` | **:154** | `paThreshold = 30` (a 2nd copy) | import the shared constants |
+⚠ **The threshold `30` is currently duplicated in at least 5 files** (`run-twp-recompute:21`, `recomputeTwpStatus:154`,
+`audit_phase_c_percentiles:30`, `verify_percentile_all_dims:23`, `verify_percentile_metrics:21`). **One source, or it
+drifts** — that is the shape of nearly every defect in this registry.
+
+## ⚠⚠ THE MISSING HALF — **SKIPPING A SIDE ≠ CLEARING IT**
+A player who drops below a minimum keeps whatever `p_war` / `o_war` / market an earlier run wrote, **forever**,
+because nothing revisits him. **Measured: applying the IP floor to the returner-pitcher path ALONE would stop
+updating 643 players who currently hold a `p_war`.** A dry-run of the gate showed `15,646 → 6,785` candidates
+(**+207 recovered** — real IP but a non-pitcher `position`; **−9,068 dropped**), and `blocked` fell **8,050 → 0**
+because the exclusions become intentional instead of incidental.
+🔴 **THEREFORE STEP 4 HAS TWO ACTIONS, NOT ONE:** run the qualifying side, **and NULL the non-qualifying side's
+stored values** (`p_war` / `o_war`, `projected_ip` / `projected_pa`, the depth role, and the market). Without the
+second action this trades one stale-value class for another.
+
+## 🚫 WHY IT IS NOT IN THIS PUSH
+It changes `p_war` for ~643 players and `o_war` for an unmeasured number, needs the invalidation half designed rather
+than bolted on, interacts with the JUCO floors, and wants E36/E37/E38 re-run together. The push is one step from done.
+**The one wired script was REVERTED so the push stays on known-good code; only the helper is committed.**
+
+## 🧠 THE PROCESS LESSON FROM BUILDING IT
+`tsc -p tsconfig.app.json --noEmit` reported **CLEAN on a file with unbalanced braces** — it does **not** cover
+`scripts/`. The error only appeared when the script was RUN (`Transform failed: Unexpected end of file`).
+✅ **For any change under `scripts/`, the REAL check is executing it with `--dry-run`.** Same class as the documented
+"`tsc --noEmit` at the root is a NO-OP" trap.
+
+
 
 
 
