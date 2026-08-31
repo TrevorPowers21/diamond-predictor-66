@@ -48,20 +48,16 @@ Adam Brodnax    Sun Belt UL Monroe             p_war 1.518  PR+ 124  weekday_sta
 | non-positive WAR floors to null | ❌ all 34 are **positive** |
 | sub-20 IP null-out | ❌ **JUCO-only**; the control group holds **1,799 priced pitchers under 20 IP**, and 17 of the 34 are over 20 IP (max **79.7**) |
 **CONTROL:** 4,403 / 4,476 priced D1 returner pitchers have a 2026 Master row ⇒ a Master row normally means a market.
-## ▶️ NEXT STEP — TRACE, DO NOT GUESS (Trevor's steer)
-> *"Check if they are transfer or returner equations. I think the team row makes sense to me as just skipping, but off
-> that it skipped without an explanation."*
-1. **Confirm WHICH equation path produced them** — returner (`precompute-returner-pitchers.ts`) vs transfer
-   (`precompute-pitchers.ts`). They are `model_type='returner'`, but confirm the row was written by that script.
-2. **`precompute-returner-pitchers.ts:415`** — `const conference = teamRow?.conference ?? p.conference ?? null`.
-   Determine whether `teamRow` resolves for these 34. `teamRow` comes from `"Teams Table"` filtered to
-   **`Season = CURRENT_SEASON` (2026)** — a player whose `team_id` points at a **2025** Teams-Table row will MISS.
-   ⚠ Recall the 254/55 split: **254 TeamIDs in the 2026 Masters point at 2025 Teams-Table rows.** That is the
-   leading hypothesis — **but it is a HYPOTHESIS. Measure it.**
-3. **★ THE REAL QUESTION IS THE SILENCE, NOT THE SKIP.** Trevor: *"it skipped without an explanation."* Even if
-   skipping is correct, the script must SAY SO and COUNT IT. A skip that prints nothing is indistinguishable from a
-   success — the exact shape of every defect in the registry.
-4. Fix, re-run `precompute-returner-pitchers` for prod, and re-assert the §4 gate.
+## ✅ THE ANSWER (Trevor's steer was right — the equations were fine)
+> *"Check if they are transfer or returner equations… it skipped without an explanation."*
+**It never skipped. It was COMPUTED CORRECTLY and then OVERWRITTEN.** The `teamRow` hypothesis was tested and
+REJECTED — all 34 resolve to a 2026 Teams row, and 71 priced pitchers have a NULL `team_id` yet still got markets.
+**Actual cause:** ONE `returner/regular` row per player, written by BOTH returner precomputes. E37 (hitters) runs
+AFTER E36 (pitchers) and wrote `market_value: null` because it had no oWAR — stomping E36's value.
+The 34 were exactly the pitchers who ALSO carry a 2026 Hitter Master row (34/34), which is what put them in E37's
+scope; they carry E37's fingerprint (`hitter_depth_role` + `projected_pa` set, `o_war` null).
+★ **Trevor's instinct about the silence was still the right instinct — it just pointed at a different mechanism.**
+Full detail: **REGISTRY #24**.
 
 ---
 # §3 WHAT IS LEFT IN THE PUSH (dependency order)
