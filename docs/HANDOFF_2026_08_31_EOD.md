@@ -29,7 +29,8 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 | **Equations / calibration** | ✅ **VERIFIED live and IN USE on prod** — all 6 `*_ncaa_sd_bad` keys present (`sd_good` = the existing `*_ncaa_sd`, by design); `dsd()` in `transferPitcherProjection:390-395` and `ncaaSdBad` in `pitcherProjection:455` consume them; `precompute-returner-pitchers:133` overlays the stage-5.5 two-sided SD — **so E36's 6,632 projections used it**. `model_config` 220/220 keys, zero missing either way. |
 | **E36 returner pitchers** | ✅ RE-RUN after the depth-role fix — 6,632 with `p_war` (avg **0.584**, was 0.607) · `projected_ip` **30.0** · max `p_war` **3.93** = staging · propagate 105,093. |
 | **E37 returner hitters** | ✅ RE-RUN — 6,806 with `o_war` (avg **0.795**) · max `o_war` **6.86** = staging · market max **$673,949** (was $104,110 pre-E37) · cornerstone **1,138**. |
-| **Depth-role source** | ✅ **FIXED** — tiers now read the Masters' `regular_season_pa` / `regular_season_ip`, not `players.pa`/`ip`. Matches TeamBuilder. ⚠ **prod and staging now DIFFER on depth roles BY DESIGN** until staging gets the same fix. |
+| **Depth-role source** | ✅ **FIXED + VALIDATED ON BOTH ENVS.** Tiers read the Masters' `regular_season_pa` / `regular_season_ip`. Applying the same code to staging collapsed the gaps ~91% (cornerstone **256 → 23**, weekend_starter **81 → 10**), proving the divergence was the RULE, not a prod defect. Fixed in **4 scripts**: returner hitter+pitcher, transfer hitter (transfer pitcher was already correct). |
+| **E38 transfers** | ▶️ **NEXT — audited.** `RSTR IQ All-Americans` (`school_team_id` NULL, prod-only) will yield **0** rows BY DESIGN; the other 13 ~14,240 each. Loop swallows exit codes — gate PER TEAM in the DB. |
 | **E35 TWP detector** | ✅ `is_twp` **137 → 253** (= staging exactly) · legacy `position='TWP'` **428 → 34** (= staging exactly) · 606 rows · D1 TWPs **90**. |
 
 **Backups on prod:** `_hm_prefill_backup` (8,245) · `_pm_prefill_backup` (8,071) · `_pm_wiggins_backup` (1) ·
@@ -483,3 +484,40 @@ never on a hardcoded count.
 4. GATE per team in the DB (13 x ~14,240 + All-Americans 0), NOT the banner
 5. re-run dry → require 0 pending per team
 ```
+
+---
+# ✅ HITTER DEPTH-ROLE CONVERGENCE CONFIRMED (2026-08-31) — the fix behaves identically on both envs
+Staging E37 re-run finished (`7,025 computed · 1,416 all-null · 2 rows missing master ratings`, EXIT=0).
+
+## THE GAP COLLAPSED 91% ONCE BOTH ENVS RAN THE SAME RULE
+| role | PROD | STAGING | Δ NOW | Δ BEFORE staging's fix |
+|---|---|---|---|---|
+| **cornerstone** | **1,138** | **1,161** | **−23** | **−256** |
+| everyday_starter | 2,513 | 2,510 | **+3** | +148 |
+| platoon_starter | 1,844 | 1,840 | **+4** | +70 |
+| utility | 842 | 834 | +8 | +18 |
+| bench | 683 | 694 | −11 | +1 |
+`projected_pa` **173.5 → 171.3** (prod 170.9) · **`max o_war` 6.86 in BOTH** ✅
+**Mirrors the pitcher result exactly** (`weekend_starter` 81→10, `workhorse_reliever` 111→10, also ~90%).
+★ **TWO INDEPENDENT CONFIRMATIONS, hitters and pitchers, that the 2026-08-31 depth-role divergence was the RULE
+CHANGE and not a prod defect.**
+
+## THE RESIDUAL IS ATTRIBUTABLE — NOT DRIFT
+| | PROD | STAGING | cause |
+|---|---|---|---|
+| avg `o_war` | **0.795** | 0.710 | prod's **C27 calibration is fresher** (staging never ran C27) |
+| avg market | **$19,274** | $16,277 | same |
+| max market | **$673,949** | $613,259 | same |
+| hitters with `o_war` | 6,806 | 6,811 | population differs by 5 |
+| `regular_season_pa` filled · avg | 5,322 · **121.4** | 5,339 · **121.7** | near-identical — the INPUT agrees |
+★ **The INPUT (`regular_season_pa`, 121.4 vs 121.7) agrees to 0.3 PA while the OUTPUT (`o_war`) differs by 0.085.**
+That is the signature of a CALIBRATION difference, not a data difference — exactly what C27 freshness predicts.
+
+## 🧠 MY OWN PROBE ERROR (6th of the session — logged for the pattern, not the incident)
+I labelled a column `ge220` but omitted the `>= 220` predicate, so it returned the TOTAL filled count (5,322 / 5,339)
+rather than the above-threshold count. The values shown were still valid (`regular_season_pa` fill + average) but the
+LABEL was wrong and would have misled a later reader.
+→ **A mislabeled correct number is as dangerous as a wrong number.** Running tally of instrument errors this session:
+wrong CSV column · exact-equality between derivations · `Number(null)` passing `isFinite` · raw-mean over a
+tiny-denominator tail · guessed column names (×3) · this mislabeled aggregate. **Every one was MY measurement, never
+the data.** Against ONE guard that fired correctly (the IP check at 1.827), where the disagreement WAS the finding.

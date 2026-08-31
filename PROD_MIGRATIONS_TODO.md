@@ -3560,3 +3560,40 @@ never on a hardcoded count.
 4. GATE per team in the DB (13 x ~14,240 + All-Americans 0), NOT the banner
 5. re-run dry → require 0 pending per team
 ```
+
+---
+# ✅ HITTER DEPTH-ROLE CONVERGENCE CONFIRMED (2026-08-31) — the fix behaves identically on both envs
+Staging E37 re-run finished (`7,025 computed · 1,416 all-null · 2 rows missing master ratings`, EXIT=0).
+
+## THE GAP COLLAPSED 91% ONCE BOTH ENVS RAN THE SAME RULE
+| role | PROD | STAGING | Δ NOW | Δ BEFORE staging's fix |
+|---|---|---|---|---|
+| **cornerstone** | **1,138** | **1,161** | **−23** | **−256** |
+| everyday_starter | 2,513 | 2,510 | **+3** | +148 |
+| platoon_starter | 1,844 | 1,840 | **+4** | +70 |
+| utility | 842 | 834 | +8 | +18 |
+| bench | 683 | 694 | −11 | +1 |
+`projected_pa` **173.5 → 171.3** (prod 170.9) · **`max o_war` 6.86 in BOTH** ✅
+**Mirrors the pitcher result exactly** (`weekend_starter` 81→10, `workhorse_reliever` 111→10, also ~90%).
+★ **TWO INDEPENDENT CONFIRMATIONS, hitters and pitchers, that the 2026-08-31 depth-role divergence was the RULE
+CHANGE and not a prod defect.**
+
+## THE RESIDUAL IS ATTRIBUTABLE — NOT DRIFT
+| | PROD | STAGING | cause |
+|---|---|---|---|
+| avg `o_war` | **0.795** | 0.710 | prod's **C27 calibration is fresher** (staging never ran C27) |
+| avg market | **$19,274** | $16,277 | same |
+| max market | **$673,949** | $613,259 | same |
+| hitters with `o_war` | 6,806 | 6,811 | population differs by 5 |
+| `regular_season_pa` filled · avg | 5,322 · **121.4** | 5,339 · **121.7** | near-identical — the INPUT agrees |
+★ **The INPUT (`regular_season_pa`, 121.4 vs 121.7) agrees to 0.3 PA while the OUTPUT (`o_war`) differs by 0.085.**
+That is the signature of a CALIBRATION difference, not a data difference — exactly what C27 freshness predicts.
+
+## 🧠 MY OWN PROBE ERROR (6th of the session — logged for the pattern, not the incident)
+I labelled a column `ge220` but omitted the `>= 220` predicate, so it returned the TOTAL filled count (5,322 / 5,339)
+rather than the above-threshold count. The values shown were still valid (`regular_season_pa` fill + average) but the
+LABEL was wrong and would have misled a later reader.
+→ **A mislabeled correct number is as dangerous as a wrong number.** Running tally of instrument errors this session:
+wrong CSV column · exact-equality between derivations · `Number(null)` passing `isFinite` · raw-mean over a
+tiny-denominator tail · guessed column names (×3) · this mislabeled aggregate. **Every one was MY measurement, never
+the data.** Against ONE guard that fired correctly (the IP check at 1.827), where the disagreement WAS the finding.
