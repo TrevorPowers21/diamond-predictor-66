@@ -36,6 +36,11 @@ async function allNoSeason(t,cols,sc){let a=[];for(let f=0;;f+=1000){let q=sb.fr
 const r3=x=>Number.isFinite(x)?Math.round(x*1000)/1000:null, r4=x=>Number.isFinite(x)?Math.round(x*10000)/10000:null;
 
 // ── sources ──────────────────────────────────────────────────────────────────
+// 🔴🔴 TRACK B BLOCKER (2026-08-30) — THIS STAGE READS CSV FILES ON DISK, NOT THE DATABASE MASTERS.
+// Track B ingests pitch logs DAILY but TruMedia Master sheets only ~MONTHLY, so a daily run has NO CSV to read
+// and this stage CANNOT run inside it. Per the architecture directive: derive_masters_from_pitchlog.ts must
+// write ALL stats to the Masters from the pitch log, and WAR must then READ THOSE MASTER TABLES.
+// Re-point these reads at the DB before Track B. See docs/PIPELINE_pitch_log_to_projections.md.
 const hitAcc = sheet("scripts/drs/output/hitter_accrued.csv");     // reg_* counting (Step 2 accrual)
 const pitLine = sheet("scripts/drs/output/pitcher_line.csv");      // reg_IP/reg_R/reg_FIP (reg_R accrued directly)
 const HM = (await all("Hitter Master","source_player_id,division,pa,regular_season_pa")).filter(r=>r.division==="D1");

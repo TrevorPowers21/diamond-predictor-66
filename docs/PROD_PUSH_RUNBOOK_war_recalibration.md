@@ -1801,3 +1801,84 @@ Before calling a difference a defect, answer **in this order**:
 4. Only if 1–3 do not explain it is it a defect.
 ⛔ **NEVER reconcile prod TO staging by copying values.** That is what produced the `team_drs` paste that had to be
 undone, and it would have carried staging's Arkansas 41.060 (a value prod could not reproduce) into prod permanently.
+
+---
+# 🅱️🔴🔴 TRACK B BLOCKER — **WAR MUST READ THE DB MASTERS, NOT TruMedia CSVs.** ARCHITECTURE DIRECTIVE (Trevor, 2026-08-30)
+**THIS IS THE MOST IMPORTANT ITEM IN THIS DOCUMENT. Track B CANNOT WORK UNTIL IT IS FIXED.**
+
+## THE DIRECTIVE, IN TREVOR'S TERMS
+> *"derive_masters_from_pitchlog.ts needs to be the one that writes all the stats and even if a little off then it
+> needs to be checked and overridden if off by the master sheets. The reason why is because on track b it is going to
+> be absorbing pitch logs **every day through the spring**, but only ingesting master sheets **once a month or so** —
+> and the only differences should be a check on some of the information as a 2nd source… things like **stolen base and
+> ERA** that aren't always perfect from deriving the pitch log. That is why it has to run in the order I am mentioning
+> and I am adamant about making sure it does in fact do that."*
+
+## THE MANDATORY ORDER
+```
+pitch log (DAILY)  →  derive_masters_from_pitchlog.ts writes ALL stats to the Masters
+                   →  WAR / power ratings / projections READ THE MASTERS (from the DATABASE)
+                   →  TruMedia Master CSV (MONTHLY) = a CHECK / OVERRIDE layer only, applied ON TOP
+```
+The Master **sheet** is a *second source for verification*, not the primary. Override scope is narrow and specific:
+**stolen bases and ERA**, plus anything else demonstrably not derivable cleanly from the pitch log.
+
+## 🔴 THE BLOCKER AS IT STANDS TODAY — WAR IS WIRED THE WRONG WAY ROUND
+`scripts/drs/populate_descriptive_war.mjs` reads its hitting and pitching lines **from CSV FILES ON DISK**:
+```js
+:75  const hitSheet = sheet("docs/drs-reference/Full Season Hitting Master Stats.csv");
+:76  const pitSheet = sheet("docs/drs-reference/Full Season Pitching Master Stats.csv");
+:102 const PA = g("PA");         // ← from the CSV, NOT from "Hitter Master".pa
+```
+`"Hitter Master"` is queried at `:77` **only** to build the D1 id list (`source_player_id, division, pa`) — the `pa`
+column is never used in the math. `populate_descriptive_war_reg.mjs` is the same shape, reading
+`scripts/drs/output/hitter_accrued.csv` and `pitcher_line.csv`.
+**⇒ In Track B there are no daily TruMedia season CSVs. A daily run would have NOTHING to read.** The WAR stage as
+written is structurally incapable of running inside Track B.
+★ It also means today's prod WAR was computed from **TruMedia season CSVs**, not from the pitch log — the exact
+inversion of the pitch-log-primary architecture. It is CORRECT (it matched staging to four decimals) but it is
+**SOURCED WRONG**, and that must not be carried into Track B.
+
+## ✅ WHY THIS IS FIXABLE — EVERY INPUT ALREADY EXISTS, PITCH-LOG-DERIVED
+Two pipelines already produce everything, and BOTH are pitch-log-sourced:
+| source | window(s) | supplies |
+|---|---|---|
+| `pitch_log_{hitter,pitcher}_totals` (**DB**) | full | rates + batted-ball/discipline: `AVG OBP SLG ISO contact barrel chase bb line_drive gb pop_up la_10_30 k_pct avg_exit_velo ev90 pull pull_air`, pitcher `K9 BB9 HR9 WHIP FIP stuff_plus hard_hit_pct barrel_pct …`, and **`ip`** |
+| `scripts/drs/output/hitter_accrued.csv` (27 cols) | **FULL + REG** | `PA AB H 2B 3B HR BB HBP SF SH AVG OBP SLG ISO` and `reg_PA reg_AB reg_H reg_2B reg_3B reg_HR reg_BB reg_HBP reg_SF reg_SH` |
+| `scripts/drs/output/pitcher_line.csv` (37 cols) | **FULL + REG** | `full_IP full_BF full_K full_BB full_HBP full_H full_HR full_ER **full_ERA** full_R full_RA9 full_FIP full_WHIP full_K9 full_BB9 full_HR9 full_K_pct full_BB_pct` + the complete matching `reg_*` set incl. **`reg_ERA`** |
+⚠ **Barrel%/EV are NOT in the engine CSVs** — they come from `pitch_log_hitter_totals`. Two pipelines, one lane.
+★ **`full_ERA` and `full_IP` ALREADY EXIST** — yet `PITCHER_UNMAPPED = ["ERA","IP","G","GS","Role"]` still declares
+them *"left to TruMedia Master (never written)"*. **That comment is now WRONG for ERA and IP.** Only `G`/`GS` (and
+`Role`, which is not a stat) genuinely lack a pitch-log source today.
+
+## 🔴 WHAT `derive_masters_from_pitchlog.ts` DOES **NOT** WRITE TODAY (the whole gap)
+It ran on prod (`4,772 pitchers + 4,373 hitters · 0 new rows`) and today re-dry-runs at **0 changes** — so everything
+in its write set already matches. **The gap is what is NOT in that set:**
+| Master column | prod today | available from | status |
+|---|---|---|---|
+| `pa` / `ab` | **regular-season line** (avg pa 121.8 vs staging 128.0) | `hitter_accrued.csv` `PA`/`AB` | ❌ patched only on NEW rows |
+| `regular_season_pa` | **0 / 5,341** | `hitter_accrued.csv` `reg_PA` | ❌ never written |
+| `IP` | regular-season line | `pitcher_line.csv` `full_IP` · `pitch_log_pitcher_totals.ip` | ❌ in `PITCHER_UNMAPPED` |
+| `regular_season_ip` | **0 / 5,375** | `pitcher_line.csv` `reg_IP` | ❌ never written |
+| `ERA` | stale CSV import | `pitcher_line.csv` `full_ERA` | ❌ in `PITCHER_UNMAPPED` |
+| `G` / `GS` | stale CSV import | *(no pitch-log source found)* | ⬜ Master-override only |
+| SB / caught stealing | Master sheet | *(partially)* | ⬜ **Master-override by design** |
+**⇒ THIS is why prod has no postseason PA.** The step ran, but the counting stats were never in its write set, so the
+Masters still hold whatever an older CSV import left. **VERIFIED:** prod `pa` == staging `regular_season_pa` for
+**5,339/5,339 hitters (100.0%)** and prod `IP` == staging `regular_season_ip` for **5,374/5,374 (100.0%)**; **0.0%**
+match the full-season values.
+
+## ▶️ THE REQUIRED WORK, IN ORDER
+1. **Extend `derive_masters_from_pitchlog.ts` to write the counting stats to EXISTING rows** — `pa`, `ab`, `IP`, `ERA`
+   — plus the **reg/post split** into `regular_season_pa` / `regular_season_ip` from `reg_PA` / `reg_IP`.
+   Boundary is `scripts/drs/drs_engine/season_config.py` → **`2026: regular_season_end 2026-05-18 / postseason_start
+   2026-05-19`**. Per that file's own policy: **player stats + power ratings = FULL season; program analytics =
+   REGULAR season; projections target a regular-season line.**
+2. **Re-point `populate_descriptive_war.mjs` / `_reg.mjs` at the DB Masters** instead of the CSV sheets. Until this is
+   done Track B has no WAR stage.
+3. **Add the Master-sheet CHECK/OVERRIDE layer** — monthly CSV compared against the derived values, overriding only
+   where the pitch log is known-weak (**SB, ERA**), and **logging every override with both values**.
+4. ⛔ **`D33b` / `lock_regular_season` IS THE WRONG TOOL AND MUST NOT RUN.** That RPC is `regular_season_pa = pa` where
+   NULL — a snapshot that only works if `pa` is *already* the regular-season line. It predates the engine's split, has
+   **NO unlock**, and running it now would permanently freeze the pre-postseason number into `regular_season_pa` while
+   `pa` is about to be rewritten to full-season. **Write both columns from the engine output instead.**

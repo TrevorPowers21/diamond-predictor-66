@@ -72,6 +72,11 @@ async function all(t, cols, season = true) { let a = []; for (let f = 0; ; f += 
 async function allNoSeason(t, cols, seasonCol) { let a = []; for (let f = 0; ; f += 1000) { let q = ordered(sb.from(t).select(cols), t).range(f, f + 999); if (seasonCol) q = q.eq(seasonCol, SEASON); const { data, error } = await q; if (error) { console.error(t, error.message); process.exit(1); } a = a.concat(data); if (data.length < 1000) break; } return a; }
 
 // ── load sources ─────────────────────────────────────────────────────────────
+// 🔴🔴 TRACK B BLOCKER (2026-08-30) — THIS STAGE READS CSV FILES ON DISK, NOT THE DATABASE MASTERS.
+// Track B ingests pitch logs DAILY but TruMedia Master sheets only ~MONTHLY, so a daily run has NO CSV to read
+// and this stage CANNOT run inside it. Per the architecture directive: derive_masters_from_pitchlog.ts must
+// write ALL stats to the Masters from the pitch log, and WAR must then READ THOSE MASTER TABLES.
+// Re-point these reads at the DB before Track B. See docs/PIPELINE_pitch_log_to_projections.md.
 const hitSheet = sheet("docs/drs-reference/Full Season Hitting Master Stats.csv");
 const pitSheet = sheet("docs/drs-reference/Full Season Pitching Master Stats.csv");
 const HM = (await all("Hitter Master", "source_player_id,division,pa")).filter(r => r.division === "D1");

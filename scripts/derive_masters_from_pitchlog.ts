@@ -174,6 +174,13 @@ const PITCHER_IP_KINDS: Record<string, FieldSpec<any>["kind"]> = {
 // Never written here — left to TruMedia Master. ERA stays Master-sourced
 // (earned-run attribution is imperfect from pitch log). IP/G/GS/Role are
 // official counts we don't overwrite.
+// 🛑 2026-08-30 — THIS LIST IS NOW WRONG FOR ERA AND IP, and the "never written" wording below is misleading.
+// `scripts/drs/output/pitcher_line.csv` ALREADY carries pitch-log-derived `full_ERA`, `full_IP` (+ the complete
+// matching `reg_*` set), and `pitch_log_pitcher_totals.ip` exists in the DB. So ERA and IP ARE derivable from the
+// pitch log — they are simply not written yet. Only G/GS genuinely lack a pitch-log source.
+// Per the architecture directive (Trevor): THIS script must write ALL stats from the pitch log, with the monthly
+// TruMedia Master sheet acting only as a CHECK/OVERRIDE for the known-weak fields (stolen bases, ERA).
+// See the "WAR MUST READ THE DB MASTERS" block in docs/PIPELINE_pitch_log_to_projections.md.
 const PITCHER_UNMAPPED = ["ERA", "IP", "G", "GS", "Role"];
 
 const eps = (kind: FieldSpec<any>["kind"]) =>
