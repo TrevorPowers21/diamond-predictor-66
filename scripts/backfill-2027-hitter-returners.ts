@@ -183,7 +183,7 @@ async function main() {
   const masterRatingRows = await loadAllPaged<any>(() =>
     (supabase as any)
       .from("Hitter Master")
-      .select("id, source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war")
+      .select("id, source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war, regular_season_pa, pa")
       .eq("Season", CURRENT_SEASON),
   );
   const masterRatingsBySourceId = new Map<string, any>();
@@ -283,7 +283,17 @@ async function main() {
       // Auto-assign depth role from last-season PA; store tier-based PA
       // (cornerstone=245, everyday=215, etc.) so within-tier players don't
       // see jarring oWAR/market gaps.
-      const hitterDepthRole = defaultHitterDepthRoleFromActualPa(meta.pa);
+      // ★ 2026-08-31 — DEPTH ROLE READS THE MASTER'S REGULAR-SEASON PA, not `players.pa`.
+      // WHY: this previously read `meta.pa` (= `players.pa`), a stat on the IDENTITY table that nothing keeps in sync
+      // with the Masters. After the 2026-08-31 Masters fill, prod's `players.pa` (120.4) diverged from
+      // `"Hitter Master".pa` (127.7) and 306 hitters silently dropped out of the `cornerstone` tier. On STAGING the
+      // two columns happen to be equal (128.0 / 128.0, 5,343 of 5,343), which is why it never surfaced there.
+      // Trevor: "Both should be regular season PA" + "we don't even really need players.pa … just change what column
+      // is read". Fallback is the Master's FULL-season `pa` (Trevor: "full season is fine") so `players` is no longer
+      // a stat source on this path. Matches TeamBuilder (useTeamBuilderData.ts:239 `regular_season_pa ?? pa`).
+      const hitterDepthRole = defaultHitterDepthRoleFromActualPa(
+        master?.regular_season_pa ?? master?.pa ?? meta.pa,
+      );
       const projectedPa = paForHitterDepthRole(hitterDepthRole);
       const oWar = computeHitterOWar(result.p_wrc_plus, null, hitterDepthRole);
       // STEP 7 (2026-08-13): market rides TOTAL hitter WAR (oWAR + dWAR + bsrWAR), not oWAR alone.

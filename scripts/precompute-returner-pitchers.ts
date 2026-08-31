@@ -485,7 +485,12 @@ async function main() {
     // the recalc engine: classify the fine depth role from real IP, then use that
     // role's IP (not the coarse SP/SM/RP default). Keeps stored == live and lets
     // one writer own (projected_ip, p_war, pitcher_depth_role, market).
-    const actualIp = Number(pmRow.IP) || 0;
+    // ★ 2026-08-31 — DEPTH ROLE READS THE REGULAR-SEASON WINDOW (Trevor: "Both should be regular season PA").
+    // `"Pitching Master".IP` became FULL-season (incl. postseason) in the 2026-08-31 Masters fill, so using it here
+    // would inflate depth tiers for deep-playoff-run teams — the exact failure the regular-season anchor exists to
+    // prevent. `regular_season_ip` is the engine's <=2026-05-18 split; fall back to full IP only where it is null.
+    // Matches the TeamBuilder path (useTeamBuilderData.ts:254 `regular_season_ip ?? IP`), so both agree.
+    const actualIp = Number(pmRow.regular_season_ip ?? pmRow.IP) || 0;
     const derived = derivePitcherStored(
       result.p_rv_plus,
       result.projected_role,

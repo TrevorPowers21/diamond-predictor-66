@@ -1,3 +1,12 @@
+/**
+ * 🛑 PARTLY LEGACY — last touched 2026-08-20, but TWO of its steps are dead:
+ *   • `calculateConferenceStuffPlus` = the LEGACY conference Stuff+ (src/savant/lib/conferenceStuffPlus.ts,
+ *     2026-04-26). The canonical producer is `conferenceStuffPlusV2` — pitch-weighted from
+ *     `"Pitching Master".stuff_plus x trackman_pitches`. Running the legacy one re-introduces the stale 101.17
+ *     value that C28 step 4 fixed to 99.15 on prod.
+ *   • `bulkRecalculatePredictionsLocal` = a STUB (predictionEngine.ts:875).
+ * Use docs/PLAN_finish_prod_push_2026_08_31.md for the current ordered sequence.
+ */
 #!/usr/bin/env node
 /**
  * Replay the post-import cascade for a given season. Used to recover after a

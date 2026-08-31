@@ -2589,3 +2589,67 @@ drift.** Compare E37 against the *shape* (distribution, depth-role mix), not aga
 re-derived values**, nor that any **code path consumes them**. Those are three separate questions:
 **(a) does the key exist · (b) is its value fresh · (c) does the producer actually read it.**
 → **For any calibration change, verify all three.** Trevor caught this by asking; I had answered (a) only.
+
+---
+# 🔴 DEPTH-ROLE SOURCE DEFECT — `players.pa` WAS DRIVING THE TIER, AND IT WENT STALE (found + fixed 2026-08-31)
+## HOW IT SURFACED
+After E37, prod's returner-hitter depth mix had **306 fewer `cornerstone`** than staging (1,088 vs 1,394) while
+`o_war` matched (**max 6.86 in BOTH**) and markets closed correctly. Markets/WAR right, TIERS wrong ⇒ the tier input
+was the problem, not the projection.
+
+## ❌ MY FIRST HYPOTHESIS WAS WRONG — measured, then discarded
+I assumed the Master `pa` change moved players across the 220-PA boundary. **It did not:**
+`>=200 PA: 1,332 → 1,297 (−35)` · `>=150 PA: 2,239 → 2,228 (−11)`. Nowhere near 306. **And the direction was wrong** —
+Master `pa` went UP (full season), which would produce MORE cornerstones, not fewer.
+
+## ✅ THE ACTUAL CAUSE — the tier reads a DIFFERENT TABLE
+`scripts/backfill-2027-hitter-returners.ts:286` called `defaultHitterDepthRoleFromActualPa(meta.pa)` where
+`meta.pa` comes from **`players.pa`** (`:136` `.from("players").select("… pa …")`) — a stat living on the **IDENTITY**
+table, which **nothing keeps in sync with the Masters**.
+| | `players.pa` | `"Hitter Master".pa` | in sync? |
+|---|---|---|---|
+| **STAGING** | 128.0 | 128.0 | ✅ **5,343 / 5,343 identical, median Δ 0.0** |
+| **PROD (after Step 1)** | **120.4** | **127.7** | ❌ 2,118 / 5,325 · median Δ **2.0** |
+★ **SMOKING GUN: staging's `players.pa >= 220` count is 1,394 — EXACTLY its cornerstone count.**
+The threshold is hardcoded (`src/lib/depthRoles.ts:93` `if (safePa >= 220) return "cornerstone"`).
+**I created the divergence**: Step 1 updated `"Hitter Master".pa` to full-season and left `players.pa` untouched.
+It never surfaced on staging because there the two columns happen to be equal.
+★ **FIFTH INSTANCE of the same shape** — *the VALUE moved to one table, a supporting INPUT stayed on another*
+(after C24 `trackman_pitches`, `computeNcaaAverages` weighting, Conference `Stuff_plus`, and F44's `TeamID`).
+
+## ✅ THE FIX — CHANGE WHAT IS READ; DO NOT SYNC ANOTHER COLUMN
+Trevor: *"Both should be regular season PA"* · *"we don't even really need `players.pa` if we are using regular season
+pa/ip — just change what column is read, not filling another column."* The Masters ALREADY carry both windows from
+Step 1 (`regular_season_pa` 5,322 · `regular_season_ip` 5,372), so **nothing needed filling.**
+```
+scripts/precompute-returner-pitchers.ts:488
+-  const actualIp = Number(pmRow.IP) || 0;
++  const actualIp = Number(pmRow.regular_season_ip ?? pmRow.IP) || 0;      // select("*") already fetches it
+
+scripts/backfill-2027-hitter-returners.ts:186   + regular_season_pa, pa   (added to the Master select)
+scripts/backfill-2027-hitter-returners.ts:286
+-  defaultHitterDepthRoleFromActualPa(meta.pa)
++  defaultHitterDepthRoleFromActualPa(master?.regular_season_pa ?? master?.pa ?? meta.pa)
+```
+**FALLBACK = the Master's FULL-season `pa`/`IP`** (Trevor: *"full season is fine"*) for the ~19 hitters / ~3 pitchers
+with no reg value — so **`players` is no longer a stat source on this path**.
+⛔ **`players.pa` / `players.ip` are LEFT IN PLACE, not removed** — other consumers may read them; a column drop
+mid-push is not worth the risk. **Do NOT add duplicate reg columns to `players`** (Trevor: no duplicated unused columns).
+✅ **BOTH PATHS NOW AGREE ON THE REGULAR SEASON:** the precompute matches TeamBuilder
+(`useTeamBuilderData.ts:239` `regular_season_pa ?? pa`, `:254` `regular_season_ip ?? IP`), which was already correct.
+**TeamBuilder is the reference implementation here.**
+⚠ **E36 + E37 MUST BE RE-RUN** — their `hitter_depth_role`/`pitcher_depth_role` and the `projected_pa`/`projected_ip`
+derived from them are stale. `o_war` / `p_war` / rates / markets are UNAFFECTED. Re-running is idempotent.
+
+## 🏷️ LEGACY FUNCTIONS MARKED (2026-08-31) — stop rediscovering these
+Banners added in-file so nobody proposes them again:
+| file | last touched | why LEGACY |
+|---|---|---|
+| `src/lib/syncMasterToPlayers.ts` | 2026-06-07 | `refreshPaIpFromMaster()` syncs Master→`players.pa/ip` — the model just superseded. ⛔ `syncMasterToPlayers()` **WIPES** the players table. ✅ `addMissingPlayers()` still live. |
+| `src/lib/importPaAbData.ts` | 2026-04-03 | writes PA/AB onto `players` |
+| `src/lib/runDataCascade.ts` | 2026-05-19 | imports `bulkRecalculatePredictionsLocal`, a **STUB** (`predictionEngine.ts:875`) — the open gate on Phase-H 48 |
+| `scripts/recompute-cascade.ts` | 2026-08-20 | **PARTLY** legacy: calls the LEGACY `calculateConferenceStuffPlus` **and** the stubbed `bulkRecalc` |
+| `src/savant/lib/conferenceStuffPlus.ts` | 2026-04-26 | reads the legacy `pitcher_stuff_plus_inputs` lane; superseded by `conferenceStuffPlusV2` |
+★ I proposed `refreshPaIpFromMaster` as "the committed process" purely because its docstring matched the symptom.
+Trevor: *"that is old outdated stale logic … all of these are outdated I am almost positive."* **A docstring that
+matches your symptom is not evidence the function is current — CHECK `git log -1 --format=%ad` FIRST.**
