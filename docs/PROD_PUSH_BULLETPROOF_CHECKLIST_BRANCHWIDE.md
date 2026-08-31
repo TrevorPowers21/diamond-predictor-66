@@ -2732,3 +2732,67 @@ When a DERIVATION RULE changes, prod↔staging comparison is **meaningless until
 a mismatch tells you nothing — I nearly logged the 306-cornerstone gap as a prod defect when it was the fix working.
 ✅ **Sequence: fix → apply to prod → apply the SAME code to staging → THEN compare.** Any residual difference after
 that is genuine data (population size, calibration freshness), and can be attributed rather than guessed at.
+
+---
+# 🔍 E38 PRE-FLIGHT AUDIT (2026-08-31) — run BEFORE `zsh scripts/_run_step2_all.sh --prod`
+Audited after the depth-role fix, because E38 runs a DIFFERENT pair of scripts from E36/E37.
+
+## 🔴 FINDING 1 — THE TRANSFER **HITTER** HAD THE SAME `players.pa` DEFECT. **FIXED.**
+E36/E37 (returners) were fixed earlier; the transfer pair had NOT been checked.
+| script | depth-role input | state |
+|---|---|---|
+| `precompute-pitchers.ts` (transfer PITCHER) | `:362` `r.regular_season_ip ?? r.IP` · `:535` `pmRow?.regular_season_ip ?? pmRow?.IP ?? p.ip` | ✅ **ALREADY CORRECT** |
+| `precompute-transfer-projections.ts` (transfer HITTER) | `:409` `const rawPa = (p as any).pa` ← **`players.pa`** | ❌ **BUGGED → FIXED** |
+**FIX APPLIED** (same pattern, `masterPR` was already in scope for `d_war`):
+```
+:305  + regular_season_pa, pa      (added to the "Hitter Master" select)
+:409  const rawPa = masterPR?.regular_season_pa ?? masterPR?.pa ?? (p as any).pa ?? null;
+```
+★ **Fixing the returner path did NOT fix the transfer path.** Four scripts derive depth roles; three needed
+inspection and two needed changes. **When a shared helper's INPUT convention changes, audit EVERY caller** —
+`grep -rn "defaultHitterDepthRoleFromActualPa\|defaultPitcherDepthRoleFromIp"`.
+
+## ⚠ FINDING 2 — `RSTR IQ All-Americans` HAS **`school_team_id = NULL`** AND **0 TRANSFER PREDICTIONS**
+| PROD active team | transfer preds |
+|---|---|
+| **RSTR IQ All-Americans** | **0** |
+| the other 13 (Kansas, Georgia, Arkansas, TCU, Penn State, …) | **~14,240 each** |
+Its `customer_teams` row: `school_team_id = NULL · active = true · savant_enabled = true · market_pay_enabled = false`.
+**STAGING HAS NO SUCH TEAM** — it is prod-only. Transfer projections need a DESTINATION program (conference, park,
+PTM), so with no `school_team_id` there is nothing to project INTO. **The 0 is almost certainly BY DESIGN.**
+🛑 **BUT `list-customer-teams.ts` RETURNS IT**, so the loop WILL attempt it — and the loop **discards exit codes**
+(below), so a failure or no-op there is indistinguishable from success. **Expect 13 teams to produce ~14,240 rows and
+All-Americans to produce 0. Do NOT treat that 0 as a failed run — and do NOT "fix" it by assigning a school.**
+
+## 🛑 FINDING 3 — THE LOOP SWALLOWS EXIT CODES (already known, restated because it now matters more)
+```zsh
+npx tsx … precompute-transfer-projections.ts --team "$uuid" $PROD_FLAG 2>&1 | grep -iE "Result:|computed|error" | head -3
+npx tsx … precompute-pitchers.ts            --team "$uuid" $PROD_FLAG 2>&1 | grep -iE "Result:|computed|overlaid|error" | head -3
+```
+The pipe means the loop's status is `grep`'s, not the script's. **`STEP 2 ALL DONE (14 teams)` PROVES NOTHING.**
+✅ **GATE: after the run, verify PER TEAM in the DB** — 13 teams × ~14,240 rows + All-Americans at 0 — and re-run a
+dry pass requiring 0 pending changes. **Never accept the banner.**
+
+## ✅ FINDING 4 — DEPENDENCIES SATISFIED
+| prerequisite | PROD | STAGING |
+|---|---|---|
+| `team_season_stats` rows | **308** | 308 |
+| `faced_stuff_plus` / `faced_htp` (what E38 READS) | **308 / 308** | 308 / 308 |
+| active customer teams | **14** | 18 |
+F44 ran, so `precompute-transfer-projections.ts:225` and `precompute-pitchers.ts:279` will find the faced-competition
+values instead of coercing an empty map. **This was the ORDER-AUDIT inversion — F44 had to precede Phase E, and does.**
+
+## ⚠ FINDING 5 — THE TEAM LISTS DIFFER (14 prod vs 18 staging). NOT A DEFECT.
+Prod's 14: RSTR IQ All-Americans · Kansas · Georgia · Arkansas · Florida Atlantic · TCU · Stetson · Penn State ·
+Arizona State · Vanderbilt · Gardner-Webb · BYU · Virginia Tech · Dallas Baptist.
+**"18 teams incl. North Carolina" is a STAGING number and is WRONG for prod.** Gate on what the live list returns,
+never on a hardcoded count.
+
+## ▶️ E38 EXECUTION ORDER
+```
+1. (done) fix the transfer-hitter depth-role source
+2. DRY-RUN one team on prod first — confirm the depth roles look REG-anchored before committing 14 teams
+3. zsh scripts/_run_step2_all.sh --prod        (~14 teams x 2 scripts; run detached under caffeinate)
+4. GATE per team in the DB (13 x ~14,240 + All-Americans 0), NOT the banner
+5. re-run dry → require 0 pending per team
+```

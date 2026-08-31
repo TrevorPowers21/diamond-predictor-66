@@ -302,7 +302,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("Hitter Master")
-        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war")
+        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war, regular_season_pa, pa")
         .eq("Season", CURRENT_SEASON)
         .in("source_player_id", idsChunk),
     );
@@ -406,7 +406,14 @@ async function main() {
     // auto-assigned from last year's PA bucket; projected_pa stored is the
     // tier value (cornerstone=245, everyday=215, etc.) — NOT raw PA — so
     // within-tier players don't get jarring WAR gaps.
-    const rawPa = (p as any).pa ?? null;
+    // ★ 2026-08-31 — DEPTH ROLE READS THE MASTER'S REGULAR-SEASON PA, not `players.pa`.
+    // Same defect fixed the same day in scripts/backfill-2027-hitter-returners.ts:286. `players.pa` is a stat on the
+    // IDENTITY table that nothing keeps in sync with the Masters; after the Masters fill, prod's `players.pa` (120.4)
+    // diverged from `"Hitter Master".pa` (127.7) and hitters silently dropped a depth tier.
+    // ⚠ The TRANSFER PITCHER path (precompute-pitchers.ts:362,:535) was ALREADY correct — it reads
+    //   `regular_season_ip ?? IP`. Only this hitter path was wrong.
+    // Fallback chain: Master reg → Master full → players.pa (last resort, for rows with no Master).
+    const rawPa = masterPR?.regular_season_pa ?? masterPR?.pa ?? (p as any).pa ?? null;
     const hitterDepthRole = defaultHitterDepthRoleFromActualPa(rawPa);
     const projectedPa = paForHitterDepthRole(hitterDepthRole);
     const oWar = computeHitterOWar(final.pWrcPlus, null, hitterDepthRole);
