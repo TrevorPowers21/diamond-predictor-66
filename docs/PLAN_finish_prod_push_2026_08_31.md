@@ -588,3 +588,35 @@ await c.query(`set statement_timeout = '15min'`);   // FINITE — never 0
 `model_version` does not exist; the columns are **`model_type`** and **`variant`**. Earlier: `ra9_r`/`AVG` on
 `team_season_stats`. **Read `information_schema.columns` — do NOT infer column names from a producing script or a
 function body.**
+
+---
+# 🔬 E36 PROD↔STAGING VERIFICATION (2026-08-31) — pitchers MATCH; hitters differ because E37 has not run
+## ✅ PITCHERS — E36 REPRODUCES STAGING
+| | PROD | STAGING |
+|---|---|---|
+| rows with `p_war` | **6,632** | 6,562 |
+| avg `p_war` | **0.607** | 0.598 |
+| `p_war` range | −1.75 … **3.93** | −6.68 … **3.93** |
+| market rows · avg · max | 6,466 · **$13,146** · **$382,705** | 6,343 · $13,241 · $387,691 |
+**PER-PLAYER (joined on `source_player_id`, n=6,485): `|Δ| p_war` mean 0.023 · MEDIAN 0.004 · p90 0.050.**
+**`$/WAR` ratio prod÷staging: median 1.000 · p10 1.000 · p90 1.000** — the pricing rate is IDENTICAL.
+Top players: `Ruger Riojas 3.58 / $357,778.626` **EXACTLY equal in both**; Volantis/Kuhns differ only by their small
+`p_war` delta. ✅ **NIL tiers are IDENTICAL in both envs** — `sec=4.0 acc=1.5 big12=1.2 bigten=1.0 … juco=0.35`
+(Trevor: PTM was raised for SEC and ACC — **that raise is already on PROD**).
+★ Prod's `p_war` FLOOR is BETTER: **−1.75 vs staging's −6.68.** Staging retains an outlier prod does not.
+
+## ⚠ HITTERS — PROD IS STALE, AND THAT IS EXPECTED (E37 IS THE NEXT STEP)
+| | PROD | STAGING |
+|---|---|---|
+| market rows · avg · **max** | 6,488 · $13,816 · **$104,110** | 6,513 · $16,803 · **$613,259** |
+Prod's returner hitters still carry **pre-SEC-4.0 pricing** — a ~6× gap at the top end. **E37 closes this.**
+🛑 **DO NOT read this as a prod defect.** And note the gap only became visible when split BY SIDE: my first comparison
+lumped hitters and pitchers together and produced a misleading "staging max $613,259 vs prod $382,705".
+**Compare like with like — split by side before comparing markets.**
+
+## 🛑 `updated_at` IS NOT A FRESHNESS SIGNAL
+Prod's returner-HITTER rows show `updated_at = 2026-08-31` while their VALUES are stale — because
+`propagate_pitcher_scores_to_predictions` rewrote scouting-score columns on **every** row (105,093 of them) and bumped
+the timestamp. **A recent `updated_at` proves a row was TOUCHED, not that its numbers are current.**
+Same family as "populated ≠ fresh" (Conference `Stuff_plus` at 30/30) and "count-correct ≠ complete" (Kozeal).
+→ **Gate on the VALUE, never on `updated_at`.**
