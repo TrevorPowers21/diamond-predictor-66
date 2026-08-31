@@ -451,7 +451,19 @@ async function main() {
       // consistent with o_war — no dependency on the separate refresh_composite_war() job that lagged.
       // total_hitter_war is the position-player HEADLINE/source; o_war stays as the offensive component.
       total_hitter_war: totalHitterWar,
-      market_value: marketValue,
+      // ★ 2026-08-31 — TWP ROUTING ADDED. TWPs keep the hitter market in `twp_hitter_market_value` and NULL the
+      //   shared `market_value`, because the display layer (`pickHitterMarketValue`, src/lib/twpMarketValue.ts:25)
+      //   reads `twp_hitter_market_value` whenever `players.is_twp` is true and IGNORES `market_value` entirely.
+      //   🚨 THIS ENGINE WAS THE ONLY ONE OF FOUR MISSING IT — returner hitter (backfill-2027-hitter-returners:327),
+      //   returner pitcher and transfer pitcher (both via predictionEngine.ts:57-61) all already routed correctly.
+      //   The result: 2,119 transfer + 110 returner TWP hitter rows had the dollars sitting in the wrong column and
+      //   rendered BLANK to coaches. The returner file's comment claiming this was "the same convention as the
+      //   transfer precompute" was aspirational — the transfer side never implemented it.
+      //   ⛔ Do NOT "fix" this downstream by re-pricing (that was F41b's mistake): the value computed HERE is the
+      //   only one priced at the DESTINATION program's conference (`toConference` above). Re-deriving it later from
+      //   the player's own conference under-prices by the full PTM ratio (measured: SEC 4.0 vs Patriot ~1.36 = 2.9x).
+      market_value: (p as any).is_twp ? null : marketValue,
+      ...((p as any).is_twp ? { twp_hitter_market_value: marketValue } : {}),
       projected_pa: projectedPa,
       hitter_depth_role: hitterDepthRole,
       // Keep precompute rows unlocked so subsequent runs can refresh them.

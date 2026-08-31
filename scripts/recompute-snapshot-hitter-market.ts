@@ -46,8 +46,9 @@ const num = (v: any) => v == null ? null : Number(v);
   // and error-check each batch so this can never silently poison the position map again.
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const pids = [...new Set(bps.map((r: any) => r.player_id))].filter((p) => p != null && UUID_RE.test(String(p)));
-  const playerPos = new Map<string, string>(), name = new Map<string, string>();
-  for (let i = 0; i < pids.length; i += 200) { const { data, error } = await sb.from("players").select("id, first_name, last_name, position").in("id", pids.slice(i, i + 200)); if (error) throw new Error(`players fetch batch @${i} failed: ${error.message}`); for (const p of (data || [])) { playerPos.set((p as any).id, (p as any).position); name.set((p as any).id, `${(p as any).first_name} ${(p as any).last_name}`); } }
+  const playerPos = new Map<string, string>(), name = new Map<string, string>(), playerTwp = new Map<string, boolean>();
+  // ★ 2026-08-31 — `is_twp` is fetched from `players`, the SOURCE OF TRUTH. See REGISTRY #21.
+  for (let i = 0; i < pids.length; i += 200) { const { data, error } = await sb.from("players").select("id, first_name, last_name, position, is_twp").in("id", pids.slice(i, i + 200)); if (error) throw new Error(`players fetch batch @${i} failed: ${error.message}`); for (const p of (data || [])) { playerPos.set((p as any).id, (p as any).position); playerTwp.set((p as any).id, (p as any).is_twp === true); name.set((p as any).id, `${(p as any).first_name} ${(p as any).last_name}`); } }
 
   let changed = 0, noConf = 0, skippedPitcher = 0; const updates: any[] = [], samples: string[] = [];
   for (const r of bps) {
@@ -59,13 +60,25 @@ const num = (v: any) => v == null ? null : Number(v);
     const pos = playerPos.get(r.player_id) ?? s0.position ?? r.position_slot ?? null;
     const newMv = computeHitterMarketValue(Number(total), { conference: conf, position: pos });
     const s = { ...s0 };
-    const isTwp = !!s.is_twp;
-    // TWP: hitter dollars live in twp_hitter_market_value (shared market_value stays null).
+    // ★ 2026-08-31 — BRANCH ON `players.is_twp`, THE SOURCE OF TRUTH — never on the snapshot's embedded copy.
+    //   E35 flipped `players.is_twp` 137→253 and NOTHING updated the snapshots, so `s.is_twp` is stale (or absent)
+    //   on every row written before that. Branching on it routed a TWP's dollars into the SHARED `market_value`,
+    //   which the display layer (`pickHitterMarketValue`) never reads for a TWP — a correct number in the column
+    //   nobody looks at, while the column it DOES read held a stale wrong-conference value (2.9× off).
+    //   ⛔ Do NOT "fix" this by back-filling `is_twp` into snapshots — that just creates another copy to go stale.
+    //   See SILENT-FAILURE REGISTRY #21. Same resolution as the `players.pa` defect (REGISTRY #9): change what is
+    //   READ, do not sync another column.
+    const isTwp = playerTwp.get(r.player_id) === true;
+    // TWP: hitter dollars live in twp_hitter_market_value and the shared market_value MUST be NULL.
     const field = isTwp ? "twp_hitter_market_value" : "market_value";
     const oldMv = num(s[field]);
     if (newMv == null) continue;
-    if (oldMv == null || Math.abs(oldMv - newMv) >= 1) {
+    // A TWP row carrying a non-null shared market_value is itself a defect to repair, even if the dollars in
+    // `field` are already correct — so it counts as a change.
+    const staleShared = isTwp && s.market_value != null;
+    if (oldMv == null || Math.abs(oldMv - newMv) >= 1 || staleShared) {
       s[field] = newMv;
+      if (isTwp) { s.market_value = null; s.is_twp = true; }
       updates.push({ id: r.id, player_snapshot: s });
       changed++;
       if (samples.length < 12) { const nm = name.get(r.player_id) ?? (s0 as any).name ?? (s0 as any).player_name ?? ((s0 as any).first_name ? `${(s0 as any).first_name} ${(s0 as any).last_name ?? ""}`.trim() : null) ?? `id:${String(r.player_id).slice(0, 8)}`; const winNew = Number(total) !== 0 ? Math.round(newMv / Number(total)) : 0; samples.push(`  ${nm} [${r.position_slot ?? pos}] ${conf} total=${Number(total).toFixed(2)} ${field}: $${oldMv == null ? "—" : Math.round(oldMv)} → $${Math.round(newMv)}  ($${winNew}/win)`); }

@@ -25,9 +25,14 @@ console.log(`[target] ${URL_IS_PROD ? "PROD" : "STAGING"} ${SB_URL}`);
 const sb = createClient(SB_URL, SB_KEY);
 const APPLY = process.argv.includes("--apply");
 const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
-const hitterFromRoster = (ps: any) => ({ is_twp: true, nil_valuation: null, p_avg: ps.p_avg ?? null, p_obp: ps.p_obp ?? null, p_slg: ps.p_slg ?? null, p_wrc_plus: ps.p_wrc_plus ?? null, owar: ps.o_war ?? null, o_war: ps.o_war ?? null, hitter_depth_role: ps.hitter_depth_role ?? null, twp_hitter_market_value: ps.twp_hitter_market_value ?? null });
+// ★ `total_hitter_war` (= o_war + d_war + bsr_war, NO p_war) MUST be carried through. F40 wrote it onto every
+//   hitter snapshot; this builder is a HAND-LISTED field set, so anything omitted here is SILENTLY STRIPPED on
+//   rebuild — it deletes the board rows and reinserts from these objects. Omitting it re-broke F40's own gate
+//   ("0 snapshots with o_war but NULL total_hitter_war"). Added 2026-08-31. See SILENT-FAILURE REGISTRY #18.
+//   ⛔ If you add a field to the hitter snapshot anywhere else, add it HERE and to `F` below, or it will vanish.
+const hitterFromRoster = (ps: any) => ({ is_twp: true, nil_valuation: null, p_avg: ps.p_avg ?? null, p_obp: ps.p_obp ?? null, p_slg: ps.p_slg ?? null, p_wrc_plus: ps.p_wrc_plus ?? null, owar: ps.o_war ?? null, o_war: ps.o_war ?? null, d_war: ps.d_war ?? null, bsr_war: ps.bsr_war ?? null, total_hitter_war: ps.total_hitter_war ?? null, hitter_depth_role: ps.hitter_depth_role ?? null, twp_hitter_market_value: ps.twp_hitter_market_value ?? null });
 const pitcherFromRoster = (ps: any) => ({ is_twp: true, nil_valuation: null, p_era: ps.p_era ?? null, p_fip: ps.p_fip ?? null, p_whip: ps.p_whip ?? null, p_k9: ps.p_k9 ?? null, p_bb9: ps.p_bb9 ?? null, p_hr9: ps.p_hr9 ?? null, p_rv_plus: ps.p_rv_plus ?? null, p_war: ps.p_war ?? null, pitcher_depth_role: ps.pitcher_depth_role ?? null, twp_pitcher_market_value: ps.twp_pitcher_market_value ?? null });
-const hitterFromPred = (p: any) => ({ is_twp: true, nil_valuation: null, p_avg: p.p_avg, p_obp: p.p_obp, p_slg: p.p_slg, p_wrc_plus: p.p_wrc_plus, owar: p.o_war, o_war: p.o_war, hitter_depth_role: p.hitter_depth_role, twp_hitter_market_value: p.twp_hitter_market_value });
+const hitterFromPred = (p: any) => ({ is_twp: true, nil_valuation: null, p_avg: p.p_avg, p_obp: p.p_obp, p_slg: p.p_slg, p_wrc_plus: p.p_wrc_plus, owar: p.o_war, o_war: p.o_war, d_war: p.d_war ?? null, bsr_war: p.bsr_war ?? null, total_hitter_war: p.total_hitter_war ?? null, hitter_depth_role: p.hitter_depth_role, twp_hitter_market_value: p.twp_hitter_market_value });
 const pitcherFromPred = (p: any) => ({ is_twp: true, nil_valuation: null, p_era: p.p_era, p_fip: p.p_fip, p_whip: p.p_whip, p_k9: p.p_k9, p_bb9: p.p_bb9, p_hr9: p.p_hr9, p_rv_plus: p.p_rv_plus, p_war: p.p_war, pitcher_depth_role: p.pitcher_depth_role, twp_pitcher_market_value: p.twp_pitcher_market_value });
 
 (async () => {
@@ -41,7 +46,9 @@ const pitcherFromPred = (p: any) => ({ is_twp: true, nil_valuation: null, p_era:
   for (const r of (tb || [])) groups.set(`${r.player_id}|${r.customer_team_id}`, { pid: r.player_id, ctid: r.customer_team_id, user_id: (r as any).user_id });
   const { data: builds } = await sb.from("team_builds").select("id, customer_team_id, is_active, is_default, team, academic_year, updated_at, created_at");
   const buildsByCt = new Map<string, any[]>(); for (const b of (builds || [])) { (buildsByCt.get(b.customer_team_id) ?? buildsByCt.set(b.customer_team_id, []).get(b.customer_team_id)!).push(b); }
-  const F = "player_id,customer_team_id,variant,model_type,p_avg,p_obp,p_slg,p_wrc_plus,p_era,p_fip,p_whip,p_k9,p_bb9,p_hr9,p_rv_plus,p_war,o_war,hitter_depth_role,pitcher_depth_role,twp_hitter_market_value,twp_pitcher_market_value";
+  // ★ d_war / bsr_war / total_hitter_war added 2026-08-31 — without them `hitterFromPred` cannot carry the
+  //   composite and the rebuilt row loses it silently. See REGISTRY #18.
+  const F = "player_id,customer_team_id,variant,model_type,p_avg,p_obp,p_slg,p_wrc_plus,p_era,p_fip,p_whip,p_k9,p_bb9,p_hr9,p_rv_plus,p_war,o_war,d_war,bsr_war,total_hitter_war,hitter_depth_role,pitcher_depth_role,twp_hitter_market_value,twp_pitcher_market_value";
 
   let done = 0; const samples: string[] = [];
   for (const { pid, ctid, user_id } of groups.values()) {

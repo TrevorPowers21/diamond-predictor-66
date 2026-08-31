@@ -62,7 +62,7 @@ Flipping `is_twp` drives real, designed machinery (traced across pipelines + edg
 - **Team Builder:** seeds the same `source_player_id` into both roster slots (one per side).
 - **Display:** "primary · TWP" across ReturningPlayers, TeamBuilder, profiles, target board.
 - **Maintenance suite:** `rebake-twp-markets`, `rebuild-twp-target-rows`, `fix-returner-twp-hitter-market`,
-  `clean-twp-sides` — all pre-existing. The gap was purely the unrun detector, not missing code.
+  `clean-twp-sides 🗑️DELETED-2026-08-31` — all pre-existing. The gap was purely the unrun detector, not missing code.
 
 ## HR9-ONLY FLOOR (folded in — narrowed from the earlier blanket floor)
 The prior calibration pass floored ALL projected rates at 0 (`Math.max(0, projected)`). Narrowed to **HR9 ONLY**

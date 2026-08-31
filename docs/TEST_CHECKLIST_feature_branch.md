@@ -141,7 +141,7 @@ Every script below has already run on **staging** (verify-all = 0). Prod is the
 coordinate-with-Trevor batch — full order + counts in **handoff §9 + §10**. Run each
 dry-run first; --apply after; verify via catalog, not "OK".
 Order: pitcher-market fix → target/build snapshot resyncs → returner-TWP market →
-transfer_snapshot backfill → rostered-consistency → clean-twp-sides → set-active-builds
+transfer_snapshot backfill → rostered-consistency → clean-twp-sides 🗑️DELETED-2026-08-31 → set-active-builds
 (⚠ confirm each program's live build with Trevor — prod activity ≠ staging) → notes
 mirror → **target_board TWP migration** → **rebuild-twp-target-rows** → verify-all.
 

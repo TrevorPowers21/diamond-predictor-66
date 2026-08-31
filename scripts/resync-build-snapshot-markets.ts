@@ -45,23 +45,42 @@ const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
   const { data: cts } = await sb.from("customer_teams").select("id, school_team_id");
   const teamIds = [...new Set((cts || []).map((c: any) => c.school_team_id).filter(Boolean).map(String))];
   const teamConf = new Map<string, string>();
-  for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) teamConf.set(String(t.id), t.conference); }
-  const ctConf = new Map<string, string>(); for (const c of (cts || [])) { const cf = teamConf.get(String(c.school_team_id)); if (cf) ctConf.set(c.id, cf); }
+  const teamName = new Map<string, string>();
+  for (let i = 0; i < teamIds.length; i += 200) { const { data } = await sb.from("Teams Table").select("id, conference, full_name").in("id", teamIds.slice(i, i + 200)); for (const t of (data || [])) { teamConf.set(String(t.id), (t as any).conference); teamName.set(String(t.id), (t as any).full_name); } }
+  const ctConf = new Map<string, string>(); const ctName = new Map<string, string>();
+  for (const c of (cts || [])) { const cf = teamConf.get(String(c.school_team_id)); if (cf) ctConf.set(c.id, cf); const nm = teamName.get(String(c.school_team_id)); if (nm) ctName.set(c.id, nm); }
   const { data: builds } = await sb.from("team_builds").select("id, customer_team_id");
-  const buildConf = new Map<string, string>(); for (const b of (builds || [])) { const cf = ctConf.get((b as any).customer_team_id); if (cf) buildConf.set(b.id, cf); }
+  const buildConf = new Map<string, string>(); const buildTeam = new Map<string, string>();
+  for (const b of (builds || [])) { const cf = ctConf.get((b as any).customer_team_id); if (cf) buildConf.set(b.id, cf); const nm = ctName.get((b as any).customer_team_id); if (nm) buildTeam.set(b.id, nm); }
 
   let bps: any[] = [];
   { let f = 0; for (;;) { let q = sb.from("team_build_players").select("id, build_id, player_id, position_slot, player_snapshot").order("id").range(f, f + 999); if (!ALL) q = q.eq("build_id", GA_BUILD); const { data, error } = await q; if (error) throw error; bps = bps.concat(data || []); if (!data || data.length < 1000) break; f += 1000; } }
-  const pids = [...new Set(bps.map((r: any) => r.player_id))];
-  const posName = new Map<string, string>(), playerPos = new Map<string, string>();
-  for (let i = 0; i < pids.length; i += 200) { const { data } = await sb.from("players").select("id, first_name, last_name, position").in("id", pids.slice(i, i + 200)); for (const p of (data || [])) { posName.set(p.id, `${p.first_name} ${p.last_name}`); playerPos.set(p.id, p.position); } }
+  // ★★ 2026-08-31 — FILTER TO REAL UUIDs + ERROR-CHECK EVERY BATCH. `team_build_players` holds **191 rows with a
+  //   NULL `player_id`** (portal-search adds). A single null/non-UUID in an `.in("id", batch)` makes Postgres reject
+  //   the ENTIRE batch as invalid-uuid — and the fetch below discarded `error`, so the failure was silent and every
+  //   real player in that batch vanished from `posName` / `playerPos` / `playerTwp`. Symptom: samples printing
+  //   `undefined` for the name, PVF flattening to 1.0, and (since 2026-08-31) `is_twp` reading FALSE for genuine
+  //   TWPs — which would have re-routed their dollars into the shared column, re-breaking REGISTRY #21.
+  //   This is the SAME defect already fixed in recompute-snapshot-hitter-market.ts:47-50; it was never ported here.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const pids = [...new Set(bps.map((r: any) => r.player_id))].filter((p) => p != null && UUID_RE.test(String(p)));
+  const posName = new Map<string, string>(), playerPos = new Map<string, string>(), playerTwp = new Map<string, boolean>();
+  // ★ 2026-08-31 — `is_twp` comes from `players`, the SOURCE OF TRUTH (REGISTRY #21).
+  for (let i = 0; i < pids.length; i += 200) { const { data, error } = await sb.from("players").select("id, first_name, last_name, position, is_twp").in("id", pids.slice(i, i + 200)); if (error) throw new Error(`players fetch batch @${i} failed: ${error.message}`); for (const p of (data || [])) { posName.set(p.id, `${p.first_name} ${p.last_name}`); playerPos.set(p.id, p.position); playerTwp.set(p.id, (p as any).is_twp === true); } }
 
   let changed = 0, noConf = 0; const updates: { id: string; player_snapshot: any }[] = [], samples: string[] = [];
   for (const r of (bps || [])) {
     const conf = buildConf.get(r.build_id); if (!conf) { noConf++; continue; }
     const s = { ...(r.player_snapshot || {}) }; if (!Object.keys(s).length) continue;
     const before = JSON.stringify(s);
-    const isTwp = !!s.is_twp, owar = num(s.o_war), pwar = num(s.p_war);
+    // ★ 2026-08-31 — BRANCH ON `players.is_twp`, NEVER the snapshot's embedded copy. E35 flipped the players flag
+    //   137→253 and nothing updated the snapshots, so `s.is_twp` is stale/absent on pre-E35 rows and routed TWP
+    //   dollars into the shared `market_value` — the column the display layer will not read for a TWP.
+    //   ⛔ Do NOT back-fill `is_twp` into snapshots; that creates another copy to go stale. See REGISTRY #21.
+    const isTwp = playerTwp.get(r.player_id) === true;
+    const owar = num(s.o_war), pwar = num(s.p_war);
+    // A TWP must never carry a shared market_value — repair it here regardless of the floor logic below.
+    if (isTwp && s.market_value != null) { s.market_value = null; s.is_twp = true; }
     // ONLY the unambiguous, position-independent error: a non-positive WAR must
     // floor to $0 (canonical), but stale rows kept a positive dollar. Positive-WAR
     // hitter markets depend on position (slot may be null → the bake resolves it
@@ -69,6 +88,33 @@ const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
     const floorNeg = (war: number | null, stored: any) => (war != null && war <= 0 && stored != null && Math.abs(num(stored)!) > 1) ? 0 : undefined;
     if (isTwp) { const h = floorNeg(owar, s.twp_hitter_market_value), p = floorNeg(pwar, s.twp_pitcher_market_value); if (h !== undefined) s.twp_hitter_market_value = h; if (p !== undefined) s.twp_pitcher_market_value = p; }
     else { const side = owar != null ? owar : pwar; const f = floorNeg(side, s.market_value); if (f !== undefined) s.market_value = f; }
+
+    // ★★ 2026-08-31 — RE-DERIVE POSITIVE PITCHER MARKETS. Previously this script ONLY floored non-positive WAR to
+    //   $0 and left every positive-WAR pitcher on whatever stale dollars it happened to hold, "leaving it to the
+    //   app's live bake". That is a STORED-FIRST VIOLATION (project_stored_derived_values_architecture: the UI reads
+    //   stored, it does not live-compute) and it produced a visible contradiction: Gio Colasante's SP slot held
+    //   $0 on the BUILD snapshot against a real p_war of 1.3073, while his TARGET BOARD row — re-derived by
+    //   resync-target-snapshots — correctly held $130,733. Same player, same side, two surfaces, two numbers.
+    //   The original "positions are ambiguous" caveat applies to HITTERS (slot may be null); pitcher pricing needs
+    //   only conference + depth role + team, all of which are present here. So we derive pitchers and continue to
+    //   leave positive-WAR hitter markets to recompute-snapshot-hitter-market (which owns them).
+    //   `team` feeds canShowPitchingMarketValue's Independent/Oregon-State guard, so it must be the PROGRAM being
+    //   priced into — NOT the player. (resync-target-snapshots passes a player name there; that is a latent bug
+    //   which only bites on Independent programs. Not copied here.)
+    //   ⚠ For a NON-TWP row the pitcher dollars live in the SHARED `market_value`, which is the same column a
+    //   hitter uses. So only write it when the row is genuinely pitcher-only (`o_war == null`) — otherwise a
+    //   two-sided non-TWP row would have its hitter market clobbered by the pitcher value. TWPs are unambiguous:
+    //   they have their own `twp_pitcher_market_value`.
+    const pitcherOnly = owar == null;
+    if (pwar != null && pwar > 0 && (isTwp || pitcherOnly)) {
+      const role = pitcherRoleFromDepthRole(s.pitcher_depth_role || "workhorse_reliever");
+      const newP = computePitcherMarketValue(pwar, { conference: conf, role, team: buildTeam.get(r.build_id) ?? null }, EQ);
+      if (newP != null) {
+        const field = isTwp ? "twp_pitcher_market_value" : "market_value";
+        const oldP = num(s[field]);
+        if (oldP == null || Math.abs(oldP - newP) >= 1) s[field] = newP;
+      }
+    }
     const os = r.player_snapshot || {};
     if (JSON.stringify(s) !== before) {
       changed++; updates.push({ id: r.id, player_snapshot: s });
