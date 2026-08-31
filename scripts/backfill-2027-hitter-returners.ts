@@ -323,8 +323,22 @@ async function main() {
           // 2026-08-23: store total_hitter_war DIRECTLY (o+d+bsr) — always fresh/consistent, no
           // refresh_composite_war() lag. total_hitter_war = position-player headline; o_war = component.
           total_hitter_war: totalHitterWar,
-          market_value: meta.is_twp ? null : marketValue,
-          ...(meta.is_twp ? { twp_hitter_market_value: marketValue } : {}),
+          // ★★ 2026-08-31 — DO NOT NULL A SHARED COLUMN WE HAVE NO VALUE FOR.
+          //   `market_value` on a `returner/regular` row is SHARED between this hitter pass and the pitcher pass
+          //   (precompute-returner-pitchers → derivePitcherStored). There is ONE row per player and BOTH stages
+          //   write this column, so the LAST writer wins — and E37 runs AFTER E36.
+          //   Previously this wrote `market_value: marketValue` unconditionally. For a PITCHER who happens to also
+          //   carry a 2026 "Hitter Master" row, `oWar` is null ⇒ `marketValue` is null ⇒ this NULLED the pitcher
+          //   market E36 had just written. Measured on prod: **34 D1 returner pitchers with positive p_war showing
+          //   NO market value**, e.g. Derek Arrocha (SWAC, 2.531 pWAR, weekend_starter) whose correct market is
+          //   $31,635. All 34 carry this pass's fingerprint (`hitter_depth_role` + `projected_pa` set, `o_war` null).
+          //   ★ `predictionEngine.ts:57-59` NAMES this collision — the TWP `twp_*_market_value` split exists
+          //   precisely so "the hitter loop's market_value write doesn't get stomped". But that protection only
+          //   applies to players flagged `is_twp`; a pitcher who merely HAS a hitter Master row is unprotected.
+          //   ⇒ Only write the shared column when we actually have a hitter value. See SILENT-FAILURE REGISTRY #24.
+          ...(meta.is_twp
+            ? { market_value: null, twp_hitter_market_value: marketValue }
+            : (marketValue != null ? { market_value: marketValue } : {})),
           projected_pa: projectedPa,
           hitter_depth_role: hitterDepthRole,
           // Unlock so future runs can refresh; trigger reverts rates when locked=true.

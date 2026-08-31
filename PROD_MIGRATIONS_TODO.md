@@ -3742,6 +3742,7 @@ never by a failure. **A Track B stage that "ran fine" tells you nothing.**
 | 21 | 🚨 **Producers branch on the snapshot's OWN embedded `is_twp`, not `players.is_twp`** — E35 flipped the players flag 137→253 and the snapshots were never updated | the dollars are CORRECT and correctly priced; they are simply written to the column the display layer will not read for that player. Nothing errors, nothing is null, the row looks complete | a TWP build snapshot holding BOTH a shared `market_value` ($112,305, correct) and a stale `twp_hitter_market_value` ($38,106, wrong conference) — **disagreeing by the exact 2.9× PTM ratio** | **Stage 19.** ⛔ **NEVER branch on a flag embedded in a snapshot** — join to the owning table at read time. A snapshot records VALUES, it is not a source of truth for IDENTITY. Gate: `players.is_twp AND snapshot->>'market_value' IS NOT NULL` = **0 rows**. ⛔ Do NOT back-fill `is_twp` into snapshots — that just creates another copy to go stale. **6th instance of "the value moved, a supporting flag stayed behind".** |
 | 22 | 🚨🚨 **An `.in("id", …)` list built from raw FKs containing a NULL — Postgres rejects the WHOLE batch as invalid-uuid, and the `error` was discarded** | the ONLY symptom was cosmetic: dry-run samples printing `undefined` for the player name. Every real player in the poisoned batch silently vanished from the position AND `is_twp` lookups | noticing that every sample line said `undefined`, then checking `team_build_players` for NULL `player_id` (**191 of 1,470**) | **Every stage.** Filter to well-formed UUIDs and **`throw` on batch error**. ⚠ **This defect would have silently UNDONE REGISTRY #21 minutes after it was fixed** — the `is_twp` map came from the same poisoned lookup, so TWPs would read `false` and re-route to the shared column. **The fix and the thing that breaks it were in the same function.** ★ **A cosmetic logging anomaly is a data-integrity signal.** |
 | 23 | 🚨 **`resync-build-snapshot-markets` never re-derived POSITIVE pitcher markets** — it only floored non-positive WAR to $0, deferring the rest to "the app's live bake" | the stored value was a plausible number (often a stale one, sometimes `$0`) and no gate compared surfaces | Colasante's SP slot: **$0 on the build snapshot vs $130,733 on the target board** — same player, same side, two surfaces | **Stage 19.** A stored-first architecture cannot defer a stored value to a live bake. **Price BOTH surfaces in ONE stage with the SAME rules**, and gate `board == build` per player. Pitcher gate = **exactly ONE `$/win` rate per conference** (no position multiplier); hitter gate = at most three. |
+| 24 | 🚨🚨 **TWO precompute stages both write `market_value` on the SAME `returner/regular` row — E37 (hitters) runs after E36 (pitchers) and NULLED the pitcher market** | both stages ran clean and reported success. The defect existed ONLY in their INTERACTION, and only on the ~113-player overlap (pitchers who also carry a Hitter Master row). The row kept E36's `p_war`/`projected_ip`/`depth_role` — only the dollars vanished | UX completeness check → **34 D1 pitchers with positive WAR and no market** (e.g. Derek Arrocha, SWAC, 2.531 pWAR, correct market $31,635) | **Stage 18/19.** 🔴 **ONE COLUMN, ONE OWNER** — no two stages may write the same column on the same row. 🔴 **A stage must NEVER null a field it has no value for** — omit the key; nulling asserts "I know this is empty", which the stage computing the OTHER side is not entitled to say. 🔴 **Gate ACROSS stages, not within them.** ★ `predictionEngine.ts:57-59` already NAMED this collision — the TWP column split exists to prevent it — but the protection only fires for `is_twp` players. |
 
 ## 🚨 MECHANICAL TRAPS THAT COST A RUN EACH (all reproduce in Track B — it writes in bulk by definition)
 | trap | symptom | fix |
@@ -4421,6 +4422,77 @@ see.** Expected, not a defect — but it IS user-visible, so it should be a know
 3. **A STALE `p_war` ON A PLAYER WITH NO CURRENT-SEASON MASTER ROW IS ITS OWN DEFECT CLASS.** Blocked players keep
    values from earlier runs indefinitely; nothing expires them.
 4. **THE STAGING CATCH-UP MUST CARRY THE STAGE-18 TWP ROUTING FIX** — otherwise it reintroduces 1,582 blanks.
+
+---
+# ✅🚨 REGISTRY #24 — SOLVED: **E37 STOMPED E36's PITCHER MARKET ON THE SHARED `returner/regular` ROW** (2026-08-31)
+The 34 blank-market D1 returner pitchers from the completeness audit. **Root cause found, fixed, verified.**
+Trevor's steer was right: *"Check if they are transfer or returner equations… it skipped without an explanation."*
+The equations were fine. **The row was overwritten AFTER it was computed correctly.**
+
+## THE MECHANISM — ONE ROW, TWO OWNERS, LAST WRITER WINS
+There is **exactly ONE `returner/regular` global row per player**, and **BOTH** returner precomputes write
+`market_value` on it. **E37 runs AFTER E36.**
+```
+E36 precompute-returner-pitchers  →  writes market_value = $31,635  (+ p_war, projected_ip, pitcher_depth_role)
+E37 backfill-2027-hitter-returners →  PATCHES THE SAME ROW. oWar is null ⇒ marketValue null
+                                   →  wrote `market_value: marketValue` UNCONDITIONALLY ⇒ **NULL** ⇒ stomped
+```
+### ★ THE CODEBASE ALREADY NAMED THIS COLLISION — AND THE PROTECTION DOES NOT COVER THESE PLAYERS
+`src/lib/predictionEngine.ts:57-59`, verbatim:
+> *"For TWPs: route MV to `twp_pitcher_market_value` and NULL out the shared `market_value` column **so the hitter
+> loop's market_value write doesn't get stomped**"*
+**The entire `twp_*_market_value` column split exists to prevent exactly this.** But it only fires when
+`meta.is_twp` is true. **A pitcher who merely HAS a 2026 `"Hitter Master"` row — without being flagged TWP — enters
+E37's scope with no protection.** He collides, and there is no separate column to catch his value.
+
+## THE EVIDENCE — CONCLUSIVE, NOT INFERRED
+| check | result |
+|---|---|
+| 34/34 have a 2026 **Hitter Master** row | ⭐ **YES** — all in E37's scope |
+| 34/34 carry `hitter_depth_role` + `projected_pa` | ⭐ **E37's fingerprint — it wrote these rows** |
+| 34/34 have `o_war` | **0** — so E37's `marketValue` was null |
+| E36 scoped dry-run (`--source-ids 1510497154`) | **`market_value: 31635.73`** — the engine computes it fine |
+| stored `p_war` / `projected_ip` / `depth_role` | **exactly match** E36's current output ⇒ E36 DID write the row |
+| CONTROL: priced pitchers with a hitter Master row | only **113 of 4,476** — the rest never enter E37's scope |
+
+## ✅ THE FIX — `backfill-2027-hitter-returners.ts:308`
+**Never NULL a shared column you have no value for.** Only write `market_value` when a hitter value exists:
+```ts
+...(meta.is_twp
+  ? { market_value: null, twp_hitter_market_value: marketValue }
+  : (marketValue != null ? { market_value: marketValue } : {})),
+```
+Then re-ran E36 (7,596 rows) + the pitcher propagate (105,112 rows, 15.3s, explicit `set statement_timeout='15min'`).
+
+## ✅ VERIFIED ON PROD — THE UNEXPLAINED BUCKET IS **ZERO**
+```
+Derek Arrocha  SWAC  p_war 2.5309  market_value $31,635.73  ($12,500/win = 25,000 × SWAC 0.5)  ✅
+D1 returner pitchers, positive WAR, no market — ALL now categorised:
+   55  null conference — alumni, no 2026 Master row (stale p_war, see below)   EXPECTED
+    7  excluded from the pitcher loop by position (OF/UTL/C/IF/TWP)            EXPECTED
+    0  ⚠ STILL UNEXPLAINED                                                     ✅
+UX COMPLETENESS (D1): hitter_BLANK 0 / 0 / 0 / 0 · pitcher_BLANK 74 (all explained) / 0 / 0 / 0
+```
+⬜ **TWO RESIDUAL CLASSES, both known and neither a market defect:**
+1. **55 alumni with a stale `p_war`** and no 2026 Master row. E36 blocks them (`no_pm_row`) so nothing refreshes or
+   expires the old value. **The blank market is correct; the STALE WAR is the real smell.** ⬜ Own defect class.
+2. **7 pitchers excluded by `pitcherTest(position)`** (OF/UTL/C/IF/TWP in `players.position`) — never enter the
+   pitcher loop, so their `p_war` is likewise stale. ⬜ Position-data quality, not pricing.
+
+## 🅱️ TRACK B — WHAT THIS MANDATES (and it is a STAGING CATCH-UP REQUIREMENT)
+1. 🔴 **ONE COLUMN, ONE OWNER.** No two stages may write the same column on the same row. Either give each side its
+   own column (as TWPs already have) or make ownership explicit and assert it. **This is the single most reusable
+   lesson of the whole leg: the bug was not in any equation — it was in WHO WROTE LAST.**
+2. 🔴 **A STAGE MUST NEVER NULL A FIELD IT HAS NO VALUE FOR.** Omit the key from the patch. Nulling asserts
+   "I know this is empty", which a stage computing the *other* side is not entitled to say.
+3. 🔴 **GATE ACROSS STAGES, NOT WITHIN THEM.** E36 and E37 each ran clean and reported success. The defect existed
+   only in their INTERACTION, and only on the ~113-player overlap. **Re-assert every stage's output gate AFTER the
+   whole sequence, not just after that stage.**
+4. 🔴 **STAGING CATCH-UP MUST CARRY THIS FIX** (`backfill-2027-hitter-returners.ts:308`) — staging runs the same
+   E36→E37 order and will have the same stomped pitchers.
+5. **A stale value on a blocked player never expires.** Track B should either refresh or explicitly invalidate rows
+   whose source row has disappeared for the current season.
+
 
 
 

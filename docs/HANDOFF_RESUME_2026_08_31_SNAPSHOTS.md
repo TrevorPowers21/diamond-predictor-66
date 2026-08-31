@@ -1,0 +1,147 @@
+# ▶️ HANDOFF — PICK UP HERE. Written 2026-08-31, after commit `ab893cf`.
+Supersedes nothing; it is the **RESUME POINT** for the snapshot/market leg of the war-recalibration push.
+Companions: `docs/HANDOFF_2026_08_31_EOD.md` (state) · `docs/HANDOFF_WHATS_AHEAD_2026_08_31.md` (rules + Track B) ·
+`docs/PIPELINE_pitch_log_to_projections.md` (**Track B spec — the important one**).
+
+## 🚨 READ FIRST
+This is **the first push that changes what coaches SEE.** Snapshots drive the UI. Two consequences:
+1. **A blank market value is a user-visible bug**, not a data curiosity. Gate the way the UI resolves, not by column.
+2. **Large market JUMPS are EXPECTED on this push** — SEC pitchers went $37,500/win → $100,000/win (PTM 1.5 → 4.0),
+   push-wide, for hitters AND pitchers. Trevor: *"that is going to be normal … all SEC coaches are gonna see a large
+   jump."* ⛔ **Do not investigate a large SEC increase as a regression** — verify against the IDENTITY below.
+
+---
+# §1 WHAT IS DONE (prod, verified in the DB — not from logs)
+| step | state |
+|---|---|
+| E38 transfers re-run (all 14 teams) | ✅ 13 × 14,267–14,276 rows · All-Americans 0 by design · 0 error/fail in log |
+| **Stage-18 TWP routing fix** | ✅ engine now routes TWP → `twp_*_market_value`, NULLs shared, prices at DESTINATION conference |
+| hitter propagate | ✅ `propagate_hitter_scores_to_predictions(2026)` → **112,449 rows, 23.7s** |
+| **F41a** `rebuild-twp-target-rows` | ✅ 3 TWP groups · `total_hitter_war` now carried through the delete+reinsert |
+| **F41b** `rebake-twp-markets` | 🗑️ **DELETED** — superseded by F42, priced at the WRONG conference |
+| **F41c** `fix-returner-twp-hitter-market` | ⏭️ **SKIPPED** — its remaining 110 rows are ALL JUCO (parked); D1 already correct |
+| **F42a** `resync-build-snapshot-markets --all` | ✅ + UUID filter, `players.is_twp`, pitcher re-derivation. 172 rows re-priced |
+| **F42b** `resync-target-snapshots --all` | ✅ 147 of 185 changed |
+| **F42b′** `recompute-snapshot-hitter-market` | ✅ 415 snapshots re-priced |
+**Backups on prod (⛔ never drop):** `_tb_pre_f41_backup` (184) · `_tb_pre_f42_backup` (185) ·
+`_tbp_pre_f42_backup` · `_tbp_pre_f42b_backup` · `_tbp_pre_twpflag_backup` · `_tbp_pre_pitchermkt_backup` (1,470 each)
+— **plus every backup listed in the EOD handoff.**
+
+---
+# §2 ✅ SOLVED — the 34 blank-market pitchers (**was** the one open defect)
+**ROOT CAUSE: REGISTRY #24 — E37 (returner hitters) stomped E36's (returner pitchers) `market_value` on the SHARED
+`returner/regular` row.** Both stages own that column; E37 runs last and wrote `null` when it had no oWAR.
+**FIXED** at `backfill-2027-hitter-returners.ts:308` (never null a shared column you have no value for), E36 re-run
+(7,596 rows) + pitcher propagate (105,112 rows). **Unexplained bucket is now ZERO.** Historical detail below.
+```
+Derek Arrocha   SWAC     Jackson State         p_war 2.531  PR+ 123  weekend_starter        85.0 proj IP
+JB Manarchuck   MAAC     Mount St. Mary's      p_war 1.606  PR+ 127  workhorse_reliever     50.0
+John Costa      ASUN     North Florida         p_war 1.577  PR+ 126  workhorse_reliever     50.0
+Adam Brodnax    Sun Belt UL Monroe             p_war 1.518  PR+ 124  weekday_starter        50.0
+```
+**FIVE HYPOTHESES TESTED AND REJECTED — do not re-test:**
+| hypothesis | result |
+|---|---|
+| Independent-conference guard (`canShowPitchingMarketValue`) | ❌ **0 of 106 are Independent** |
+| no 2026 `"Pitching Master"` row ⇒ E36 blocked them | ❌ **34 of 34 HAVE one** |
+| null `players.team` | ❌ **0** |
+| non-positive WAR floors to null | ❌ all 34 are **positive** |
+| sub-20 IP null-out | ❌ **JUCO-only**; the control group holds **1,799 priced pitchers under 20 IP**, and 17 of the 34 are over 20 IP (max **79.7**) |
+**CONTROL:** 4,403 / 4,476 priced D1 returner pitchers have a 2026 Master row ⇒ a Master row normally means a market.
+## ▶️ NEXT STEP — TRACE, DO NOT GUESS (Trevor's steer)
+> *"Check if they are transfer or returner equations. I think the team row makes sense to me as just skipping, but off
+> that it skipped without an explanation."*
+1. **Confirm WHICH equation path produced them** — returner (`precompute-returner-pitchers.ts`) vs transfer
+   (`precompute-pitchers.ts`). They are `model_type='returner'`, but confirm the row was written by that script.
+2. **`precompute-returner-pitchers.ts:415`** — `const conference = teamRow?.conference ?? p.conference ?? null`.
+   Determine whether `teamRow` resolves for these 34. `teamRow` comes from `"Teams Table"` filtered to
+   **`Season = CURRENT_SEASON` (2026)** — a player whose `team_id` points at a **2025** Teams-Table row will MISS.
+   ⚠ Recall the 254/55 split: **254 TeamIDs in the 2026 Masters point at 2025 Teams-Table rows.** That is the
+   leading hypothesis — **but it is a HYPOTHESIS. Measure it.**
+3. **★ THE REAL QUESTION IS THE SILENCE, NOT THE SKIP.** Trevor: *"it skipped without an explanation."* Even if
+   skipping is correct, the script must SAY SO and COUNT IT. A skip that prints nothing is indistinguishable from a
+   success — the exact shape of every defect in the registry.
+4. Fix, re-run `precompute-returner-pitchers` for prod, and re-assert the §4 gate.
+
+---
+# §3 WHAT IS LEFT IN THE PUSH (dependency order)
+```
+✅ 0.  THE 34            ← §2. SOLVED 2026-08-31 (REGISTRY #24). Unexplained bucket = 0.
+   1.  F43   backfill-neutral-snapshot --prod --apply  →  heal-stale-snapshots --prod --apply --yes
+             ⚠ HELD deliberately: F43 writes NEUTRAL snapshots (another user-visible surface) and should not
+               land on top of an unexplained blank. Both verified: UUID-filtered, `is_twp` read from `players`,
+               safe-by-construction on env (`--prod` SELECTS the env file; `--env-file` cannot redirect).
+             ⚠ `heal-stale-snapshots --all` is SHOW_ALL — a DISPLAY flag, NOT scope. Different meaning from F42's --all.
+   2.  G46   supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm   (Trevor)
+             ⛔ NEVER --linked (config.toml names a THIRD ref kfkuhdmpchxyffmnowgj) · ⛔ do NOT deploy recalculate-prediction
+   3.  preview-verify (Vercel preview points at PROD) → gh pr create staging→main → **Trevor merges** → Phase H drops
+   4.  postseason-inclusive Master sheet import — the CROSS-CHECK/OVERRIDE layer (SB, ERA, G/GS). Derive-then-override.
+   5.  STAGING CATCH-UP, run THROUGH TRACK B — see §5, it now has HARD REQUIREMENTS.
+```
+
+---
+# §4 THE GATES THAT MATTER NOW (use these; a count gate catches none of them)
+```sql
+-- 1. COMPLETENESS, written the way the UI RESOLVES it (not a column check). Must be 0.
+--    Scope to division='D1' — JUCO is parked (see §5).
+select count(*) from player_predictions pp join players p on p.id=pp.player_id
+where pp.season=2027 and p.division='D1' and pp.p_war is not null
+  and coalesce(case when p.is_twp then pp.twp_pitcher_market_value else pp.market_value end) is null;
+--    …and the hitter equivalent with o_war / twp_hitter_market_value.
+
+-- 2. TWP ROUTING. Must be 0 on BOTH surfaces.
+select count(*) from team_build_players tbp join players p on p.id=tbp.player_id
+where p.is_twp and tbp.player_snapshot->>'market_value' is not null;   -- and target_board/transfer_snapshot
+
+-- 3. MARKET IDENTITY — NOT a "$130k/win" threshold (that number is just 25,000 × 4.0 × 1.3, the formula's own max).
+--    HITTER: at most THREE distinct $/win per conference (the PVM tiers 1.0 / 1.1 / 1.3)
+--    PITCHER: EXACTLY ONE distinct $/win per conference (pitchers have NO position multiplier)
+--    Verified 2026-08-31: SEC 100,000 · ACC 37,500 · Big 12 30,000 · Big Ten 25,000 · AAC 20,000 · Big South/CUSA/ASUN 12,500
+
+-- 4. CROSS-SURFACE. A player on both surfaces must price identically.
+--    board.twp_*_market_value == build.twp_*_market_value
+```
+🛑 **ALWAYS LABEL `total` vs `$/win`.** Overbeek is **$232,576 total** at **$100,000 per win**. Comparing a total
+against a per-win number reads as a 79% breach when nothing is wrong. This mistake was made and walked back today.
+
+---
+# §5 🅱️ STAGING CATCH-UP — HARD REQUIREMENTS DISCOVERED TODAY
+Staging is **NOT** a valid reference for TWP markets. Measured 2026-08-31:
+| | PROD | STAGING |
+|---|---|---|
+| D1 TWP rows | 1,256 | 1,707 |
+| `twp_hitter_market_value` set | **1,253** | **122** |
+| **TWP hitter rows rendering BLANK** | **0** ✅ | **1,582** ❌ |
+**The catch-up MUST carry, or staging comes back wrong:**
+1. 🔴 **The stage-18 TWP routing fix** (`precompute-transfer-projections.ts:465-466`) — else 1,582 blanks return.
+2. 🔴 **`players.is_twp` as the branch** in both snapshot producers — never the snapshot's embedded copy (REGISTRY #21).
+3. 🔴 **UUID filter + throw-on-batch-error** on `.in()` lists (REGISTRY #22) — staging's `team_build_players` should be
+   checked for NULL `player_id` the way prod's was (**191 of 1,470**).
+4. 🔴 **Pitcher market re-derivation** on build snapshots (REGISTRY #23).
+5. ⚠ Staging still lacks **C24 / C26 / C27 / C28 / C28b / C29** — the pre-existing gap. Prod is ahead on the
+   conference `*_plus` set, `pitcher_ev*`/`iz*` (30/30 vs 0/30), NCAA averages/SDs, ERA source and depth-role anchoring.
+★ **The catch-up is the FIRST REAL EXERCISE OF TRACK B — not a hand-run of six scripts.**
+
+---
+# §6 🅿️ JUCO — PARKED. DO NOT "FIX".
+A full JUCO restructure is coming (**databases move, JUCO merges with D2/D3**). Trevor: *"anything JUCO related is
+gonna be tricky or wrong. The consistency is all in D1 NCAA."*
+- **2,119 JUCO TWP hitter rows render BLANK** — deliberate. ⚠ Visible to a coach if a JUCO player is on their board.
+- Root cause is SCOPE, not a defect: `precompute-transfer-projections.ts:243` defaults to D1-only and
+  `_run_step2_all.sh` has never passed `--division`. Running `--division JUCO` would close all 2,119 — **do not.**
+- **Scope every gate to `division='D1'`.** A gate spanning all divisions fails on JUCO forever and trains the reader
+  to ignore it — which is how a real D1 failure gets waved through.
+
+---
+# §7 THE RULES THIS LEG ADDED (full detail in the registry, #18–#23)
+1. **A repair step that RE-DERIVES a value the engine already computed is itself the bug.** Only stage 18 knows the
+   destination conference; re-pricing downstream from the player's own conference under-prices by the full PTM ratio.
+2. **NEVER rebuild a snapshot from a hand-listed field set.** Round-trip the object; overwrite only what you own.
+3. **NEVER branch on a flag embedded in a snapshot.** Join to the owning table. A snapshot records VALUES; it is not
+   a source of truth for IDENTITY.
+4. **NEVER build an `.in()` list from raw FKs.** Filter to well-formed UUIDs and THROW on batch error.
+5. **A cosmetic logging anomaly is a data-integrity signal.** `undefined` in a sample line exposed REGISTRY #22.
+6. **Never gate on a magnitude derived from the model's own constants** — it moves with the thing it is meant to check.
+7. **A backup taken before the PREVIOUS step is not a backup for this one.**
+8. **When N sibling paths implement a convention, diff ALL N.** Three of four routed TWP markets correctly; the
+   outlier was invisible because its output looked perfectly normal — and a sibling's comment CLAIMED it complied.
