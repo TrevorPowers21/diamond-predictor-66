@@ -3056,3 +3056,47 @@ Banners added in-file so nobody proposes them again:
 ★ I proposed `refreshPaIpFromMaster` as "the committed process" purely because its docstring matched the symptom.
 Trevor: *"that is old outdated stale logic … all of these are outdated I am almost positive."* **A docstring that
 matches your symptom is not evidence the function is current — CHECK `git log -1 --format=%ad` FIRST.**
+
+---
+# ✅ E36 + E37 RE-RUN AFTER THE DEPTH-ROLE FIX (prod, 2026-08-31)
+Re-ran both so tiers derive from the REGULAR-SEASON window. Both idempotent. Propagate needed the explicit
+`set statement_timeout = '15min'` again (105,093 rows, 14.8s) — the bare run times out at prod's 2min default.
+
+## RESULT — PROD vs STAGING, and why they now DIFFER BY DESIGN
+| | PROD | STAGING | reading |
+|---|---|---|---|
+| **HITTER** cornerstone | **1,138** (1,088 pre-fix) | 1,394 | prod anchors on REG; staging on FULL |
+| everyday_starter | 2,513 | 2,365 | |
+| avg `projected_pa` | 170.9 | 173.5 | |
+| avg `o_war` | **0.795** | 0.717 | prod's C27 calibration is fresher |
+| **max `o_war`** | **6.86** | **6.86** | ✅ **identical — the projection math reproduces** |
+| market avg / max | $19,274 / **$673,949** | $16,564 / $613,259 | |
+| **PITCHER** weekend_starter | **336** | 417 | prod a tier lower on REG innings |
+| workhorse_reliever | 418 | 529 | |
+| weekday_starter | 524 | 430 | |
+| avg `projected_ip` | **30.0** | 31.2 | |
+| avg `p_war` | **0.584** (0.607 pre-fix) | 0.598 | |
+| **max `p_war`** | **3.93** | **3.93** | ✅ identical |
+**THE DRIVER, EXPLICITLY:**
+```
+PROD     "Hitter Master".regular_season_pa >= 220  →    896  (D1)     ← REGULAR season
+STAGING  players.pa >= 220                         →  1,394           ← FULL season (old rule)
+```
+🛑 **PROD AND STAGING SHOULD NO LONGER MATCH ON DEPTH ROLES.** Prod anchors tiers to regular-season volume (the fix);
+staging still uses full-season PA/IP because it has not had the fix. **A depth-role mismatch is NOT a prod defect** —
+staging picks this up when it is caught up THROUGH TRACK B. Everything else reconciles: **max `o_war` 6.86 and max
+`p_war` 3.93 are IDENTICAL**, and the higher prod `o_war`/markets trace to C27's fresher calibration.
+
+## 🛑 CORRECTION — I SAID THE DEPTH-ROLE CHANGE WOULD NOT TOUCH `p_war`. THAT WAS WRONG.
+The tier sets `projected_ip` / `projected_pa`, and **`p_war` scales with innings**:
+`projected_ip 31.2 → 30.0` ⇒ `avg p_war 0.607 → 0.584` (−0.023). Hitters likewise: `projected_pa 173.5 → 170.9`.
+**Depth role is NOT a display attribute — it is a WAR INPUT.** Changing its source changes projections, and therefore
+market values. `max` is unchanged in both, so the top of the distribution is stable — but the mean moved.
+→ **Anything that alters depth-role derivation REQUIRES a full re-run of E36/E37 and everything downstream of them.**
+
+## ⚙️ MECHANICS WORTH KEEPING
+- `npm run …:prod -- --dry-run` — the `--` is REQUIRED; the alias itself contains no dry-run flag and **writes**.
+- The propagate RPC needs `set statement_timeout = '15min'` as an **explicit statement** (the node-postgres client
+  constructor option does NOT take). FINITE — never `0`.
+- Write long-running output **straight to a file**, never through a `grep` pipe — grep buffers and the log stays
+  0 bytes, hiding all progress (cost one blind 5-minute wait).
