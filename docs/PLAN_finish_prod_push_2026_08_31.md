@@ -92,7 +92,7 @@ Verify counts (5,341 / 5,375), then apply. Needs an explicit **"prod, now?"**.
 - ★ **pick a deep playoff team (LSU / Arkansas): its depth-role tier counts must NOT move.**
 - ★ **`desc_owar` / `total_desc_war` UNCHANGED** — D31 wrote them from the full-season CSV; this step must not disturb them.
 
-## ▶️ STEP 5 — F44 `refresh_team_season_stats(2026)` — **NEXT. Both blockers now cleared.**
+## ✅ STEP 5 — F44 `refresh_team_season_stats(2026)` — **DONE 2026-08-31** (59.7s · 308 rows · all gates pass · required deleting the phantom Wiggins row first)
 Now that `regular_season_ip` is filled, `ra9_r` / `fra9_r` compute instead of landing NULL.
 ```sql
 select refresh_team_season_stats(2026);
@@ -101,7 +101,7 @@ select refresh_team_season_stats(2026);
 **GATE:** `team_season_stats` 0 → **308 rows** · `faced_stuff_plus` / `faced_htp` populated · `ra9_r` / `fra9_r`
 **NOT NULL** · WAR matrix non-null · AVG ≈ .277 · wRC+ ≈ 100.
 
-## STEP 6 — E35 TWP detector
+## ▶️ STEP 6 — E35 TWP detector — **NEXT**
 ```
 npx tsx --env-file=.env.production.local scripts/run-twp-recompute.ts --prod          # dry-run
 npx tsx --env-file=.env.production.local scripts/run-twp-recompute.ts --prod --apply
@@ -434,3 +434,72 @@ percent-exact-match, and never a raw mean over a skewed denominator.
 no longer yields NULL) **and** `game_string` exists (its records block keys on it). Then E35 → precomputes → F39 → F40–43.
 ⬜ **Still to come:** the postseason-inclusive Master sheet import, which OVERRIDES where it is more accurate
 (SB, ERA, G/GS) — per the derive-then-check order.
+
+---
+# ✅ F44 `refresh_team_season_stats(2026)` — APPLIED TO PROD 2026-08-31. Completed in 59.7s.
+## GATES — ALL PASS (prod, season 2026)
+```
+rows 0 → 308                                308
+faced_stuff_plus / faced_htp                308 / 308   ← what Phase E actually reads
+ra9_reg / fip_ra9_reg                       308 / 308   ← would be NULL without regular_season_ip
+AVG 0.277 · wRC+ 98.8 · ERA 6.20 · total_war 15.09
+W/L records                                 308 teams · 27.6W-27.4L · 55.0 games
+team_drs · ip_total · park snapshot         308 / 308 / 308
+Arkansas exactly ONE row                    1
+```
+★ **THREE GATES ARE DIRECT PAYOFFS FROM TODAY'S EARLIER WORK:**
+1. `ra9_reg`/`fip_ra9_reg` = 308 — these divide by `sum(regular_season_ip)` (`:143,:145`), which was **0/5,375 this
+   morning**. Without STEP 1 they would ALL have landed NULL, silently.
+2. **W/L records = 27.6W-27.4L over 55.0 games** — the records block keys on `game_string`, which was **0/2,576,146**
+   this morning. **55.0 games/team independently cross-checks the 8,519 distinct games** from the backfill
+   (8,519 × 2 ÷ 308 = 55.3). Two different derivations of season length agreeing.
+3. `AVG 0.277` and `wRC+ 98.8` land exactly where the runbook predicted (~.277 / ~100).
+
+## 🛑 F44 FAILED FIRST — A PRIMARY KEY CAUGHT WHAT NO GATE OF OURS WOULD HAVE
+```
+duplicate key value violates unique constraint "team_season_stats_pkey"
+Key (source_id, season)=(3375, 2026) already exists.
+```
+The function does `GROUP BY "TeamID"` then `JOIN "Teams Table" tt ON tt.id = TeamID` to get `source_id`. **Two
+`TeamID`s resolving to ONE `source_id` therefore emit two rows with the same PK.** `team_season_stats` stayed at
+**0 rows** — a plpgsql function is atomic, so it rolled back whole.
+★ **THE DATABASE CONSTRAINT DID CARDINALITY ENFORCEMENT NO APPLICATION GATE WOULD HAVE.** It refused to write two
+Arkansas rows rather than silently producing one. **A PRIMARY KEY IS A CARDINALITY GATE — lean on it.**
+
+## 🔍 ROOT CAUSE — A MANUFACTURED MASTER ROW, NOT A `TeamID` PROBLEM
+**My first proposed fix (re-point the `TeamID`) WAS WRONG.** Trevor pushed back — *"I am more worried about the team
+id changing and impacting a lot more than we realize"* — and investigating proved him right.
+### WHAT THE INVESTIGATION FOUND
+| the `TeamID` convention is MIXED, and that is FINE | |
+|---|---|
+| 2026 Masters pointing at a **2025** Teams-Table row | **254 TeamIDs · 8,794 rows** |
+| 2026 Masters pointing at a **2026** Teams-Table row | **55 TeamIDs · 1,922 rows** |
+**So 55 teams legitimately use their 2026 id.** Arkansas was not an outlier for using one — it was the **ONLY
+`source_id` where BOTH appeared**. The two Arkansas Teams-Table rows are **identical in every field** except `id` and
+`Season` (same `source_id`, name, abbreviation, conference, `conference_id`, division), and the 2026 row is genuinely
+referenced by **34 `players` rows**. ⛔ **DO NOT "normalize" the 254/55 split — F44 only requires that each
+`source_id` resolve to ONE `TeamID`.**
+### THE ACTUAL DEFECT — Carson Wiggins (`1583774970`)
+| | |
+|---|---|
+| prod `pitch_log` 2026 | **0 pitches, 0 games** |
+| prod `pitch_log_pitcher_totals` | **no row** |
+| **staging `"Pitching Master"`** | **DOES NOT EXIST** |
+| prod `"Pitching Master"` | 1 row, `IP 14`, `ERA 3.21`, on the 2026 `TeamID` |
+A **manufactured row with no season behind it** — Trevor: *"Wiggins was manually added because there was a chance he
+was coming back, then he signed."* **DELETED** (backed up to `_pm_wiggins_backup`); his `players` row untouched.
+★ **THE KOZEAL/WIGGINS DISTINCTION — THIS IS THE RULE:**
+> **Kozeal:** 1,103 pitches, 287 PA of real pitch-log data, **no Master row** → the row was MISSING and had to be created.
+> **Wiggins:** a Master row with **ZERO pitch-log data** → the row was PHANTOM and had to be removed.
+> **Presence in a season's Master is determined by whether the PITCH LOG shows he played — nothing else.**
+### VERIFIED AFTER THE DELETE — **NO `TeamID` CHANGED**
+`source_ids served by >1 TeamID: 0` → **308 TeamIDs mapping to 308 distinct source_ids, 1:1.** The mixed 254/55
+convention is untouched.
+
+## 🧠 PROCESS NOTES
+- **I guessed column names twice** (`ra9_r`, `AVG`) before reading `information_schema`. `ra9_r`/`fra9_r` are the
+  function's internal CTE aliases; the TABLE columns are `ra9_reg`/`ra9_total`/`fip_ra9_reg`. **Read the schema; do
+  not infer column names from the producing SQL.**
+- **`statement_timeout` could NOT be raised via the node-postgres client option** — `show statement_timeout` still
+  reported `2min` despite passing `statement_timeout: 900000`. F44 finished in **59.7s** so it did not matter, but for
+  anything longer use `set statement_timeout = '15min'` as an explicit statement (a FINITE value — **never 0**).

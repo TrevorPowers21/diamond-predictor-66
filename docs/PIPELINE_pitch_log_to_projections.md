@@ -2708,3 +2708,121 @@ percent-exact-match, and never a raw mean over a skewed denominator.
 no longer yields NULL) **and** `game_string` exists (its records block keys on it). Then E35 → precomputes → F39 → F40–43.
 ⬜ **Still to come:** the postseason-inclusive Master sheet import, which OVERRIDES where it is more accurate
 (SB, ERA, G/GS) — per the derive-then-check order.
+
+---
+# ✅ F44 `refresh_team_season_stats(2026)` — APPLIED TO PROD 2026-08-31. Completed in 59.7s.
+## GATES — ALL PASS (prod, season 2026)
+```
+rows 0 → 308                                308
+faced_stuff_plus / faced_htp                308 / 308   ← what Phase E actually reads
+ra9_reg / fip_ra9_reg                       308 / 308   ← would be NULL without regular_season_ip
+AVG 0.277 · wRC+ 98.8 · ERA 6.20 · total_war 15.09
+W/L records                                 308 teams · 27.6W-27.4L · 55.0 games
+team_drs · ip_total · park snapshot         308 / 308 / 308
+Arkansas exactly ONE row                    1
+```
+★ **THREE GATES ARE DIRECT PAYOFFS FROM TODAY'S EARLIER WORK:**
+1. `ra9_reg`/`fip_ra9_reg` = 308 — these divide by `sum(regular_season_ip)` (`:143,:145`), which was **0/5,375 this
+   morning**. Without STEP 1 they would ALL have landed NULL, silently.
+2. **W/L records = 27.6W-27.4L over 55.0 games** — the records block keys on `game_string`, which was **0/2,576,146**
+   this morning. **55.0 games/team independently cross-checks the 8,519 distinct games** from the backfill
+   (8,519 × 2 ÷ 308 = 55.3). Two different derivations of season length agreeing.
+3. `AVG 0.277` and `wRC+ 98.8` land exactly where the runbook predicted (~.277 / ~100).
+
+## 🛑 F44 FAILED FIRST — A PRIMARY KEY CAUGHT WHAT NO GATE OF OURS WOULD HAVE
+```
+duplicate key value violates unique constraint "team_season_stats_pkey"
+Key (source_id, season)=(3375, 2026) already exists.
+```
+The function does `GROUP BY "TeamID"` then `JOIN "Teams Table" tt ON tt.id = TeamID` to get `source_id`. **Two
+`TeamID`s resolving to ONE `source_id` therefore emit two rows with the same PK.** `team_season_stats` stayed at
+**0 rows** — a plpgsql function is atomic, so it rolled back whole.
+★ **THE DATABASE CONSTRAINT DID CARDINALITY ENFORCEMENT NO APPLICATION GATE WOULD HAVE.** It refused to write two
+Arkansas rows rather than silently producing one. **A PRIMARY KEY IS A CARDINALITY GATE — lean on it.**
+
+## 🔍 ROOT CAUSE — A MANUFACTURED MASTER ROW, NOT A `TeamID` PROBLEM
+**My first proposed fix (re-point the `TeamID`) WAS WRONG.** Trevor pushed back — *"I am more worried about the team
+id changing and impacting a lot more than we realize"* — and investigating proved him right.
+### WHAT THE INVESTIGATION FOUND
+| the `TeamID` convention is MIXED, and that is FINE | |
+|---|---|
+| 2026 Masters pointing at a **2025** Teams-Table row | **254 TeamIDs · 8,794 rows** |
+| 2026 Masters pointing at a **2026** Teams-Table row | **55 TeamIDs · 1,922 rows** |
+**So 55 teams legitimately use their 2026 id.** Arkansas was not an outlier for using one — it was the **ONLY
+`source_id` where BOTH appeared**. The two Arkansas Teams-Table rows are **identical in every field** except `id` and
+`Season` (same `source_id`, name, abbreviation, conference, `conference_id`, division), and the 2026 row is genuinely
+referenced by **34 `players` rows**. ⛔ **DO NOT "normalize" the 254/55 split — F44 only requires that each
+`source_id` resolve to ONE `TeamID`.**
+### THE ACTUAL DEFECT — Carson Wiggins (`1583774970`)
+| | |
+|---|---|
+| prod `pitch_log` 2026 | **0 pitches, 0 games** |
+| prod `pitch_log_pitcher_totals` | **no row** |
+| **staging `"Pitching Master"`** | **DOES NOT EXIST** |
+| prod `"Pitching Master"` | 1 row, `IP 14`, `ERA 3.21`, on the 2026 `TeamID` |
+A **manufactured row with no season behind it** — Trevor: *"Wiggins was manually added because there was a chance he
+was coming back, then he signed."* **DELETED** (backed up to `_pm_wiggins_backup`); his `players` row untouched.
+★ **THE KOZEAL/WIGGINS DISTINCTION — THIS IS THE RULE:**
+> **Kozeal:** 1,103 pitches, 287 PA of real pitch-log data, **no Master row** → the row was MISSING and had to be created.
+> **Wiggins:** a Master row with **ZERO pitch-log data** → the row was PHANTOM and had to be removed.
+> **Presence in a season's Master is determined by whether the PITCH LOG shows he played — nothing else.**
+### VERIFIED AFTER THE DELETE — **NO `TeamID` CHANGED**
+`source_ids served by >1 TeamID: 0` → **308 TeamIDs mapping to 308 distinct source_ids, 1:1.** The mixed 254/55
+convention is untouched.
+
+## 🧠 PROCESS NOTES
+- **I guessed column names twice** (`ra9_r`, `AVG`) before reading `information_schema`. `ra9_r`/`fra9_r` are the
+  function's internal CTE aliases; the TABLE columns are `ra9_reg`/`ra9_total`/`fip_ra9_reg`. **Read the schema; do
+  not infer column names from the producing SQL.**
+- **`statement_timeout` could NOT be raised via the node-postgres client option** — `show statement_timeout` still
+  reported `2min` despite passing `statement_timeout: 900000`. F44 finished in **59.7s** so it did not matter, but for
+  anything longer use `set statement_timeout = '15min'` as an explicit statement (a FINITE value — **never 0**).
+
+---
+# 🅱️ TRACK B — RULES ADDED 2026-08-31 FROM THE MASTERS/F44 WORK. Build these in from the start.
+## 1. ROW EXISTENCE IS DECIDED BY THE PITCH LOG, IN BOTH DIRECTIONS
+| case | evidence | action |
+|---|---|---|
+| **Kozeal** | 1,103 pitches · 287 PA · **no Master row** | **CREATE** the row |
+| **Wiggins** | **0 pitches** · no totals row · a Master row exists | **REMOVE** the row |
+Track B must handle **both**: create rows for players the pitch log shows played, and flag/remove Master rows with no
+pitch-log season behind them. **Neither is decided by returner status, roster status, or portal status.**
+⚠ A manufactured row is not harmless — Wiggins' phantom row **hard-blocked `refresh_team_season_stats`** via a PK
+violation and would have folded 14 phantom IP into Arkansas's team rollups had it been "fixed" by re-pointing.
+
+## 2. `TeamID` IS A SEASONED KEY — GROUP ON `source_id`, NOT ON `TeamID`
+`"Teams Table"` has **one row per team per season** (prod: 308 for 2025, 466 for 2026), so a program has MULTIPLE
+`TeamID`s. The 2026 Masters legitimately use a MIX: **254 TeamIDs → 2025 rows (8,794 player-rows)** and
+**55 TeamIDs → 2026 rows (1,922 player-rows)**. **That mix is NOT a defect and must not be "normalized".**
+**THE ONLY INVARIANT THAT MATTERS:** each `source_id` must resolve to exactly **ONE** `TeamID` within a season's
+Masters. Violate it and any team rollup either double-counts or hits a PK violation.
+✅ **TRACK B RULE: for team-level grouping, resolve to `source_id` FIRST and group on that** — never group on the
+per-season `TeamID` uuid. And when creating a Master row, **adopt the `TeamID` the player's teammates already use**;
+resolving it independently by season is what split Arkansas 308→309 earlier the same day.
+✅ **ASSERT THE INVARIANT AS A GATE:** `select source_id from (…) group by source_id having count(distinct TeamID)>1`
+must return **ZERO ROWS** before any team rollup runs.
+
+## 3. LEAN ON DATABASE CONSTRAINTS — THEY CATCH WHAT APPLICATION GATES MISS
+The `team_season_stats_pkey` on `(source_id, season)` caught the Arkansas duplicate that **no count, value, or
+membership gate would have** — and because a plpgsql function is atomic it rolled back to 0 rows rather than leaving
+half a table. **A PRIMARY KEY IS A CARDINALITY GATE.** Track B's tables should carry the natural keys that make
+double-counting impossible, rather than relying on the writer to be careful.
+
+## 4. BULK-WRITE MECHANICS (measured on prod)
+- `statement_timeout` = **2min**, and it **cannot be raised via the node-postgres client option** (`show
+  statement_timeout` still reported `2min` after passing `statement_timeout: 900000`). Use an explicit
+  `set statement_timeout = '15min'` statement — a **FINITE** value, **never `0`**.
+- **BATCH every bulk write.** One UPDATE over 2.5M rows blew the timeout and rolled back whole. 25,000-row chunks fed
+  through `unnest()` ran ~0.25 min each. Measured throughput: **≈87,000 rows/min**.
+- **Make the `WHERE` clause RESUMABLE** (`where col is null`) so an interrupted batch run can simply be re-run.
+- ⛔ **Never `CREATE TEMP TABLE … ON COMMIT DROP`** from node-postgres without an explicit `BEGIN` — autocommit drops
+  it before the next statement.
+- **Read `information_schema` for column names.** The producing SQL's CTE aliases (`ra9_r`, `fra9_r`) are NOT the
+  table's columns (`ra9_reg`, `ra9_total`, `fip_ra9_reg`).
+
+## 5. WHAT F44 PROVES ABOUT THE DEPENDENCY CHAIN
+F44 consumed, in one call, nearly everything built today — and each would have failed SILENTLY, not loudly:
+`regular_season_ip` (else `ra9_reg`/`fip_ra9_reg` → NULL via `nullif(sum(...),0)`) · `game_string` (else the W/L
+records block has no key) · Masters `desc_*`/`_reg` · `team_drs` · Conference Stuff+/HTP · `"Park Factors".rg_factor`.
+**Track B must run these in dependency order and gate each on a VALUE, because the failure mode is a populated table
+full of NULLs and zeros that passes every count check.**
