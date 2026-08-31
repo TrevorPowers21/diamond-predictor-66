@@ -26,6 +26,7 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 | **`K9/BB9/HR9/WHIP/FIP`** | ✅ **now pitch-log-DERIVED on prod (5,375)** — were stale TruMedia values until today. |
 | **F44 `team_season_stats`** | ✅ **0 → 308.** `faced_*` 308/308 · `ra9_reg` 308 · W/L **27.6-27.4 over 55.0 games** · AVG .277 · wRC+ 98.8. |
 | *(unplanned)* Kozeal / Wiggins | ✅ Kozeal's real row CREATED (D1 hitters 5,341); Wiggins' phantom row DELETED. |
+| **E35 TWP detector** | ✅ `is_twp` **137 → 253** (= staging exactly) · legacy `position='TWP'` **428 → 34** (= staging exactly) · 606 rows · D1 TWPs **90**. |
 
 **Backups on prod:** `_hm_prefill_backup` (8,245) · `_pm_prefill_backup` (8,071) · `_pm_wiggins_backup` (1) ·
 `_confstats_backup` · `_parkfactors_backup` (615) · `_c28_before` · `_v2_prechain_backup`.
@@ -38,9 +39,8 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 ---
 # §2 WHAT'S LEFT — dependency order, NOT the runbook's topic order
 ```
-▶ E35  run-twp-recompute --prod [--apply]      guard added ✅ · prod is_twp 137/31,467 (staging 253) → expect a BIG change
-                                                MUST precede the precomputes so both-side TWP rows generate
-  E36  precompute-returner-pitchers:prod        (dry-run first)
+✅ E35  run-twp-recompute --prod --apply       DONE 2026-08-31 · is_twp 137→253 (= staging) · legacy TWP 428→34 (= staging) · 606 rows
+▶ E36  precompute-returner-pitchers:prod        NEXT (dry-run first)
   E37  precompute-returner-hitters:prod
   E38  zsh scripts/_run_step2_all.sh --prod     🛑 the loop pipes through `grep | head -3` and SWALLOWS EXIT CODES.
                                                 "14 teams DONE" is NOT proof — re-run the dry-run, require 0 pending per team.
