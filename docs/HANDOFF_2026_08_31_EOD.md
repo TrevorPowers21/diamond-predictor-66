@@ -706,3 +706,54 @@ that ceiling: over PostgREST (`.rpc(...)`, the Supabase MCP, any HTTP client) th
 `refresh_composite_war()` writes **`player_predictions`** (`d_war`, `bsr_war`, `total_hitter_war`) — **NOT the
 Masters.** The Masters' Phase-D `d_war`/`bsr_war` are untouched. Older runbook text describing it as rewriting "the
 descriptive Master" is WRONG.
+
+---
+# 🚨 REGISTRY #17 — `refresh_composite_war()` STORES "UNKNOWN DEFENSE" AS "AVERAGE DEFENSE"
+Found by checking **ACCURACY**, not the identity (Trevor: *"check accuracy not just total"*). The identity
+`total = o + d + bsr` held at **worst 0.000000 across 112,087 rows** — and proved nothing about whether `d` was
+CORRECTLY SOURCED. It holds regardless of where `d` came from. **Exactly the "internally consistent but sourced
+wrong" shape.**
+
+## ✅ THE ACCURACY CHECK THAT DID MEAN SOMETHING
+`player_predictions.d_war` vs `"Hitter Master".d_war` (the Phase-D descriptive value), joined via
+`players.source_player_id`:
+```
+n = 72,726 · IDENTICAL 72,726 (100.0%) · median Δ 0.0002 · worst 0.000
+bsr_war: n = 72,726 · IDENTICAL 72,726 (100.0%) · worst 0.000
+```
+★ **The projection side and the descriptive side derive the SAME number from the SAME source.** Correctly sourced.
+✅ **This is intentional and correct:** `refresh_composite_war()` writes **`player_predictions`** (the PROJECTION
+side); the Masters hold the **DESCRIPTIVE 2026** record from Phase D. Two different things that share column names —
+the Masters are NOT touched, by design.
+
+## 🚨 THE DEFECT — `coalesce(..., 0)` MAKES "NO DATA" LOOK LIKE "LEAGUE AVERAGE"
+```sql
+coalesce(d.dw, 0) as dw   -- Σ drs_floor WHERE position <> 'P' / 13.1
+coalesce(b.bw, 0) as bw   -- wsb_runs / 13.1
+```
+A player with **NO row** in `player_season_defense` gets `d_war = 0`, stored **identically** to a player measured at
+exactly 0.000. And `total_hitter_war = o_war + d_war + bsr_war`, so their total silently treats **unmeasured defense
+as league-average**.
+```
+d_war = 0 rows                          133,816 of 201,221
+  ├ NO defense row (coalesce default)    73,345   ← "unknown", stored as 0
+  └ genuinely 0.000 from real data        60,471   ← measured
+bsr_war = 0 with NO baserunning row       58,119
+```
+## SCOPE — 38 rows actually matter, not 73,345
+| division | defaulted players | verdict |
+|---|---|---|
+| **NJCAA_D1** | **5,218** | ✅ **EXPECTED** — the dRS engine has no JUCO coverage |
+| D1 | 1,286 | mostly low-PA |
+| D2 | 2 | — |
+★ **D1 players with ≥50 PA and NO defense row: 38** (avg **131.3 PA**, max **270 PA**).
+**Those 38 are real contributors credited with exactly-average defense on no measurement.**
+
+## ⬜ NOT FIXED — needs a decision, and it is Trevor's
+This is **[[feedback_zero_is_missing_not_a_value]]** ("exact-0 scouting % → `—`") surfacing in a NEW table. Options:
+(a) leave as-is — treating unknown defense as average is a defensible modelling choice for a projection;
+(b) distinguish them (NULL, or a `d_war_source` flag) so the UI can show `—` rather than 0.000;
+(c) investigate why 38 D1 regulars have no `player_season_defense` row — the dRS engine covers 13,454 rows, so these
+are genuine gaps in the engine's output, not a join failure.
+🚨 **TRACK B:** whichever is chosen, the accumulator must carry the DISTINCTION (measured-0 vs no-data) rather than
+collapsing both to 0 — a daily unattended run has no human to notice that a 270-PA hitter's defense was never measured.
