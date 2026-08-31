@@ -1256,3 +1256,52 @@ Stuff+ per-pitcher gate: mean 99.3 · p50 99.3 · p10 93.1 · p90 105.7  (IDENTI
 4. **IDENTITY gate** — `total_desc_war = desc_owar + d_war + bsr_war` ≤ 0.002; `Σ team_drs = 0`; `Σ drs_behind = 0`.
 5. **LOG-CONTENT gate** — read the log body, never the exit code. `0 FAILED` must be printed, not inferred.
 6. **SIGN gate** — arm-side pitches positive armHB for BOTH hands (18/18 buckets), else ABORT before writing.
+
+---
+# ✅ E2 PARK FACTORS + MANDATORY C28-STEP-3 RE-RUN — APPLIED TO PROD 2026-08-30
+## E2a — code fixes first (the docs already called for the guard; the banner was found during the dry run)
+- double-keyed `--prod` guard + env-driven URL/key (was a **literal staging URL** + literal `.env.local` read).
+- 🛑 **LYING BANNER FIXED** — `:215` printed `MODE: … target=STAGING` **while running against PROD**. Identical defect
+  to `_run_store_no_propagate.ts` (C26). Now prints the RESOLVED env. **Third instance of this class.**
+
+## E2b — DRY RUN + the TEAM-BY-TEAM GATE (a row count would have hidden this)
+`_parkfactors_backup` verified **615 rows = 306 (2025) + 309 (2026)** before touching anything.
+CSV 2026 = **308** teams vs PROD 2026 = **309** rows ⇒ delete+reinsert would drop one.
+**Diffed BY NAME: the single dropped team is `Fort Wayne`.** ✅ **CORRECT — Trevor: they had no 2026 team.**
+⚠ My first diff was WRONG and briefly reported "309 would be dropped" — my probe matched the CSV's **`teamId`**
+column instead of **`team`** (`/team/i` hits `teamId` first). Corrected immediately. **The real name column is `team`
+(index 3): `Rank,teamId,teamName,team,teamFullName,…`.** Do not re-derive this by regex; use the literal column name.
+
+## E2c — APPLIED. `✓ Wrote 922 rows across 2024/2025/2026 (seasonal + main).`
+| season | rows before → after | `rg_factor` | **`rg_factor_seasonal`** |
+|---|---|---|---|
+| 2024 | *(absent)* → **307** | 307 | **307** |
+| 2025 | 306 → **307** | 307 | **307** |
+| 2026 | 309 → **308** | 308 | **308** |
+**`rg_factor_seasonal` 0/309 → fully populated — the objective of E2.** Georgia 2026 `rg_factor` = **109.35**,
+exactly the dry-run's predicted rolling value; `rg_factor_seasonal` = 107.76 (single-season). Fort Wayne now present in
+2024/2025 only. ⚠ `source_team_id` is 306/307 for 2024 and 2025 (2 unmapped historical teams) — 308/308 for 2026.
+
+## ★ E2d — THE MANDATORY RE-RUN, AND THE NUMBER THAT PROVES IT
+E2 rewrites the **MAIN** factor columns (current season → 3-yr rolling), and `derive_conf_opr_htp.ts:10` reads
+`"Park Factors".rg_factor`. Measured rewrite magnitude from the dry run:
+```
+RG  mean|Δ| 2.16  max|Δ| 7.24 (n=308)   ISO mean|Δ| 2.11  max 7.07   AVG 0.65   OBP 0.38
+worst: Monmouth/rg 100.3→93.06 · Mississippi Valley State/rg 134.44→127.52 · Northern Colorado/rg 121.5→115.08
+```
+`npx tsx --env-file=.env.production.local scripts/derive_conf_opr_htp.ts --apply --prod` → **APPLIED 30 rows.**
+| | BEFORE | AFTER |
+|---|---|---|
+| `run_env_factor` **count** | **30/30** | **30/30** ← ⚠ **IDENTICAL — a count gate PASSES either way** |
+| `run_env_factor` **avg** | **101.879** | **99.719** (**−2.16**) |
+| `hitter_talent_plus` avg | 100.13 | **99.23** (−0.90) |
+★★ **The `run_env_factor` shift of −2.16 EQUALS the park `RG mean|Δ|` of 2.16.** The competition-translation lever
+moved by exactly the amount park factors moved. Had E2 been run in its documented Phase-E slot *after* C28, this value
+would have been silently stale at a passing 30/30 — biasing every projection of a player INTO a conference.
+Division split intact: **D1 30 · NJCAA_D1 10 · D2 2.** Sample HTP moves: Big 12 117.2→**119.1** · SBC 103.8→**107.7** ·
+Independent 109.1→**122** · MWC 95.7→**96** · The Summit 93.8→**93.4**.
+
+## 🧠 RULE CONFIRMED BY MEASUREMENT
+**`derive_conf_opr_htp` must be the LAST thing to touch park-derived conference columns.** Any stage that rewrites
+`"Park Factors".rg_factor` invalidates `run_env_factor` / `hitter_talent_plus` / `offensive_power_rating` **without
+changing their fill count**. Gate on the VALUE CHANGING, never on the count.

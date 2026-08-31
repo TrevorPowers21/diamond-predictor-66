@@ -212,7 +212,9 @@ const avg3 = (xs: (number | null)[]) => {
 };
 
 async function main() {
-  console.log(`MODE: ${APPLY ? "APPLY (writes staging)" : "DRY RUN"}  target=STAGING\n`);
+  // ★ FIX 2026-08-30: this banner was HARDCODED to "target=STAGING" and printed that while running against PROD —
+  // the same lying-banner defect already fixed in _run_store_no_propagate.ts (C26). Now reports the RESOLVED env.
+  console.log(`MODE: ${APPLY ? "APPLY (destructive delete+reinsert of 2024/2025/2026)" : "DRY RUN"}  target=${isProd ? "🔴 PROD" : "STAGING/other"}\n`);
 
   const perYear = new Map<number, ReturnType<typeof seasonalFactors>>();
   for (const y of SEASONS) {
