@@ -1938,3 +1938,59 @@ identical to 3dp. Remaining diffs (`hitter_talent_plus` 99.23 vs 99.01) are **st
 4. **Kozeal missing** — invisible to `5,340 = 5,340`
 5. **`--create-new` structurally broken** — exits 0, prints `0 new rows`, can never create a hitter
 6. **`TeamID` team split** — both buckets internally consistent, Σ-centering held **at 309 teams**
+
+---
+# 🚦 PUSH-TO-PROD ROADBLOCKS — WHAT ACTUALLY BLOCKS FINISHING THE PUSH (2026-08-30)
+**Scope: THE PROD PUSH ONLY.** Track B build work is tracked separately (see the TRACK B ARCHITECTURE block) and is
+**NOT** a push blocker. Readiness swept script-by-script, verified — not reasoned from memory.
+
+## 🔴 GENUINE BLOCKERS — must be handled before/while running the remaining steps
+| # | blocker | detail | fix |
+|---|---|---|---|
+| 1 | **F40 `backfill-snapshot-total-hitter-war.ts` HAS NO ENV GUARD** | `:22` `createClient(process.env.SUPABASE_URL!, …)` with **no `--prod` flag anywhere** (`grep -c` = 0/0). `--env-file=.env.production.local` writes PROD with **zero opt-in**. **SIXTH instance** of this defect class (after `_run_store_no_propagate`, both C28 producers, the market scripts, E35, E2). | Add the standard double-keyed guard + verify both refuse paths. ~5 min. |
+| 2 | **F44 will write NULL regular-season rates** | `refresh_team_season_stats.sql:143,145` divide by `sum(regular_season_ip)`, which is **0/5,375 on prod** ⇒ `nullif(...,0)` → NULL ⇒ `ra9_r` / `fra9_r` and the `_reg` rate set land NULL, **silently**. | ⚠ **NOT a hard block** — see below. Run F44 now, **re-run after** the `derive_masters` build fills `regular_season_ip`. The function is idempotent (DELETE-season-then-rebuild). |
+
+## ✅ WHY BLOCKER 2 DOES NOT STOP THE PUSH
+`faced_stuff_plus` / `faced_htp` — the columns Phase E actually reads — are built by **steps 8 and 9** of
+`refresh_team_season_stats`, which join `pitch_log` to the conference Stuff+/HTP. **They do NOT depend on
+`regular_season_ip`.** So F44 run today still correctly unblocks `precompute-transfer-projections.ts:225` and
+`precompute-pitchers.ts:279`. Only the **program-analytics `_reg` rates** are degraded, and those feed YoY /
+championship-benchmark displays, not projections. **Run it, note the gap, re-run later.**
+
+## ✅ NOT BLOCKERS — verified ready (do NOT re-check, do NOT "fix")
+| step | state |
+|---|---|
+| **E35** TWP detector | guard **ADDED + both refuse paths verified** ✅ |
+| **E36 / E37 / E38a / E38b** precomputes | all carry the prod ref assert (`grep` = 1) + ordered pagination ✅ · `customer_teams` = **14 active** (NOT 18 — that is a staging number) |
+| **F41a / F41b / F41c** TWP markets | ref asserts present ✅ (the earlier "no `--prod`" note is STALE). ⚠ invoke directly — **not npm scripts**. F41b's unordered `.range()` is **benign**: its reads are `players is_twp=true` (253), `target_board` (184), `"Teams Table"` (774) — all single-page. Re-check only if any crosses 1000. |
+| **F42a / F42b / F42c** resyncs | ref asserts present ✅ (the "hardcoded `.env.local`" note is STALE — F42a is env-driven + double-key-guarded). ⚠ **F42a needs `--all`** — its default scope is a **staging** build id (0 rows on prod). |
+| **F43a / F43b** snapshots | **SAFE BY CONSTRUCTION** — `--prod` SELECTS the env file and they read it directly, so `--env-file` cannot redirect them and prod is unreachable without `--prod`. No ref assert, but no exposure. |
+| **F39** `refresh_composite_war()` | already **÷13.1** on prod and runs ✅. 🛑 fire from the **direct pg session / SQL editor only** — over PostgREST the ~125s gateway cuts it and the whole UPDATE **ROLLS BACK**. |
+| **G46** edge-fn deploy | gate is now only "F44 has RUN and POPULATED `team_season_stats`" — the table + function **exist** on prod. |
+
+## 🟢 EXPLICITLY NOT PUSH PROBLEMS (correct as-is — keep going, do not edit)
+- **`pa` / `IP` holding the regular-season line.** Depth-role tiering reads `regular_season_pa ?? pa`; `regular_season_pa`
+  is NULL so it falls through to `pa` — which **IS** the regular-season line. **The tiers are CORRECT today.** This
+  only becomes a hazard when `pa` goes full-season, which happens in the derive_masters build where both columns are
+  written together. **Nothing to do for the push.**
+- **WAR sourced from CSVs.** Numbers **verified correct** (D34 all 9 gates; Kozeal matches staging to 3dp). Wrong
+  *wiring*, right *values*. **Do NOT recompute.** Re-point during the Track B build.
+- **`repRows` `:465` bug.** Affects only **new-row creation**, which the push does not use. Track B blocker, not a push one.
+- **`G`/`GS`, SB/CS, `dob`/`class_year`, `trackman_pitches` on Hitter Master.** Out of scope / by design / vestigial.
+- **Everything already applied** — Stuff+ chain, C24/C26/C27/C28/C28b/C29, D29b–D34, E2 + the `derive_conf_opr_htp`
+  re-run, Kozeal's row. **Verified. Do not re-run or re-test.**
+
+## ▶️ THE REMAINING PUSH, READY TO EXECUTE (dependency order)
+```
+0.  FIX F40's env guard (only genuine code blocker)
+1.  F44  refresh_team_season_stats(2026)   ← MOVED UP, must precede Phase E (faced_* reads)
+2.  E35  run-twp-recompute --apply --prod   (prod is_twp 137/31,467 → expect a large change)
+3.  E36  returner pitchers  →  E37 returner hitters  →  E38 zsh scripts/_run_step2_all.sh --prod
+        ⚠ the loop pipes through `grep | head -3` and SWALLOWS EXIT CODES — do not trust "14 teams DONE";
+          re-run the dry-run afterwards and require 0 pending per team.
+4.  F39  refresh_composite_war()  (direct pg session ONLY)
+5.  F40 → F41 → F42 (--all) → F42b → F43
+6.  G46  edge-fn deploy (Trevor)  →  preview-verify  →  gh pr create staging→main  →  Trevor merges
+7.  H    gated drops  →  THEN staging catch-up, run THROUGH Track B
+8.  LATER: re-run F44 once derive_masters fills regular_season_ip (idempotent)
+```
