@@ -2249,3 +2249,46 @@ Compare like with like; never relax a gate to make it pass.
 populated it will finally derive **`K9` `BB9` `HR9` `WHIP` `FIP`** on prod instead of silently leaving stale TruMedia
 values. **Those five columns do NOT change until STEP 1 runs** — 0c only arms it.
 Also unblocked: `refresh_team_season_stats` step 5 (team W/L records), which keys on `game_string`.
+
+---
+# ✅ STEP 1 APPLIED TO PROD (2026-08-31) — the Masters now carry FULL-SEASON counting stats + the reg anchors
+`derive_masters_from_pitchlog.ts --apply --no-newrows --prod`. Backups: `_hm_prefill_backup` (8,245) ·
+`_pm_prefill_backup` (8,071). Changed 3,742 hitters / 5,374 pitchers.
+
+## GATES (prod, 2026, D1) — before → after
+| gate | before | after | ✓ |
+|---|---|---|---|
+| `pa` avg | 121.8 | **127.7** | ✅ full-season |
+| `regular_season_pa` | **0** | **5,322** (avg 121.4) | ✅ |
+| `regular_season_pa` vs the OLD `pa` | — | **median Δ 0.00** (n=5,322) | ✅ |
+| `IP` avg | 25.67 | **26.66** | ✅ |
+| `regular_season_ip` | **0** | **5,372** (avg 25.32) | ✅ |
+| `bf` | **0** | **5,372** | ✅ free fill, was never wired |
+| `K9` / `WHIP` | stale CSV | **5,375 / 5,375 DERIVED** | ✅ ← the gap 0c armed |
+| `k_pct` | 4,374 | **5,334** | ✅ patch gate removed |
+| **depth-role volume** (`regular_season_pa ?? pa`) | — | **median Δ 0.00** | ✅ tiers stable |
+
+## 🛑 TWO OF MY OWN GATES WERE MISCALIBRATED — THE DATA WAS RIGHT BOTH TIMES
+1. **`pull_air` 4,781 (I expected ~5,341).** ❌ my expectation. `pull_air` is gated by **`MIN_TRACKED_BIP`** — a
+   DATA-QUALITY floor — not by `MIN_PA`. I had already documented "sample-gated columns: do NOT fill these" and then
+   wrote a gate expecting them filled. **4,781 is correct.**
+2. **`ERA` avg 8.72 — I called it implausible.** ❌ wrong comparison. It was **8.65 BEFORE**; the raw mean is dominated
+   by tiny-IP outliers (Luke Rolland 0.30 IP / 216.0 ERA — pre-existing). The meaningful measure, **IP-WEIGHTED ERA,
+   moved 6.10 → 6.12** — essentially unchanged, the sliver being postseason innings.
+★ **RULE: for any per-player rate, gate on the IP/PA-WEIGHTED mean, never the raw mean.** A raw mean over a
+long tiny-denominator tail is not a league average and will trigger false alarms.
+
+## 🧠 FOUR INSTRUMENT ERRORS IN ONE SESSION — THE PATTERN
+Every one was MY measurement, not the data: (1) park-factor diff matched the CSV's `teamId` instead of `team` →
+"309 teams dropped" when it was **1**; (2) compared two derivations by EXACT EQUALITY → "1,306 hitters change" when
+median Δ was **0.00**; (3) `Number(null) === 0` passed `isFinite` → a fabricated 26.6-IP discrepancy; (4) raw-mean ERA
+→ a false regression. **VERIFY THE INSTRUMENT BEFORE REPORTING AN ALARM.** Report mean/median/p90/max — never a
+percent-exact-match, and never a raw mean over a skewed denominator.
+✅ **The one gate that fired for real** — the IP-fill guard at 1.827 — was RIGHT, and its disagreement was the finding
+(prod's `Master.IP` held the regular-season line). **Fix the comparison, never the threshold.**
+
+## ▶️ NEXT
+`F44 refresh_team_season_stats(2026)` — now fully unblocked: `regular_season_ip` is populated (its `nullif(sum(...),0)`
+no longer yields NULL) **and** `game_string` exists (its records block keys on it). Then E35 → precomputes → F39 → F40–43.
+⬜ **Still to come:** the postseason-inclusive Master sheet import, which OVERRIDES where it is more accurate
+(SB, ERA, G/GS) — per the derive-then-check order.
