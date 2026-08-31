@@ -2412,3 +2412,169 @@ hitters** and reports `0 new rows` with **exit 0**.
 **FIX:** `:465` → `"batter_id"`, **and** `:451` → `const { data, error } = …` with failures counted + fatal.
 **GATE:** after the fix, a prod dry-run must report **exactly 1** new hitter (Kozeal was already inserted manually, so
 re-verify against the current membership query) and the MEMBERSHIP query must come back EMPTY.
+
+---
+# 🅱️🏛️ TRACK B — THE COMPLETE ARCHITECTURE (CANONICAL, 2026-08-30). Build from THIS. Zero ambiguity intended.
+Settled with Trevor across this session. **Every statement below is a DECISION, not a proposal.** Where something is
+genuinely undecided it is marked ⬜ OPEN. Where something is verified on prod it says VERIFIED.
+
+## 1. THE TWO CADENCES — everything else follows from this
+| source | cadence | role |
+|---|---|---|
+| **Pitch log** | **DAILY, all spring** | **PRIMARY SOURCE OF TRUTH.** The majority of every statistic is DERIVED from it. |
+| **TruMedia Master sheet** | **~MONTHLY** | **SECOND SOURCE / CHECK.** Overrides the derived value ONLY where the pitch log is known-weak — **stolen bases, ERA, G/GS**. Never a daily dependency. |
+⇒ **NO STAGE MAY DEPEND ON A FILE THAT ONLY ARRIVES MONTHLY.** Any stage reading `docs/drs-reference/*.csv` or
+`scripts/drs/output/*.csv` is structurally unrunnable inside Track B.
+
+## 2. THE THREE LAYERS — each value lives in EXACTLY ONE place
+```
+   ┌── LAYER 1 ── pitch_log ─────────────────────────────────────────────────────┐
+   │  raw per-pitch. Never aggregated in place. Immutable history.               │
+   └────────────────────────────────┬────────────────────────────────────────────┘
+                                    │  REBUILT ON **EVERY** PITCH-LOG IMPORT
+   ┌── LAYER 2 ── pitch_log_*_totals ── THE ACCUMULATOR ─────────────────────────┐
+   │  ALL RAW COUNTS live here and ONLY here, per (player, season, dimension_key)│
+   │  hitter: pa ab hits_single/double/triple/hr k bb hbp sac batted_* ev_* …    │
+   │  pitcher: total_bf total_pa total_k total_bb total_hbp hits_*_allowed ip …  │
+   │  + defensive/baserunning run values (batting_rv, defensive_rv, baserunning_rv)│
+   └────────────────────────────────┬────────────────────────────────────────────┘
+                                    │  DERIVE (rates, ratings, WAR)
+   ┌── LAYER 3 ── "Hitter Master" / "Pitching Master" ── DERIVED + DISPLAY ──────┐
+   │  rates (AVG/OBP/SLG/ISO, K9/BB9/HR9/WHIP/FIP), power ratings, stuff_plus,   │
+   │  desc_* and desc_*_reg WAR, plus pa/ab/IP + regular_season_pa/_ip as the    │
+   │  DISPLAY + DEPTH-ROLE-TIER anchors.                                         │
+   │  ⛔ NO raw component counts here (no H/2B/3B/HR/BB/HBP columns) — they live  │
+   │     in Layer 2. Storing them twice is exactly what we are eliminating.      │
+   └─────────────────────────────────────────────────────────────────────────────┘
+```
+**★ WAR READS LAYER 2 AND WRITES LAYER 3.** That is the resolution of "WAR must read the Masters": the *counts* come
+from the accumulator, the *results* land on the Master, and every consumer downstream reads the Master.
+**★ `pitch_log_*_totals` IS NOT AN END-OF-SEASON ARTIFACT.** It was built that way only because the season was already
+over. **It must rebuild on every import** — it is the mechanism by which pitch-log data reaches the Masters.
+
+## 3. THE REGULAR/POSTSEASON SPLIT — LOCK ONCE AT THE TRANSITION, THEN KEEP ACCUMULATING
+> Trevor: *"we also probably just need to recognize the one time in the year when it transitions to the postseason and
+> lock in the regular season values, then just keep adding what becomes postseason values."*
+```
+during the regular season   →  totals accumulate normally
+AT THE TRANSITION (one time)→  SNAPSHOT the regular-season line   (dimension_key='reg', or the *_reg columns)
+after the transition        →  'all' KEEPS GROWING (full season);  'reg' NEVER CHANGES AGAIN
+```
+This is the *correct* form of what `lock_regular_season` was groping at — but driven by the accumulator, not by copying
+`pa` into `regular_season_pa`. **⛔ `lock_regular_season` / D33b IS OBSOLETE. Retire it.**
+**Boundary:** `2026-05-18` (regular_season_end) / `2026-05-19` (postseason_start).
+🛑 **IT IS CURRENTLY TYPED IN TWO PLACES** — `scripts/drs/drs_engine/season_config.py` and
+`refresh_team_season_stats`'s `p_reg_end` default. **THERE MUST BE ONE SOURCE.** Two copies can drift and nothing
+errors. ⬜ **FUTURE (Trevor's plan):** load **per-team SCHEDULES** for upcoming seasons so the system knows when each
+team's regular season ends — which removes the constant entirely and handles teams whose seasons end on different
+dates. Not urgent; wire the single source first.
+**Policy (from `season_config.py`, unchanged):** player stats + power ratings = **FULL** season · program analytics
+(`team_war_snapshots`, YoY/championship) = **REGULAR** season · projections TARGET a regular-season line.
+
+## 4. 🔴 WHAT MUST BE BUILT — THE GAP INVENTORY (exact columns, VERIFIED on prod 2026-08-30)
+### 4a. `pitch_log_pitcher_totals` (51 cols) IS MISSING THE RUN-PREVENTION INPUTS
+HAS: `total_bf total_pa total_k total_bb total_hbp hits_{single,double,triple,hr}_allowed total_ab ip batted_* ev_* stuff_plus_sum`
+**MISSING — and `desc_ra9` / `desc_pwar` cannot be computed without them:**
+| missing | why it matters | note |
+|---|---|---|
+| **`R`** (total runs allowed) | `desc_ra9 = 0.5·(RA9 + drs_behind_per9) + 0.5·(FIP·E2T)` | ⚠ **NOT a naive count** — the engine accrues it with **inherited-runner attribution, earned + unearned** (`pitcher_line.csv` `full_R`). **That accrual logic must move INTO the totals build.** |
+| **`ER`** (earned runs) | `ERA` | same accrual |
+| **`G` / `GS`** | roster/role context | ⬜ Trevor: *"almost positive the pitch log import has a starting pitcher id"* — derivable, **not worth chasing now. Track B flag.** |
+### 4b. DEFENSE + BASERUNNING SHOULD FOLD INTO THE SAME ACCUMULATOR
+> Trevor: *"same could be said for storing baserunning and defensive values in that same run that might be a separate
+> table now — those should all go into the pitch_log_*_totals then that should be derived into the masters from every
+> pitch log imported."*
+Today they are **separate tables** rebuilt by an offline Python engine:
+`player_season_defense` (32 cols — `drs_floor/total/ceiling`, `range_*`, `arm_runs`, `framing_runs`, …) and
+`player_season_baserunning` (15 cols — `sb cs sbh wsb_runs` **+ `wsb_runs_reg`** ← *a reg variant already exists here*).
+★ **PRECEDENT ALREADY IN PLACE:** `pitch_log_hitter_totals` already carries **`batting_rv`, `defensive_rv`,
+`baserunning_rv`** (+ `_z`), written by `populate_hitter_run_values(season)`. So the bridge exists — it just runs as a
+separate step instead of as part of the accumulator.
+⬜ **OPEN — Trevor's direction is clear (fold them in); the sequencing is not decided.** dRS is a heavy engine with its
+own constants; whether it becomes a stage of the daily run or stays a periodic rebuild feeding the accumulator needs a
+call. **Do not assume either.**
+### 4c. `derive_masters_from_pitchlog.ts` — the extension already scoped
+Write to EXISTING rows: `pa`/`ab` (FULL), `IP` (FULL), `ERA`, `bf`, **and** `regular_season_pa`/`regular_season_ip`
+**in the same operation** (see the depth-role tier hazard). Split the gate: **no floor for PATCHING** (`:274`),
+**keep 25 PA / 20 BF for CREATING** (`:469`). Fix `repRows` `:465` → `"batter_id"` and stop discarding `error` at `:451`.
+
+## 5. ✅ WHAT IS ALREADY CORRECT — DO NOT RE-TEST, DO NOT "FIX"
+- **Rates + batted-ball/discipline on both Masters** — already pitch-log-derived and written; the prod dry-run reports
+  **0 changes** on 4,373 hitters / 4,772 pitchers. Correct.
+- **`desc_*` and `desc_*_reg` WAR on prod** — D31/D32 committed, D34 passed all 9 gates. Values verified against
+  staging (`desc_owar` 0.3458 vs 0.3456, sum identity 0.001). **Correct, even though SOURCED from CSVs** — that is a
+  Track B wiring problem, not a data problem. **Do not recompute.**
+- **`team_drs`** — derived on prod, 308 teams, sum 0.00. **Correct.**
+- **Park factors + `run_env_factor`** — prod↔staging **308/308 IDENTICAL**, `run_env_factor` identical at 99.719.
+- **Sample-gated columns** (`barrel`, `ev90`, `avg_exit_velo`, `la_10_30`, the `*_score` set, power ratings) — null
+  below `MIN_TRACKED_BIP` **by design**. ⛔ **NOT a gap. Do not fill.**
+- **`blended_*` + `combined_*`** (~1,061 hitters / 1,658 pitchers) — multi-season players only, **by design**.
+
+## 6. ⚖️ ROADBLOCKS vs NOT-WORTH-FIXING
+| item | verdict |
+|---|---|
+| WAR reads CSVs, not the DB | 🔴 **ROADBLOCK for Track B** — but NOT for the current prod push. Re-point during the Track B build, not now. |
+| `pitch_log_pitcher_totals` missing `R`/`ER` (+ the inherited-runner accrual) | 🔴 **ROADBLOCK** — no pitcher WAR without it. |
+| `repRows` `:465` bug (no hitter row can ever be created) | 🔴 **ROADBLOCK** — 2027's first run is mostly new players. |
+| `regular_season_pa`/`_ip` unfilled | 🔴 **ROADBLOCK for F44** (`nullif(sum(regular_season_ip),0)` → NULL rates) **and a live hazard** the moment `pa` goes full-season. |
+| `pa`/`IP` holding the regular-season line | 🟡 **Fix in the build.** Harmless today *because* `regular_season_*` is NULL and the fallback lands on the right value. |
+| Boundary date typed in 2 places | 🟡 **Wire to one source — not urgent.** Superseded later by per-team schedules. |
+| `G`/`GS` with no pitch-log source | 🟢 **NOT worth chasing now.** Master-override; Track B flag. |
+| SB / CS | 🟢 **Master-override BY DESIGN.** Not a gap. |
+| `dob` / `class_year` empty | 🟢 **Not stats.** Roster-scraper concern, out of scope. |
+| `trackman_pitches` on `"Hitter Master"` | 🟢 **Vestigial** (a pitcher concept). Confirm, then ignore or drop. |
+| `k_pct` / `pull_air` short by ~963 | 🟡 **Fix via the patch-gate removal** — fill for everyone, following the slash line. |
+| Reg-season STAT columns beyond `pa`/`IP` | 🟢 **DECIDED: do not add.** Counts live in Layer 2; the Master stores derived results only. |
+| Recomputing prod WAR | 🟢 **NOT needed.** Values verified correct. |
+
+## 7. 🧭 THE FOUR GATE TYPES THAT ACTUALLY CATCH THINGS (a count gate catches none of them)
+1. **VALUE** — did the number CHANGE? (Conference `Stuff_plus` 101.17→99.15 · `run_env_factor` 101.879→99.719, both **30/30 before AND after**)
+2. **MEMBERSHIP** — diff the ID SET. (caught Kozeal: 5,340 = 5,340 passed every count)
+3. **CARDINALITY** — assert the GROUP count (D1 = 308 teams). (caught the `TeamID` split; the Σ-centering assertion held at 309)
+4. **LOG-CONTENT** — read the body, never the exit code. (`0 FAILED` must be printed, not inferred; `--create-new` exits 0 while creating nothing)
+
+---
+# 📍 WHERE WE ARE — END OF 2026-08-30. Current state, and what is left.
+## ✅ DONE ON PROD (verified in the DB, not from logs)
+| phase | state |
+|---|---|
+| **A / B** schema + config | ✅ `model_config` 220 keys · Phase-B tuned values SURVIVED C27's upsert (`nil_tier_sec` 4.0, `r_obp_std_pr` 31.89504) |
+| **C** Stuff+ chain 1–5 | ✅ 2,013,005 pitches · per-pitcher gate **mean 99.3 / p50 99.3 / p10 93.1 / p90 105.7 — IDENTICAL to staging** |
+| **C24 / C27 / C26 / C29 / C28 (4 steps) / C28b** | ✅ all applied; Conference `Stuff_plus` **101.17 → 99.15** (the lane fix) |
+| **D29b** `team_drs` | ✅ **DERIVED on prod** (not pasted) — 308 teams, sum 0.00, Arkansas 41.272 |
+| **D30** dRS/wSB load | ✅ confirmed NO-OP (13,454 / 10,432 already present) |
+| **D31 / D32** descriptive WAR + `_reg` | ✅ committed, `0 FAILED`; **D34 passed all 9 gates** |
+| **E2** park factors + ★`derive_conf_opr_htp` re-run | ✅ `rg_factor_seasonal` 0/309 → full; `run_env_factor` **101.879 → 99.719** |
+| *(unplanned)* Camden Kozeal | ✅ Master row created — D1 hitters 5,340 → **5,341** |
+**Prod↔staging where compared:** park factors **308/308 identical** · `run_env_factor` identical · Kozeal's WAR
+identical to 3dp. Remaining diffs (`hitter_talent_plus` 99.23 vs 99.01) are **staging being BEHIND** — prod is current.
+
+## ⛔ NOT DONE, AND DELIBERATELY SO
+- **`D33b` / `lock_regular_season`** — **OBSOLETE, do not run.** Superseded by the accumulator lock (§3 of the
+  architecture). It has **no unlock** and would freeze the pre-postseason number.
+- **`pa`/`IP` still hold the REGULAR-SEASON line** — harmless *today* precisely because `regular_season_*` is NULL and
+  the depth-role fallback lands on the right value. **Fixed in the derive_masters build, both columns together.**
+- **WAR still sourced from CSVs** — correct numbers, wrong wiring. **Re-point during the Track B build, not now.**
+
+## ▶️ REMAINING PROD PUSH (dependency order, NOT topic order)
+`F44 refresh_team_season_stats` ← **BLOCKED on `regular_season_ip`** (it divides by it → NULL rates) →
+`E35` TWP detector (guard added ✅) → `E36/E37/E38` precomputes → `F39` `refresh_composite_war` → `F40–F43` →
+`G46` edge-fn deploy → PR staging→main → `H` drops → **THEN staging catch-up, run THROUGH Track B.**
+★ **F44 MOVED UP, before Phase E** — `precompute-transfer-projections.ts:225` / `precompute-pitchers.ts:279` READ
+`team_season_stats.faced_*` and coerce a miss to `[]`. See the ORDER AUDIT.
+
+## 🔨 THE BUILD QUEUE (in order, all scoped, none started)
+1. **`derive_masters_from_pitchlog.ts` extension** — counting stats + reg/post split + gate split + `repRows` fix.
+2. **`pitch_log_pitcher_totals` gains `R`/`ER`** — including the inherited-runner accrual currently only in the engine.
+3. **`dimension_key='reg'`** on the totals build → kills the last hitter-side CSV dependency.
+4. **Fold defense/baserunning into the accumulator** ⬜ sequencing OPEN.
+5. **Re-point WAR at the DB** (Layer 2 → Layer 3).
+6. **One boundary-date source** → later, per-team schedules.
+
+## 🧠 THE SIX DEFECTS THIS PUSH FOUND — every one PASSED a naive check
+1. Conference `Stuff_plus` **stale at 30/30** (a 4th producer the runbook omitted)
+2. `trackman_pitches` **fully populated from the WRONG LANE** (638/5,367 = 11.9% agreement)
+3. `run_env_factor` **stale under E2 at 30/30** (park rewrite invalidates it)
+4. **Kozeal missing** — invisible to `5,340 = 5,340`
+5. **`--create-new` structurally broken** — exits 0, prints `0 new rows`, can never create a hitter
+6. **`TeamID` team split** — both buckets internally consistent, Σ-centering held **at 309 teams**
