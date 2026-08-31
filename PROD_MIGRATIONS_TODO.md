@@ -3291,3 +3291,65 @@ Prod's returner-HITTER rows show `updated_at = 2026-08-31` while their VALUES ar
 the timestamp. **A recent `updated_at` proves a row was TOUCHED, not that its numbers are current.**
 Same family as "populated ≠ fresh" (Conference `Stuff_plus` at 30/30) and "count-correct ≠ complete" (Kozeal).
 → **Gate on the VALUE, never on `updated_at`.**
+
+---
+# 🧮 EQUATION / CALIBRATION VERIFICATION ON PROD (2026-08-31) — the two-sided SD IS live and IS being used
+Trevor asked whether the equation work — **including the two-sided SD** — actually made it to prod. **I had NOT
+verified it** and was implicitly relying on "220 keys on both envs", which only proves the KEYS exist. Verified properly:
+
+## ✅ 1. THE TWO-SIDED SD IS PRESENT ON PROD — AND `sd_good` IS NOT MISSING
+**There are no literal `sd_good` keys, and that is BY DESIGN.** `src/lib/pitcherProjection.ts:185` states it:
+> *"a positive rating-z projects toward the GOOD side (use **sd_good = ncaaSd**); negative toward the [bad] side"*
+So the pair is **`<stat>_plus_ncaa_sd` (GOOD side) + `<stat>_plus_ncaa_sd_bad` (BAD side)**.
+**All 6 bad-side keys are on PROD** (re-derived by C27 from prod's own population):
+```
+era_plus_ncaa_sd_bad  2.304009   (staging 2.264985)
+fip_plus_ncaa_sd_bad  1.869489   (staging 1.843704)
+whip_plus_ncaa_sd_bad 0.341070   (staging 0.337614)
+k9_plus_ncaa_sd_bad   1.982413   (staging 1.966669)
+bb9_plus_ncaa_sd_bad  1.763271   (staging 1.733557)
+hr9_plus_ncaa_sd_bad  0.281018   (staging 0.271141)
+```
+
+## ✅ 2. THE CODE ACTUALLY CONSUMES THEM (existence ≠ use — checked separately)
+```
+src/lib/transferPitcherProjection.ts:390-395   dsd(<stat>Pr, eq.<stat>_plus_ncaa_sd, eq.<stat>_plus_ncaa_sd_bad)
+                                               → era · fip · whip · k9 · bb9 · hr9
+src/lib/pitcherProjection.ts:455               ncaaSd: eq.era_plus_ncaa_sd, ncaaSdBad: eq.era_plus_ncaa_sd_bad
+src/lib/transferPitcherProjection.ts:111-112   "PR+ > 100 = better talent → the compressed GOOD side (sd_good);
+                                                PR+ < 100 → the wide BAD side (sd_bad)"
+```
+
+## ✅ 3. **E36 (RUN ON PROD TODAY) USED IT** — the run itself is the proof
+`scripts/precompute-returner-pitchers.ts:133`:
+> *"Overlay `model_config <stat>_plus_ncaa_*` (incl. the **stage-5.5 two-sided `_sd` / `_sd_bad`** + calibrated …)"*
+and `:13` / `:38` route the math through `computePitcherProjection` in `pitcherProjection.ts`, which takes `ncaaSdBad`.
+**⇒ The 6,632 prod pitcher projections written today were computed WITH the two-sided SD.**
+
+## ✅ 4. `model_config` KEY SETS ARE IDENTICAL — 220 / 220, ZERO missing either way
+`in STAGING not prod: 0` · `in PROD not staging: 0`.
+
+## ⚠ 5. THE "77 DIFFERENCES" WERE MOSTLY NOISE — 156 formatting, **64 genuine**
+A raw string comparison reported 77 differing values; a NUMERIC comparison shows **156 formatting-only**
+(`0.3` vs `0.30`) and **64 genuinely different**. **Compare numerically, never as strings.**
+**All 64 are prod being FRESHER** — they are the NCAA averages/SDs that **C27 re-derived from prod's own data**, and
+**staging never ran C27**:
+```
+p_ncaa_avg_stuff_plus  prod 100.0141  staging 99.4358   ← ★ the Stuff+ RECENTER reached the projection constants
+p_sd_stuff_plus        prod 5.04577   staging 5.93754
+p_ncaa_avg_whiff_pct   prod 23.3673   staging 23.4593
+r_ncaa_avg_ba          prod 0.2772    staging 0.28      ← prod DERIVED; staging a rounded literal
+r_ba_std_pr            prod 29.99699  staging 31.297
+r_obp_std_ncaa         prod 0.05081   staging 0.046781
+```
+★ **`p_ncaa_avg_stuff_plus = 100.0141` on prod is an END-TO-END signal** that the Stuff+ recenter survived
+score → aggregate → Master rollup → `computeNcaaAverages` → the projection constants.
+🛑 **CONSEQUENCE FOR E37:** the hitter-side calibration (`r_ba_std_pr`, `r_obp_std_ncaa`, `r_ncaa_avg_*`) ALSO differs
+from staging for the same C27 reason. **E37's hitter numbers will NOT match staging exactly — that is EXPECTED, not
+drift.** Compare E37 against the *shape* (distribution, depth-role mix), not against staging's literal values.
+
+## 🧠 THE CHECK I WAS SKIPPING
+"220 keys on both environments" proves only that the **keys exist**. It does NOT prove they are **populated with
+re-derived values**, nor that any **code path consumes them**. Those are three separate questions:
+**(a) does the key exist · (b) is its value fresh · (c) does the producer actually read it.**
+→ **For any calibration change, verify all three.** Trevor caught this by asking; I had answered (a) only.

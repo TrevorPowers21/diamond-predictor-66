@@ -26,6 +26,8 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 | **`K9/BB9/HR9/WHIP/FIP`** | ✅ **now pitch-log-DERIVED on prod (5,375)** — were stale TruMedia values until today. |
 | **F44 `team_season_stats`** | ✅ **0 → 308.** `faced_*` 308/308 · `ra9_reg` 308 · W/L **27.6-27.4 over 55.0 games** · AVG .277 · wRC+ 98.8. |
 | *(unplanned)* Kozeal / Wiggins | ✅ Kozeal's real row CREATED (D1 hitters 5,341); Wiggins' phantom row DELETED. |
+| **Equations / calibration** | ✅ **VERIFIED live and IN USE on prod** — all 6 `*_ncaa_sd_bad` keys present (`sd_good` = the existing `*_ncaa_sd`, by design); `dsd()` in `transferPitcherProjection:390-395` and `ncaaSdBad` in `pitcherProjection:455` consume them; `precompute-returner-pitchers:133` overlays the stage-5.5 two-sided SD — **so E36's 6,632 projections used it**. `model_config` 220/220 keys, zero missing either way. |
+| **E36 returner pitchers** | ✅ 6,632 with `p_war` (avg 0.607) · per-player vs staging **median Δ 0.004** · `$/WAR` ratio **1.000** · propagate 105,093 rows. |
 | **E35 TWP detector** | ✅ `is_twp` **137 → 253** (= staging exactly) · legacy `position='TWP'` **428 → 34** (= staging exactly) · 606 rows · D1 TWPs **90**. |
 
 **Backups on prod:** `_hm_prefill_backup` (8,245) · `_pm_prefill_backup` (8,071) · `_pm_wiggins_backup` (1) ·
@@ -40,8 +42,11 @@ architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`
 # §2 WHAT'S LEFT — dependency order, NOT the runbook's topic order
 ```
 ✅ E35  run-twp-recompute --prod --apply       DONE 2026-08-31 · is_twp 137→253 (= staging) · legacy TWP 428→34 (= staging) · 606 rows
-▶ E36  precompute-returner-pitchers:prod        NEXT (dry-run first)
-  E37  precompute-returner-hitters:prod
+✅ E36  precompute-returner-pitchers:prod       DONE · 6,632 p_war · median Δ 0.004 vs staging · propagate re-run (105,093)
+▶ E37  precompute-returner-hitters:prod        IN FLIGHT · 8,231 rows · 7,018 computed / 1,418 all-null
+       🛑 `npm run …:prod` ALIASES **WRITE** — no --dry-run inside. Use `-- --dry-run` (the `--` is REQUIRED).
+       ⚠ hitter markets on prod are PRE-SEC-4.0 (max $104,110 vs staging $613,259) — E37 should close this.
+       ⚠ hitter calibration differs from staging (C27 re-derived) — compare SHAPE, not staging's literals.
   E38  zsh scripts/_run_step2_all.sh --prod     🛑 the loop pipes through `grep | head -3` and SWALLOWS EXIT CODES.
                                                 "14 teams DONE" is NOT proof — re-run the dry-run, require 0 pending per team.
                                                 customer_teams active = 14 (NOT 18 — that is a staging number)
@@ -75,6 +80,11 @@ where the pitch log is weak (**SB, ERA, G/GS**). Order is derive-then-override, 
    a wrong CSV column · exact-equality between two derivations · `Number(null)` passing `isFinite` · a raw mean over a
    tiny-denominator tail · guessed column names. **Report mean/median/p90/max — never a %-exact-match or a raw mean.**
 7. **LEAN ON DATABASE CONSTRAINTS.** `team_season_stats_pkey` caught a duplicate no application gate would have.
+8. **FOR ANY CONFIG/CALIBRATION CHANGE, VERIFY THREE THINGS SEPARATELY:** (a) the key EXISTS · (b) its value is
+   FRESH (re-derived for THIS env) · (c) a code path actually READS it. "220 keys on both envs" answers only (a).
+9. **COMPARE CONFIG NUMERICALLY, NOT AS STRINGS.** A string diff reported 77 differences; 156 were formatting
+   (`0.3` vs `0.30`) and only 64 were real.
+10. **`updated_at` IS NOT A FRESHNESS SIGNAL.** The propagate bumped it on 105,093 rows whose values never changed.
 
 # §4 🛑 MISTAKES — DO NOT REPEAT
 - A subagent with prod credentials called `refresh_composite_war()` and wrote ~112k rows → **subagents get STAGING only**.
@@ -202,3 +212,65 @@ Prod's returner-HITTER rows show `updated_at = 2026-08-31` while their VALUES ar
 the timestamp. **A recent `updated_at` proves a row was TOUCHED, not that its numbers are current.**
 Same family as "populated ≠ fresh" (Conference `Stuff_plus` at 30/30) and "count-correct ≠ complete" (Kozeal).
 → **Gate on the VALUE, never on `updated_at`.**
+
+---
+# 🧮 EQUATION / CALIBRATION VERIFICATION ON PROD (2026-08-31) — the two-sided SD IS live and IS being used
+Trevor asked whether the equation work — **including the two-sided SD** — actually made it to prod. **I had NOT
+verified it** and was implicitly relying on "220 keys on both envs", which only proves the KEYS exist. Verified properly:
+
+## ✅ 1. THE TWO-SIDED SD IS PRESENT ON PROD — AND `sd_good` IS NOT MISSING
+**There are no literal `sd_good` keys, and that is BY DESIGN.** `src/lib/pitcherProjection.ts:185` states it:
+> *"a positive rating-z projects toward the GOOD side (use **sd_good = ncaaSd**); negative toward the [bad] side"*
+So the pair is **`<stat>_plus_ncaa_sd` (GOOD side) + `<stat>_plus_ncaa_sd_bad` (BAD side)**.
+**All 6 bad-side keys are on PROD** (re-derived by C27 from prod's own population):
+```
+era_plus_ncaa_sd_bad  2.304009   (staging 2.264985)
+fip_plus_ncaa_sd_bad  1.869489   (staging 1.843704)
+whip_plus_ncaa_sd_bad 0.341070   (staging 0.337614)
+k9_plus_ncaa_sd_bad   1.982413   (staging 1.966669)
+bb9_plus_ncaa_sd_bad  1.763271   (staging 1.733557)
+hr9_plus_ncaa_sd_bad  0.281018   (staging 0.271141)
+```
+
+## ✅ 2. THE CODE ACTUALLY CONSUMES THEM (existence ≠ use — checked separately)
+```
+src/lib/transferPitcherProjection.ts:390-395   dsd(<stat>Pr, eq.<stat>_plus_ncaa_sd, eq.<stat>_plus_ncaa_sd_bad)
+                                               → era · fip · whip · k9 · bb9 · hr9
+src/lib/pitcherProjection.ts:455               ncaaSd: eq.era_plus_ncaa_sd, ncaaSdBad: eq.era_plus_ncaa_sd_bad
+src/lib/transferPitcherProjection.ts:111-112   "PR+ > 100 = better talent → the compressed GOOD side (sd_good);
+                                                PR+ < 100 → the wide BAD side (sd_bad)"
+```
+
+## ✅ 3. **E36 (RUN ON PROD TODAY) USED IT** — the run itself is the proof
+`scripts/precompute-returner-pitchers.ts:133`:
+> *"Overlay `model_config <stat>_plus_ncaa_*` (incl. the **stage-5.5 two-sided `_sd` / `_sd_bad`** + calibrated …)"*
+and `:13` / `:38` route the math through `computePitcherProjection` in `pitcherProjection.ts`, which takes `ncaaSdBad`.
+**⇒ The 6,632 prod pitcher projections written today were computed WITH the two-sided SD.**
+
+## ✅ 4. `model_config` KEY SETS ARE IDENTICAL — 220 / 220, ZERO missing either way
+`in STAGING not prod: 0` · `in PROD not staging: 0`.
+
+## ⚠ 5. THE "77 DIFFERENCES" WERE MOSTLY NOISE — 156 formatting, **64 genuine**
+A raw string comparison reported 77 differing values; a NUMERIC comparison shows **156 formatting-only**
+(`0.3` vs `0.30`) and **64 genuinely different**. **Compare numerically, never as strings.**
+**All 64 are prod being FRESHER** — they are the NCAA averages/SDs that **C27 re-derived from prod's own data**, and
+**staging never ran C27**:
+```
+p_ncaa_avg_stuff_plus  prod 100.0141  staging 99.4358   ← ★ the Stuff+ RECENTER reached the projection constants
+p_sd_stuff_plus        prod 5.04577   staging 5.93754
+p_ncaa_avg_whiff_pct   prod 23.3673   staging 23.4593
+r_ncaa_avg_ba          prod 0.2772    staging 0.28      ← prod DERIVED; staging a rounded literal
+r_ba_std_pr            prod 29.99699  staging 31.297
+r_obp_std_ncaa         prod 0.05081   staging 0.046781
+```
+★ **`p_ncaa_avg_stuff_plus = 100.0141` on prod is an END-TO-END signal** that the Stuff+ recenter survived
+score → aggregate → Master rollup → `computeNcaaAverages` → the projection constants.
+🛑 **CONSEQUENCE FOR E37:** the hitter-side calibration (`r_ba_std_pr`, `r_obp_std_ncaa`, `r_ncaa_avg_*`) ALSO differs
+from staging for the same C27 reason. **E37's hitter numbers will NOT match staging exactly — that is EXPECTED, not
+drift.** Compare E37 against the *shape* (distribution, depth-role mix), not against staging's literal values.
+
+## 🧠 THE CHECK I WAS SKIPPING
+"220 keys on both environments" proves only that the **keys exist**. It does NOT prove they are **populated with
+re-derived values**, nor that any **code path consumes them**. Those are three separate questions:
+**(a) does the key exist · (b) is its value fresh · (c) does the producer actually read it.**
+→ **For any calibration change, verify all three.** Trevor caught this by asking; I had answered (a) only.
