@@ -307,3 +307,51 @@ Independent 109.1→**122** · MWC 95.7→**96** · The Summit 93.8→**93.4**.
 **`derive_conf_opr_htp` must be the LAST thing to touch park-derived conference columns.** Any stage that rewrites
 `"Park Factors".rg_factor` invalidates `run_env_factor` / `hitter_talent_plus` / `offensive_power_rating` **without
 changing their fill count**. Gate on the VALUE CHANGING, never on the count.
+
+---
+# 🔬 E2 PROD↔STAGING COMPARISON — HOW IT WAS VERIFIED, AND WHAT A DIFFERENCE MEANS (2026-08-30)
+Run AFTER E2 + the `derive_conf_opr_htp` re-run. **Method matters as much as the result** — this is the template for
+comparing the two environments now that they have diverged.
+
+## METHOD (do it this way; a row count proves nothing)
+1. **Structural:** row counts + non-null counts per season, both envs.
+2. **VALUE-level:** pull all 2026 rows from each, **join on `team_name`**, compare each numeric field, report
+   `matched / IDENTICAL / worst |Δ|` — never just "counts agree".
+3. **Downstream:** compare the consumers (`Conference Stats`) separately, and **attribute every difference** to a
+   named cause before calling it a defect.
+
+## ✅ RESULT 1 — PARK FACTORS ARE *IDENTICAL*. This is INDEPENDENT REPLICATION, not a copy.
+| | PROD | STAGING |
+|---|---|---|
+| rows 2024 / 2025 / 2026 | **307 / 307 / 308** | **307 / 307 / 308** |
+| `rg_factor` populated | 307 / 307 / 308 | 307 / 307 / 308 |
+| `rg_factor_seasonal` populated | 307 / 307 / 308 | 307 / 307 / 308 |
+| **2026 `rg_factor` joined on `team_name`** | **308 matched · 308 IDENTICAL · worst \|Δ\| 0.0000** | |
+| **2026 `rg_factor_seasonal`** | **308 IDENTICAL** | |
+Same source CSVs, same formula, executed separately against two different databases → **byte-identical output**.
+Prod's park factors are now in exactly the state staging is in. ★ This is the same class of evidence as the Stuff+
+per-pitcher gate (mean 99.3 / p50 99.3 / p10 93.1 / p90 105.7 identical across two different pitch populations) and
+the Kozeal descriptive-WAR match (2.404 / 0.649 / −0.051 / 3.002 to three decimals).
+
+## ✅ RESULT 2 — `run_env_factor` IDENTICAL; the other two differ FOR A KNOWN REASON
+| Conference Stats 2026 D1 | PROD | STAGING | verdict |
+|---|---|---|---|
+| `run_env_factor` | **99.719** | **99.719** | ✅ **identical** — the purely park-derived value. Identical parks ⇒ identical result. **The E2 → `derive_conf_opr_htp` chain is verified end-to-end.** |
+| `Stuff_plus` | 99.15 | 99.16 | Δ −0.01 — immaterial |
+| `hitter_talent_plus` | 99.23 | 99.01 | Δ +0.22 — **EXPECTED, see below** |
+**Why HTP differs:** `HTP = OPR + 1.25·(Stuff+ − 100) + 0.75·(100 − run_env)`. `run_env` is now identical and Stuff+ is
+within 0.01, so the difference comes from **`offensive_power_rating`**, which is built off the **Masters** — and
+**STAGING NEVER RECEIVED C24 / C26 / C27 / C28 / C28b / C29.** Its Master-derived inputs are OLDER.
+🛑 **THEREFORE: PROD IS THE MORE CURRENT SIDE FOR THESE COLUMNS. A prod↔staging mismatch here is NOT a prod defect.**
+Prod is also ahead on `pitcher_ev90`, `pitcher_exit_velo`, `pitcher_in_zone_pct`, `pitcher_iz_whiff_pct`
+(**30/30 prod vs 0/30 staging**) and `pitcher_ev_score`/`pitcher_iz_score` (**30/30 vs 0/30**).
+
+## 🧭 THE RULE THIS ESTABLISHES — HOW TO READ ANY PROD↔STAGING DIFFERENCE FROM NOW ON
+Before calling a difference a defect, answer **in this order**:
+1. **Is the input identical?** (park CSVs, engine CSVs, pitch log) — if yes, an output difference is a real signal.
+2. **Which env is BEHIND on the producing step?** Staging is missing C24/C26/C27/C28/C28b/C29. Prod is missing nothing
+   in Phase C. **Whoever is behind explains the gap; do not "fix" the current side toward the stale one.**
+3. **Is the differing column derived from the Masters?** If so, staging's drift explains it.
+4. Only if 1–3 do not explain it is it a defect.
+⛔ **NEVER reconcile prod TO staging by copying values.** That is what produced the `team_drs` paste that had to be
+undone, and it would have carried staging's Arkansas 41.060 (a value prod could not reproduce) into prod permanently.
