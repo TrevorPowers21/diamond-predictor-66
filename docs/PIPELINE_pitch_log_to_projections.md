@@ -2620,3 +2620,48 @@ the ~125s PostgREST gateway ceiling that silently rolls back `refresh_composite_
 Track B writes in bulk on every ingest. It MUST: batch every write under the statement timeout · use a resumable
 predicate · never rely on `ON COMMIT DROP` · report per-batch progress and a final written count · treat a
 swallowed error as a hard stop. All four of these were violated by code found in this push.
+
+---
+# ✅ STEP 0b + 0c APPLIED TO PROD (2026-08-31) — `game_string` backfilled, per-pitcher IP derived
+## 0b — `pitch_log.game_string` BACKFILL: **0 → 2,576,146 (100%)**
+```
+✓ updated 2,576,146 rows
+AFTER — filled 2,576,146 / 2,576,146 · distinct games 8,519
+```
+★ **SANITY GATE THAT MATTERS: 8,519 distinct games × 2 team-appearances ÷ 308 D1 teams = 55.3 games/team** — exactly a
+~56-game season. A bad join would have produced a nonsense number here; a row count alone would not have caught it.
+Source: `docs/drs-reference/*DRS Pitch Log*.csv` (34 files, `uniqPitchId`→`gameString`), **not** copied from staging.
+**RUNTIME:** ~30 min at **≈87,000 rows/min**, 103 batches of 25,000. Two failed attempts first (see the node-postgres
+traps block) — both wrote NOTHING and prod was re-verified at `filled 0` after each.
+
+## 0c — `pitch_log_pitcher_totals.ip` + NEW `ip_reg`: **0 → 5,415**
+```
+DERIVED — 5415 pitchers (5382 with IP>0)
+  Σ IP 147,630.3   Σ reg 140,202.7   post = 7,427.7 (5.0%)
+  vs TruMedia Master.IP — n=5,374  mean|Δ|=0.458  median=0.33  p90=1.33
+```
+**THREE INDEPENDENT CONFIRMATIONS:** (1) **Σ IP 147,630.3 is IDENTICAL to staging's** — same pitch log, same
+derivation, same answer, computed separately; (2) mean |Δ| **0.458** matches staging's **0.476**; (3) the **5.0%
+postseason share** is right for conference tournaments + regionals on a 56-game season.
+DDL: `alter table pitch_log_pitcher_totals add column if not exists ip_reg numeric`.
+
+## 🛑 THE GUARD FIRED — AND IT WAS RIGHT TO. READ THIS BEFORE LOOSENING ANY THRESHOLD.
+The first prod dry-run **ABORTED**: `mean |Δ| = 1.827 > 1.0 — derivation looks wrong`.
+**The derivation was fine. The COMPARISON was wrong.**
+| prod `"Pitching Master".IP` vs | mean \|Δ\| | median |
+|---|---|---|
+| derived **FULL** `ip` | **1.827** | 0.67 |
+| derived **`ip_reg`** | **0.458** | **0.33** |
+**PROD's `Master.IP` HOLDS THE REGULAR-SEASON LINE** (staging's holds FULL). Checking a full-season derivation against
+a regular-season column manufactures a false discrepancy.
+✅ **FIXED THE COMPARISON, NOT THE THRESHOLD** — the script now checks `ip_reg` by default with a `--cmp-full`
+override for once the Masters hold the full-season line. **Loosening the threshold would have written silently and
+destroyed the only signal that told us which window prod's Master column is in.**
+★ **LESSON: a tripped guard is DATA.** It said "these two numbers disagree" and the disagreement was the real finding.
+Compare like with like; never relax a gate to make it pass.
+
+## ▶️ WHAT THIS ARMS (nothing has changed on the Masters yet)
+`derive_masters_from_pitchlog` calls `pitcherIpDependent(t, ip)`, which returns `{}` on a null `ip`. With `ip` now
+populated it will finally derive **`K9` `BB9` `HR9` `WHIP` `FIP`** on prod instead of silently leaving stale TruMedia
+values. **Those five columns do NOT change until STEP 1 runs** — 0c only arms it.
+Also unblocked: `refresh_team_season_stats` step 5 (team W/L records), which keys on `game_string`.

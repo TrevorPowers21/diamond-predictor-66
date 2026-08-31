@@ -85,7 +85,14 @@ async function main() {
     // accuracy check against the authoritative TruMedia line
     const acc = (await c.query(
       `select source_player_id sid, "IP" ip from "Pitching Master" where "Season"=$1 and division='D1' and "IP" is not null`, [SEASON])).rows;
-    const byId = new Map(derived.map((r) => [String(r.pitcher_id), Number(r.ip)]));
+    // ★ COMPARE LIKE WITH LIKE. `"Pitching Master".IP` currently holds the REGULAR-SEASON line on PROD (verified:
+    // vs derived ip_reg mean|Δ| 0.458, vs derived FULL ip 1.827) and the FULL line on staging. Checking the full
+    // derivation against a regular-season Master column produced a false 1.827 and tripped this guard — the
+    // derivation was fine. Compare against whichever window the Master actually holds.
+    const cmpFull = process.argv.includes("--cmp-full");
+    const byId = new Map(derived.map((r) => [String(r.pitcher_id), Number(cmpFull ? r.ip : r.ip_reg)]));
+    console.log(`  accuracy check vs "Pitching Master".IP using the ${cmpFull ? "FULL" : "REGULAR-SEASON"} derivation` +
+      ` (override with --cmp-full)`);
     const diffs = acc.map((m) => { const v = byId.get(String(m.sid)); return v == null ? null : Math.abs(v - Number(m.ip)); })
       .filter((x): x is number => x != null).sort((a, b) => a - b);
     if (diffs.length) {
