@@ -1,3 +1,8 @@
+# ⚠️ SUPERSEDED AS THE ENTRY POINT — START AT `docs/HANDOFF_2026_08_31_MASTERS_AND_TRACKB.md`
+That file carries the current state, the two workstreams (prod push vs Track B build), the next concrete
+task, and the mistakes list. **This document remains valid for Phase-C detail and the full investigation
+record** — keep reading it for the C24/C26/C27/C28/C28b/C29 narrative and every logged block below.
+
 # ▶️ HANDOFF — RSTR IQ prod push, 2026-08-30. START HERE.
 
 ## READ IN THIS ORDER (do not skip)
@@ -1822,3 +1827,56 @@ championship-benchmark displays, not projections. **Run it, note the gap, re-run
 7.  H    gated drops  →  THEN staging catch-up, run THROUGH Track B
 8.  LATER: re-run F44 once derive_masters fills regular_season_ip (idempotent)
 ```
+
+---
+# 🎯 DIRECTIVE — PROD MUST HOLD **FULL-SEASON** `pa`/`IP` (INCLUDING POSTSEASON), WITH THE REG SPLIT ALONGSIDE
+> Trevor, 2026-08-30: *"what we need to do is update prod to reflect full season stats including postseason, which
+> means that the engine needs to recognize regular season PA the correct way and fill them with that information."*
+
+## THE TARGET STATE (both columns, ONE operation, from the engine)
+| column | value | engine source |
+|---|---|---|
+| `"Hitter Master".pa` / `ab` | **FULL season, incl. postseason** | `hitter_accrued.csv` → `PA` / `AB` |
+| `"Hitter Master".regular_season_pa` | **REG only (≤ 2026-05-18)** | `hitter_accrued.csv` → `reg_PA` |
+| `"Pitching Master".IP` | **FULL season, incl. postseason** | `pitcher_line.csv` → `full_IP` |
+| `"Pitching Master".regular_season_ip` | **REG only** | `pitcher_line.csv` → `reg_IP` |
+| `"Pitching Master".ERA` / `bf` | **FULL season** | `pitcher_line.csv` → `full_ERA` / `full_BF` |
+🛑 **WRITE BOTH WINDOWS IN THE SAME OPERATION.** Depth-role tiering reads `regular_season_pa ?? pa` — if `pa` goes
+full-season while `regular_season_*` is still NULL, tiering silently uses **postseason-inflated volume** and deep-run
+playoff teams get pushed up a tier, with no error. **This is why the engine must supply both, not a snapshot.**
+
+## 📊 THE MEASUREMENT THAT ESTABLISHES THE CURRENT STATE (prod + staging, VERIFIED 2026-08-30)
+| comparison | mean \|Δ\| | median | p90 | max |
+|---|---|---|---|---|
+| **STAGING** `regular_season_pa` vs engine `reg_PA` | 0.858 | **0.00** | 3 | 23 |
+| **STAGING** `pa` vs engine `PA` (full) | 0.852 | **0.00** | 2 | 23 |
+| **PROD** `pa` vs engine **`reg_PA`** | **0.865** | **0.00** | 3 | 37 |
+| **PROD** `pa` vs engine `PA` (full) | **6.567** | 1.00 | 20 | 79 |
+| **PROD** `IP` vs engine **`reg_IP`** | **0.402** | 0.30 | 1.03 | 8.03 |
+| **PROD** `IP` vs engine `full_IP` | **1.428** | 0.37 | 4.33 | 27.67 |
+**CONCLUSIONS:**
+1. ✅ **STAGING IS FILLED CORRECTLY** — both windows match their own engine source at **median 0**, correctly paired.
+   **Do NOT "fix" staging.** (Trevor was right; my earlier doubt was wrong.)
+2. ✅ **PROD's `pa`/`IP` ARE THE REGULAR-SEASON WINDOW** — 0.865 vs 6.567 for PA, 0.402 vs 1.428 for IP. Unambiguous.
+3. ✅ The residual **~0.86 PA / ~0.40 IP** is TruMedia counting vs the engine's pitch-log derivation — the same
+   effect recorded as **IP corr 0.9932 vs Master IP** in the `team_season_stats` migration. **Expected, not a defect.**
+4. ✅ **FILLING `regular_season_pa`/`_ip` FROM THE ENGINE IS LOW-RISK** — the value differs from today's `pa` by a
+   **median of 0.00**, so depth-role tiers barely move. **My earlier "this changes 1,306 hitters" warning was WRONG.**
+
+## 🧠 METHODOLOGICAL LESSON — DO NOT COMPARE TWO DERIVATIONS BY EXACT EQUALITY
+I first tested prod `pa` == engine `reg_PA` with **exact integer equality** and got **75.5%**, then reported that as
+"1,306 hitters would change." **That was a false alarm.** The true distribution is **median 0, mean 0.865**. Exact
+equality between two INDEPENDENT derivations of the same quantity will always show a large "mismatch %" that is really
+just rounding/derivation noise.
+✅ **RULE: when comparing two derivations, report mean/median/p90/max of |Δ| — never a % exact match.**
+⚠ **Second occurrence today.** The first was the E2 park-factor diff, where my probe matched the CSV's `teamId`
+column instead of `team` and briefly reported "all 309 teams would be dropped" (the truth was **1**: Fort Wayne).
+**Both were MY instrument, not the data.** Verify the instrument before reporting an alarm.
+
+## ▶️ EXECUTION (part of the `derive_masters_from_pitchlog` extension — NOT a separate lock step)
+1. Write all four columns from the engine in ONE upsert per player.
+2. **GATE (values, not counts):** `pa` avg **121.8 → ~128.0** · `regular_season_pa` ≈ today's `pa` (median Δ 0) ·
+   `regular_season_ip` **0 → 5,374** · `IP` avg rises · spot-check a deep playoff team (LSU / Arkansas) and confirm
+   its **depth-role tier counts do not move**.
+3. Then **re-run F44** (`refresh_team_season_stats`) so `ra9_r` / `fra9_r` stop landing NULL. Idempotent.
+⛔ **`lock_regular_season` / D33b remains OBSOLETE** — it snapshots `pa`, which is exactly the wrong mechanism.
