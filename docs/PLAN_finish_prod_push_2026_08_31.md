@@ -12,13 +12,13 @@ Scope: finishing the push. Track B build work is separate (`docs/PIPELINE_pitch_
 them leaves every projection built on the old regular-season-only values. **Fill → F44 → E35 → precomputes.**
 
 ---
-## STEP 0 — F40 env guard *(code only, no DB)*
+## ✅ STEP 0 — F40 env guard — **DONE 2026-08-31** (all 4 paths verified) *(code only, no DB)*
 `scripts/backfill-snapshot-total-hitter-war.ts:22` uses `process.env.SUPABASE_URL` with **no `--prod` flag anywhere**
 (`grep -c` = 0/0) ⇒ `--env-file=.env.production.local` writes PROD with zero opt-in. **6th instance of this defect.**
 Add the standard double-keyed guard (URL and `--prod` must AGREE).
 **GATE:** both refuse paths print — `✗ URL is PROD but --prod was not passed` and `✗ --prod passed but URL is not prod`.
 
-## ★ STEP 0b — BACKFILL `pitch_log.game_string` (NEW — discovered 2026-08-31, PROD WRITE)
+## ✅ STEP 0b — BACKFILL `pitch_log.game_string` — **DONE 2026-08-31** (0 → 2,576,146 · 8,519 games · 55.3 g/team) (NEW — discovered 2026-08-31, PROD WRITE)
 **`game_string` is 0 / 2,576,146 on PROD.** It is an INGEST-time identifier, not derived. While NULL it silently
 breaks (a) per-pitcher IP — the half-inning key is `(game_string, inn)` — and (b) `refresh_team_season_stats` step 5's
 W/L records, which key on it. **Neither raises an error.**
@@ -29,7 +29,7 @@ npx tsx scripts/backfill_pitch_log_game_string.ts --prod --apply
 **GATE:** `game_string` 0 → **2,576,146** · `count(distinct game_string)` ≈ the season's game count · spot-check that
 the embedded date matches the row's `date`.
 
-## ★ STEP 0c — FILL `pitch_log_pitcher_totals.ip` + `ip_reg` (NEW, PROD WRITE)
+## ✅ STEP 0c — FILL `pitch_log_pitcher_totals.ip` — **DONE 2026-08-31** (0 → 5,415 · ip_reg added · Σ IP 147,630.3 = staging) + `ip_reg` (NEW, PROD WRITE)
 **`ip` is 0 / 5,509 on PROD**, which is why `K9/BB9/HR9/WHIP/FIP` on the Pitching Master are **stale CSV values**
 rather than pitch-log-derived (`pitcherIpDependent` returns `{}` on a null ip). Requires STEP 0b.
 ```
@@ -39,7 +39,7 @@ npx tsx --env-file=.env.production.local scripts/fill_pitcher_totals_ip.ts --pro
 **GATE:** derives ~5,400 pitchers (0 before STEP 0b) · `ip` 0 → ~5,400 · `ip_reg` populated · postseason share ≈ **5%**
 · mean |Δ| vs `"Pitching Master".IP` ≈ **0.48** (the script self-aborts above 1.0).
 
-## STEP 1 — extend `derive_masters_from_pitchlog.ts` *(code only, no DB)*
+## ✅ STEP 1 — extend + APPLY `derive_masters_from_pitchlog.ts` — **DONE 2026-08-31** (3,742 H / 5,374 P · all gates pass) *(code only, no DB)*
 **1a. Write the counting columns to EXISTING rows**, all in ONE upsert per player:
 | column | ← source | window |
 |---|---|---|
@@ -58,7 +58,7 @@ counted and fatal. *(Not needed for this push, but it is adjacent code and Track
 **1d. Remove `ERA`/`IP`/`bf` from `PITCHER_UNMAPPED`** (leave `G`, `GS`, `Role`).
 **GATE:** `tsc -p tsconfig.app.json --noEmit 2>&1 | grep derive_masters` shows no NEW errors.
 
-## STEP 2 — VALIDATE ON STAGING FIRST *(dry-run, no writes)* ★ the highest-value step
+## ✅ STEP 2 — staging validation — **DONE** (changes explained: ~966 un-gated thin hitters + the IP write) *(dry-run, no writes)* ★ the highest-value step
 Staging's `pa` / `regular_season_pa` / `IP` / `regular_season_ip` are **already correct** (median Δ 0.00 vs the engine).
 So the extended script must reproduce values staging **already has** — independent replication, the same technique
 that validated `derive_team_drs` (308/308 exact) and Kozeal's WAR (3dp).
@@ -68,7 +68,7 @@ npx tsx --env-file=.env.local scripts/derive_masters_from_pitchlog.ts --dry-run
 **GATE:** for the four counting columns it reports **≈0 changes** on staging. If it wants to change thousands, the
 mapping is wrong — **STOP and diagnose. Do not proceed to prod.**
 
-## STEP 3 — PROD DRY RUN
+## ✅ STEP 3 — prod dry-run — **DONE** (values verified: pa/IP rise, ERA rises with postseason, reg == old pa)
 ```
 npx tsx --env-file=.env.production.local scripts/derive_masters_from_pitchlog.ts --dry-run --prod
 ```
@@ -78,7 +78,7 @@ npx tsx --env-file=.env.production.local scripts/derive_masters_from_pitchlog.ts
 **GATE:** the sample diff shows `pa` RISING and `regular_season_pa` ≈ today's `pa`. If the `regular_season_pa` delta is large,
 the windows are swapped — STOP.
 
-## STEP 4 — BACK UP, THEN APPLY *(first prod write of this plan)*
+## ✅ STEP 4 — backup + apply — **DONE** (`_hm_prefill_backup` 8,245 · `_pm_prefill_backup` 8,071) *(first prod write of this plan)*
 ```sql
 create table _hm_prefill_backup as select * from "Hitter Master"   where "Season"=2026;
 create table _pm_prefill_backup as select * from "Pitching Master" where "Season"=2026;
@@ -92,7 +92,7 @@ Verify counts (5,341 / 5,375), then apply. Needs an explicit **"prod, now?"**.
 - ★ **pick a deep playoff team (LSU / Arkansas): its depth-role tier counts must NOT move.**
 - ★ **`desc_owar` / `total_desc_war` UNCHANGED** — D31 wrote them from the full-season CSV; this step must not disturb them.
 
-## STEP 5 — F44 `refresh_team_season_stats(2026)`
+## ▶️ STEP 5 — F44 `refresh_team_season_stats(2026)` — **NEXT. Both blockers now cleared.**
 Now that `regular_season_ip` is filled, `ra9_r` / `fra9_r` compute instead of landing NULL.
 ```sql
 select refresh_team_season_stats(2026);
@@ -196,7 +196,7 @@ ALLOW   PROD + --prod         → [env] 🔴 PROD (trbvxuoliwrfowibatkm)  mode=D
 | | PROD | STAGING |
 |---|---|---|
 | `pitch_log` 2026 rows | 2,576,146 | 2,579,655 |
-| **`game_string` populated** | **0 (100% NULL)** | **2,576,146** |
+| **`game_string` populated** | ✅ **2,576,146 (backfilled 2026-08-31)** — was 0 | **2,576,146** |
 | `inn` · `outs` · `date` · `pitcher_id` | 2,576,146 each ✅ | ✅ |
 **Every other column is fine.** Only `game_string` is empty — and it is **NOT a derived value**. It is an identifier
 that arrives WITH the export and is written at INGEST: `scripts/ingest_pitch_log.ts:325`
@@ -268,8 +268,8 @@ records **corr 0.9932 vs Master IP**).
 ## LAYER 2 — `pitch_log_*_totals` (THE ACCUMULATOR — rebuilt on EVERY import)
 | table.column | source | PROD state | note |
 |---|---|---|---|
-| `pitch_log_pitcher_totals.ip` | outs÷3 from `pitch_log` | ❌ **0 / 5,509** | needs `game_string` first |
-| `pitch_log_pitcher_totals.ip_reg` | same, ≤ boundary | ❌ **column does not exist** | `add column if not exists` |
+| `pitch_log_pitcher_totals.ip` | outs÷3 from `pitch_log` | ✅ **5,415 (filled 2026-08-31)** | required `game_string` first |
+| `pitch_log_pitcher_totals.ip_reg` | same, ≤ boundary | ✅ **column added + 5,415 filled (2026-08-31)** | |
 | `..._pitcher_totals.R` / `ER` | ⬜ **NOT BUILT** | ❌ absent | ⚠ needs the engine's **inherited-runner attribution, earned+unearned** — NOT a naive count. Blocks pitcher WAR from the DB. |
 | `..._pitcher_totals` counts (`total_bf/pa/k/bb/hbp`, hits, batted-ball, `stuff_plus_sum`) | aggregator | ✅ 5,509 | |
 | `pitch_log_hitter_totals` (`pa ab hits_* k bb hbp sac`, batted-ball, `ev_*`) | aggregator | ✅ 6,099 | full-season `pa`/`ab` verified **median Δ 0.00** vs engine |
@@ -283,8 +283,8 @@ records **corr 0.9932 vs Master IP**).
 | `Pitching Master.IP` | `ip` (full) | ⚠ holds the REGULAR-SEASON line |
 | `Pitching Master.regular_season_ip` | `ip_reg` | ❌ **0 / 5,375** |
 | `Pitching Master.ERA` | engine `full_ERA` (until `ER` lands in the accumulator) | ⚠ stale CSV |
-| `Pitching Master.bf` | `total_bf` | ❌ **0 / 5,375** — free fill, already selected by the producer |
-| **`K9` `BB9` `HR9` `WHIP` `FIP`** | `pitcherIpDependent()` — **needs `ip`** | 🔴 **STALE CSV VALUES ON PROD.** `pitcherIpDependent` returns `{}` when `ip` is null, so the producer silently skips them. **Staging derives them; prod does not.** ← *newly discovered, was not in any doc* |
+| `Pitching Master.bf` | `total_bf` | ✅ **5,372 (filled 2026-08-31)** |
+| **`K9` `BB9` `HR9` `WHIP` `FIP`** | `pitcherIpDependent()` — **needs `ip`** | ✅ **DERIVED ON PROD 2026-08-31 — 5,375/5,375.** Historical: `pitcherIpDependent` returned `{}` on a null `ip`, so the producer silently skipped them and prod held stale TruMedia values while staging derived them. Fixed by filling `ip` (step 0c) then running step 1. |
 | `k_pct` / `pull_air` | accumulator | ⚠ 4,374 / 4,367 of 5,341 — the `MIN_PA` PATCH gate (now removed) |
 | rates + batted-ball + `stuff_plus` | accumulator | ✅ (dry-run: 0 changes) |
 | `G` / `GS` | ⬜ no pitch-log source found | Master-override. Trevor: *"almost positive the pitch log import has a starting pitcher id"* — Track B flag |

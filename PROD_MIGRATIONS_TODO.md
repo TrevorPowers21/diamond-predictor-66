@@ -2818,7 +2818,7 @@ ALLOW   PROD + --prod         → [env] 🔴 PROD (trbvxuoliwrfowibatkm)  mode=D
 | | PROD | STAGING |
 |---|---|---|
 | `pitch_log` 2026 rows | 2,576,146 | 2,579,655 |
-| **`game_string` populated** | **0 (100% NULL)** | **2,576,146** |
+| **`game_string` populated** | ✅ **2,576,146 (backfilled 2026-08-31)** — was 0 | **2,576,146** |
 | `inn` · `outs` · `date` · `pitcher_id` | 2,576,146 each ✅ | ✅ |
 **Every other column is fine.** Only `game_string` is empty — and it is **NOT a derived value**. It is an identifier
 that arrives WITH the export and is written at INGEST: `scripts/ingest_pitch_log.ts:325`
@@ -2890,8 +2890,8 @@ records **corr 0.9932 vs Master IP**).
 ## LAYER 2 — `pitch_log_*_totals` (THE ACCUMULATOR — rebuilt on EVERY import)
 | table.column | source | PROD state | note |
 |---|---|---|---|
-| `pitch_log_pitcher_totals.ip` | outs÷3 from `pitch_log` | ❌ **0 / 5,509** | needs `game_string` first |
-| `pitch_log_pitcher_totals.ip_reg` | same, ≤ boundary | ❌ **column does not exist** | `add column if not exists` |
+| `pitch_log_pitcher_totals.ip` | outs÷3 from `pitch_log` | ✅ **5,415 (filled 2026-08-31)** | required `game_string` first |
+| `pitch_log_pitcher_totals.ip_reg` | same, ≤ boundary | ✅ **column added + 5,415 filled (2026-08-31)** | |
 | `..._pitcher_totals.R` / `ER` | ⬜ **NOT BUILT** | ❌ absent | ⚠ needs the engine's **inherited-runner attribution, earned+unearned** — NOT a naive count. Blocks pitcher WAR from the DB. |
 | `..._pitcher_totals` counts (`total_bf/pa/k/bb/hbp`, hits, batted-ball, `stuff_plus_sum`) | aggregator | ✅ 5,509 | |
 | `pitch_log_hitter_totals` (`pa ab hits_* k bb hbp sac`, batted-ball, `ev_*`) | aggregator | ✅ 6,099 | full-season `pa`/`ab` verified **median Δ 0.00** vs engine |
@@ -2905,8 +2905,8 @@ records **corr 0.9932 vs Master IP**).
 | `Pitching Master.IP` | `ip` (full) | ⚠ holds the REGULAR-SEASON line |
 | `Pitching Master.regular_season_ip` | `ip_reg` | ❌ **0 / 5,375** |
 | `Pitching Master.ERA` | engine `full_ERA` (until `ER` lands in the accumulator) | ⚠ stale CSV |
-| `Pitching Master.bf` | `total_bf` | ❌ **0 / 5,375** — free fill, already selected by the producer |
-| **`K9` `BB9` `HR9` `WHIP` `FIP`** | `pitcherIpDependent()` — **needs `ip`** | 🔴 **STALE CSV VALUES ON PROD.** `pitcherIpDependent` returns `{}` when `ip` is null, so the producer silently skips them. **Staging derives them; prod does not.** ← *newly discovered, was not in any doc* |
+| `Pitching Master.bf` | `total_bf` | ✅ **5,372 (filled 2026-08-31)** |
+| **`K9` `BB9` `HR9` `WHIP` `FIP`** | `pitcherIpDependent()` — **needs `ip`** | ✅ **DERIVED ON PROD 2026-08-31 — 5,375/5,375.** Historical: `pitcherIpDependent` returned `{}` on a null `ip`, so the producer silently skipped them and prod held stale TruMedia values while staging derived them. Fixed by filling `ip` (step 0c) then running step 1. |
 | `k_pct` / `pull_air` | accumulator | ⚠ 4,374 / 4,367 of 5,341 — the `MIN_PA` PATCH gate (now removed) |
 | rates + batted-ball + `stuff_plus` | accumulator | ✅ (dry-run: 0 changes) |
 | `G` / `GS` | ⬜ no pitch-log source found | Master-override. Trevor: *"almost positive the pitch log import has a starting pitcher id"* — Track B flag |
