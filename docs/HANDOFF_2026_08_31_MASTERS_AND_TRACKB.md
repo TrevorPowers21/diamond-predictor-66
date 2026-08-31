@@ -1,3 +1,8 @@
+# ⚠️ SUPERSEDED AS THE ENTRY POINT — START AT `docs/HANDOFF_2026_08_31_EOD.md`
+That file carries the current prod state (through F44), what's left in dependency order, and the seven rules
+this push established. **This document remains valid for the Track B architecture write-up and the two-workstream
+framing** — keep reading it for those.
+
 # ▶️ HANDOFF — RSTR IQ, end of 2026-08-30. **START HERE.**
 Supersedes `HANDOFF_2026_08_30_PROD_PUSH.md` as the entry point. That file is still valid for Phase-C detail.
 
