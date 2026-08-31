@@ -3107,3 +3107,52 @@ position = NULL (alumni)"*). **Nothing recoverable was lost.**
 ## WHY THIS HAD TO PRECEDE THE PRECOMPUTES
 `is_twp` drives BOTH-SIDE row generation. Running E36/E37/E38 first would have produced projections for 137 TWPs
 instead of 253 — **116 two-way players silently missing their second side**, with no error anywhere.
+
+---
+# ✅ E36 RETURNER PITCHERS — APPLIED TO PROD 2026-08-31 (+ the propagate re-run)
+## RESULT
+`6440 computed · 8050 blocked (of 15,646 pitchers) · 1,172 JUCO computed · 1,156 JUCO nulled (sub-20 IP)` →
+**7,596 rows upserted.** Blocked reason is uniformly `no_pm_row` (no `"Pitching Master"` row) — expected for
+alumni/non-2026 players.
+## GATES
+```
+returner pitcher rows with p_war   6,632  (market_value 6,466 · p_era 6,632 · pitcher_depth_role 5,459)
+p_war distribution                 avg 0.607 · −1.75 … 3.93
+propagate scouting scores          91,393 rows carry pitcher_whiff_score
+market values                      avg $13,482 · max $382,705
+```
+
+## 🛑 MY ERROR — I CALLED IT A DRY RUN AND IT WROTE. **THE `:prod` npm ALIASES APPLY BY DEFAULT.**
+```
+"precompute-returner-pitchers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-returner-pitchers.ts --prod"
+```
+**There is NO `--dry-run` in the alias.** The script DOES support it (`:104` `process.argv.includes("--dry-run")`) —
+it just has to be passed through:
+```
+npm run precompute-returner-pitchers:prod -- --dry-run      ← the `--` is REQUIRED
+```
+I announced "dry-run first", ran the bare alias, and it upserted **7,596 rows to prod**. The write was the authorized
+next step so nothing unintended landed, but **the description was wrong and I did not verify the mode before running.**
+★ **RULE: for every `npm run …:prod` alias, `grep` it in `package.json` FIRST and confirm whether a dry-run flag is
+present. Assume these aliases WRITE.** This applies to E37 (`precompute-returner-hitters:prod`) and every other
+`:prod` alias in the remaining sequence.
+
+## 🐛 THE PROPAGATE TIMED OUT — AND THE FIX IS THE ONE THAT MATTERS FOR EVERY LONG STATEMENT
+`✗ propagate failed: canceling statement due to statement timeout`
+`propagate_pitcher_scores_to_predictions` is an `UPDATE … FROM players, "Pitching Master"` with **NO season filter on
+`player_predictions`**, so it rewrites **~105k rows** across every season/model. Prod's `statement_timeout` is **2min**.
+✅ **RE-RAN SUCCESSFULLY: `105,093 rows in 11.3s`.**
+★★ **`SET statement_timeout = '15min'` AS AN EXPLICIT STATEMENT WORKS. The node-postgres CLIENT CONSTRUCTOR OPTION
+DOES NOT.** Passing `new pg.Client({ statement_timeout: 900000 })` left `show statement_timeout` reporting `2min`.
+```ts
+const c = new pg.Client({ connectionString: PGURI, keepAlive: true });
+await c.connect();
+await c.query(`set statement_timeout = '15min'`);   // FINITE — never 0
+```
+⛔ **NEVER `statement_timeout = 0`** — a previous session did that and prod hung 39 minutes with no failure signal.
+ℹ The step is IDEMPOTENT (it only copies scouting scores from the Masters), so re-running after a timeout is safe.
+
+## 🧠 COLUMN NAMES — I GUESSED AGAIN (3rd time today)
+`model_version` does not exist; the columns are **`model_type`** and **`variant`**. Earlier: `ra9_r`/`AVG` on
+`team_season_stats`. **Read `information_schema.columns` — do NOT infer column names from a producing script or a
+function body.**
