@@ -922,6 +922,156 @@ than bolted on, interacts with the JUCO floors, and wants E36/E37/E38 re-run tog
 ✅ **For any change under `scripts/`, the REAL check is executing it with `--dry-run`.** Same class as the documented
 "`tsc --noEmit` at the root is a NO-OP" trap.
 
+---
+# ✅ C1 wRC+ VERIFICATION — CLOSED, BOTH SIDES (2026-08-31)
+Trevor: *"did you make the update on the WRC+ equation to reflect both projecting and the previous season? That was
+part of this feature branch."* **Verified end-to-end. Nothing is missing. Two long-standing ⚠ items are now closed.**
+
+## ① THE PROJECTING SIDE — C1 IS LIVE ON PROD, IDENTICAL TO STAGING
+All 11 `model_config` keys hold the C1 values, **prod == staging on every one**:
+```
+r_w_obp 0.691 · r_w_slg 0.235 · r_w_avg 0 · r_w_iso 0 · r_w_intercept 0.011
+t_w_obp 0.691 · t_w_slg 0.235 · t_w_avg 0 · t_w_iso 0 · t_w_intercept 0.011 · r_ncaa_avg_wrc 0.3782
+```
+✅ **THE `PROD_MIGRATIONS_TODO:700` LANDMINE IS RESOLVED IN PRACTICE.** `wrc_c1_model_config.sql` would have set
+`owar_replacement_runs_per_600 = 26.2`; **prod and staging both hold 21.22** (the correct, later value). The stale
+constant never landed. ⛔ **Do NOT run that SQL now — it would REGRESS the replacement level.**
+
+## ② THE EDGE FUNCTIONS — ALL FOUR LOCAL COPIES ARE C1 (they cannot import `src/`)
+`src/lib/wrc.ts` warns that Deno edge fns keep LOCAL copies, grep-linked by `// canonical: src/lib/wrc.ts`.
+Every one checked:
+| edge function | line | state |
+|---|---|---|
+| **`process-precompute-jobs`** ← **what G46 deploys** | `:454-456` | reads `r_w_intercept`/`r_w_obp`/`r_w_slg` from config with **C1 defaults** ✅ |
+| `google-sheets-sync` | `:860` | `{0.011, 0.691, 0.235, 0, 0}` ✅ |
+| `import-power-ratings-csv` | `:76` | `0.011 + 0.691·OBP + 0.235·SLG` ✅ |
+| `recalculate-prediction` | `:19` | C1 ✅ — and ⛔ **NOT deployed, by design** |
+### ✅ THE `⚠ VERIFY` LEFT IN `wrc_c1_model_config.sql` IS NOW ANSWERED
+That SQL flagged: *"the transfer denom the engine actually reads … DB has `t_wrc_plus_ncaa_avg = 1` (odd) and code
+reads `t_wrc_ncaa_avg` (absent → code default 0.3782 applies). Confirm before trusting the transfer wRC+."*
+**MEASURED:** `t_wrc_ncaa_avg` is **ABSENT on BOTH envs** ⇒ `process-precompute-jobs:431` falls through to its C1
+default **0.3782 — CORRECT**. `t_wrc_plus_ncaa_avg = 1` is a key **the edge fn never reads** — inert, not a denominator.
+**⇒ G46 IS SAFE TO DEPLOY on this axis.**
+
+## ③ THE PREVIOUS-SEASON SIDE — THERE IS NO STORED PER-PLAYER wRC+ TO RECOMPUTE
+Every `%wrc%` column on prod, enumerated from `information_schema`:
+| table | column | nature |
+|---|---|---|
+| `player_predictions` | `p_wrc_plus`, `p_wrc` | **PROJECTION** (2027), per player |
+| `Conference Stats` | `WRC_plus` | conference aggregate |
+| `team_season_stats` | `wrc_plus_reg`, `wrc_plus_total`, `conf_wrc_plus` | team aggregate |
+| `ncaa_averages` | `wrc`, `wrc_sd` | population constants |
+★ **Nothing on `"Hitter Master"` or `players`.** The previous-season per-player wRC+ a coach sees is **computed at
+DISPLAY time** from the Master's stored OBP/SLG via `src/lib/wrc.ts` — C1 by construction. **There is no stored
+descriptive wRC+ that could be stale.**
+### ✅ AND THE TWO STORED AGGREGATES REPRODUCE EXACTLY UNDER C1
+```
+Conference WRC_plus vs (0.011 + 0.691·OBP + 0.235·SLG)/0.3782×100, from its OWN stored OBP/SLG:
+   30 D1 conferences · worst delta 0.000        ← EXACT
+   (the 1 "outside 1pt" is Independent, whose SLG is NULL — the documented no-conference-mates case)
+Team wrc_plus_total (F44): 308 teams · avg 98.8 · range 81.8–127.9   ← lands where the runbook predicted
+```
+
+## 🧠 WHAT THIS MEANS FOR THE PROD↔STAGING wRC+ GAP
+The measured **median 4-point wRC+ / 0.133 `o_war`** difference vs staging is **NOT an equation or config problem** —
+the constants are byte-identical across environments. It comes from the projected **OBP/SLG inputs** differing
+(median 0.003 / 0.002), which traces to **C27 recalibrating prod's NCAA means and SDs**. Prod is the fresher side.
+⚠ **Do not "fix" wRC+ toward staging.** See the measured input-difference table.
+### ★ THE STRONGEST SIGNAL IN THE WHOLE COMPARISON
+`d_war` and `bsr_war` are **EXACTLY IDENTICAL across 5,121 D1 players — mean 0, max 0.** The new WAR components are
+destination-invariant and reproduce perfectly; `total_hitter_war` tracks `o_war` because of it. Depth roles agree
+**98.7%**. The projected slash line matches to a thousandth. **The engine reproduces; only the calibration differs.**
+
+## 🅱️ TRACK B
+1. **`src/lib/wrc.ts` is the ONE source — but the 4 edge fns physically CANNOT import it.** Their local copies are
+   grep-linked by `// canonical: src/lib/wrc.ts`. **Any change to `WRC_C1` must update all four in lockstep**, and
+   Track B should assert it (compare the deployed constants against `WRC_C1` on every run).
+2. **A config key that is ABSENT is not automatically a defect** — here absence is CORRECT, because the code default
+   IS the canonical value. Assert the EFFECTIVE value (config ?? code default), never mere presence.
+
+---
+# ✅ F43 COMPLETE (2026-08-31) — **AND THE SHORTCOMINGS IT EXPOSED. READ ALL OF THESE BEFORE BUILDING STAGE 19.**
+`backfill-neutral-snapshot` (F43a) → `heal-stale-snapshots` (F43b). **The last write of the push.**
+```
+F43a  applied bp=1259 tb=182 · 0 error/fail
+F43b  healed 1029/1029 errors=0 · re-dry drift=0
+F43b  healed 23/23 (market pass, after the #21 fix below)
+GATES  F40 orphans 0/0/0/0 · REGISTRY #21 leaks 0/0 · negatives 0 · re-dry drift 0
+       neutral == prediction: board 68/68 · build 40/40 · worst 0.0000
+```
+★ **THIS IS THE STEP THAT MAKES THE WHOLE PUSH VISIBLE.** Coach-facing WAR moved substantially — Landon Hairston
+**2.518 → 4.247 (+69%)**, Daniel Jackson 1.944 → 3.425, Collin Smith 0.208 → 2.032 (SP↔RP transition). **Verified as
+the current model output, matched to four decimals — not drift.** Trevor: *"That is a normal change and one we have to own."*
+
+## 🚨 SHORTCOMING 1 — REGISTRY #21 RECURRED IN A **THIRD** SCRIPT, AND MY OWN PREDICTION MADE IT WORSE
+`heal-stale-snapshots.ts:106` branched on **`s.is_twp` — the snapshot's embedded copy** — to choose the market column:
+```ts
+:67   twp.set(p.id, !!p.is_twp)      // ← the AUTHORITATIVE players map IS loaded
+:75   twp.get(pid)                   // ← and IS used, for the role fallback
+:106  const isTwp = !!s.is_twp;      // ← but the MARKET branch ignored it   ❌
+```
+**LIVE DAMAGE:** the F43b run wrote `market_value = $101,953` onto Gio Colasante's TWP **pitcher** slot (whose snapshot
+`is_twp` was absent) and left `twp_pitcher_market_value` stale at $130,733 — **re-breaking a gate that had read 0 hours
+earlier.**
+🛑 **THE PROCESS FAILURE IS MINE, AND IT IS THE LESSON:** I fixed REGISTRY #21 in the two F42 producers and **stopped
+there instead of grepping every consumer**. I then explicitly observed that Colasante's SP slot had `is_twp` absent and
+recorded it as *"harmless — the producers now read `players.is_twp`."* **That prediction was false for this script, and
+running F43b made it bite.** ⇒ **When a defect class is found, `grep` EVERY site in the same pass. A reasoned
+"harmless" is not a verification.** (Rule already in the docs as "when a shared helper's input convention changes,
+audit EVERY caller" — REGISTRY #10. I had the rule and did not apply it.)
+✅ **FIXED** — `:106` now reads `twp.get(r.pid) === true`.
+
+## 🚨 SHORTCOMING 2 — THE MARKET-COLUMN FIX IS INVISIBLE WITHOUT `--market`
+After fixing `:106`, the routine heal still would NOT repair Colasante: `:161`'s `mktDrift` is gated behind the
+**`--market` flag, OFF by default** ("so the routine heal stays narrow"). A row whose WAR is correct but whose dollars
+sit in the **wrong column** is a market-only drift — **invisible to the default run.**
+⚠ The default pass reported **`drift=0`** while a TWP was actively mis-routed. **A "0 drift" result does not mean the
+snapshots are correct — it means nothing the enabled checks look at is wrong.**
+✅ Resolved by `--market` (23 rows). 🅱️ **TRACK B: the column-placement check must NOT be optional.**
+
+## 🚨 SHORTCOMING 3 — "SAFE BY CONSTRUCTION" WAS FALSE: **TWO CLIENTS, TWO POINTERS**
+The docs claim F43 is *"SAFE BY CONSTRUCTION — `--prod` SELECTS the env file … `--env-file` cannot redirect them."*
+**Only true of the script's OWN client.** A transitive import pulls in the shared one:
+```
+heal-stale-snapshots → pitchingEquations:125 → hooks/useEquationWeights → lib/supabaseQueries:1 → integrations/supabase/client
+                                                                                                   ↑ reads process.env
+```
+`fetchEquationWeights` **actually queries** with it (the pitching weights). So the script has **two Supabase clients
+aimed by two different mechanisms**: its own from the env FILE (`--prod`), the shared one from `process.env`
+(`--env-file`). Run `--env-file=.env.local --prod` and it **writes PROD while reading its equation weights from
+STAGING** — right target, wrong constants, **no error**.
+★ **A NEW SHAPE OF THE ENV-GUARD DEFECT (7th instance): not a MISSING guard, but TWO guards that can DISAGREE.**
+⚠ The benign symptom is the script refusing to start when `process.env` is unset — which is how this was found.
+🅱️ **TRACK B: assert at startup that EVERY client in the process resolves to the SAME project ref, and fail loudly.**
+
+## ⚠ SHORTCOMING 4 — A LONG PROD WRITE KILLED MID-FLIGHT LEAVES A PARTIAL STATE
+F43a's first apply hit a 2-minute shell timeout and was **SIGTERM'd mid-write** (`populated` moved 1,260 → 1,263).
+Recoverable ONLY because the script is idempotent and rebuilds from predictions. **Same lesson as the E38 run, and it
+was repeated in the same session.** 🅱️ **Detach every prod write from the start; never rely on idempotency as the
+safety net.**
+
+## ✅ WHAT F43 PROVED (keep these as the stage-19 contract)
+1. **F43a's contract holds exactly:** `neutral == the gatekept prediction` — board 68/68, build 40/40, **worst 0.0000**.
+   Precedence is *team-precomputed → global regular → any*; 555 of 595 rostered rows resolve to the global returner and
+   40 to the team-precomputed row. **Both are correct — comparing against the wrong one manufactures false drift.**
+2. **F43b's contract holds:** `snapshot = f(neutral, notes)` **preserves coach toggles**. Hairston has three build rows;
+   the untoggled one matches neutral **exactly** (4.2469) while two carry `depthRole: "starter"` and correctly sit
+   lower (2.5178). **A snapshot differing from its neutral is NOT drift when a toggle explains it.**
+3. **Re-dry to `drift=0` is the completion gate** — but see SHORTCOMING 2 for what that gate does not cover.
+
+## 🧠 MY OWN INSTRUMENT ERRORS IN THIS STEP (all mine, none the data — the running tally continues)
+| error | consequence |
+|---|---|
+| Compared board snapshots to the **global returner** line instead of the **team-precomputed** row — **THREE times** | manufactured "56 of 68 disagree" and "16 of 82 agree, worst 3.80". Correct join: **68/68 exact** |
+| `awk -F'[ →]'` parsed `rv+82→113` as a WAR field | fabricated a "4.438 WAR move"; the real max was **1.82** |
+| grepped for `fail` and matched the string **`errors=0`** in the success line | reported "1 fail mention" on a clean run |
+| guessed the column name `"Conference"` (it is `"conference abbreviation"`) | query threw — **4th guessed column name this push**, against a documented rule to read `information_schema` first |
+★ **EVERY ONE WAS THE MEASUREMENT, NEVER THE DATA.** The standing rule — *verify the instrument before reporting an
+alarm* — was violated four more times in a single step. **When a comparison spans two surfaces, state which row you are
+joining to BEFORE reading the result.**
+
+
+
 
 
 
