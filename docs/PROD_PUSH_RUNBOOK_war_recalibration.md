@@ -1878,7 +1878,7 @@ match the full-season values.
    done Track B has no WAR stage.
 3. **Add the Master-sheet CHECK/OVERRIDE layer** — monthly CSV compared against the derived values, overriding only
    where the pitch log is known-weak (**SB, ERA**), and **logging every override with both values**.
-4. ⛔ **`D33b` / `lock_regular_season` IS THE WRONG TOOL AND MUST NOT RUN.** That RPC is `regular_season_pa = pa` where
+4. ⛔ **`D33b` / `lock_regular_season` IS OBSOLETE — NOT DEFERRED (Trevor, 2026-08-30).** `derive_masters_from_pitchlog` writes `pa` and `regular_season_pa` in the SAME run from the SAME source row, so the atomicity rule is met structurally and the lock has no remaining purpose. **Retire it.** Original note: That RPC is `regular_season_pa = pa` where
    NULL — a snapshot that only works if `pa` is *already* the regular-season line. It predates the engine's split, has
    **NO unlock**, and running it now would permanently freeze the pre-postseason number into `regular_season_pa` while
    `pa` is about to be rewritten to full-season. **Write both columns from the engine output instead.**
@@ -2002,3 +2002,49 @@ must have risen (avg **121.8 → ~128.0**). Spot-check a deep playoff team (LSU 
 tier counts did **not** change.
 ⛔ Still **DO NOT** run `lock_regular_season` / D33b — it snapshots `pa → regular_season_pa`, which is only valid while
 `pa` is the regular-season line, and it has **no unlock**.
+
+---
+# ✅ THREE BUILD DECISIONS LOCKED (Trevor, 2026-08-30) — these define how `derive_masters_from_pitchlog.ts` is extended
+## 1. THE ATOMICITY REQUIREMENT IS SATISFIED BY CONSTRUCTION — `lock_regular_season` BECOMES OBSOLETE
+> *"which would just simply be the derive masters from pitch log correct?"* — **YES.**
+Because this ONE producer writes `pa`/`ab`/`IP`/`ERA` **and** `regular_season_pa`/`regular_season_ip` in the **same
+run, from the same source row** (`hitter_accrued.csv` gives `PA` + `reg_PA`; `pitcher_line.csv` gives `full_IP` +
+`reg_IP`), the "one operation, both columns, or neither" rule is met **structurally** — there is no window in which
+`pa` is full-season while `regular_season_pa` is still NULL, which is the state that would silently inflate
+depth-role tiers for playoff teams.
+⛔ **THEREFORE `lock_regular_season` / D33b IS NOT DEFERRED — IT IS OBSOLETE.** It is a pre-engine snapshot mechanism
+(`regular_season_pa = pa` where NULL, **no unlock**) that only works while `pa` is the regular-season line. Once this
+build lands it must never be run. **Retire it alongside `team_drs_store.sql`.**
+
+## 2. `k_pct` / `pull_air` — FILL FOR EVERYONE, FOLLOWING THE SLASH LINE
+> *"follow the slashline and fill it for everyone."*
+**Today:** `k_pct` **4,374** / `pull_air` **4,367** of **5,341** hitters (pitcher `k_pct` 4,772 of 5,375) — the
+shortfall is exactly the `thin(<25 PA)=963` skipped by `MIN_PA`, while `AVG/OBP/SLG/ISO` show **full** coverage only
+because they were last written by the older CSV import.
+🛑 **THE GATE MUST BE SPLIT IN TWO — it currently gates the WHOLE patch at `:274`:**
+```ts
+:274  if ((t.pa ?? 0) < MIN_PA) { hitterThin++; continue; }   // ← PATCH gate: REMOVE / set to 0
+:469  if ((t.pa ?? 0) < MIN_PA) { skipped++; continue; }      // ← NEW-ROW gate: KEEP at 25 PA / 20 BF
+```
+**PATCHING an existing row: no floor** — every player with pitch-log data gets every derived field.
+**CREATING a new row: keep the floor** — otherwise `--create-new` manufactures a Master row for every 1-PA appearance
+(on prod that would be **763 candidates instead of 1**; the background orphans top out at 18 PA).
+⚠ **Once this producer is the SOLE writer, leaving the patch gate at 25 would strand ~963 hitters + ~603 pitchers on
+permanently stale CSV values.** Sample-gated batted-ball fields (`barrel`, `ev90`, `avg_exit_velo`, `la_10_30`, …)
+keep their own `MIN_TRACKED_BIP` floor — that is a DATA-QUALITY floor, not a volume floor, and is correct.
+
+## 3. `--create-new` STAYS IN THE PIPELINE — AND ITS BUG IS NOW REQUIRED WORK
+> *"keep create new in pitch log track b… we are gonna NEED it in Track B because 2027 will have a bunch of new
+> players when Track B runs for the first time in a regular season and will have to do it. It actually makes more
+> sense to have it built in that process to ensure it's done properly."*
+New-row creation is a **first-class Track B stage**, not a manual patch: at the start of each season virtually every
+freshman/transfer appears in the pitch log before any Master sheet arrives, and Track B ingests pitch logs **daily**
+vs master sheets **monthly** — so the pipeline MUST be able to create the row itself.
+🔴 **THEREFORE THE `repRows` BUG IS BLOCKING, NOT OPTIONAL:** `:465` passes `"batting_team_id"` where `idCol` belongs
+(`:486` correctly passes `"pitcher_id"`), so it queries `pitch_log WHERE batting_team_id = <a player id>` — matches
+nothing, **exceeds the statement timeout** over 2,576,146 rows, and `:451` **discards the `error`** ⇒ every hitter
+silently skipped ⇒ **no hitter Master row can EVER be created.** Left unfixed, Track B's first 2027 run creates **zero
+hitters** and reports `0 new rows` with **exit 0**.
+**FIX:** `:465` → `"batter_id"`, **and** `:451` → `const { data, error } = …` with failures counted + fatal.
+**GATE:** after the fix, a prod dry-run must report **exactly 1** new hitter (Kozeal was already inserted manually, so
+re-verify against the current membership query) and the MEMBERSHIP query must come back EMPTY.
