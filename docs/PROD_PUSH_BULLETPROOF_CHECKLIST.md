@@ -3100,3 +3100,38 @@ market values. `max` is unchanged in both, so the top of the distribution is sta
   constructor option does NOT take). FINITE — never `0`.
 - Write long-running output **straight to a file**, never through a `grep` pipe — grep buffers and the log stays
   0 bytes, hiding all progress (cost one blind 5-minute wait).
+
+---
+# ✅ STAGING VALIDATION OF THE DEPTH-ROLE FIX (2026-08-31) — the divergence WAS the rule, not a data defect
+**METHOD:** apply the SAME fixed code to STAGING, so the only remaining difference between environments is DATA.
+If the tiers converge, the earlier prod↔staging gap was the rule change; if they stay apart, it is a data problem.
+**This is the cleanest way to separate "we changed the rule" from "prod is broken" — use it whenever a rule changes.**
+
+## PITCHERS — CONVERGED ✅
+| role | PROD | STAGING | Δ |
+|---|---|---|---|
+| high_leverage_reliever | 967 | 963 | +4 |
+| low_impact_reliever | 776 | 757 | +19 |
+| mid_leverage_reliever | 958 | 918 | +40 |
+| specialist_reliever | 1,226 | 1,174 | +52 |
+| swing_starter | 254 | 242 | +12 |
+| weekday_starter | 524 | 488 | +36 |
+| weekend_starter | 336 | 346 | **−10** |
+| workhorse_reliever | 418 | 428 | **−10** |
+Same ordering, proportional deltas. **Prod carries 70 more pitchers with `p_war` (6,632 vs 6,562)**, which accounts
+for most of the spread.
+**BEFORE staging got the fix:** `weekend_starter` 336 vs **417**, `workhorse_reliever` 418 vs **529** — gaps of 81 and
+111. **AFTER:** −10 and −10. **The gap collapsed by ~90% once both ran the same rule.**
+`avg p_war` **0.584 vs 0.598 → 0.584 vs 0.577** · `projected_ip` **30.0 vs 30.4** · `max p_war` **3.93 in BOTH** ✅
+
+## ⚙️ MECHANICAL DIFFERENCE WORTH KNOWING
+**The propagate RPC SUCCEEDS INLINE on staging (110,383 rows) but TIMES OUT on prod** at the 2min default.
+Prod's `player_predictions` is larger and the statement is un-scoped by season. **On prod, always follow the
+precompute with the explicit-`SET` propagate; on staging the bare run is fine.** Do not read the staging success as
+evidence the prod path works.
+
+## 🧠 THE RULE THIS ESTABLISHES
+When a DERIVATION RULE changes, prod↔staging comparison is **meaningless until BOTH run the new rule**. Before that,
+a mismatch tells you nothing — I nearly logged the 306-cornerstone gap as a prod defect when it was the fix working.
+✅ **Sequence: fix → apply to prod → apply the SAME code to staging → THEN compare.** Any residual difference after
+that is genuine data (population size, calibration freshness), and can be attributed rather than guessed at.
