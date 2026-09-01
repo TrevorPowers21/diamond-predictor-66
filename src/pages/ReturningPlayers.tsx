@@ -3522,7 +3522,18 @@ export default function ReturningPlayers() {
                                 // ⚠ The HITTER chips above stay stored-first ON PURPOSE — there the stored
                                 //    score and the pitch-log percentile are the same number, and hitters
                                 //    already agree across all three pages. Do not "fix" them to match.
-                                const live = livePitchLogPitcherScores((r as any).source_player_id);
+                                // 🛑 KEY IS `r.id`, NOT `r.source_player_id`. The PITCHING row type has
+                                //    `id` + `player_id` and NO `source_player_id` field — pitcher rows
+                                //    carry **id = source_player_id** (a numeric TruMedia id, not a UUID;
+                                //    see the DownloadReportBar note below, which resolves them with a
+                                //    uuid regex for exactly this reason). Passing `.source_player_id`
+                                //    here yields `undefined` → `live` is always null → EVERY chip blank.
+                                //    That defect was invisible while the stored score was preferred,
+                                //    because the stored value always won and `live` was never reached.
+                                //    ⛔ Do not "restore" `.source_player_id` here. The hitter chips above
+                                //       DO use `p.source_player_id` — that row type has the field; this
+                                //       one does not. The two row shapes are genuinely different.
+                                const live = livePitchLogPitcherScores((r as any).source_player_id ?? r.id);
                                 const stf = live?.stuff ?? null;
                                 const whf = live?.whiff ?? null;
                                 const bb = live?.bb ?? null;
