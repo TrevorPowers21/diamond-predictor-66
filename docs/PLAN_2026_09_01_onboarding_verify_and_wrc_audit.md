@@ -1,5 +1,26 @@
 # PLAN — 2026-09-01 · Onboarding verification + wRC+ audit
 
+## ✅ STATUS 2026-09-01 (end of session) — CONFIG CONSOLIDATION STEPS 1–3 **DONE**. RESUME AT STEP 4.
+
+**The config-source problem described below is FIXED IN CODE.** `model_config` (`model_type='admin_ui'`,
+`season=2026`) is now the **single source of truth**. Do not redo steps 1–3.
+
+| step | done | evidence |
+|---|---|---|
+| 1 | `"Equation Weights"` → `"Equation Weights_LEGACY_2025"` on **BOTH** databases | 361 rows intact · no dependent views/functions · **5,122 stored D1 returner hitters UNCHANGED (mean wRC+ 98.82)** — proof nothing live-computes |
+| 2 | Legacy reads retired | `predictionEngine` no longer reads the 2025 table (**that was Gate B**); dead `model_config` returner/transfer fallback removed; `pitchingEquations` repointed to `model_config` 2026. ⚠ per-team override block **KEPT** — it is a feature, not legacy |
+| 3 | Key convention + readers wired | `p_<stat>_pr_center` / `h_<stat>_pr_center` (matches the 54 existing `p_*` keys); **12 keys added to the `fields` mapping** — this is what made the calibration stop being inert |
+
+🛑 **CODE IS FIXED. DATA IS NOT.** `model_config` has **not** been written on either database, the edge
+function still carries its own constants and its own hardcoded `100`, and **no precompute has re-run** —
+so every stored `p_era` / `p_war` / `p_wrc_plus` / `market_value` still carries BOTH biases and **no
+displayed number has changed.**
+
+▶️ **RESUME AT STEP 4** — apply calibration (staging → prod) → mirror the edge fn → re-run precomputes →
+verify **ACROSS THE RANGE** (p05/p10/median/p90; a mean-only check is blind to this class of bug).
+Full detail + paste-ready resume text: `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md`.
+
+
 ## 🛑 PROD IS BLOCKED
 
 Trevor, 2026-08-31: *"we wont be able to push this into prod until we make sure adding the new team

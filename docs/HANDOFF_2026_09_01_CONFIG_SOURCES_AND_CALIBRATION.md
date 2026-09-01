@@ -8,21 +8,31 @@ Companions: `docs/PLAN_2026_09_01_onboarding_verify_and_wrc_audit.md` (gates) ·
 
 ## 🚨 THE ONE THING TO UNDERSTAND
 
-**Three config systems are live at once, and the hitter path reads a different one on prod than on
-staging.** Everything else in this file follows from that.
+**Three config systems were live at once, and the hitter path read a different one on prod than on
+staging.** That is now FIXED in code (steps 1–3) — but every stored number still carries the old bias
+until the precomputes re-run (step 6).
 
-| path | reads | PROD | STAGING |
+### AS IT IS NOW (after steps 1–3)
+| path | reads | state |
+|---|---|---|
+| Pitching — `readPitchingWeights` | **`model_config` admin_ui @ 2026** | ✅ repointed 2026-09-01 |
+| Hitting — `predictionEngine.loadEngineConfig` | **code defaults + per-team overrides only** | ✅ legacy read removed |
+| Pitcher power ratings — `loadPitchingPowerEq` | `model_config` admin_ui @ 2026, `p_` keys | ✅ unchanged |
+| Batch precomputes + edge fn | `model_config` admin_ui @ CURRENT_SEASON | ✅ unchanged |
+⇒ **`model_config` (admin_ui, season 2026) is now the single source of truth.**
+
+### WHAT IT WAS (why anything was wrong at all) — keep for context
+| path | read | PROD | STAGING |
 |---|---|---|---|
-| Pitching — `readPitchingWeights` (`pitchingEquations.ts:147`) | `"Equation Weights"` @ **2025** | 0 of 40 mapped keys present → **code defaults** | table EMPTY → **code defaults** |
-| Hitting — `predictionEngine.ts:261` | `"Equation Weights"` @ **2025** | **333 keys — LIVE, overrides code** | table EMPTY → **code defaults** |
-| Pitcher power ratings — `loadPitchingPowerEq` (`predictionEngine.ts:694`) | `model_config` admin_ui @ **2026**, keys starting `p_` only | ✅ | ✅ |
-| Batch precomputes + edge fn | `model_config` admin_ui @ **CURRENT_SEASON** | ✅ | ✅ |
+| Pitching | `"Equation Weights"` @ 2025 | 0 of 40 mapped keys → code defaults | table EMPTY → code defaults |
+| Hitting | `"Equation Weights"` @ 2025 | **333 keys — LIVE, overrode the code** | table EMPTY → code defaults |
 
-⛔ `predictionEngine`'s "fall back to `model_config`" branch is **DEAD CODE** — it filters
-`model_type IN ('returner','transfer')`, but `model_config` contains **only `admin_ui`** rows in both
-databases. It has never returned a value.
+⛔ `predictionEngine`'s "fall back to `model_config`" branch was **DEAD CODE** — it filtered
+`model_type IN ('returner','transfer')` while `model_config` holds **only `admin_ui`** rows, so it never
+returned a value. Removed in step 2.
 
----
+★ **THE LESSON**: same code, two databases, different equations — because one had rows and the other did
+not, and the override was guarded by `if (eqWeights.size > 0)`. **Verify config on BOTH databases.**
 
 ## ✅ GATE B IS SOLVED — it was never a dev-scale or stale-copy problem
 
@@ -93,42 +103,70 @@ this script) and its centers sit at 100.31–103.79. Centers are stored for both
 | Top 5 un-blanked (reverted my `team_id` ghost filter) | staging `team_id` NULL on 15,560/15,561 |
 | 146 stale D1 projections deleted (prod + staging), Wiggins protected | both DBs now 0 stale rows |
 
-### ⬜ NOT DONE — code is fixed, DATA IS NOT
-1. **`model_config` never written** on either DB — the calibration producer has only been dry-run.
-2. **Nothing reads `pr_center` / `pr_sd` from any table.** The producer emits `era_plus_pr_center`;
-   `readPitchingWeights`'s 40-key mapping has no such entry, and `loadPitchingPowerEq` only takes keys
-   starting `p_`. **The calibration work is INERT until a reader is wired.**
-3. **Edge function** keeps its own constant copies AND its own hardcoded `100` — onboarding still
+### ✅ STEPS 1–3 COMPLETE (config consolidation)
+| step | what | state |
+|---|---|---|
+| **1** | `"Equation Weights"` → `"Equation Weights_LEGACY_2025"` | ✅ **BOTH databases.** Verified 4 ways: renamed · 361 rows intact · no dependent views/functions · **5,122 stored D1 returner hitters UNCHANGED, mean wRC+ 98.82** — which is the proof that nothing live-computes. |
+| **2** | Retire the legacy source | ✅ `predictionEngine` no longer reads the 2025 table (that was Gate B). Dead `model_config` returner/transfer fallback removed — it filtered a `model_type` that does not exist, so it always returned nothing, and it had no season filter. `pitchingEquations` repointed to `model_config` admin_ui 2026. ⚠ The per-team override block was **KEPT** — it is the carrier for [[project_per_program_equation_overrides]], not legacy. |
+| **3** | Key convention + wire the readers | ✅ `p_<stat>_pr_center` / `h_<stat>_pr_center` (matches the 54 existing `p_*` keys). **12 keys added to the `fields` mapping** in `pitchingEquations.ts`. This is what made the calibration stop being inert. |
+
+### ⬜ STILL NOT DONE — CODE IS FIXED, **DATA IS NOT**
+1. **`model_config` never written** on either DB. Producer dry-runs clean at **41 keys**.
+2. **Edge function** keeps its own constant copies AND its own hardcoded `100` — onboarding still
    projects with the old bias.
-4. **Precomputes not re-run** — every stored `p_era`/`p_war`/`p_wrc_plus`/`market_value` on prod still
-   carries both biases.
+3. **Precomputes not re-run.** Every stored `p_era` / `p_war` / `p_wrc_plus` / `market_value` on BOTH
+   databases still carries BOTH biases. **No displayed number has changed yet.**
+4. **Stage 5.5 autofill NOT BUILT** — it is a manual script; a Masters refresh silently invalidates
+   every constant and nothing warns you.
 
----
+## ▶️ RESUME HERE — STEP 4. (Steps 1–3 are done; do not redo them.)
 
-## ▶️ NEXT STEPS, IN ORDER (all approved by Trevor 2026-09-01)
+**4. Apply the calibration — STAGING FIRST.**
+```
+npx tsx --env-file=.env.local              scripts/compute-projection-calibration.ts          # dry run
+npx tsx --env-file=.env.local              scripts/compute-projection-calibration.ts --apply
+npx tsx --env-file=.env.production.local   scripts/compute-projection-calibration.ts --apply  # after staging checks
+```
+Expect **41 keys** and `⚠ far from 100` on exactly 5 pitching centres (era/fip/whip/bb9/overall).
+⚠ This REPLACES the 19 all-division keys with D1-only values. It moves **no stored projection** on its
+own — projections change at step 6.
+**Gate:** `era_plus_ncaa_avg` reads ~**5.2635** (was 5.483215) and `p_bb9_pr_center` ~**123.16** exists.
 
-**1. Mark legacy clearly.** Rename `"Equation Weights"` → `"Equation Weights_LEGACY_2025"`.
-   ⚠ Rename, do **not** delete — a rename makes a missed reader crash LOUDLY instead of silently
-   falling back to code defaults, which is the exact failure mode chased all day.
-   Effect: prod's hitter wRC+ reverts to the canonical formula. Staging unaffected (already empty).
+**5. Mirror into the edge function** (`supabase/functions/process-precompute-jobs/index.ts`) — its own
+constant copies AND its own hardcoded `100`. Until then, onboarding a team writes old-bias projections
+into a brand-new program. ⚠ It reads `model_config` already, so prefer DELETING its local constants
+over updating them.
 
-**2. Delete the override block** `predictionEngine.ts:379-405` and the dead `model_config`
-   returner/transfer fallback, so nothing can silently re-override the defaults.
+**6. Re-run the precomputes, then verify ACROSS THE RANGE.**
+⚠ **THIS is where numbers move**: ERA up ~0.35 (constant offset, spread preserved), hitter wRC+
+redistributing (median −1.5, 62% down / 38% up). Verify p05 / p10 / median / p90 — **a mean-only check
+is blind to this class of bug**, and to the one it replaces.
 
-**3. Wire the readers to `model_config` admin_ui @ 2026** (the single source of truth) and add
-   `pr_center` / `pr_sd` to a mapping. Decide the key convention first — `loadPitchingPowerEq` uses a
-   `p_` prefix (`p_era_pr_sd` already exists in model_config) while the producer emits
-   `era_plus_pr_center`. **Pick ONE and make the producer match it.**
+**7. Then** onboarding verification + Georgia Tech (Gate A), which has been blocked on exactly this.
 
-**4. Apply the calibration** — `npx tsx --env-file=<env> scripts/compute-projection-calibration.ts`
-   (dry-run first; expect **41 keys**, and `⚠ far from 100` on the 5 pitching centers). Staging → prod.
+## 📋 PASTE-READY RESUME TEXT (for a fresh session)
 
-**5. Mirror everything into the edge function** (constants + the hardcoded 100).
-
-**6. Re-run precomputes**, then verify the **ACROSS-THE-RANGE** table — p05/p10/median/p90 — not the
-   mean. A constant offset is invisible to a mean check.
-
----
+> Resuming RSTR IQ on `feature/war-recalibration`. Read
+> `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md` first — it is current.
+>
+> Context: two root causes were found and FIXED IN CODE on 2026-09-01. (1) Gate B — prod's returner
+> wRC+ ran a different equation because the legacy `"Equation Weights"` 2025 table overrode the code
+> defaults; proven by the legacy formula reproducing the stored value for 5,122/5,122 D1 returner
+> hitters vs 1,164 for canonical. (2) C1 — ERAs ran ~4% low because the calibration had no division
+> filter (477 JUCO = 27% of the sample) and the z-shift assumed PR+ centres at 100 when the true
+> D1/IP>=40 centres are 109.73–123.16.
+>
+> Config consolidation steps 1–3 are DONE: the legacy table is renamed `_LEGACY_2025` on both
+> databases, the legacy reads are removed, and `model_config` (admin_ui, season 2026) is now the single
+> source of truth with the rating centres wired into the `fields` mapping.
+>
+> **NOTHING HAS BEEN WRITTEN TO EITHER DATABASE'S `model_config`, AND NO PROJECTION HAS BEEN
+> RECOMPUTED.** Every stored `p_era` / `p_war` / `p_wrc_plus` / `market_value` still carries both
+> biases.
+>
+> **Resume at STEP 4** in that handoff: apply the calibration to staging, then prod, then mirror the
+> edge function, then re-run precomputes and verify ACROSS THE RANGE (p05/p10/median/p90 — a mean-only
+> check is blind to this class of bug). Do not redo steps 1–3.
 
 ## ⛔ TRAPS — each of these already cost time today
 

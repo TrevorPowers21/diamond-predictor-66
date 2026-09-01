@@ -4,6 +4,27 @@
 > war-recalibration prod push, from that push's 28 silent-failure findings. Build Track B from THIS.
 > Companion detail: `docs/HANDOFF_RESUME_2026_08_31_SNAPSHOTS.md` (state) · `docs/AUDIT_dependency_order_vs_topic_order_2026_08_30.md` (why order ≠ topic).
 
+## ✅ STATUS 2026-09-01 (end of session) — CONFIG CONSOLIDATION STEPS 1–3 **DONE**. RESUME AT STEP 4.
+
+**The config-source problem described below is FIXED IN CODE.** `model_config` (`model_type='admin_ui'`,
+`season=2026`) is now the **single source of truth**. Do not redo steps 1–3.
+
+| step | done | evidence |
+|---|---|---|
+| 1 | `"Equation Weights"` → `"Equation Weights_LEGACY_2025"` on **BOTH** databases | 361 rows intact · no dependent views/functions · **5,122 stored D1 returner hitters UNCHANGED (mean wRC+ 98.82)** — proof nothing live-computes |
+| 2 | Legacy reads retired | `predictionEngine` no longer reads the 2025 table (**that was Gate B**); dead `model_config` returner/transfer fallback removed; `pitchingEquations` repointed to `model_config` 2026. ⚠ per-team override block **KEPT** — it is a feature, not legacy |
+| 3 | Key convention + readers wired | `p_<stat>_pr_center` / `h_<stat>_pr_center` (matches the 54 existing `p_*` keys); **12 keys added to the `fields` mapping** — this is what made the calibration stop being inert |
+
+🛑 **CODE IS FIXED. DATA IS NOT.** `model_config` has **not** been written on either database, the edge
+function still carries its own constants and its own hardcoded `100`, and **no precompute has re-run** —
+so every stored `p_era` / `p_war` / `p_wrc_plus` / `market_value` still carries BOTH biases and **no
+displayed number has changed.**
+
+▶️ **RESUME AT STEP 4** — apply calibration (staging → prod) → mirror the edge fn → re-run precomputes →
+verify **ACROSS THE RANGE** (p05/p10/median/p90; a mean-only check is blind to this class of bug).
+Full detail + paste-ready resume text: `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md`.
+
+
 ## 0. WHAT TRACK B IS
 **ONE edge function, running ONCE PER DAY, that performs the entire ingest→store chain.** Every stage below is a
 hand-run script today. The prod push was its dress rehearsal: **every defect that push found is a Track B requirement**,
@@ -448,7 +469,7 @@ exact mistake the prod runbook made; see `docs/AUDIT_dependency_order_vs_topic_o
 | 3b | **Season-stats dimension aggregation** (needs 3 done + Hitter Master top-quartile for `vs_top_hitters`) | per-dimension slash line + rates + by-pitch-type across splits: `all, vs_lhp/rhp, vs_92plus, vs_stuff_100/105plus, vs_fastball/breaking/offspeed, vs_top_hitters` (48 aggs / 10 dims) | `pitch_log_hitter_totals`, `pitch_log_pitcher_totals`, `*_by_pitch_type` (keyed `dimension_key`) | **Season Stats display** (`/stats` → `PitchLogSection`). ⚠ still an OFFLINE hand-run script (`scripts/aggregate_pitch_log_dimensions.ts`, now with `--prod`/`--direct`/`--only=`) → Track B must absorb it; `conf_only`/intra-conf split not built. 🛑 on PROD run it with `--direct`. |
 | 4 | Power ratings (Masters) | hitter ba/obp/iso ratings (+pull_air) → desc WAR; pitcher pRV+/era⁺/… → desc pWAR | `Hitter Master` + `Pitching Master` (ratings + `desc_*` / `total_desc_war` cols) | Player/Pitcher Profile, Rankings |
 | 5 | Conference baselines | Conf Stuff+ (depth), wRC+, park factors, HTP | `Conference Stats` | Team Builder context |
-| 5.5 | **Projection calibration + rating centers** — ✅ **BUILT** (2026-08-25, extended 2026-09-01). `scripts/compute-projection-calibration.ts` | (a) per-stat mean + TWO-SIDED SD (`_ncaa_sd` good / `_ncaa_sd_bad`) on the qualified pop, (b) **`<key>_pr_center` + `<key>_pr_sd` for all 11 ratings** — 6 pitching stats, `pitch_overall`, `t_ba`/`t_obp`/`t_iso`, `hit_overall`. 🛑 **D1 ONLY** (`.eq("division","D1")`) — see the MUST READ below. **41 keys** (was 19). Qualifier: pitching `IP >= 40`, hitting `pa >= 100`, Season = CURRENT_SEASON. | `model_config` (`model_type='admin_ui'`, `season=CURRENT_SEASON`) | **feeds stage 6** — the projection reads BOTH the two-sided SDs AND the centers. Producer is DRY-RUN by default; `--apply` writes. |
+| 5.5 | **Projection calibration + rating centers** — ✅ **BUILT + WIRED** (2026-08-25 · extended and readers connected 2026-09-01; ⬜ **NOT YET APPLIED to either DB**). `scripts/compute-projection-calibration.ts` | (a) per-stat mean + TWO-SIDED SD (`_ncaa_sd` good / `_ncaa_sd_bad`) on the qualified pop, (b) **`<key>_pr_center` + `<key>_pr_sd` for all 11 ratings** — 6 pitching stats, `pitch_overall`, `t_ba`/`t_obp`/`t_iso`, `hit_overall`. 🛑 **D1 ONLY** (`.eq("division","D1")`) — see the MUST READ below. **41 keys** (was 19). Qualifier: pitching `IP >= 40`, hitting `pa >= 100`, Season = CURRENT_SEASON. | `model_config` (`model_type='admin_ui'`, `season=CURRENT_SEASON`) — keys `p_<stat>_pr_center` / `h_<stat>_pr_center` (see the KEY NAMING block) | **feeds stage 6** — the projection reads BOTH the two-sided SDs AND the centers, via the `fields` mapping in `pitchingEquations.ts` (12 keys wired 2026-09-01; without that mapping the keys are INERT). Producer is DRY-RUN by default; `--apply` writes. |
 | 6 | Projections | returner + transfer engine (blend → competition translation via Stuff+/HTP/park → class/dev → depth-role → WAR → market); **reads stage-5.5 two-sided SDs (directional) AND `<stat>_pr_center`** — the z-shift is `((PR+ − pr_center) / pr_sd) × ncaa_sd`, **NOT `− 100`** (see the 5.5 MUST READ). 🛑 **ORDER: this stage READS `team_season_stats.faced_stuff_plus`/`.faced_htp`** (`precompute-transfer-projections.ts:225`, `precompute-pitchers.ts:279`) for Independent from-programs, and **swallows the error / coerces to `[]`** — so `refresh_team_season_stats` MUST run BEFORE it or Independents silently lose the faced-competition adjustment. | `player_predictions` (o_war, p_war, total_hitter_war, market_value, rates) | Rankings, Profiles, Team Builder, Transfer Portal |
 | 7 | NIL + need | score = total_WAR × PTM → allocateNil curve + need premium | (computed live; GM `gm_budget.nil_allocation_mode`) | Team Builder, GM, Target Board |
 
