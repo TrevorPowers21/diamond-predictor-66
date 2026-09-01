@@ -134,6 +134,7 @@ export type PitchingEquationWeights = {
 };
 
 import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
+import { supabase } from "@/integrations/supabase/client";
 
 export const PITCHING_EQUATIONS_STORAGE_KEY = "admin_pitching_equations_v1";
 
@@ -141,11 +142,47 @@ export const PITCHING_EQUATIONS_STORAGE_KEY = "admin_pitching_equations_v1";
 let _supabaseWeightsCache: Partial<PitchingEquationWeights> | null = null;
 let _supabaseCacheLoading = false;
 
+/**
+ * 🛑 SOURCE CHANGED 2026-09-01 — was `loadEquationWeightsMap(2025)`, i.e. the `"Equation Weights"`
+ *    table at Season 2025. That table is now `"Equation Weights_LEGACY_2025"` on both databases.
+ *
+ * ★ This overlay was ALREADY A NO-OP: of the 40 keys the mapping below asks for, **zero** existed in
+ *   that table on prod, and staging's copy was empty. So the pitching path has always run on
+ *   `DEFAULT_PITCHING_WEIGHTS`. (The scary-looking `pwar_runs_per_win = 10` in the legacy table — vs
+ *   the correct 13.1 — was never read, because it is not in the mapping.)
+ *
+ * ⇒ Now reads `model_config` (model_type='admin_ui', season=2026), the single source of truth, so the
+ *   app and the batch/edge-function paths finally agree on where constants come from.
+ * ⚠ A key only takes effect if it is ALSO listed in the `fields` mapping below. Writing a key to
+ *   model_config is not enough — that is why `<stat>_pr_center` / `<stat>_pr_sd` were inert.
+ */
+const PITCHING_CONFIG_SEASON = 2026;
+
 function _loadSupabasePitchingWeights() {
   if (_supabaseCacheLoading || _supabaseWeightsCache) return;
   _supabaseCacheLoading = true;
-  loadEquationWeightsMap(2025)
-    .then((map) => {
+  // Wrapped in an async IIFE: the Supabase builder is a PromiseLike, so `.then().then().catch()`
+  // does not type-check against it. This keeps the same fire-and-forget shape with real Promise
+  // semantics, and the catch still degrades to code defaults rather than throwing on module import.
+  void (async () => {
+    let map = new Map<string, number>();
+    try {
+      const { data } = await supabase
+        .from("model_config")
+        .select("config_key, config_value")
+        .eq("model_type", "admin_ui")
+        .eq("season", PITCHING_CONFIG_SEASON);
+      for (const row of (data || []) as Array<{ config_key: string | null; config_value: any }>) {
+        const n = Number(row.config_value);
+        if (row.config_key && Number.isFinite(n)) {
+          map.set(row.config_key, n);
+          map.set(String(row.config_key).toLowerCase(), n);
+        }
+      }
+    } catch {
+      map = new Map();
+    }
+    try {
       const partial: Partial<PitchingEquationWeights> = {};
       const get = (key: string) => {
         const v = map.get(key) ?? map.get(key.toLowerCase());
@@ -199,9 +236,12 @@ function _loadSupabasePitchingWeights() {
         if (v !== undefined) (partial as any)[field] = v;
       }
       _supabaseWeightsCache = partial;
-    })
-    .catch(() => { _supabaseWeightsCache = {}; })
-    .finally(() => { _supabaseCacheLoading = false; });
+    } catch {
+      _supabaseWeightsCache = {};
+    } finally {
+      _supabaseCacheLoading = false;
+    }
+  })();
 }
 
 // Kick off the cache load immediately on module import

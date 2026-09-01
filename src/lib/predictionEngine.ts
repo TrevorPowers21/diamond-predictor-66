@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
@@ -255,13 +254,26 @@ function normalizeClassTransition(raw?: string | null): string {
 }
 
 export async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineConfig> {
-  // Load from "Equation Weights" table (primary), fall back to "model_config" (legacy)
-  let eqWeights: Map<string, number>;
-  try {
-    eqWeights = await loadEquationWeightsMap(2025);
-  } catch {
-    eqWeights = new Map();
-  }
+  // 🛑 LEGACY SOURCE REMOVED 2026-09-01. This used to read the `"Equation Weights"` table at
+  //    Season 2025 and treat it as the PRIMARY source, overriding the code defaults below.
+  //
+  // ★ THAT WAS GATE B. Prod's returner wRC+ ran a DIFFERENT EQUATION than the code because of it:
+  //      code    intercept .011 · obp .691 · slg .235 · avg 0   · iso 0    ÷ .3782
+  //      legacy  intercept .011 · obp .450 · slg .300 · avg .15 · iso .10  ÷ .364
+  //    Across 5,122 D1 returner hitters the legacy formula reproduced the STORED p_wrc_plus for
+  //    5,122 (100%); the canonical formula for 1,164 (23%). Staging looked correct only because its
+  //    copy of the table was EMPTY, so the `eqWeights.size > 0` guard below skipped the override —
+  //    same code, different equation, purely because one database had rows and the other did not.
+  //    The table is now `"Equation Weights_LEGACY_2025"` on both databases.
+  //
+  // ⛔ Do NOT reintroduce a table read here. `model_config` (model_type='admin_ui', season=2026) is
+  //    the single source of truth. Anything this function needs must come from there or from the
+  //    code defaults.
+  // ⚠ `eqWeights` is KEPT — it is still the carrier for PER-TEAM overrides below
+  //    ([[project_per_program_equation_overrides]]), which are a real feature, currently 0 rows on
+  //    both databases. With no global source it starts empty, so the `size > 0` guard means the
+  //    override block only fires for a team that actually has overrides. That is the intended shape.
+  const eqWeights: Map<string, number> = new Map();
   // Per-team overrides on equation_weights keys win over globals when provided.
   if (customerTeamId) {
     const { data: ovRows } = await (supabase as any)
@@ -274,14 +286,16 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
   }
   const eq = (key: string) => eqWeights.get(key) ?? eqWeights.get(key.toLowerCase());
 
-  const { data, error } = await supabase
-    .from("model_config")
-    .select("model_type, config_key, config_value");
-
-  if (error && eqWeights.size === 0) throw error;
-
-  let returnerRows = ((data || []) as any[]).filter((row) => row.model_type === "returner");
-  let transferRows = ((data || []) as any[]).filter((row) => row.model_type === "transfer");
+  // 🛑 DEAD CODE REMOVED 2026-09-01 — this query was unfiltered by season AND filtered to
+  //    `model_type IN ('returner','transfer')`, but `model_config` contains ONLY `admin_ui` rows
+  //    (prod 2025:140 / 2026:220 · staging 2025:157 / 2026:220). Both arrays were ALWAYS empty, so
+  //    this branch has never contributed a value. It also carried a season bug in waiting: no
+  //    `.eq("season", …)`, so it would have pulled 2025 and 2026 together the moment such rows existed.
+  //    The per-model_type override overlay that followed it is preserved below.
+  const returnerRowsBase: any[] = [];
+  const transferRowsBase: any[] = [];
+  let returnerRows = returnerRowsBase;
+  let transferRows = transferRowsBase;
 
   // Layer model_type-scoped overrides on top of the legacy model_config rows
   if (customerTeamId) {
