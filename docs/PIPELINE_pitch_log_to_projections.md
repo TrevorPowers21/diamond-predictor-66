@@ -565,6 +565,90 @@ reintroduces a constant offset of ~1.7 rating points ≈ **0.09 ERA** — i.e. i
 They are consistent today because both come from `twoSided()`/`CENTERS` over the identical row set.
 ⇒ If weighting is ever changed, change it in **BOTH** places in the same commit, and re-apply together.
 
+### ★★★ SNAPSHOTS ARE COPIES — RECOMPUTING PREDICTIONS DOES NOT UPDATE THEM (2026-09-01) ★★★
+
+🛑 **THE SYMPTOM THAT EXPOSED IT (Trevor, 2026-09-01):** *"player profile is showing properly on
+staging but team builder is not."* That asymmetry IS the diagnosis, not a puzzle:
+
+| surface | reads | after a precompute |
+|---|---|---|
+| **Player Profile / Dashboard / Top 5** | `player_predictions` **directly** | ✅ fresh immediately |
+| **Team Builder / Target Board / GM hub** | a **SNAPSHOT COPY** of the prediction | ❌ frozen at write time |
+
+Snapshots exist so a build renders with zero recompute ([[project_stored_derived_values_architecture]]).
+The cost is that **every precompute silently desynchronises them.** Nothing cascades. Nothing warns.
+
+**MEASURED ON STAGING immediately after the returner + transfer recomputes (2026-09-01):**
+```
+team_build_players.player_snapshot    604 rows   307 fresh   296 STALE   worst gap 3.907 WAR
+team_build_players.neutral_snapshot   586 rows   276 fresh   310 STALE
+target_board.transfer_snapshot         74 rows    12 fresh    62 STALE   worst gap 50.0 wRC+
+```
+A 3.907-WAR gap on a build player and a 50-point wRC+ gap on a board row are not rounding — that is a
+coach looking at a number from a previous model.
+
+### ⇒ THE ORDER IS NOT OPTIONAL. SNAPSHOTS ARE **LAST**.
+Run predictions first, then snapshots. Refreshing snapshots before the precompute finishes just copies
+the old values forward and you do it twice.
+
+```bash
+# ── 1. PREDICTIONS (the source) ───────────────────────────────────────────────
+#    Pitchers BEFORE hitters — both write the shared `market_value` column and the
+#    hitter pass must be the LAST writer (see SILENT-FAILURE REGISTRY #24).
+npm run precompute-returner-pitchers          # :prod for prod
+npm run precompute-returner-hitters           # :prod for prod
+#    Then transfers, PER customer team (14 on prod, 18 on staging):
+npm run precompute-transfers -- --team <uuid> # :prod  → hitter transfer rows
+npm run precompute-pitchers   -- --team <uuid># :prod  → pitcher transfer rows
+
+# ── 2. SNAPSHOTS (the copies) — ONLY after step 1 is complete ─────────────────
+#    2a. build player_snapshot. ⚠ --force IS REQUIRED. Without it the script only fills
+#        rows WHERE player_snapshot IS NULL, and ours are POPULATED-BUT-STALE → a silent no-op.
+npm run backfill-build-snapshots -- --apply --force
+npm run backfill-build-snapshots:prod -- --apply --force
+
+#    2b. target_board.transfer_snapshot (rebuilds every row; no NULL filter)
+npx tsx --env-file=.env.local scripts/backfill-target-transfer-snapshots.ts --apply
+npx tsx --env-file=.env.production.local scripts/backfill-target-transfer-snapshots.ts --prod --apply
+
+#    2c. layer total_hitter_war / d_war / bsr_war onto the snapshots written by 2a/2b.
+#        MUST run AFTER them: 2a and 2b write `o_war`/`owar` ONLY, never the total.
+npx tsx --env-file=.env.local scripts/backfill-snapshot-total-hitter-war.ts --apply
+npx tsx --env-file=.env.production.local scripts/backfill-snapshot-total-hitter-war.ts --prod --apply
+```
+
+⛔ **2c IS IDEMPOTENT IN THE WRONG DIRECTION FOR A REFRESH.** It *"skips snapshots that already have
+`total_hitter_war`"*. That is correct for a first fill and **WRONG after a recompute** — a snapshot
+holding a STALE total is skipped and stays stale. It only works here because 2a/2b **overwrite the
+snapshot object first**, dropping the old total. ⇒ **Never run 2c without 2a/2b immediately before it.**
+
+### ⚠ OPEN GAP — `neutral_snapshot` HAS NO REFRESH PATH
+`scripts/backfill-neutral-snapshots.ts` states: *"IDEMPOTENT: only touches rows WHERE
+`neutral_snapshot` IS NULL."* There is **no `--force`**. So the **310 stale staging rows above cannot
+be refreshed by any existing script.** `neutral_snapshot` is the immutable dev_agg=0 base the toggle
+recompute reads, so a stale one makes every toggle start from an old baseline.
+**NOT FIXED. Needs either a `--force` flag on that script or a targeted rewrite before the next push.**
+
+### VERIFY — VALUE gates, never counts or exit codes
+```sql
+-- must return 0 STALE for each. Compare the SNAPSHOT against the FRESH prediction.
+select count(*) filter (where abs((tbp.player_snapshot->>'total_hitter_war')::numeric
+                                  - pp.total_hitter_war) >= 0.001) as stale
+from team_build_players tbp
+join player_predictions pp on pp.player_id = tbp.player_id and pp.season = 2027
+  and pp.model_type='returner' and pp.variant='regular' and pp.customer_team_id is null
+where tbp.player_snapshot ? 'total_hitter_war' and pp.total_hitter_war is not null;
+```
+**Named-player gate — Naulivou Lauaki Jr. (Oregon, R-FR), the row that exposed Gate B:**
+```
+BEFORE (legacy wRC+ formula)  wRC+ 113 · oWAR 0.966 · totalWAR 0.883 · market $24,260
+AFTER  (canonical)            wRC+ 101 · oWAR 0.436 · totalWAR 0.352 · market  $9,671
+```
+✅ Confirmed identical on staging AND prod after the returner recompute (2026-09-01).
+⚠ **Market moves ~60% on a 12-point wRC+ change** — that is arithmetic, not a bug: oWAR scales off
+`(wRC+ − 100)`, so near the baseline a small wRC+ move is a large relative WAR/market move. Contact-
+heavy hitters fall (the legacy formula double-counted AVG); high-OBP hitters rise.
+
 ### ★★★ 2026-09-01 (PM) — CENTRES EVERYWHERE · total_hitter_war · CROSS-IMPLEMENTATION DIFF ★★★
 
 🛑 **THE METHOD THAT FOUND THE REAL BUG — RUN TWO IMPLEMENTATIONS AND DIFF THEM.**

@@ -1,6 +1,34 @@
 # ▶️ HANDOFF — 2026-09-01. Config sources, calibration, snapshot read path. **START HERE.**
 
 
+
+## 🛑 SNAPSHOTS ARE COPIES — A PRECOMPUTE DOES NOT REFRESH THEM (2026-09-01)
+
+**Symptom:** *"player profile is showing properly on staging but team builder is not."* That IS the
+diagnosis. Player Profile / Dashboard / Top 5 read `player_predictions` **directly** (fresh instantly).
+Team Builder / Target Board / GM hub read a **SNAPSHOT COPY** frozen at write time. Nothing cascades.
+
+**Measured on staging right after the returner + transfer recomputes:**
+```
+team_build_players.player_snapshot   604 rows · 296 STALE · worst gap 3.907 WAR
+team_build_players.neutral_snapshot  586 rows · 310 STALE
+target_board.transfer_snapshot        74 rows ·  62 STALE · worst gap 50.0 wRC+
+```
+
+**RUN ORDER — predictions first, snapshots LAST:**
+1. `precompute-returner-pitchers` → `precompute-returner-hitters` (pitchers FIRST; shared `market_value`, hitter must be last writer)
+2. per team: `precompute-transfers -- --team <uuid>` + `precompute-pitchers -- --team <uuid>` (14 prod / 18 staging)
+3. `backfill-build-snapshots -- --apply --force` ⚠ **`--force` REQUIRED** — without it the script only fills `player_snapshot IS NULL` rows and ours are populated-but-stale → **silent no-op**
+4. `scripts/backfill-target-transfer-snapshots.ts --apply`
+5. `scripts/backfill-snapshot-total-hitter-war.ts --apply` — MUST be last; steps 3/4 write `o_war` only. ⛔ It *skips snapshots that already have* `total_hitter_war`, so it only works because 3/4 overwrite the object first. **Never run it standalone after a recompute.**
+
+⚠ **OPEN GAP: `neutral_snapshot` has NO refresh path.** `backfill-neutral-snapshots.ts` is `IS NULL` only, no `--force`. The 310 stale rows cannot be refreshed by any existing script, and it is the dev_agg=0 base every toggle reads. **NOT FIXED.**
+
+**Named gate — Naulivou Lauaki Jr. (Oregon, R-FR):** wRC+ **113 → 101**, oWAR 0.966 → 0.436, market **$24,260 → $9,671**. ✅ verified on staging AND prod. Market moves ~60% on a 12-pt wRC+ change because oWAR scales off `(wRC+ − 100)` — arithmetic, not a bug.
+
+Full runbook + SQL verify gates: Track B (`docs/PIPELINE_pitch_log_to_projections.md`).
+
+
 ## ★ 2026-09-01 (PM) — CENTRES · total_hitter_war · CROSS-IMPL DIFF (commit `ffc161d`)
 
 🛑 **New required gate: diff the deployed edge function against the local precompute over the same
