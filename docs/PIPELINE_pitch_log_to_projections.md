@@ -565,6 +565,94 @@ reintroduces a constant offset of ~1.7 rating points ≈ **0.09 ERA** — i.e. i
 They are consistent today because both come from `twoSided()`/`CENTERS` over the identical row set.
 ⇒ If weighting is ever changed, change it in **BOTH** places in the same commit, and re-apply together.
 
+### ★★★ SNAPSHOT LAYERS — WHICH ONE EACH SURFACE READS (2026-09-01, found in the UI) ★★★
+
+🛑 **THE BUG TREVOR FOUND BY CLICKING, THAT EVERY AUTOMATED CHECK MISSED.** Hudson Brown showed
+**.396** in Team Builder and **.385** on Player Profile; Josiah Overbeek **.306** vs **.304**.
+Blake Primrose and Brendan Lawson matched — **which is why two spot checks are not a verification.**
+
+**THERE ARE THREE STORED LAYERS AND THEY ARE NOT THE SAME THING:**
+| layer | what it is | who reads it |
+|---|---|---|
+| `neutral_snapshot` | the **dev_agg=0 BASE**, no toggle state | build rows: `shown = neutralPrediction ?? prediction` (`useTeamBuilderSimulation.ts:1361`) |
+| `transfer_snapshot` (target_board) | the **toggle-BAKED** board copy | **board-only targets**: `boardOnlyTarget → storedPrecomputed` (`:1359`) |
+| `player_snapshot` (team_build_players) | the **toggle-BAKED** build copy | the saved value + fallback when neutral is absent |
+
+⇒ **Refreshing the base does NOT fix the surface.** On 2026-09-01 the neutral layer was refreshed and
+the board's `transfer_snapshot` was left alone — so Player Profile (reads `player_predictions`) was
+right while Team Builder (reads the board snapshot) was wrong on **60 of 74 rows**.
+```
+Hudson Brown     transfer_snapshot .3978 · neutral .3856 · Georgia precompute .3856
+Josiah Overbeek                    .3059 ·         .3039 ·                    .3039
+```
+**Every layer must be refreshed, in order, after every precompute.**
+
+### ⛔ TWO TRAPS THAT COST HOURS — BOTH ARE "THE COPY IS NOT WHAT YOU THINK"
+**1. `node-postgres` returns `numeric` as a STRING.** The build PITCHER neutral is a **verbatim** copy
+of the prediction row, so the first `--refresh` wrote every numeric as a JSON string. Team Builder
+then **CRASHED**: `shownMetric.toFixed is not a function` (`PlayerTableRow.tsx:834`). 627 staging /
+653 prod rows. Fixed with driver type parsers:
+```ts
+pg.types.setTypeParser(1700, v => v === null ? null : Number(v));  // numeric
+pg.types.setTypeParser(20,   v => v === null ? null : Number(v));  // int8
+```
+🛑 **"Copy the row verbatim" is only safe when the driver's type mapping matches the consumer's.**
+A verbatim copy through a driver that stringifies numerics is NOT verbatim.
+⇒ **Verify TYPES, not just values.** `jsonb_typeof(snap->'p_war')` must be `number`. A snapshot can
+hold the exactly-correct number and still crash the page.
+
+**2. A column you do not SELECT cannot be written.** Hit AGAIN in
+`backfill-target-transfer-snapshots.ts`: adding `total_hitter_war`/`d_war`/`bsr_war`/depth roles to
+the written object without widening the `SELECT` would have written silent NULLs. Same root cause as
+the original `total_hitter_war` bug. **Widen the select in the same edit, every time.**
+
+### THE FULL REFRESH ORDER — snapshots are LAST, and there are FOUR of them
+```bash
+# 1. PREDICTIONS (source). Pitchers BEFORE hitters — shared market_value, hitter must be last writer.
+npm run precompute-returner-pitchers[:prod]
+npm run precompute-returner-hitters[:prod]
+npm run precompute-transfers[:prod] -- --team <uuid>     # per team: 14 prod / 18 staging
+npm run precompute-pitchers[:prod]  -- --team <uuid>
+
+# 2. NEUTRAL — the base. TOGGLE-SAFE (holds no toggle state).
+npx tsx scripts/backfill-neutral-snapshots.ts [--prod] --refresh --apply          # team_build_players (VERBATIM shape)
+npx tsx --env-file=.env.local scripts/backfill-neutral-snapshot.ts [--prod] --target-board-only --apply  # target_board (NORMALIZED shape)
+
+# 3. THE BAKED COPIES.
+npx tsx --env-file=.env.local scripts/backfill-target-transfer-snapshots.ts [--prod] --apply   # board transfer_snapshot
+npx tsx scripts/refresh-player-snapshots-untoggled.ts [--prod] --apply                          # build player_snapshot, UNTOGGLED ONLY
+
+# 4. VERIFY — every row, every field, both layers, both tables.
+npx tsx scripts/audit-snapshot-consistency.ts [--prod]      # must print "✅ CLEAN"
+```
+⚠ **Step 3 flattens toggles by design.** `backfill-target-transfer-snapshots` rebuilds from
+predictions, so board rows with a saved toggle reset to neutral (27 staging rows).
+**Trevor accepted this for BOARD-ONLY targets** ("as long as players are not actively on the team
+builds they are okay if they have to be reset"). `refresh-player-snapshots-untoggled` **EXCLUDES**
+toggled rows outright — build toggles are never flattened (59 staging / 147 prod preserved).
+
+### FINAL AUDIT — 2026-09-01, every build, every target, every user
+```
+                                           STAGING              PROD
+target_board.transfer_snapshot        169 / 0 mismatch     183 / 0  (2 no-pred)
+target_board.neutral_snapshot         167 / 0              182 / 0
+team_build_players.neutral_snapshot 1,254 / 0            1,277 / 0
+player_snapshot (untoggled)         1,205 / 0            1,165 / 2 (inert, see below)
+string-typed values                     0                    0
+STAGING: ✅ CLEAN
+```
+The 2 prod rows are **Bryant Ball (C)** and **Bryce Calloway (1B)** — position players whose
+`player_snapshot` carries a vestigial `p_war` key while their neutral is a HITTER shape with no
+`p_war`. Inert: nothing reads pWAR for a catcher, and every hitter field matches.
+
+⚠ **AUDIT GOTCHAS — both produced FALSE ALARMS before being fixed:**
+- `market_value` is stored as **`nil_valuation`** on board/transfer snapshots, and `o_war` as
+  **`owar`** on the legacy shape. A naive audit reports 70 phantom mismatches.
+- A **TWP nulls the shared `market_value` by convention** (value lives in `twp_*_market_value`,
+  `src/lib/twpMarketValue.ts`). Aiden Mouton flagged twice until the audit was made TWP-aware.
+- **Checks MUST be side-aware.** A TWP carries BOTH sides on ONE prediction row; `coalesce(o_war,
+  p_war)` compares a hitter number to a pitcher snapshot (this produced the 4 phantom "wrong" rows).
+
 ### ★★★ WHICH PREDICTION ROW A NEUTRAL SNAPSHOT MUST COPY — VERIFIED 2026-09-01 ★★★
 
 **THE RULE (Trevor, 2026-09-01):** *"the neutral snapshot for every returner is using their global

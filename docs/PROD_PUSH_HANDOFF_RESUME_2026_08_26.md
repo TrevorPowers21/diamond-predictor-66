@@ -3,6 +3,38 @@
 
 
 
+
+## 🛑 SNAPSHOT LAYERS — REFRESHING THE BASE DOES NOT FIX THE SURFACE (2026-09-01)
+
+Trevor found this **by clicking**, after every automated check passed: Hudson Brown **.396** in Team
+Builder vs **.385** on Player Profile; Overbeek **.306** vs **.304**. Primrose and Lawson matched —
+**two spot checks are not a verification.**
+
+**THREE stored layers, different readers:** `neutral_snapshot` = dev_agg=0 BASE (build rows read it:
+`shown = neutralPrediction ?? prediction`) · `target_board.transfer_snapshot` = toggle-BAKED, and it
+is what a **board-only target** renders from (`useTeamBuilderSimulation.ts:1359`) ·
+`player_snapshot` = toggle-BAKED build copy. Refreshing neutral alone left **60 of 74** board rows stale.
+
+**ORDER (snapshots LAST, four of them):** precomputes → `backfill-neutral-snapshots --refresh`
+(builds) → `backfill-neutral-snapshot --target-board-only` (board) →
+`backfill-target-transfer-snapshots` → `refresh-player-snapshots-untoggled` →
+**`audit-snapshot-consistency` must print ✅ CLEAN**.
+
+⛔ **Two traps, both "the copy is not what you think":**
+1. **`node-postgres` returns `numeric` as a STRING.** The verbatim pitcher copy wrote strings and
+   **crashed Team Builder** (`shownMetric.toFixed is not a function`, 627 staging / 653 prod rows).
+   Fixed with `pg.types.setTypeParser(1700/20, Number)`. ⇒ **Verify TYPES, not just values.**
+2. **A column you don't SELECT can't be written** — hit again; widen the select in the same edit.
+
+**FINAL AUDIT:** staging **✅ CLEAN** (169/167/1,254/1,205 all 0 mismatch, 0 strings); prod 0 mismatch
+except 2 inert vestigial `p_war` keys on position players. Build toggles preserved (59 staging /
+147 prod); board-only target toggles reset — accepted by Trevor.
+
+⚠ Audit gotchas that caused FALSE alarms: `market_value` is stored as `nil_valuation` and `o_war` as
+`owar`; a TWP nulls the shared `market_value` by design; and checks MUST be side-aware because a TWP
+carries both sides on ONE prediction row. Full detail: Track B.
+
+
 ## ★ NEUTRAL SNAPSHOT SOURCING — VERIFIED 2026-09-01 (returner = global · transfer = precomputed)
 
 **Rule:** predRank is *team-scoped FIRST, global SECOND, never another team's precompute.* A returner
