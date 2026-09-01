@@ -12,6 +12,22 @@ const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.lo
 const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
 const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
 const APPLY = process.argv.includes("--apply");
+/**
+ * --target-board-only : write ONLY `target_board`, skip `team_build_players`.
+ *
+ * 🛑 THE TWO TABLES DO NOT SHARE A SNAPSHOT SHAPE. Verified on staging 2026-09-01:
+ *      target_board          neutral = the NORMALIZED object this file's neutralFor() builds
+ *                                      (13 hitter keys / 15 pitcher keys)   ← this script is CORRECT
+ *      team_build_players    PITCHER neutral = a VERBATIM copy of the prediction row (77 keys:
+ *                                      id, player_id, variant, customer_team_id, model_type,
+ *                                      from_ fields, score fields, ...)                          ← this script is WRONG
+ *   `scripts/backfill-neutral-snapshots.ts` (PLURAL) owns team_build_players and carries an explicit
+ *   "⛔ Do NOT normalize the pitcher shape" warning, because TB's readers expect those extra keys.
+ *   Running this file over team_build_players would STRIP them.
+ * ⇒ Use --target-board-only here; use the PLURAL script (with --refresh) for builds.
+ *   The two scripts are NOT interchangeable and neither supersedes the other.
+ */
+const TARGET_BOARD_ONLY = process.argv.includes("--target-board-only");
 console.log(`### DB: ${ENV}  APPLY=${APPLY} ###`);
 const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 // .order("id") is REQUIRED — range() pagination without a stable sort silently skips/dupes rows across pages.
@@ -63,7 +79,8 @@ const hasSide = (r: any, side: "P" | "H") => side === "P" ? (r.pitcher_role != n
   console.log(`team_build_players: ${bpSet} to set, ${bpMiss} no-neutral (no-AB/local)`);
   console.log(`target_board:       ${tbSet} to set, ${tbMiss} no-neutral`);
   if (!APPLY) { console.log("\nDRY RUN — add --apply."); return; }
-  for (let i = 0; i < bpUp.length; i++) { const { error } = await sb.from("team_build_players").update({ neutral_snapshot: bpUp[i].neutral_snapshot }).eq("id", bpUp[i].id); if (error) console.log("bp err", error.message); if ((i + 1) % 200 === 0) process.stdout.write(`\r  bp ${i + 1}/${bpUp.length}`); }
+  if (TARGET_BOARD_ONLY) console.log("scope: TARGET BOARD ONLY — team_build_players skipped (different shape; use the PLURAL script --refresh)");
+  for (let i = 0; TARGET_BOARD_ONLY ? false : i < bpUp.length; i++) { const { error } = await sb.from("team_build_players").update({ neutral_snapshot: bpUp[i].neutral_snapshot }).eq("id", bpUp[i].id); if (error) console.log("bp err", error.message); if ((i + 1) % 200 === 0) process.stdout.write(`\r  bp ${i + 1}/${bpUp.length}`); }
   for (let i = 0; i < tbUp.length; i++) { const { error } = await sb.from("target_board").update({ neutral_snapshot: tbUp[i].neutral_snapshot }).eq("id", tbUp[i].id); if (error) console.log("tb err", error.message); if ((i + 1) % 200 === 0) process.stdout.write(`\r  tb ${i + 1}/${tbUp.length}`); }
-  console.log(`\n✅ applied bp=${bpUp.length} tb=${tbUp.length}`);
+  console.log(`\n✅ applied bp=${TARGET_BOARD_ONLY ? 0 : bpUp.length} tb=${tbUp.length}`);
 })();

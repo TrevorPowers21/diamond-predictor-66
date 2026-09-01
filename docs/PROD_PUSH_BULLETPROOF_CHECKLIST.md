@@ -1,6 +1,38 @@
 # ✅ BULLETPROOF PUSH-TO-PROD CHECKLIST — **the GATES**
 
 
+
+## ★ NEUTRAL SNAPSHOT SOURCING — VERIFIED 2026-09-01 (returner = global · transfer = precomputed)
+
+**Rule:** predRank is *team-scoped FIRST, global SECOND, never another team's precompute.* A returner
+has no precompute at his own school → global. A transfer's team-scoped row IS the projection INTO
+that school; using global would project him at his CURRENT school.
+
+**Measured on staging after the refill (side-aware):**
+```
+team_build_players  returner 1,213 → 0 team-scoped · 1,203 global · 0 WRONG
+                    target      41 → 36 team-scoped ·     5 global* · 0 WRONG
+target_board        transfer   154 → 150 team-scoped · 4 TWP-pitcher-side · 0 WRONG
+                    returner    13 →  12 global                          · 0 WRONG
+  * 5 targets have no precompute for that team yet — global is the documented fallback.
+```
+⚠ The 4 "wrong" rows were a BAD QUERY, not bad data — all Josiah Overbeek, a TWP whose PITCHER-slot
+board rows correctly hold pWAR. `coalesce(o_war, p_war)` pulled his hitter oWAR off the same row.
+**Every snapshot check must be side-aware; a TWP carries both sides on ONE prediction row.**
+
+⛔ **The two neutral scripts are NOT interchangeable — the tables use different shapes.**
+`team_build_players` pitcher neutral = VERBATIM prediction row (77 keys incl. `variant`,
+`customer_team_id`) → `backfill-neutral-snapshots.ts` (**PLURAL**) `--refresh`.
+`target_board` = NORMALIZED (13/15 keys) → `backfill-neutral-snapshot.ts` (**SINGULAR**)
+`--target-board-only`. Running the singular one unscoped STRIPS the verbatim build keys.
+
+✅ Toggle-safe, proven: 1,207/1,207 build + 167/167 board neutrals at `dev_aggressiveness = 0`, while
+59 build + 17 board rows keep a non-zero toggle in `production_notes`, untouched.
+⛔ NEVER add a refresh flag to anything writing `player_snapshot`/`transfer_snapshot` from predictions.
+
+Full runbook + exact commands: Track B (`docs/PIPELINE_pitch_log_to_projections.md`).
+
+
 ## 🛑 SNAPSHOTS ARE COPIES — A PRECOMPUTE DOES NOT REFRESH THEM (2026-09-01)
 
 **Symptom:** *"player profile is showing properly on staging but team builder is not."* That IS the

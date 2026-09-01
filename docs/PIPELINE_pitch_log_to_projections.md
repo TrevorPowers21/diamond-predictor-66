@@ -565,6 +565,69 @@ reintroduces a constant offset of ~1.7 rating points ≈ **0.09 ERA** — i.e. i
 They are consistent today because both come from `twoSided()`/`CENTERS` over the identical row set.
 ⇒ If weighting is ever changed, change it in **BOTH** places in the same commit, and re-apply together.
 
+### ★★★ WHICH PREDICTION ROW A NEUTRAL SNAPSHOT MUST COPY — VERIFIED 2026-09-01 ★★★
+
+**THE RULE (Trevor, 2026-09-01):** *"the neutral snapshot for every returner is using their global
+returner math and every player who is a transfer and not a returner on both team builds players and
+target board are showing their precomputed rows in their neutral snapshot."*
+
+```
+predRank — team-scoped FIRST, global SECOND, never another team's precompute:
+  1. customer_team_id = THIS build/board's team  AND variant = 'precomputed'   ← a TRANSFER
+  2. customer_team_id IS NULL AND model_type='returner' AND variant='regular'  ← a RETURNER
+```
+A returner has **no precompute at his own school**, so he MUST fall to global. A transfer's
+team-scoped row IS the projection INTO that school — using global for him would project him at his
+CURRENT school, which is the whole error this rule prevents.
+
+**MEASURED ON STAGING AFTER THE REFILL (both tables, side-aware):**
+```
+team_build_players
+  rosterStatus=returner  1,213 rows →     0 team-scoped · 1,203 global   · 0 WRONG
+  rosterStatus=target       41 rows →    36 team-scoped ·     5 global*  · 0 WRONG
+target_board
+  HAS team-scoped (transfer)  154 rows → 150 team-scoped · 4 TWP-pitcher-side · 0 WRONG
+  no team-scoped (returner)    13 rows →  12 global                           · 0 WRONG
+
+  * 5 targets have NO precompute for that team yet → global is the documented fallback. It projects
+    them at their CURRENT school. The next precompute wave gives them a real row.
+```
+⚠ **THE 4 "WRONG" ROWS WERE A BAD QUERY, NOT BAD DATA.** All four are Josiah Overbeek, a **TWP**
+(`is_twp`, position 1B, `position_slot='RP'`). His board rows are the PITCHER slot and correctly hold
+**pWAR** (0.267/0.161/0.244/0.138 = `ts_pwar` exactly). A `coalesce(o_war, p_war)` check pulled his
+HITTER oWAR (2.828) off the same row and compared a hitter number to a pitcher snapshot.
+⇒ **Any snapshot check MUST be side-aware.** A TWP carries both sides on ONE prediction row.
+
+### ⛔ THE TWO NEUTRAL SCRIPTS ARE NOT INTERCHANGEABLE — THE TABLES USE DIFFERENT SHAPES
+| table | pitcher neutral shape | the ONLY correct script |
+|---|---|---|
+| `team_build_players` | **VERBATIM** prediction row — 77 keys incl. `id`, `player_id`, `variant`, `customer_team_id`, `model_type`, `from_` fields, score fields | `backfill-neutral-snapshots.ts` (**PLURAL**) `--refresh` |
+| `target_board` | **NORMALIZED** — 13 hitter keys / 15 pitcher keys | `backfill-neutral-snapshot.ts` (**SINGULAR**) `--target-board-only` |
+
+🛑 Running the SINGULAR script unscoped rewrites `team_build_players` too and **STRIPS the verbatim
+keys** — including `variant`/`customer_team_id`, which are exactly what proves a row used its
+team-scoped source. The PLURAL file already warns *"⛔ Do NOT normalize the pitcher shape."*
+**Neither script supersedes the other. Each owns one table.** `--target-board-only` exists to make
+that impossible to get wrong.
+
+### EXACT COMMANDS — snapshots run LAST, after every precompute
+```bash
+# builds (verbatim shape)          staging 1,254 written · 310 stale → 18, all 18 team-scoped
+npx tsx scripts/backfill-neutral-snapshots.ts --refresh --apply
+npx tsx scripts/backfill-neutral-snapshots.ts --prod --refresh --apply
+# target board (normalized shape)  staging 167 written · was 43/66 stale → 0 wrong
+npx tsx --env-file=.env.local            scripts/backfill-neutral-snapshot.ts --target-board-only --apply
+npx tsx --env-file=.env.production.local scripts/backfill-neutral-snapshot.ts --prod --target-board-only --apply
+```
+✅ **TOGGLE-SAFE, PROVEN.** `neutral_snapshot` is the dev_agg=0 base and holds NO toggle state —
+staging: **1,207/1,207 builds and 167/167 board rows at `dev_aggressiveness = 0`, zero exceptions**,
+while 59 build rows + 17 board rows still carry a non-zero toggle in `production_notes`, untouched.
+Toggles are re-applied ON TOP at read time (`useTeamBuilderSimulation.ts:1361` —
+`shown = neutralPrediction ?? prediction`, then a devAggScale RATIO multiplies it).
+⛔ **NEVER add a refresh flag to a script that writes `player_snapshot`/`transfer_snapshot` from
+predictions.** Those are the toggle-BAKED copies; rebuilding them from a prediction flattens every
+coach's toggle back to neutral.
+
 ### ★★★ SNAPSHOTS ARE COPIES — RECOMPUTING PREDICTIONS DOES NOT UPDATE THEM (2026-09-01) ★★★
 
 🛑 **THE SYMPTOM THAT EXPOSED IT (Trevor, 2026-09-01):** *"player profile is showing properly on
