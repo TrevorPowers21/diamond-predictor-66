@@ -119,7 +119,23 @@ this script) and its centers sit at 100.31–103.79. Centers are stored for both
 4. **Stage 5.5 autofill NOT BUILT** — it is a manual script; a Masters refresh silently invalidates
    every constant and nothing warns you.
 
-## ▶️ RESUME HERE — STEP 4. (Steps 1–3 are done; do not redo them.)
+## ✅ STEP 4 DONE — calibration APPLIED to BOTH databases (2026-09-01)
+
+`model_config` admin_ui/2026: **220 → 236 keys** on each DB (16 added, 25 changed). Gates, prod:
+```
+era_plus_ncaa_avg  5.483215 → 5.263544     fip 5.097954 → 4.430664   bb9 4.013998 → 3.773413
+p_era_pr_center    109.725344   p_bb9_pr_center 123.161475   h_ba_pr_center 102.988686
+non-calibration keys changed: 0
+STORED PROJECTIONS UNCHANGED: 5,122 D1 returner hitters, mean wRC+ 98.82 — identical to baseline
+```
+Rollback references: `/tmp/calib/prod_before.json`, `/tmp/calib/staging_before.json` (220 keys each).
+⚠ Staging and prod calibrate to slightly different values (different populations: n=1,325 vs 1,295) —
+that is CORRECT, each database calibrates to its own data. Do not "sync" them.
+
+**WEIGHTING = PER-ROW, by decision** — see the Track B ⚖️ block. Anchors and centres must always be
+computed the same way on the same rows; mixing per-row and IP-weighted recreates C1 (~0.09 ERA).
+
+## ▶️ RESUME HERE — STEP 5. (Steps 1–4 are done; do not redo them.)
 
 **4. Apply the calibration — STAGING FIRST.**
 ```
@@ -183,17 +199,22 @@ is blind to this class of bug**, and to the one it replaces.
 > no division filter (**477 JUCO = 27% of the sample**) and the z-shift assumed PR+ centres at 100 when
 > the true D1/IP≥40 centres are **109.73–123.16** (bb9 worst).
 >
-> Config consolidation **steps 1–3 are DONE**: legacy table renamed `_LEGACY_2025` on BOTH databases,
-> legacy reads removed, `model_config` (admin_ui, season 2026) is the single source of truth, and the
-> rating centres are wired into the `fields` mapping.
+> Config consolidation **steps 1–4 are DONE**: legacy table renamed `_LEGACY_2025` on BOTH databases,
+> legacy reads removed, `model_config` (admin_ui, season 2026) is the single source of truth, the rating
+> centres are wired into the `fields` mapping, and **the calibration is APPLIED to BOTH databases**
+> (220 → 236 keys; `era_plus_ncaa_avg` 5.483215 → 5.263544 on prod).
 >
-> 🛑 **NOTHING HAS BEEN WRITTEN TO EITHER DATABASE'S `model_config`, AND NO PROJECTION HAS BEEN
-> RECOMPUTED.** Every stored `p_era` / `p_war` / `p_wrc_plus` / `market_value` still carries both biases.
-> **No displayed number has changed.**
+> ⚖️ **Weighting is PER-ROW by decision** (each qualified pitcher counts once; volume is carried by
+> `projected_ip`). Anchors and centres MUST always be computed the same way on the same rows — mixing
+> per-row with IP-weighted recreates C1 in miniature (~0.09 ERA).
 >
-> **RESUME AT STEP 4.** Apply calibration (staging → prod) → mirror the edge fn → re-run precomputes →
+> 🛑 **`model_config` IS NOW APPLIED, BUT NO PROJECTION HAS BEEN RECOMPUTED.** Every stored `p_era` /
+> `p_war` / `p_wrc_plus` / `market_value` still carries both biases, and **no displayed number has
+> changed** — verified: 5,122 D1 returner hitters at mean wRC+ 98.82, identical before and after.
+>
+> **RESUME AT STEP 5.** Mirror the edge fn → re-run precomputes →
 > verify **ACROSS THE RANGE** (p05/p10/median/p90; a mean-only check is blind to this class of bug).
-> **Do not redo steps 1–3.**
+> **Do not redo steps 1–4.**
 
 ## 📚 DOCUMENT MAP — what lives where
 

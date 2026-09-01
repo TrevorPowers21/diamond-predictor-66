@@ -87,6 +87,33 @@ mismatch in the constants, not at the model.**
 
 Full detail + the fix: `docs/PIPELINE_pitch_log_to_projections.md` stage 5.5 MUST READ.
 
+## ⚖️ THE WEIGHTING QUESTION — asked and answered 2026-09-01
+
+Trevor: *"are you scaling it by row or by IP?"* — the right question, and it exposed an **undocumented
+choice** rather than a defect.
+
+**ANSWER: per-row.** `twoSided()` is `sum(vals)/vals.length`; every qualified pitcher counts once.
+
+**WHY THAT IS DEFENSIBLE HERE.** A projection ranks a PLAYER against other PLAYERS, and volume is
+already carried separately by `projected_ip` through the depth role. Folding innings into the rate
+baseline would let workhorses define "average," which answers *"the average inning"* — a run-environment
+question, not a projection question. That is precisely why conference/region baselines ARE IP/PA-weighted
+([[feedback_weighted_region_averages]]) while this is not: **two conventions, two purposes.**
+
+**MEASURED (PROD, D1, IP>=40):** ERA anchor 5.2635 per-row vs 5.1325 IP-weighted (−2.5%); BB9 −3.3%;
+FIP −1.6%. Rating centres move the OTHER way: era 109.725 → 111.413, bb9 123.161 → 126.606 — because
+better pitchers throw more innings, weighting lowers the stat anchor AND raises the rating centre.
+
+🛑 **THE REAL HAZARD IS NOT THE CHOICE — IT IS MIXING.** An IP-weighted centre with a per-row anchor
+offsets every projection by ~1.7 rating points ≈ **0.09 ERA**, silently and uniformly. That is C1 in
+miniature: *a constant fit on one frame applied to another.* They are safe today only because both come
+from the same expression over the same rows.
+
+★ **GENERALISED RULE, worth carrying beyond this file:** whenever a formula has a CENTRE and a SCALE,
+they must be derived from the **same population by the same method**, in the same commit. Every
+projection bug found on 2026-09-01 — the missing division filter, the assumed rating centre of 100, and
+this — is the same failure: **two halves of one equation sourced from different populations.**
+
 ## ★ BUILD STATUS (2026-08-25) — PITCHING BUILT + VERIFIED on staging
 - **Producer** `scripts/compute-projection-calibration.ts` (stage 5.5) — computes per-stat calibrated mean + `sd_good`/`sd_bad`
   on the qualified pop; HR9 shrinkage (data-K=71) baked into HR9's mean/SD. Writes `<stat>_plus_ncaa_avg/_ncaa_sd/_ncaa_sd_bad`
