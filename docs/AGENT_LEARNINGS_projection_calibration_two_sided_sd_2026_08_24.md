@@ -59,6 +59,34 @@ Two-sided moves HR9 from impossible (−0.01) to 0.14, but real elite is 0.29–
 4. Re-run all precomputes; re-verify the calibration table (actual vs projected across the range).
 5. Add the doctrine + the across-the-range calibration check to the audit doctrine.
 
+## 🛑 MUST READ — TWO CONSTANTS IN THIS DESIGN WERE WRONG (found 2026-09-01)
+
+The METHOD below (two-sided SD, `sd_good`/`sd_bad`, HR9 shrinkage) is correct and shipped correctly.
+**Two POPULATION choices around it were not**, and both produced the same signature: projections
+uniformly biased at every percentile and in every class bucket.
+
+**(1) THIS DOC NEVER SPECIFIED A DIVISION.** It says *"On the QUALIFIED population (min IP / min AB — a
+real sample)"* — a volume qualifier and nothing else. The producer therefore filtered on `Season` only,
+and the "NCAA" baselines were computed across EVERY division. On prod at `IP >= 40`:
+`D1 1,295 (mean ERA 5.264) · NJCAA_D1 477 (6.118) · ALL 1,773 (5.492)`. **477 JUCO pitchers — 27% of the
+sample — inflated the D1 anchor by 0.229 ERA (4.3%).** `git log` confirms a division filter was never
+present. ⇒ **Any future calibration MUST state its division as explicitly as it states its qualifier.**
+
+**(2) THE Z-SHIFT SUBTRACTS 100, BUT PR+ IS NOT CENTERED AT 100 HERE.** The mechanism block below writes
+`zShift = ((PR+ − 100) / prSD) × ncaaSD`. True centers on D1/`IP>=40`: era 109.73 · fip 108.29 ·
+whip 108.40 · k9 101.69 · **bb9 123.16** · hr9 102.04. On the all-division/`IP>=20` population they are
+96.3–104.0 (≈100) — PR+ was FIT there and APPLIED here, giving every qualified pitcher a free head start
+(**+0.44 ERA**). Fixed by storing `<key>_pr_center` for all 11 ratings and measuring the z from it.
+
+★ **THE DOCTRINE BELOW CAUGHT ITS OWN BLIND SPOT.** This doc's standing check is *"does the model's OUTPUT
+make logical sense against reality ACROSS THE WHOLE RANGE"* — and it does, because a miscentered rating is
+a CONSTANT offset: the shape stays right and only the level moves. **A range check catches a broken tail;
+it does not catch a uniform shift.** The tell was the opposite of a tail problem — *equal* discrepancies in
+every bucket. ⇒ Add to the doctrine: **a constant offset with correct spread points at a population
+mismatch in the constants, not at the model.**
+
+Full detail + the fix: `docs/PIPELINE_pitch_log_to_projections.md` stage 5.5 MUST READ.
+
 ## ★ BUILD STATUS (2026-08-25) — PITCHING BUILT + VERIFIED on staging
 - **Producer** `scripts/compute-projection-calibration.ts` (stage 5.5) — computes per-stat calibrated mean + `sd_good`/`sd_bad`
   on the qualified pop; HR9 shrinkage (data-K=71) baked into HR9's mean/SD. Writes `<stat>_plus_ncaa_avg/_ncaa_sd/_ncaa_sd_bad`

@@ -448,9 +448,68 @@ exact mistake the prod runbook made; see `docs/AUDIT_dependency_order_vs_topic_o
 | 3b | **Season-stats dimension aggregation** (needs 3 done + Hitter Master top-quartile for `vs_top_hitters`) | per-dimension slash line + rates + by-pitch-type across splits: `all, vs_lhp/rhp, vs_92plus, vs_stuff_100/105plus, vs_fastball/breaking/offspeed, vs_top_hitters` (48 aggs / 10 dims) | `pitch_log_hitter_totals`, `pitch_log_pitcher_totals`, `*_by_pitch_type` (keyed `dimension_key`) | **Season Stats display** (`/stats` → `PitchLogSection`). ⚠ still an OFFLINE hand-run script (`scripts/aggregate_pitch_log_dimensions.ts`, now with `--prod`/`--direct`/`--only=`) → Track B must absorb it; `conf_only`/intra-conf split not built. 🛑 on PROD run it with `--direct`. |
 | 4 | Power ratings (Masters) | hitter ba/obp/iso ratings (+pull_air) → desc WAR; pitcher pRV+/era⁺/… → desc pWAR | `Hitter Master` + `Pitching Master` (ratings + `desc_*` / `total_desc_war` cols) | Player/Pitcher Profile, Rankings |
 | 5 | Conference baselines | Conf Stuff+ (depth), wRC+, park factors, HTP | `Conference Stats` | Team Builder context |
-| 5.5 | **Projection calibration (NEW, 2026-08-24)** | per-stat mean + TWO-SIDED SD (`sd_good`/`sd_bad`) on the qualified pop (min IP/AB) + `pr_sd` from stage-4 ratings — fixes the z-shift over-projecting elite (impossible HR9/ERA) | `model_config` (per-stat `*_sd_good`/`*_sd_bad`/`*_ncaa_avg`/`*_qual_min`) | (feeds stage 6) — see `AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md`. NOT built yet. |
-| 6 | Projections | returner + transfer engine (blend → competition translation via Stuff+/HTP/park → class/dev → depth-role → WAR → market); **reads stage-5.5 two-sided SDs, directional**. 🛑 **ORDER: this stage READS `team_season_stats.faced_stuff_plus`/`.faced_htp`** (`precompute-transfer-projections.ts:225`, `precompute-pitchers.ts:279`) for Independent from-programs, and **swallows the error / coerces to `[]`** — so `refresh_team_season_stats` MUST run BEFORE it or Independents silently lose the faced-competition adjustment. | `player_predictions` (o_war, p_war, total_hitter_war, market_value, rates) | Rankings, Profiles, Team Builder, Transfer Portal |
+| 5.5 | **Projection calibration + rating centers** — ✅ **BUILT** (2026-08-25, extended 2026-09-01). `scripts/compute-projection-calibration.ts` | (a) per-stat mean + TWO-SIDED SD (`_ncaa_sd` good / `_ncaa_sd_bad`) on the qualified pop, (b) **`<key>_pr_center` + `<key>_pr_sd` for all 11 ratings** — 6 pitching stats, `pitch_overall`, `t_ba`/`t_obp`/`t_iso`, `hit_overall`. 🛑 **D1 ONLY** (`.eq("division","D1")`) — see the MUST READ below. **41 keys** (was 19). Qualifier: pitching `IP >= 40`, hitting `pa >= 100`, Season = CURRENT_SEASON. | `model_config` (`model_type='admin_ui'`, `season=CURRENT_SEASON`) | **feeds stage 6** — the projection reads BOTH the two-sided SDs AND the centers. Producer is DRY-RUN by default; `--apply` writes. |
+| 6 | Projections | returner + transfer engine (blend → competition translation via Stuff+/HTP/park → class/dev → depth-role → WAR → market); **reads stage-5.5 two-sided SDs (directional) AND `<stat>_pr_center`** — the z-shift is `((PR+ − pr_center) / pr_sd) × ncaa_sd`, **NOT `− 100`** (see the 5.5 MUST READ). 🛑 **ORDER: this stage READS `team_season_stats.faced_stuff_plus`/`.faced_htp`** (`precompute-transfer-projections.ts:225`, `precompute-pitchers.ts:279`) for Independent from-programs, and **swallows the error / coerces to `[]`** — so `refresh_team_season_stats` MUST run BEFORE it or Independents silently lose the faced-competition adjustment. | `player_predictions` (o_war, p_war, total_hitter_war, market_value, rates) | Rankings, Profiles, Team Builder, Transfer Portal |
 | 7 | NIL + need | score = total_WAR × PTM → allocateNil curve + need premium | (computed live; GM `gm_budget.nil_allocation_mode`) | Team Builder, GM, Target Board |
+
+### 🛑 MUST READ — STAGE 5.5 IS **D1 ONLY**, AND THE Z-SHIFT DOES **NOT** SUBTRACT 100 (2026-09-01)
+
+Two constants were **fit on one population and applied to another**. Same root cause, two places.
+Both produced the identical symptom: **projections uniformly biased at EVERY percentile and in EVERY
+class bucket, with no per-class pattern** — the signature of a CONSTANT, not a per-group adjustment.
+
+**(1) The producer had NO division filter.** `pageAll` filtered only on `Season`, so the "NCAA"
+baselines every projection centers on were computed across EVERY division. At the producer's own
+qualifier (Season 2026, `IP >= 40`), measured on prod:
+```
+D1        1,295 pitchers   mean ERA 5.264
+NJCAA_D1    477            mean ERA 6.118   ← 27% of the sample
+D2             1                    3.480
+ALL       1,773            mean ERA 5.492   ← what shipped (model_config era_plus_ncaa_avg 5.483215)
+```
+⇒ 477 JUCO pitchers inflated the **D1** anchor by **0.229 ERA (4.3%)**. `git log` confirms the filter
+was **never present** — the 2026-08-24 doc specified the volume qualifier but never the division, so it
+shipped all-division from day one. ⛔ **Do NOT remove the D1 filter to "get a bigger sample."** A bigger
+sample of the wrong population is worse than a smaller sample of the right one, and JUCO rates AGAINST
+these baselines ([[feedback_juco_uses_d1_baselines]]) — including JUCO made the contamination circular.
+
+**(2) The z-shift assumed PR+ is centered at 100. It is not.** True centers on D1 / `IP >= 40`:
+```
+era 109.7253 · fip 108.2875 · whip 108.4028 · k9 101.6919 · bb9 123.1615 · hr9 102.0359
+pitch_overall 109.0064
+```
+On the **all-division, IP>=20** population those same centers are **96.3–104.0**, i.e. ~100 — so PR+ was
+FIT there and APPLIED to D1/IP>=40. Every qualified D1 pitcher carried a free head start; for ERA,
+`((109.73 − 100) / 27.90) × 1.425 = **+0.44 ERA** of phantom improvement`. **BB9 is the extreme at 123.16.**
+
+★ **HITTING IS NOT CONTAMINATED THE SAME WAY.** Its anchors were already D1-scoped (they come from the
+2026-08-11 power-rating refits, **not** this script) and its centers sit at **100.31–103.79**. Centers are
+emitted for it anyway — Trevor 2026-09-01: *"we need to add all of these into the model config to store
+since apparently they won't settle at 100 and it needs to be consistent and stored off the data runs."*
+⚠ `pitch_overall` / `hit_overall` are emitted because **transfer projections read `overall_*`** (Trevor:
+*"Overall power rating isn't used except in transfer projections"*). Leaving those on an assumed 100 would
+leave the transfer path carrying the phantom the returner path just had removed.
+
+**VERIFIED** against the real ERA constants — the fix removes a constant offset and KEEPS THE SPREAD:
+```
+AVERAGE qualified pitcher (PR+ 109.7253)   4.9280 → 5.2757     (actual 2026 mean 5.3040)
+ELITE   (PR+ 140)                          3.8457 → 4.1934
+WEAK    (PR+  80)                          6.2359 → 6.7028
+```
+
+**⛔ THE CONSTANTS ARE STORED FROM THE DATA EACH RUN — DO NOT HARDCODE THEM BACK INTO `src/lib`.**
+That is exactly how `era_pr_sd` came to differ between `src/lib` (28.11694) and the edge fn
+(29.48780404). `DEFAULT_PITCHING_WEIGHTS` carries them ONLY as an offline fallback, and
+`readPitchingWeights` passes them through from `base` (which already has the Supabase overlay) —
+**deliberately NOT from localStorage**, because a coach hand-editing a population mean would silently
+restore the bias.
+
+⬜ **STILL OPEN when this was written:** the **edge function keeps its own constant copies and its own
+hardcoded `100`**, so onboarding still projects with the old bias; `model_config` has not been written on
+either database; precomputes have not been re-run. ⚠ After they are, **re-verify the ACROSS-THE-RANGE
+calibration table, not the mean** — a bug calibrated perfectly at the mean is invisible to every
+mean-based check (2026-08-24 doctrine).
+
 
 ## Current vs target
 - **Current:** stages 2–5 (+ **3b**) are **scattered one-off scripts run by hand** (`reclassify_prod`, `compute_pitch_log_stuff_plus`, `derive_masters_from_pitchlog`, `conferenceStuffPlusV2`, `populate-conference-stats-env-plus`, `aggregate_pitch_log_dimensions` (3b, season-stats splits), the Master rating stores, the conf-stats Bucket-A/OPR/HTP producers, …) — easy to forget → stale baselines/conference/season-stats values.
