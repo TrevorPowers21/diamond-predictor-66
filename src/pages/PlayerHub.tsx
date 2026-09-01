@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { useAuth } from "@/hooks/useAuth";
+import { useActiveBuildSnapshot } from "@/hooks/useActiveBuildSnapshot";
 import { allocateNil } from "@/lib/nilAllocation";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
@@ -337,7 +338,28 @@ export default function PlayerHub() {
   const sc = (v: number | null | undefined) => (v == null ? null : v * devAggScale);
   // Pitcher line: apply the build's role-transition + dev-agg overlay to the
   // stored prediction — mirrors PitcherProfile.projectedPitching (production_notes).
+  // 🛑 SAVED SNAPSHOT WINS — no live compute for a rostered player (Trevor, 2026-09-01).
+  //    This card was re-deriving the line instead of reading it, and its dev scale is an ADDITIVE
+  //    approximation (`low(v) = v * (1 - delta)` below) where PitcherProfile uses the proper
+  //    multiplicative ratio. Same intent, different arithmetic ⇒ a toggled pitcher read 4.84 here and
+  //    4.86 on Team Builder + the player profile (Luke Howe). Reading the snapshot removes the
+  //    discrepancy by construction rather than by matching two formulas.
+  // ⛔ Never pass these through `sc()` / `pitcherProj` — the snapshot already has the build's dev-agg
+  //    and role baked in; scaling again double-applies it.
+  const { snapshot: hubPitcherSnap } = useActiveBuildSnapshot(playerId, "pitcher");
+  const { snapshot: hubHitterSnap } = useActiveBuildSnapshot(playerId, "hitter");
+
   const pitcherProj = (() => {
+    // Rostered on the active build ⇒ read the saved line verbatim.
+    if (isPitcher && hubPitcherSnap) {
+      return {
+        era: hubPitcherSnap.p_era ?? null,
+        fip: hubPitcherSnap.p_fip ?? null,
+        whip: hubPitcherSnap.p_whip ?? null,
+        k9: hubPitcherSnap.p_k9 ?? null,
+        bb9: hubPitcherSnap.p_bb9 ?? null,
+      };
+    }
     if (!isPitcher || !projection) return null;
     const eq = readPitchingWeights();
     const roleCurve = {
@@ -522,11 +544,11 @@ export default function PlayerHub() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-5 gap-1.5">
-                    {projBox("AVG", rate(sc(projection?.p_avg)))}
-                    {projBox("OBP", rate(sc(projection?.p_obp)))}
-                    {projBox("SLG", rate(sc(projection?.p_slg)))}
-                    {projBox("OPS", rate(sc(projection?.p_ops)))}
-                    {projBox("wRC+", projection?.p_wrc_plus != null ? String(Math.round(sc(projection.p_wrc_plus)!)) : "—", true)}
+                    {projBox("AVG", rate(hubHitterSnap ? hubHitterSnap.p_avg : sc(projection?.p_avg)))}
+                    {projBox("OBP", rate(hubHitterSnap ? hubHitterSnap.p_obp : sc(projection?.p_obp)))}
+                    {projBox("SLG", rate(hubHitterSnap ? hubHitterSnap.p_slg : sc(projection?.p_slg)))}
+                    {projBox("OPS", rate(hubHitterSnap ? (hubHitterSnap.p_ops ?? ((hubHitterSnap.p_obp ?? 0) + (hubHitterSnap.p_slg ?? 0))) : sc(projection?.p_ops)))}
+                    {projBox("wRC+", hubHitterSnap?.p_wrc_plus != null ? String(Math.round(Number(hubHitterSnap.p_wrc_plus))) : (projection?.p_wrc_plus != null ? String(Math.round(sc(projection.p_wrc_plus)!)) : "—"), true)}
                   </div>
                 )
               ))}
