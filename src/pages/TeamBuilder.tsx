@@ -1930,13 +1930,32 @@ export default function TeamBuilder() {
               base.p_war = proj.pwar ?? null;
               base.pitcher_depth_role = rp.depth_role ?? base.pitcher_depth_role ?? null;
               // TWP pitcher slot is OWN-SIDE ONLY — never carry the hitter side.
-              if (isTwp) { base.o_war = null; base.p_avg = null; base.p_obp = null; base.p_slg = null; base.p_wrc_plus = null; base.hitter_depth_role = null; base.twp_hitter_market_value = null; }
+              if (isTwp) { base.o_war = null; base.total_hitter_war = null; base.d_war = null; base.bsr_war = null;
+                base.p_avg = null; base.p_obp = null; base.p_slg = null; base.p_wrc_plus = null; base.hitter_depth_role = null; base.twp_hitter_market_value = null; }
+              // ⛔ total_hitter_war / d_war / bsr_war MUST be nulled with o_war on a TWP pitcher slot.
+              //    pickHitterWar prefers total_hitter_war, so a leftover value would resurface as this
+              //    slot's hitter WAR even though the hitter side was deliberately cleared.
             } else {
               base.p_avg = shown.p_avg ?? base.p_avg ?? null;
               base.p_obp = shown.p_obp ?? base.p_obp ?? null;
               base.p_slg = shown.p_slg ?? base.p_slg ?? null;
               base.p_wrc_plus = proj.shownWrc ?? shown.p_wrc_plus ?? base.p_wrc_plus ?? null;
-              base.o_war = proj.owar ?? null;
+              // 🛑 SECOND WRITE SITE — the explicit "Save build" (delete-all + re-insert at :1868/:1984).
+              //    It had the SAME defect as the target/roster save: it wrote `o_war` and never
+              //    `total_hitter_war`, while `base` is spread from `rp.prediction` — so the STALE
+              //    total came along for the ride and won on the next read (`pickHitterWar` prefers
+              //    total_hitter_war). Symptom: a toggle held correctly, then pressing Save reverted it.
+              // ⛔ `proj.owar` is the HEADLINE TOTAL — do not write it into `o_war`.
+              //    oWAR scales; dWAR/bsrWAR carry through unscaled; total = the sum.
+              const oWarOnlySave = (proj as any).oWarOnly ?? proj.owar ?? null;
+              const dWarSave = (proj as any).dWar ?? base.d_war ?? null;
+              const bsrWarSave = (proj as any).bsrWar ?? base.bsr_war ?? null;
+              base.o_war = oWarOnlySave;
+              if (dWarSave != null && Number.isFinite(Number(dWarSave))) base.d_war = Number(dWarSave);
+              if (bsrWarSave != null && Number.isFinite(Number(bsrWarSave))) base.bsr_war = Number(bsrWarSave);
+              base.total_hitter_war = proj.owar ?? (oWarOnlySave != null
+                ? Number(oWarOnlySave) + Number(dWarSave ?? 0) + Number(bsrWarSave ?? 0)
+                : null);
               base.hitter_depth_role = rp.depth_role ?? base.hitter_depth_role ?? null;
               // TWP hitter slot is OWN-SIDE ONLY — never carry the pitcher side.
               if (isTwp) { base.p_era = null; base.p_fip = null; base.p_whip = null; base.p_k9 = null; base.p_bb9 = null; base.p_hr9 = null; base.p_rv_plus = null; base.p_war = null; base.pitcher_depth_role = null; base.twp_pitcher_market_value = null; }
@@ -2291,7 +2310,27 @@ export default function TeamBuilder() {
     } else {
       const f = { p_avg: shown.p_avg ?? t.p_avg ?? null, p_obp: shown.p_obp ?? t.p_obp ?? null, p_slg: shown.p_slg ?? t.p_slg ?? null, p_wrc_plus: proj.shownWrc ?? shown.p_wrc_plus ?? t.p_wrc_plus ?? null, hitter_depth_role: player.depth_role ?? t.hitter_depth_role ?? null };
       Object.assign(t, f); Object.assign(bp, f);
-      t.owar = proj.owar ?? null; t.o_war = proj.owar ?? null; bp.o_war = proj.owar ?? null;
+      // 🛑 PERSIST ALL FOUR WAR FIELDS, NOT JUST oWAR (Trevor, 2026-09-01).
+      //    The live compute is a BRIDGE: instant feedback on toggle, then the row saves and every
+      //    later read comes from the snapshot — "it needs to transition back to stored snapshot then
+      //    never live compute again on any load unless changed."
+      //    That handoff only works if what we save equals what we just showed.
+      //
+      // ★ THE BUG THIS FIXES. This line used to write `o_war`/`owar` and NEVER `total_hitter_war`.
+      //    `pickHitterWar` reads `total_hitter_war ?? o_war ?? owar`, so the STALE total kept winning
+      //    on reload: the coach toggled, watched WAR move, and it snapped straight back to the old
+      //    number the moment the snapshot took over (Farner 1.86, Traeger 1.44).
+      // ⛔ `proj.owar` is the HEADLINE TOTAL — never write it into `o_war`. Use the components:
+      //    oWAR scales with the toggle; dWAR and bsrWAR are destination-invariant and carry through
+      //    unscaled (Trevor: "only scaling oWAR ... total hitter war is scaled oWAR + dWAR + bsrWAR").
+      const oWarOnly = (proj as any).oWarOnly ?? proj.owar ?? null;
+      const dWarOut = (proj as any).dWar ?? Number((shown as any)?.d_war) ?? null;
+      const bsrWarOut = (proj as any).bsrWar ?? Number((shown as any)?.bsr_war) ?? null;
+      const totalOut = proj.owar ?? (oWarOnly != null ? Number(oWarOnly) + Number(dWarOut ?? 0) + Number(bsrWarOut ?? 0) : null);
+      t.owar = oWarOnly; t.o_war = oWarOnly; bp.o_war = oWarOnly;
+      if (dWarOut != null && Number.isFinite(Number(dWarOut))) { t.d_war = Number(dWarOut); bp.d_war = Number(dWarOut); }
+      if (bsrWarOut != null && Number.isFinite(Number(bsrWarOut))) { t.bsr_war = Number(bsrWarOut); bp.bsr_war = Number(bsrWarOut); }
+      t.total_hitter_war = totalOut; bp.total_hitter_war = totalOut;
       if (isTwp) { t.twp_hitter_market_value = mkt; bp.twp_hitter_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
       else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
     }
@@ -2300,8 +2339,8 @@ export default function TeamBuilder() {
     // never carries the other side's data.
     if (isTwp) {
       if (treatAsPitcher) {
-        bp.o_war = null; bp.p_avg = null; bp.p_obp = null; bp.p_slg = null; bp.p_wrc_plus = null; bp.hitter_depth_role = null; bp.twp_hitter_market_value = null;
-        t.owar = null; t.o_war = null; t.p_avg = null; t.p_obp = null; t.p_slg = null; t.p_wrc_plus = null; t.hitter_depth_role = null; t.twp_hitter_market_value = null;
+        bp.o_war = null; bp.total_hitter_war = null; bp.d_war = null; bp.bsr_war = null; bp.p_avg = null; bp.p_obp = null; bp.p_slg = null; bp.p_wrc_plus = null; bp.hitter_depth_role = null; bp.twp_hitter_market_value = null;
+        t.owar = null; t.o_war = null; t.total_hitter_war = null; t.d_war = null; t.bsr_war = null; t.p_avg = null; t.p_obp = null; t.p_slg = null; t.p_wrc_plus = null; t.hitter_depth_role = null; t.twp_hitter_market_value = null;
       } else {
         bp.p_era = null; bp.p_fip = null; bp.p_whip = null; bp.p_k9 = null; bp.p_bb9 = null; bp.p_hr9 = null; bp.p_rv_plus = null; bp.p_war = null; bp.pitcher_depth_role = null; bp.twp_pitcher_market_value = null;
         t.p_era = null; t.p_fip = null; t.p_whip = null; t.p_k9 = null; t.p_bb9 = null; t.p_hr9 = null; t.p_rv_plus = null; t.p_war = null; t.pitcher_depth_role = null; t.twp_pitcher_market_value = null;

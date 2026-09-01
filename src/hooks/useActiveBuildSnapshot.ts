@@ -44,6 +44,54 @@ export type BuildSnapshotSide = "hitter" | "pitcher";
 
 const isPitcherSlot = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 
+/**
+ * TARGET BOARD fallback — a player can be on the board WITHOUT being on the roster, and his saved
+ * line then lives in `target_board.transfer_snapshot` (staging: 169 rows, all populated, 8 teams;
+ * prod: 57 for Arkansas alone). Before 2026-09-01 no surface read this at all, so a board-only
+ * player silently fell through to the neutral projection.
+ *
+ * ⚠ THE BOARD SHAPE IS NOT THE BUILD SHAPE. Verified against staging:
+ *     `nil_valuation`  is the board's market value   (build uses `market_value`)
+ *     `owar`           is carried ALONGSIDE `o_war`  (legacy key; either may be the populated one)
+ *   TargetBoardSubtab already normalizes exactly this pair. We do the same here so every caller sees
+ *   ONE shape and no surface has to know which table the line came from.
+ *
+ * ⛔ TWPs: a two-way player's board row can carry BOTH `p_era` and `p_wrc_plus`, so field-presence
+ *    alone cannot pick a side — `position_slot` decides, and the field guard is only a backstop.
+ */
+async function boardSnapshot(
+  playerId: string,
+  customerTeamId: string,
+  side: BuildSnapshotSide,
+): Promise<Record<string, any> | null> {
+  const { data: tb } = await (supabase as any)
+    .from("target_board")
+    .select("player_id, position_slot, transfer_snapshot")
+    .eq("customer_team_id", customerTeamId)
+    .eq("player_id", playerId);
+
+  const rows = (tb || []).filter((r: any) => r.transfer_snapshot);
+  if (rows.length === 0) return null;
+
+  const wantPitcher = side === "pitcher";
+  const match =
+    rows.length === 1 && isPitcherSlot(rows[0].position_slot) === wantPitcher
+      ? rows[0]
+      : rows.find((r: any) => isPitcherSlot(r.position_slot) === wantPitcher);
+  if (!match) return null;
+
+  const raw = match.transfer_snapshot as Record<string, any>;
+  if (wantPitcher && raw.p_era == null) return null;
+  if (!wantPitcher && raw.p_wrc_plus == null && raw.p_avg == null) return null;
+
+  // Normalize to the build-snapshot shape so callers never branch on the source table.
+  return {
+    ...raw,
+    o_war: raw.o_war ?? raw.owar ?? null,
+    market_value: raw.market_value ?? raw.nil_valuation ?? null,
+  };
+}
+
 export function useActiveBuildSnapshot(
   playerId: string | null | undefined,
   side: BuildSnapshotSide,
@@ -69,7 +117,7 @@ export function useActiveBuildSnapshot(
         .eq("player_id", playerId);
 
       const rows = (bps || []).filter((r: any) => r.player_snapshot);
-      if (rows.length === 0) return null;
+      if (rows.length === 0) return boardSnapshot(playerId!, effectiveTeamId!, side);
 
       // A TWP has TWO rows — a hitter slot and a pitcher slot. Take the one this caller asked for;
       // never merge them, or a two-way player's hitter card shows his pitching line.
@@ -78,7 +126,9 @@ export function useActiveBuildSnapshot(
         rows.length === 1 && isPitcherSlot(rows[0].position_slot) === wantPitcher
           ? rows[0]
           : rows.find((r: any) => isPitcherSlot(r.position_slot) === wantPitcher);
-      if (!match) return null;
+      // Rostered, but not on the side we were asked for (e.g. a hitter-only roster row and this is
+      // the pitcher card) — the board may still hold that side's line.
+      if (!match) return boardSnapshot(playerId!, effectiveTeamId!, side);
 
       // Field guard: a hitter-slot snapshot has no pitching fields and vice versa. Returning the
       // wrong shape would spread `undefined` over a caller's line instead of failing cleanly.

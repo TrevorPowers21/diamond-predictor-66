@@ -1308,7 +1308,18 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         // o_war/owar until snapshots are re-baked with the total (transfer_snapshot=`owar`, build=`o_war`).
         const hitterWar = pickHitterWar(snap);
         if (!treatAsPitcher && hitterWar != null && snap.p_wrc_plus != null) {
-          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)), owar: Number(hitterWar), pwar: null };
+          // Same shape as the dirty path below: headline in `owar`, components alongside. A CLEAN row
+          // is what the coach sees after a save persists, so the two must be interchangeable —
+          // otherwise the number moves the instant the live compute hands back to the snapshot.
+          const dW = Number((snap as any).d_war);
+          const bW = Number((snap as any).bsr_war);
+          return {
+            sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)),
+            owar: Number(hitterWar), pwar: null,
+            oWarOnly: Number((snap as any).o_war ?? (snap as any).owar ?? hitterWar),
+            dWar: Number.isFinite(dW) ? dW : 0,
+            bsrWar: Number.isFinite(bW) ? bW : 0,
+          };
         }
       }
     }
@@ -1509,7 +1520,36 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     } : shown;
     const shownWrcFinal = shownFinal?.p_wrc_plus ?? shownWrc;
 
-    return { sim, shown: shownFinal, shownWrc: shownWrcFinal, owar, pwar: null };
+    // 🛑 HEADLINE HITTER WAR = scaled oWAR + dWAR + bsrWAR (Trevor, 2026-09-01):
+    //    "we are still only scaling oWAR with dev aggressiveness and role changes, then
+    //     total hitter war is scaled oWAR + dWAR + bsrWAR."
+    //
+    // ★ THIS WAS THE TRAEGER BUG. The CLEAN path above (:1309) returns `pickHitterWar(snap)`, which
+    //   is `total_hitter_war` (o+d+bsr). This DIRTY path returned bare `owar`. Same field name, two
+    //   different quantities — so a toggle silently DROPPED dWAR + bsrWAR and the number fell, then
+    //   "healed" on reload when the clean path took over again.
+    //   Traeger, measured on prod: o_war 2.0807 / total 2.153 (adjusted), o_war 1.367 / total 1.4398
+    //   (neutral). Trevor watched it flash 2.08 (dirty → oWAR only) and settle at 1.44
+    //   (clean → neutral total). Both were real values; the field just meant different things.
+    //
+    // ⛔ dWAR and bsrWAR are NOT scaled — they are destination-invariant, player-level, and the dev
+    //    toggle has no claim on them. Only oWAR moves. Do not "improve" this by scaling them too.
+    // ⚠ Read them off `shown` (the neutral base), never off an already-adjusted snapshot.
+    const dWarBase = Number((shown as any)?.d_war);
+    const bsrWarBase = Number((shown as any)?.bsr_war);
+    const dWar = Number.isFinite(dWarBase) ? dWarBase : 0;
+    const bsrWar = Number.isFinite(bsrWarBase) ? bsrWarBase : 0;
+    const totalHitterWar = owar != null ? owar + dWar + bsrWar : null;
+
+    // ⚠ `owar` here is the HEADLINE (total) so it matches the clean path at :1309, which returns
+    //    `pickHitterWar(snap)` = total_hitter_war. Display and sorting read this field.
+    // 🛑 The COMPONENTS are returned alongside because the SAVE must persist them separately:
+    //    writing the total into `o_war` would corrupt the stored row. See TeamBuilder.tsx save.
+    return {
+      sim, shown: shownFinal, shownWrc: shownWrcFinal,
+      owar: totalHitterWar, pwar: null,
+      oWarOnly: owar, dWar, bsrWar,
+    };
   }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, liveTargetPredictionByPlayerId, remoteEquationValues]);
 
   // Off-roster target gate: a target row that the coach hasn't toggled "on
