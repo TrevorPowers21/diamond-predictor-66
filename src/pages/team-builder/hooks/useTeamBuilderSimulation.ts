@@ -523,7 +523,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     queryFn: async () => {
       let q = supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_rv_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, market_value, projected_pa, p_war, projected_ip, pitcher_role, hitter_depth_role, pitcher_depth_role")
+        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_rv_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, d_war, bsr_war, total_hitter_war, market_value, projected_pa, p_war, projected_ip, pitcher_role, hitter_depth_role, pitcher_depth_role")
         .eq("season", PROJECTION_SEASON)
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
@@ -650,7 +650,13 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
           p_rv_plus: p.transfer_snapshot.p_rv_plus ?? null,
           p_war: p.transfer_snapshot.p_war ?? null,
           nil_valuation: p.transfer_snapshot.nil_valuation ?? null,
-          owar: p.transfer_snapshot.owar ?? null,
+          // ★ 2026-09-01 — the `owar` DISPLAY field carries TOTAL hitter WAR (o+d+bsr), the
+          //   position-player headline — same convention as the clean path below
+          //   (`owar: totalHitterWar`). Reading `.owar` alone showed the oWAR COMPONENT only:
+          //   Ryder Helfrick rendered 2.32 instead of 4.94 on a freshly added target row.
+          //   Falls back to the component for snapshots written before total_hitter_war existed.
+          owar: p.transfer_snapshot.total_hitter_war
+            ?? p.transfer_snapshot.owar ?? p.transfer_snapshot.o_war ?? null,
         }
       : null;
     if (!selectedTeam) return snapshotFallback;

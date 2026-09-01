@@ -5,9 +5,19 @@ export type TransferProjectionInputs = {
   lastAvg: number;
   lastObp: number;
   lastSlg: number;
+  /** The hitter's OWN BA power rating (Hitter Master `ba_power_rating`). ⚠ NOT `fromAvgPlus` —
+   *  that is CONFERENCE avg+, a from→to environment delta with nothing to do with the player. */
   baPR: number;
+  /** The hitter's OWN OBP power rating (`obp_power_rating`). ⚠ NOT `fromObpPlus` (conference). */
   obpPR: number;
+  /** The hitter's OWN ISO power rating (`iso_power_rating`). ⚠ NOT `fromIsoPlus` (conference). */
   isoPR: number;
+  /** Population mean of `ba_power_rating` on D1/PA>=100 (`model_config` h_ba_pr_center). NOT 100. */
+  baPrCenter?: number;
+  /** Population mean of `obp_power_rating` (h_obp_pr_center). NOT 100. */
+  obpPrCenter?: number;
+  /** Population mean of `iso_power_rating` (h_iso_pr_center). NOT 100. */
+  isoPrCenter?: number;
   fromAvgPlus: number;
   toAvgPlus: number;
   fromObpPlus: number;
@@ -80,7 +90,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
   const fromIsoPark = input.fromIsoPark ?? input.fromPark;
   const toIsoPark = input.toIsoPark ?? input.toPark;
   const safeBaStdPower = input.baStdPower === 0 ? 1 : input.baStdPower;
-  const baScaled = input.ncaaAvgBA + (((input.baPR - 100) / safeBaStdPower) * input.baStdNcaa);
+  const baScaled = input.ncaaAvgBA + (((input.baPR - (input.baPrCenter ?? 100)) / safeBaStdPower) * input.baStdNcaa);
   const baBlended = input.lastAvg * (1 - input.baPowerWeight) + baScaled * input.baPowerWeight;
   const baMultiplier =
     1 +
@@ -90,7 +100,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
   const pAvgRaw = baBlended * baMultiplier;
 
   const safeObpStdPower = input.obpStdPower === 0 ? 1 : input.obpStdPower;
-  const obpScaled = input.ncaaAvgOBP + (((input.obpPR - 100) / safeObpStdPower) * input.obpStdNcaa);
+  const obpScaled = input.ncaaAvgOBP + (((input.obpPR - (input.obpPrCenter ?? 100)) / safeObpStdPower) * input.obpStdNcaa);
   const obpBlended = input.lastObp * (1 - input.obpPowerWeight) + obpScaled * input.obpPowerWeight;
   const obpMultiplier =
     1 +
@@ -100,7 +110,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
   const pObpRaw = obpBlended * obpMultiplier;
 
   const lastIso = input.lastSlg - input.lastAvg;
-  const ratingZ = input.isoStdPower > 0 ? (input.isoPR - 100) / input.isoStdPower : 0;
+  const ratingZ = input.isoStdPower > 0 ? (input.isoPR - (input.isoPrCenter ?? 100)) / input.isoStdPower : 0;
   const scaledIso = input.ncaaAvgISO + (ratingZ * input.isoStdNcaa);
   // Power-heavy blend (default 0.7) matches BA/OBP and the returner formula.
   // Old hardcoded 0.3 was inverted — it trusted lastIso 70% which double-counted

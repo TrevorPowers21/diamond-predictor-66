@@ -137,7 +137,7 @@ export function useTargetBoard() {
       // Toggles later overwrite it via saveTargetToggle; removal deletes the row.
       const [{ data: preds }, { data: pl }] = await Promise.all([
         supabase.from("player_predictions")
-          .select("customer_team_id, variant, model_type, p_avg, p_obp, p_slg, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, class_transition, pitcher_role, projected_ip")
+          .select("customer_team_id, variant, model_type, p_avg, p_obp, p_slg, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, class_transition, pitcher_role, projected_ip")
           .eq("player_id", playerId).eq("season", PROJECTION_SEASON).in("status", ["active", "departed"]),
         supabase.from("players").select("is_twp, position").eq("id", playerId).maybeSingle(),
       ]);
@@ -152,6 +152,10 @@ export function useTargetBoard() {
         p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg, p_wrc_plus: pred.p_wrc_plus,
         p_era: pred.p_era, p_fip: pred.p_fip, p_whip: pred.p_whip, p_k9: pred.p_k9, p_bb9: pred.p_bb9, p_hr9: pred.p_hr9,
         p_rv_plus: pred.p_rv_plus, p_war: pred.p_war, owar: pred.o_war, o_war: pred.o_war,
+        // ★ 2026-09-01 — TOTAL hitter WAR is the position-player HEADLINE (o+d+bsr). Writing only
+        //   o_war made a newly added hitter show his oWAR alone (Ryder Helfrick 2.32 instead of
+        //   4.94). d_war/bsr_war ride along so a consumer can show the split without a refetch.
+        d_war: pred.d_war, bsr_war: pred.bsr_war, total_hitter_war: pred.total_hitter_war,
         nil_valuation: isTwp ? null : pred.market_value,
         twp_hitter_market_value: pred.twp_hitter_market_value, twp_pitcher_market_value: pred.twp_pitcher_market_value,
         hitter_depth_role: pred.hitter_depth_role, pitcher_depth_role: pred.pitcher_depth_role,
@@ -159,7 +163,7 @@ export function useTargetBoard() {
       } : null;
       // Persisted NEUTRAL base (dev_agg=0), own-side, so the toggle recompute never
       // depends on a live fetch. Mirrors scripts/backfill-neutral-snapshot.
-      const hitterNeutral = pred ? { dev_aggressiveness: 0, class_transition: pred.class_transition ?? null, p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg, p_wrc_plus: pred.p_wrc_plus, o_war: pred.o_war, hitter_depth_role: pred.hitter_depth_role, twp_hitter_market_value: pred.twp_hitter_market_value, market_value: pred.market_value } : null;
+      const hitterNeutral = pred ? { dev_aggressiveness: 0, class_transition: pred.class_transition ?? null, p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg, p_wrc_plus: pred.p_wrc_plus, o_war: pred.o_war, d_war: pred.d_war, bsr_war: pred.bsr_war, total_hitter_war: pred.total_hitter_war, hitter_depth_role: pred.hitter_depth_role, twp_hitter_market_value: pred.twp_hitter_market_value, market_value: pred.market_value } : null;
       const pitcherNeutral = pred ? { dev_aggressiveness: 0, class_transition: pred.class_transition ?? null, p_era: pred.p_era, p_fip: pred.p_fip, p_whip: pred.p_whip, p_k9: pred.p_k9, p_bb9: pred.p_bb9, p_hr9: pred.p_hr9, p_rv_plus: pred.p_rv_plus, p_war: pred.p_war, pitcher_role: pred.pitcher_role ?? null, pitcher_depth_role: pred.pitcher_depth_role, twp_pitcher_market_value: pred.twp_pitcher_market_value, projected_ip: pred.projected_ip ?? null } : null;
       const oneWayNeutral = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(plPosition || "").trim()) ? pitcherNeutral : hitterNeutral;
       // TWP → TWO rows (hitter slot + pitcher slot), each own-side only, mirroring
@@ -171,7 +175,7 @@ export function useTargetBoard() {
         const isPitPos = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(plPosition || "").trim());
         const hitterSlot = isPitPos ? "UTL" : (plPosition || "UTL");
         const pitcherSlot = /starter/i.test(String(pred?.pitcher_depth_role || "")) ? "SP" : "RP";
-        const hitterSnap = { is_twp: true, nil_valuation: null, p_avg: t.p_avg, p_obp: t.p_obp, p_slg: t.p_slg, p_wrc_plus: t.p_wrc_plus, owar: t.owar, o_war: t.o_war, hitter_depth_role: t.hitter_depth_role, twp_hitter_market_value: t.twp_hitter_market_value };
+        const hitterSnap = { is_twp: true, nil_valuation: null, p_avg: t.p_avg, p_obp: t.p_obp, p_slg: t.p_slg, p_wrc_plus: t.p_wrc_plus, owar: t.owar, o_war: t.o_war, d_war: t.d_war, bsr_war: t.bsr_war, total_hitter_war: t.total_hitter_war, hitter_depth_role: t.hitter_depth_role, twp_hitter_market_value: t.twp_hitter_market_value };
         const pitcherSnap = { is_twp: true, nil_valuation: null, p_era: t.p_era, p_fip: t.p_fip, p_whip: t.p_whip, p_k9: t.p_k9, p_bb9: t.p_bb9, p_hr9: t.p_hr9, p_rv_plus: t.p_rv_plus, p_war: t.p_war, pitcher_depth_role: t.pitcher_depth_role, twp_pitcher_market_value: t.twp_pitcher_market_value };
         insertRows = [
           { user_id: user.id, player_id: playerId, customer_team_id: effectiveTeamId, position_slot: hitterSlot, transfer_snapshot: hitterSnap, neutral_snapshot: hitterNeutral },

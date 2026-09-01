@@ -99,6 +99,33 @@ async function loadPitchingPowerEq(season = CURRENT_SEASON): Promise<Record<stri
   return merged;
 }
 
+
+// ─── DRY-RUN DELTA REPORT (2026-09-01, step 6) ──────────────────────────────────────────────────
+// Read-only. Compares what THIS run would write against what is stored, so the calibration change
+// can be inspected BEFORE any write. Gate is ACROSS THE RANGE (p05..p90) + biggest movers, never
+// the mean alone — a bug calibrated perfectly at the mean is invisible to a mean-only check.
+const _pctl = (xs: number[], q: number): number => {
+  if (!xs.length) return NaN;
+  const s = [...xs].sort((a, b) => a - b);
+  const i = (s.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (i - lo);
+};
+const _fmt = (n: number, d = 3) => (Number.isFinite(n) ? n.toFixed(d) : "  —  ");
+function _rangeReport(label: string, pairs: Array<{ before: number | null; after: number | null }>, d = 3) {
+  const both = pairs.filter((p) => p.before != null && p.after != null && Number.isFinite(p.before as number) && Number.isFinite(p.after as number));
+  if (!both.length) { console.log(`   ${label.padEnd(16)} (no comparable rows)`); return; }
+  const B = both.map((p) => p.before as number), A = both.map((p) => p.after as number);
+  const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const spreadB = _pctl(B, 0.9) - _pctl(B, 0.05), spreadA = _pctl(A, 0.9) - _pctl(A, 0.05);
+  const spreadPct = spreadB !== 0 ? ((spreadA - spreadB) / spreadB) * 100 : NaN;
+  console.log(`   ${label.padEnd(10)} n=${String(both.length).padStart(5)}  ` +
+    `mean ${_fmt(mean(B), d)}→${_fmt(mean(A), d)} (${(mean(A) - mean(B) >= 0 ? "+" : "")}${_fmt(mean(A) - mean(B), d)})  ` +
+    `p05 ${_fmt(_pctl(B, 0.05), d)}→${_fmt(_pctl(A, 0.05), d)}  ` +
+    `p50 ${_fmt(_pctl(B, 0.5), d)}→${_fmt(_pctl(A, 0.5), d)}  ` +
+    `p90 ${_fmt(_pctl(B, 0.9), d)}→${_fmt(_pctl(A, 0.9), d)}  ` +
+    `spread ${_fmt(spreadB, d)}→${_fmt(spreadA, d)} (${spreadPct >= 0 ? "+" : ""}${_fmt(spreadPct, 1)}%)`);
+}
+
 async function main() {
   const isProd = process.argv.includes("--prod");
   const dryRun = process.argv.includes("--dry-run");
@@ -540,8 +567,43 @@ async function main() {
   }
 
   if (dryRun) {
-    console.log(`${C.yellow}[DRY RUN]${C.reset} would upsert ${upserts.length} rows. Sample:`);
-    console.log(JSON.stringify(upserts.slice(0, 2), null, 2));
+    console.log(`${C.yellow}[DRY RUN]${C.reset} would upsert ${upserts.length} rows — diffing vs stored (no writes)...`);
+    const ids = upserts.map((u: any) => u.player_id);
+    const stored = new Map<string, any>();
+    const meta = new Map<string, { name: string; div: string | null }>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const { data: sd, error: se } = await (supabase as any).from("player_predictions")
+        .select("player_id, p_era, p_fip, p_whip, p_bb9, p_rv_plus, p_war, market_value, projected_ip")
+        .eq("model_type", "returner").eq("variant", "regular").eq("season", season)
+        .is("customer_team_id", null).in("player_id", chunk);
+      if (se) throw new Error(`stored lookup failed: ${se.message}`);
+      for (const r of (sd || [])) stored.set(r.player_id, r);
+      const { data: pd, error: pe } = await (supabase as any).from("players")
+        .select("id, first_name, last_name, division, team").in("id", chunk);
+      if (pe) throw new Error(`players lookup failed: ${pe.message}`);
+      for (const r of (pd || [])) meta.set(r.id, { name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(), div: r.division });
+    }
+    const rows = upserts.map((u: any) => ({ u, s: stored.get(u.player_id), m: meta.get(u.player_id) }))
+      .filter((r) => r.s && r.m?.div === "D1");
+    const qual = rows.filter((r) => Number(r.u.projected_ip) >= 40);
+    console.log(`\n${C.bold}D1 rows with a stored comparison: ${rows.length} · QUALIFIED (projected_ip>=40): ${qual.length}${C.reset}`);
+    for (const [lbl, col, dp] of [["p_era", "p_era", 3], ["p_fip", "p_fip", 3], ["p_whip", "p_whip", 3],
+                                  ["p_bb9", "p_bb9", 3], ["p_rv_plus", "p_rv_plus", 1], ["p_war", "p_war", 3],
+                                  ["market", "market_value", 0]] as Array<[string, string, number]>) {
+      _rangeReport(lbl, qual.map((r) => ({ before: r.s[col] == null ? null : Number(r.s[col]), after: r.u[col] == null ? null : Number(r.u[col]) })), dp);
+    }
+    const movers = qual.map((r) => ({ name: r.m!.name, ip: Number(r.u.projected_ip),
+        b: r.s.p_era == null ? NaN : Number(r.s.p_era), a: r.u.p_era == null ? NaN : Number(r.u.p_era) }))
+      .filter((x) => Number.isFinite(x.b) && Number.isFinite(x.a))
+      .map((x) => ({ ...x, d: x.a - x.b })).sort((p, q) => Math.abs(q.d) - Math.abs(p.d));
+    console.log(`\n${C.bold}20 LARGEST p_era MOVES (qualified):${C.reset}`);
+    for (const x of movers.slice(0, 20)) {
+      const arrow = x.d >= 0 ? `${C.red}▲` : `${C.green}▼`;
+      console.log(`   ${x.name.padEnd(26)} ip=${String(Math.round(x.ip)).padStart(4)}  ${_fmt(x.b)} → ${_fmt(x.a)}  ${arrow}${x.d >= 0 ? "+" : ""}${_fmt(x.d)}${C.reset}`);
+    }
+    const unchanged = movers.filter((x) => Math.abs(x.d) < 1e-6).length;
+    console.log(`\n   unchanged (|Δ|<1e-6): ${unchanged}/${movers.length}`);
     return;
   }
 

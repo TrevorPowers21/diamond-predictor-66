@@ -38,7 +38,6 @@ import {
   getPositionValueMultiplier,
   DEFAULT_NIL_TIER_MULTIPLIERS,
 } from "@/lib/nilProgramSpecific";
-import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
@@ -2586,102 +2585,18 @@ export default function TeamBuilder() {
         team_metrics: null,
         team_power_plus: null,
       };
-      if (selectedTeam && row.__seedPowerPlus?.baPlus != null && row.__seedPowerPlus?.obpPlus != null && row.__seedPowerPlus?.isoPlus != null) {
-        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
-        const fromTeamRow = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
-        const fromConference = fromTeamRow?.conference || row.conference || null;
-        const fromConfStats = resolveConferenceStats(fromConference, fromTeamRow?.conference_id ?? null);
-        const toConfStats = resolveConferenceStats(toTeamRow?.conference || null, toTeamRow?.conference_id ?? null);
-        const lastAvg = row.__seedStats?.avg ?? null;
-        const lastObp = row.__seedStats?.obp ?? null;
-        const lastSlg = row.__seedStats?.slg ?? null;
-        if (
-          toTeamRow && fromConfStats && toConfStats &&
-          lastAvg != null && lastObp != null && lastSlg != null &&
-          fromConfStats.avg_plus != null && toConfStats.avg_plus != null &&
-          fromConfStats.obp_plus != null && toConfStats.obp_plus != null &&
-          fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
-          fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
-        ) {
-          const targetSeedHand = batsHandToHandedness((row as any).bats_hand);
-          const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
-          const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
-          const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
-          const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
-          const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
-          const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
-          if (
-            fromParkAvgRaw != null && toParkAvgRaw != null &&
-            fromParkObpRaw != null && toParkObpRaw != null &&
-            fromParkIsoRaw != null && toParkIsoRaw != null
-          ) {
-            const projected = computeTransferProjection({
-              lastAvg, lastObp, lastSlg,
-              baPR: Number(row.__seedPowerPlus.baPlus),
-              obpPR: Number(row.__seedPowerPlus.obpPlus),
-              isoPR: Number(row.__seedPowerPlus.isoPlus),
-              fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
-              fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
-              fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
-              fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
-              fromPark: normalizeParkToIndex(fromParkAvgRaw), toPark: normalizeParkToIndex(toParkAvgRaw),
-              fromObpPark: normalizeParkToIndex(fromParkObpRaw), toObpPark: normalizeParkToIndex(toParkObpRaw),
-              fromIsoPark: normalizeParkToIndex(fromParkIsoRaw), toIsoPark: normalizeParkToIndex(toParkIsoRaw),
-              ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
-              ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
-              ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
-              ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.3782)),
-              baStdPower: eqNum("t_ba_std_pr", 31.297),
-              baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
-              obpStdPower: eqNum("t_obp_std_pr", 28.889),
-              obpStdNcaa: toRate(eqNum("t_obp_std_ncaa", 0.046781)),
-              baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
-              obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
-              baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight)),
-              obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight)),
-              isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight)),
-              baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight)),
-              obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight)),
-              isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight)),
-              baParkWeight: toWeight(eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight)),
-              obpParkWeight: toWeight(eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight)),
-              isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
-              isoStdPower: eqNum("t_iso_std_power", 45.423),
-              isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
-              wObp: toRate(eqNum("r_w_obp", 0.691)),
-              wSlg: toRate(eqNum("r_w_slg", 0.235)),
-              wAvg: toRate(eqNum("r_w_avg", 0)),
-              wIso: toRate(eqNum("r_w_iso", 0)),
-            });
-            const classKey = "SJ";
-            const classAdj = classKey === "SJ" ? 0.02 : 0.02;
-            const devAgg = 0;
-            const transferMult = 1 + classAdj + (devAgg * 0.06);
-            const pAvgAdj = projected.pAvg * transferMult;
-            const pObpAdj = projected.pObp * transferMult;
-            const pIsoAdj = projected.pIso * transferMult;
-            const pSlgAdj = pAvgAdj + pIsoAdj;
-            const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.3782));
-            const wObp = toRate(eqNum("r_w_obp", 0.691));
-            const wSlg = toRate(eqNum("r_w_slg", 0.235));
-            const wAvg = toRate(eqNum("r_w_avg", 0));
-            const wIso = toRate(eqNum("r_w_iso", 0));
-            const pWrcAdj = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObpAdj, pSlgAdj, pAvgAdj, pIsoAdj);
-            const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
-            const owarAdj = computeOWarFromWrcPlus(pWrcPlusAdj, 260); // centralized (war.ts constants)
-            const basePerOwar = eqNum("nil_base_per_owar", 25000);
-            const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
-            const pvm = getPositionValueMultiplier(row.position);
-            const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
-            const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
-            newP.transfer_snapshot = {
-              p_avg: pAvgAdj, p_obp: pObpAdj, p_slg: pSlgAdj,
-              p_wrc_plus: pWrcPlusAdj, owar: owarAdj, nil_valuation: nilValuation,
-              from_team: row.team || null, from_conference: fromConference,
-            };
-          }
-        }
-      }
+      // ⛔ LIVE TRANSFER PROJECTION REMOVED 2026-09-01 (Trevor). This was the manual-seed
+      //    fallback: a seeded hitter with no `player_predictions` row got its p_avg/p_obp/p_slg/
+      //    wRC+/oWAR/NIL computed here via computeTransferProjection(). It was the LAST live
+      //    compute on the add path — the normal add is stored-first (see the JIT-fetch above,
+      //    which exists precisely so a resolvable seed row reads its STORED prediction).
+      // WHY IT WENT: a second projection implementation drifts from the precompute and CONFLICTS
+      //    with the stored value — the add would show one number and save would write another.
+      //    (It also still centred the z-shift at 100 after the 2026-09-01 centre fix, so it would
+      //    have disagreed with every recomputed row.) One source of truth: the stored snapshot.
+      // ⇒ A manually-seeded hitter with NO stored prediction now lands with the seed rates only
+      //    (`transfer_snapshot` above: p_avg/p_obp/p_slg from __seedStats, wRC+/oWAR/NIL null)
+      //    until a precompute gives it a real row. Blank is correct; invented-and-conflicting is not.
       setRosterPlayers((prev) => [...prev, newP]);
       setDirty(true);
       setTargetPlayerSearchQuery("");
@@ -2889,7 +2804,7 @@ export default function TeamBuilder() {
     const [{ data: storedRows }, { data: playerRow }] = await Promise.all([
       supabase
         .from("player_predictions")
-        .select("customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip, class_transition, dev_aggressiveness")
+        .select("customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip, class_transition, dev_aggressiveness")
         .eq("player_id", row.id)
         .eq("season", PROJECTION_SEASON)
         .in("status", ["active", "departed"]),
@@ -2963,7 +2878,15 @@ export default function TeamBuilder() {
           p_obp: stored?.p_obp ?? null,
           p_slg: stored?.p_slg ?? null,
           p_wrc_plus: stored?.p_wrc_plus ?? null,
+          // ★ 2026-09-01 — the OPTIMISTIC row rendered on add. It must already carry the TOTAL,
+          //   or the coach sees the oWAR component and watches it jump when the DB row lands
+          //   (Ryder Helfrick: 2.5 → 5.02). Same class as the target-board bug: a column that is
+          //   not in the SELECT at :2807 cannot be written here.
           owar: stored?.o_war ?? null,
+          o_war: stored?.o_war ?? null,
+          d_war: stored?.d_war ?? null,
+          bsr_war: stored?.bsr_war ?? null,
+          total_hitter_war: stored?.total_hitter_war ?? null,
           nil_valuation: isTwp ? (stored?.twp_hitter_market_value ?? null) : (stored?.market_value ?? null),
           // Carry BOTH side market values so pickHitter/PitcherMarketValue can
           // resolve a TWP's per-side market from either row's snapshot.

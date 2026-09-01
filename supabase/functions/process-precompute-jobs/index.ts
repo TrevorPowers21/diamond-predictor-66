@@ -316,11 +316,31 @@ function normalizeParkToIndex(n: number | null): number {
 const toRate = (n: number) => (Math.abs(n) > 1 ? n / 100 : n);
 const toWeight = (n: number) => (Math.abs(n) >= 10 ? n / 100 : n);
 
+// ★★★ LOUD FALLBACKS (2026-09-01) ★★★
+// Every config bug found on 2026-09-01 had the SAME shape: a lookup misses, a plausible default takes
+// over, and NOTHING says so. The number that comes out is well-formed, in range, and wrong —
+// stage 5.5 wrote 41 keys nothing read; the z-shift assumed a centre of 100; the legacy
+// "Equation Weights" table silently outranked the code for 5,122/5,122 returners.
+// ⇒ A key that cannot be resolved from `model_config` must leave a TRACE. Logged once per key per
+//   invocation (a per-player log would drown the run — this fires on a 5,000-player loop).
+const _eqFellBack = new Set<string>();
+function _noteFallback(key: string, source: string, value: number) {
+  if (_eqFellBack.has(key)) return;
+  _eqFellBack.add(key);
+  console.warn(`[eq-fallback] ${key} NOT in model_config — using ${source} ${value}`);
+}
+/** Call once at the end of a job to summarise what never resolved. */
+function logEquationFallbackSummary(scope: string) {
+  if (_eqFellBack.size === 0) { console.log(`[eq-fallback] ${scope}: all keys resolved from model_config ✓`); return; }
+  console.warn(`[eq-fallback] ${scope}: ${_eqFellBack.size} key(s) fell back to code constants: ${[...
+    _eqFellBack].sort().join(", ")}`);
+}
 function readEquationValue(key: string, fallback: number, remoteValues: Record<string, number>): number {
   const remote = remoteValues[key];
   if (Number.isFinite(remote)) return Number(remote);
   const canonical = (TRANSFER_WEIGHT_DEFAULTS as Record<string, number>)[key];
-  if (canonical !== undefined) return canonical;
+  if (canonical !== undefined) { _noteFallback(key, "TRANSFER_WEIGHT_DEFAULTS", canonical); return canonical; }
+  _noteFallback(key, "call-site literal", fallback);
   return fallback;
 }
 
@@ -614,8 +634,16 @@ const applyRoleTransitionAdjustment = (
 // Two-sided (split) SD selector — mirror of src/lib/transferPitcherProjection.dsd + pitcherProjection's
 // directional SD (stage 5.5 calibration). PR+ >= 100 projects toward the GOOD side (compressed → sd_good);
 // PR+ < 100 toward the wide BAD side (sd_bad). Falls back to sd_good when sd_bad is absent.
-const dsd = (prPlus: number, sdGood: number, sdBad: number | undefined | null): number =>
-  (prPlus >= 100 ? sdGood : (Number.isFinite(sdBad as number) ? (sdBad as number) : sdGood));
+// 🛑 SPLIT AT THE CENTRE, NOT 100 (2026-09-01, Trevor: "it needs to be split at the stored average").
+//    "Good side" means BETTER THAN THE POPULATION MEAN. PR+ does not centre at 100 on D1/IP>=40 —
+//    era 109.64, bb9 121.68 — so `prPlus >= 100` classified every arm between 100 and the centre as
+//    good-side and handed it sd_good (1.443) when it belonged on sd_bad (1.897), a 31% swing.
+//    `projectPitchingRate` (returner path) already split at prCenter; these transfer copies did not,
+//    which is why the batch and onboarding disagreed BIDIRECTIONALLY on ~24% of pitchers.
+//    Defaults to 100 only so an un-migrated caller is unchanged.
+const dsd = (prPlus: number, sdGood: number, sdBad: number | undefined | null, prCenter = 100): number =>
+  (prPlus >= (Number.isFinite(prCenter) ? prCenter : 100)
+    ? sdGood : (Number.isFinite(sdBad as number) ? (sdBad as number) : sdGood));
 
 const projectLowerP = (
   last: number, prPlus: number, ncaaAvg: number, prSd: number, ncaaSd: number,
@@ -727,15 +755,15 @@ function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: P
   const fromHr9Pf = input.fromHr9ParkRaw != null ? parkToIndex(input.fromHr9ParkRaw) : null;
   const toHr9Pf = input.toHr9ParkRaw != null ? parkToIndex(input.toHr9ParkRaw) : null;
 
-  const pEra = projectLowerP(input.era, input.storedPrPlus.era, eq.era_plus_ncaa_avg, eq.era_pr_sd, dsd(input.storedPrPlus.era, eq.era_plus_ncaa_sd, eq.era_plus_ncaa_sd_bad), eq.transfer_era_power_weight, eq.transfer_era_conference_weight, input.fromEraPlus, input.toEraPlus, eq.transfer_era_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_era_park_weight, fromRg, toRg, 1, eq.era_pr_center);
-  const pFip = projectLowerP(input.fip, input.storedPrPlus.fip, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, dsd(input.storedPrPlus.fip, eq.fip_plus_ncaa_sd, eq.fip_plus_ncaa_sd_bad), eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, input.fromFipPlus, input.toFipPlus, eq.transfer_fip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_fip_park_weight, fromRg, toRg, 1, eq.fip_pr_center);
-  const pWhip = projectLowerP(input.whip, input.storedPrPlus.whip, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(input.storedPrPlus.whip, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, input.fromWhipPlus, input.toWhipPlus, eq.transfer_whip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75, eq.whip_pr_center);
-  const pK9 = projectHigherP(input.k9, input.storedPrPlus.k9, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(input.storedPrPlus.k9, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, input.fromK9Plus, input.toK9Plus, eq.transfer_k9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.k9_pr_center);
-  const pBb9 = projectLowerP(input.bb9, input.storedPrPlus.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(input.storedPrPlus.bb9, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, input.fromBb9Plus, input.toBb9Plus, eq.transfer_bb9_competition_weight, input.fromHitterTalent, input.toHitterTalent, null, null, null, 1, eq.bb9_pr_center);
+  const pEra = projectLowerP(input.era, input.storedPrPlus.era, eq.era_plus_ncaa_avg, eq.era_pr_sd, dsd(input.storedPrPlus.era, eq.era_plus_ncaa_sd, eq.era_plus_ncaa_sd_bad, eq.era_pr_center), eq.transfer_era_power_weight, eq.transfer_era_conference_weight, input.fromEraPlus, input.toEraPlus, eq.transfer_era_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_era_park_weight, fromRg, toRg, 1, eq.era_pr_center);
+  const pFip = projectLowerP(input.fip, input.storedPrPlus.fip, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, dsd(input.storedPrPlus.fip, eq.fip_plus_ncaa_sd, eq.fip_plus_ncaa_sd_bad, eq.fip_pr_center), eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, input.fromFipPlus, input.toFipPlus, eq.transfer_fip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_fip_park_weight, fromRg, toRg, 1, eq.fip_pr_center);
+  const pWhip = projectLowerP(input.whip, input.storedPrPlus.whip, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(input.storedPrPlus.whip, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad, eq.whip_pr_center), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, input.fromWhipPlus, input.toWhipPlus, eq.transfer_whip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75, eq.whip_pr_center);
+  const pK9 = projectHigherP(input.k9, input.storedPrPlus.k9, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(input.storedPrPlus.k9, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad, eq.k9_pr_center), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, input.fromK9Plus, input.toK9Plus, eq.transfer_k9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.k9_pr_center);
+  const pBb9 = projectLowerP(input.bb9, input.storedPrPlus.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(input.storedPrPlus.bb9, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad, eq.bb9_pr_center), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, input.fromBb9Plus, input.toBb9Plus, eq.transfer_bb9_competition_weight, input.fromHitterTalent, input.toHitterTalent, null, null, null, 1, eq.bb9_pr_center);
   // HR9-only physical floor at 0 (mirror src/lib floorAtZero, Trevor 2026-08-25): HR9 is the lone
   // luck-dominated rate where a thin-sample blend can dip below 0 even after the two-sided SD. Every
   // OTHER rate stays unfloored so a negative surfaces as a real bug, not silently masked.
-  const pHr9 = Math.max(0, projectLowerP(input.hr9, input.storedPrPlus.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(input.storedPrPlus.hr9, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, input.fromHr9Plus, input.toHr9Plus, eq.transfer_hr9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf, 1, eq.hr9_pr_center));
+  const pHr9 = Math.max(0, projectLowerP(input.hr9, input.storedPrPlus.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(input.storedPrPlus.hr9, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad, eq.hr9_pr_center), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, input.fromHr9Plus, input.toHr9Plus, eq.transfer_hr9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf, 1, eq.hr9_pr_center));
 
   const roleCurve = {
     tier1Max: eq.rp_to_sp_low_better_tier1_max, tier2Max: eq.rp_to_sp_low_better_tier2_max, tier3Max: eq.rp_to_sp_low_better_tier3_max,
@@ -979,7 +1007,12 @@ function getProgramTierMultiplierByConference(
 function getPositionValueMultiplier(position: string | null | undefined): number {
   const pos = (position || "").trim().toUpperCase();
   if (["C","CATCHER","SS","SHORTSTOP","CF","CENTER FIELD","CENTERFIELD"].includes(pos)) return 1.3;
-  if (["2B","SECOND BASE","SECONDBASE","3B","THIRD BASE","THIRDBASE","LF","RF","CORNER OUTFIELD","COF","OF","OUTFIELD"].includes(pos)) return 1.1;
+  // 🛑 "IF"/"INF"/"INFIELD" MUST be here. They were missing until 2026-09-01, so an `IF` player got
+  //    1.1x in the batch (src/lib/nilProgramSpecific.ts) and 1.0x here — a flat 10% market-value gap
+  //    between onboarding and every other path. Found by diffing this function's output against the
+  //    local precompute for Georgia: 371 rows, ratio EXACTLY 1.1, all position='IF'.
+  //    Keep this list byte-identical to src/lib/nilProgramSpecific.ts::getPositionValueMultiplier.
+  if (["2B","SECOND BASE","SECONDBASE","3B","THIRD BASE","THIRDBASE","IF","INF","INFIELD","LF","RF","CORNER OUTFIELD","COF","OF","OUTFIELD"].includes(pos)) return 1.1;
   if (["1B","FIRST BASE","FIRSTBASE","DH","DESIGNATED HITTER","DESIGNATEDHITTER","UT","UTL","UTIL","UTILITY"].includes(pos)) return 1.0;
   if (["BENCH","BENCH UTILITY","BENCHUTILITY"].includes(pos)) return 0.8;
   return 1.0;
@@ -1498,7 +1531,18 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     if (Number.isFinite(prSds[s])) eqD1[`${s}_pr_sd`] = prSds[s];
     eqD1[`${s}_pr_center`] = ctr(s);
   }
-  console.log(`[calibration] pr_centers from model_config: ${Object.keys(prCenters).length}/9 · pr_sds: ${Object.keys(prSds).length}/6`);
+  // LOUD: name what did NOT resolve. A count of "7/9" tells you something is missing but not WHAT,
+  // and a stale centre is invisible in the output — it just shifts every projection a little.
+  {
+    const wantCtr = ["era", "fip", "whip", "k9", "bb9", "hr9", "ba", "obp", "iso"];
+    const wantSd = ["era", "fip", "whip", "k9", "bb9", "hr9"];
+    const missCtr = wantCtr.filter((k) => !Number.isFinite(prCenters[k]));
+    const missSd = wantSd.filter((k) => !Number.isFinite(prSds[k]));
+    console.log(`[calibration] pr_centers ${wantCtr.length - missCtr.length}/${wantCtr.length} · pr_sds ${wantSd.length - missSd.length}/${wantSd.length}`);
+    if (missCtr.length) console.warn(`[calibration] ⚠ MISSING pr_center → hardcoded fallback: ${missCtr.map((k) => `${k}(${CTR_FALLBACK[k]})`).join(", ")}`);
+    if (missSd.length) console.warn(`[calibration] ⚠ MISSING pr_sd → code default: ${missSd.join(", ")}`);
+    if (!missCtr.length && !missSd.length) console.log(`[calibration] ✓ all centres and SDs resolved from model_config`);
+  }
   const eqJucoOrD2: typeof PITCHING_EQ_DEFAULTS = { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS };
   // 2026-08-21: PTM tiers from model_config `nil_tier_<code>` (single source; falls back to consts).
   const mcMapP: Record<string, number> = {};
@@ -1968,13 +2012,18 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
   const playerIds: string[] = returners.map((p: any) => p.id);
 
   // Load predictions (freshly written by precompute)
+  // 🛑 total_hitter_war / d_war / bsr_war MUST stay in this SELECT. The `player_snapshot` writes below
+  //    copy from these rows, and a column that is not selected CANNOT be written — that is exactly how
+  //    `useTargetBoard.addPlayer` shipped snapshots carrying the oWAR COMPONENT instead of the
+  //    position-player headline (Ryder Helfrick 2.32 vs 4.94, found 2026-09-01). Same bug, same cause:
+  //    market_value was in the select and was correct; total_hitter_war was not and was silently absent.
   const PAGE = 1000;
   let predictions: any[] = [];
   let from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("player_predictions")
-      .select("player_id, customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip, class_transition, dev_aggressiveness")
+      .select("player_id, customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip, class_transition, dev_aggressiveness")
       .in("player_id", playerIds)
       .eq("season", PROJECTION_SEASON)
       .in("status", ["active", "departed"])
@@ -2031,7 +2080,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         position_slot: p.position && !isPitcherPos(p.position) ? p.position : null,
         depth_order: 1, nil_value: 0,
         production_notes: buildPlayerMetaJson("returner", hDepth),
-        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, d_war: hPred.d_war, bsr_war: hPred.bsr_war, total_hitter_war: hPred.total_hitter_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: customName,
@@ -2055,7 +2104,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         player_id: p.id, source: "returner", custom_name: `${p.first_name || ""} ${p.last_name || ""}`.trim() || null,
         position_slot: p.position ?? null, depth_order: 1, nil_value: 0,
         production_notes: buildPlayerMetaJson("returner", hDepth),
-        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, d_war: hPred.d_war, bsr_war: hPred.bsr_war, total_hitter_war: hPred.total_hitter_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
     }
   }
@@ -2239,6 +2288,10 @@ Deno.serve(async (req: Request) => {
     } catch (cwErr: any) {
       console.error("refresh_composite_war threw (non-fatal):", cwErr);
     }
+
+    // Every key that could not be resolved from model_config, named, once per run. A silent
+    // fallback is how a stale constant survives a "successful" job — see the note on readEquationValue.
+    logEquationFallbackSummary(`job ${job.id.slice(0, 8)} scope=${job.scope}`);
 
     await supabase
       .from("precompute_jobs")

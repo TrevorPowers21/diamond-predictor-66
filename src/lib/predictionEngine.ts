@@ -127,6 +127,12 @@ interface ReturnerConfig {
   obpStdPower: number;
   obpStdNcaa: number;
   ncaaPR: number;
+  /** Population mean of the BA power rating (`h_ba_pr_center`). NOT 100 — see loadEngineConfig. */
+  baPrCenter: number;
+  /** Population mean of the OBP power rating (`h_obp_pr_center`). */
+  obpPrCenter: number;
+  /** Population mean of the ISO power rating (`h_iso_pr_center`). */
+  isoPrCenter: number;
   powerWeight: number;
   ncaaWrc: number;
   classBases: Record<string, { avg: number; obp: number; iso: number }>;
@@ -326,6 +332,12 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     obpStdPower: 31.89504,  // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
     obpStdNcaa: 0.046781,
     ncaaPR: 100,
+    // 🛑 The hitter power ratings are NOT centred at 100. These literals mirror
+    //    `process-precompute-jobs/index.ts:471-473` so the batch and the onboarding edge
+    //    function behave identically offline; `model_config` h_*_pr_center overrides both.
+    baPrCenter: 102.9887,
+    obpPrCenter: 100.3109,
+    isoPrCenter: 103.7939,
     powerWeight: 0.7,
     ncaaWrc: 0.3782,
     classBases: {
@@ -387,6 +399,40 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     } else if (k.startsWith("wrc_weight_")) {
       const stat = k.replace("wrc_weight_", "") as "obp" | "slg" | "avg" | "iso";
       if (["obp", "slg", "avg", "iso"].includes(stat)) returner.wrcWeights[stat] = toWeight(v);
+    }
+  }
+
+  // ★★★ 2026-09-01 — HITTER RATING CENTRES FROM model_config (h_<stat>_pr_center) ★★★
+  //   The z-shift below divides `(rating - CENTRE) / sd`. It used `ncaaPR = 100`, but the hitter
+  //   power ratings are NOT centred at 100 on D1 (staging: BA 102.588 · OBP 99.977 · ISO 103.235).
+  //   The onboarding edge function has read these since the C1 fix; the BATCH did not, so a newly
+  //   onboarded program's hitters were computed on a different centre than every existing team's.
+  //   Measured 2026-09-01: the hitter dry run moved 0/3,794 rows because of this gap.
+  // ⚠ These are the ONLY model_config keys this hitter path reads. The 41 `r_*` / 26 `t_*` keys
+  //   are still INERT here — see the note at the top of this function.
+  {
+    const { data: ctrRows, error: ctrErr } = await (supabase as any)
+      .from("model_config")
+      .select("config_key, config_value")
+      .eq("model_type", "admin_ui")
+      .eq("season", 2026)
+      .in("config_key", ["h_ba_pr_center", "h_obp_pr_center", "h_iso_pr_center"]);
+    if (ctrErr) {
+      console.warn(`[engineConfig] h_*_pr_center read FAILED (${ctrErr.message}) — falling back to code defaults`);
+    } else {
+      const seen = new Set<string>();
+      for (const r of (ctrRows || []) as Array<{ config_key: string; config_value: any }>) {
+        const v = Number(r.config_value);
+        if (!Number.isFinite(v)) continue;
+        seen.add(r.config_key);
+        if (r.config_key === "h_ba_pr_center") returner.baPrCenter = v;
+        else if (r.config_key === "h_obp_pr_center") returner.obpPrCenter = v;
+        else if (r.config_key === "h_iso_pr_center") returner.isoPrCenter = v;
+      }
+      // LOUD FALLBACK — a missing key must never be a silent substitution.
+      for (const k of ["h_ba_pr_center", "h_obp_pr_center", "h_iso_pr_center"]) {
+        if (!seen.has(k)) console.warn(`[engineConfig] ${k} MISSING from model_config — using code default`);
+      }
     }
   }
 
@@ -525,7 +571,7 @@ export function recalcReturner(
     ? null
     : (() => {
       const safeBaStdPower = config.baStdPower === 0 ? 1 : config.baStdPower;
-      const scaledBa = config.ncaaAvg + (((baPlus - config.ncaaPR) / safeBaStdPower) * config.baStdNcaa);
+      const scaledBa = config.ncaaAvg + (((baPlus - config.baPrCenter) / safeBaStdPower) * config.baStdNcaa);
       const baBlended = (fromAvg * (1 - effectivePowerWeight)) + (scaledBa * effectivePowerWeight);
       const baProjected = baBlended * (1 + bases.avg + (devAgg * config.devCoeffs.avg));
       return round3(normalizeProjectedRate(baProjected));
@@ -535,7 +581,7 @@ export function recalcReturner(
     ? null
     : (() => {
       const safeObpStdPower = config.obpStdPower === 0 ? 1 : config.obpStdPower;
-      const scaledObp = config.ncaaObp + (((obpPlus - config.ncaaPR) / safeObpStdPower) * config.obpStdNcaa);
+      const scaledObp = config.ncaaObp + (((obpPlus - config.obpPrCenter) / safeObpStdPower) * config.obpStdNcaa);
       const obpBlended = (fromObp * (1 - effectivePowerWeight)) + (scaledObp * effectivePowerWeight);
       const obpProjected = obpBlended * (1 + bases.obp + (devAgg * config.devCoeffs.obp));
       return round3(normalizeProjectedRate(obpProjected));
@@ -545,7 +591,7 @@ export function recalcReturner(
     ? null
     : (() => {
       const lastIso = fromSlg - fromAvg;
-      const scaledIso = config.ncaaIso + (((isoPlus - config.ncaaPR) / config.isoStdPower) * config.isoStdNcaa);
+      const scaledIso = config.ncaaIso + (((isoPlus - config.isoPrCenter) / config.isoStdPower) * config.isoStdNcaa);
       const blendedIso = (lastIso * (1 - effectivePowerWeight)) + (scaledIso * effectivePowerWeight);
       return round3(normalizeProjectedRate(blendedIso * (1 + bases.iso + (devAgg * config.devCoeffs.iso))));
     })();
@@ -570,6 +616,12 @@ export function recalcReturner(
   };
 }
 
+// ⛔ DEAD — ZERO CALLERS (the router that used it was removed 2026-08-20; see note below).
+//    It is ALSO WRONG: it scales BA/OBP/ISO off the single OVERALL rating
+//    (`power_rating_plus` = Hitter Master `overall_power_rating`). Hitting does NOT use an overall
+//    rating — each metric must use its OWN power rating, as `transferProjection.ts` (baPR/obpPR/isoPR)
+//    and the returner path do. If this is ever revived, port it to per-stat ratings + per-stat
+//    centres FIRST. Left centred at 100 deliberately: do not "fix" the centre on the wrong input.
 function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
   const fromAvgRaw = normalizeRateInput(Number(pred.from_avg));
   const fromObpRaw = normalizeRateInput(Number(pred.from_obp));

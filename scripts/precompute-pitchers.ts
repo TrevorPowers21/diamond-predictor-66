@@ -71,6 +71,26 @@ function normalizeName(s: string | null | undefined): string {
   return String(s || "").toLowerCase().trim().replace(/\s+/g, " ");
 }
 
+// ─── DRY-RUN DELTA REPORT (2026-09-01, step 6) — read-only, gate is ACROSS THE RANGE ──────────────
+const _pctl = (xs: number[], q: number): number => {
+  if (!xs.length) return NaN;
+  const s = [...xs].sort((a, b) => a - b);
+  const i = (s.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (i - lo);
+};
+const _fmt = (n: number, d = 3) => (Number.isFinite(n) ? n.toFixed(d) : "  —  ");
+function _rangeReport(label: string, pairs: Array<{ before: number | null; after: number | null }>, d = 3) {
+  const both = pairs.filter((p) => p.before != null && p.after != null && Number.isFinite(p.before as number) && Number.isFinite(p.after as number));
+  if (!both.length) { console.log(`   ${label.padEnd(12)} (no comparable rows)`); return; }
+  const B = both.map((p) => p.before as number), A = both.map((p) => p.after as number);
+  const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const sB = _pctl(B, 0.9) - _pctl(B, 0.05), sA = _pctl(A, 0.9) - _pctl(A, 0.05);
+  console.log(`   ${label.padEnd(12)} n=${String(both.length).padStart(5)}  mean ${_fmt(mean(B), d)}→${_fmt(mean(A), d)} (${mean(A) - mean(B) >= 0 ? "+" : ""}${_fmt(mean(A) - mean(B), d)})  ` +
+    `p05 ${_fmt(_pctl(B, 0.05), d)}→${_fmt(_pctl(A, 0.05), d)}  p50 ${_fmt(_pctl(B, 0.5), d)}→${_fmt(_pctl(A, 0.5), d)}  ` +
+    `p90 ${_fmt(_pctl(B, 0.9), d)}→${_fmt(_pctl(A, 0.9), d)}  spread ${_fmt(sB, d)}→${_fmt(sA, d)} (${sB !== 0 ? ((sA - sB) / sB * 100 >= 0 ? "+" : "") + _fmt((sA - sB) / sB * 100, 1) + "%" : "—"})`);
+}
+
+
 async function main() {
   const isProd = process.argv.includes("--prod");
   const dryRun = process.argv.includes("--dry-run");
@@ -591,8 +611,27 @@ async function main() {
   }
 
   if (dryRun) {
-    console.log(`${C.yellow}[DRY RUN]${C.reset} would upsert ${upserts.length} rows. Sample:`);
-    console.log(JSON.stringify(upserts.slice(0, 2), null, 2));
+    console.log(`${C.yellow}[DRY RUN]${C.reset} would upsert ${upserts.length} rows — diffing vs stored (no writes)...`);
+    const ids = upserts.map((u: any) => u.player_id);
+    const stored = new Map<string, any>(); const meta = new Map<string, any>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const { data: sd, error: se } = await (supabase as any).from("player_predictions")
+        .select("player_id, p_era, p_fip, p_whip, p_bb9, p_war, market_value, projected_ip")
+        .eq("model_type", "transfer").eq("variant", "precomputed")
+        .eq("customer_team_id", upserts[0].customer_team_id).in("player_id", chunk);
+      if (se) throw new Error(`stored lookup failed: ${se.message}`);
+      for (const r of (sd || [])) stored.set(r.player_id, r);
+      const { data: pd, error: pe } = await (supabase as any).from("players")
+        .select("id, first_name, last_name, division").in("id", chunk);
+      if (pe) throw new Error(`players lookup failed: ${pe.message}`);
+      for (const r of (pd || [])) meta.set(r.id, { name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(), div: r.division });
+    }
+    const P = upserts.map((u: any) => ({ u, s: stored.get(u.player_id), m: meta.get(u.player_id) }))
+      .filter((r: any) => r.s && r.m?.div === "D1" && Number(r.u.projected_ip) >= 40 && r.u.p_era != null);
+    console.log(`\n${C.bold}TRANSFER PITCHERS (D1, ip>=40): ${P.length}${C.reset}`);
+    for (const [l, c, d] of [["p_era","p_era",3],["p_fip","p_fip",3],["p_whip","p_whip",3],["p_bb9","p_bb9",3],["p_war","p_war",3],["market","market_value",0]] as Array<[string,string,number]>)
+      _rangeReport(l, P.map((r: any) => ({ before: r.s[c] == null ? null : Number(r.s[c]), after: r.u[c] == null ? null : Number(r.u[c]) })), d);
     return;
   }
 

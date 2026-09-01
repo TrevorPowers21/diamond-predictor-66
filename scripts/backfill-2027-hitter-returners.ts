@@ -60,6 +60,33 @@ async function loadAllPaged<T>(builder: () => any): Promise<T[]> {
   return out;
 }
 
+
+// ─── DRY-RUN DELTA REPORT (2026-09-01, step 6) ──────────────────────────────────────────────────
+// Read-only. Compares what THIS run would write against what is stored, so the calibration change
+// can be inspected BEFORE any write. Gate is ACROSS THE RANGE (p05..p90) + biggest movers, never
+// the mean alone — a bug calibrated perfectly at the mean is invisible to a mean-only check.
+const _pctl = (xs: number[], q: number): number => {
+  if (!xs.length) return NaN;
+  const s = [...xs].sort((a, b) => a - b);
+  const i = (s.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (i - lo);
+};
+const _fmt = (n: number, d = 3) => (Number.isFinite(n) ? n.toFixed(d) : "  —  ");
+function _rangeReport(label: string, pairs: Array<{ before: number | null; after: number | null }>, d = 3) {
+  const both = pairs.filter((p) => p.before != null && p.after != null && Number.isFinite(p.before as number) && Number.isFinite(p.after as number));
+  if (!both.length) { console.log(`   ${label.padEnd(16)} (no comparable rows)`); return; }
+  const B = both.map((p) => p.before as number), A = both.map((p) => p.after as number);
+  const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const spreadB = _pctl(B, 0.9) - _pctl(B, 0.05), spreadA = _pctl(A, 0.9) - _pctl(A, 0.05);
+  const spreadPct = spreadB !== 0 ? ((spreadA - spreadB) / spreadB) * 100 : NaN;
+  console.log(`   ${label.padEnd(10)} n=${String(both.length).padStart(5)}  ` +
+    `mean ${_fmt(mean(B), d)}→${_fmt(mean(A), d)} (${(mean(A) - mean(B) >= 0 ? "+" : "")}${_fmt(mean(A) - mean(B), d)})  ` +
+    `p05 ${_fmt(_pctl(B, 0.05), d)}→${_fmt(_pctl(A, 0.05), d)}  ` +
+    `p50 ${_fmt(_pctl(B, 0.5), d)}→${_fmt(_pctl(A, 0.5), d)}  ` +
+    `p90 ${_fmt(_pctl(B, 0.9), d)}→${_fmt(_pctl(A, 0.9), d)}  ` +
+    `spread ${_fmt(spreadB, d)}→${_fmt(spreadA, d)} (${spreadPct >= 0 ? "+" : ""}${_fmt(spreadPct, 1)}%)`);
+}
+
 async function main() {
   const isProd = process.argv.includes("--prod");
   const dryRun = process.argv.includes("--dry-run");
@@ -353,8 +380,46 @@ async function main() {
   console.log(`${C.bold}Recalc result:${C.reset} ${C.green}${computed} computed${C.reset}, ${C.yellow}${nullProjected} all-null projections${C.reset}, ${C.yellow}${missingMasterRatings} rows missing master ratings${C.reset}`);
 
   if (dryRun) {
-    console.log(`${C.yellow}[DRY RUN]${C.reset} would UPDATE ${updates.length} rows. Sample:`);
-    console.log(JSON.stringify(updates.slice(0, 2), null, 2));
+    console.log(`${C.yellow}[DRY RUN]${C.reset} would UPDATE ${updates.length} rows — diffing vs stored (no writes)...`);
+    const ids = updates.map((u: any) => u.id);
+    const stored = new Map<string, any>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data: sd, error: se } = await (supabase as any).from("player_predictions")
+        .select("id, player_id, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, total_hitter_war, market_value, projected_pa")
+        .in("id", ids.slice(i, i + 100));
+      if (se) throw new Error(`stored lookup failed: ${se.message}`);
+      for (const r of (sd || [])) stored.set(r.id, r);
+    }
+    const pids = Array.from(new Set(Array.from(stored.values()).map((r: any) => r.player_id)));
+    const meta = new Map<string, { name: string; div: string | null }>();
+    for (let i = 0; i < pids.length; i += 100) {
+      const { data: pd, error: pe } = await (supabase as any).from("players")
+        .select("id, first_name, last_name, division").in("id", pids.slice(i, i + 100));
+      if (pe) throw new Error(`players lookup failed: ${pe.message}`);
+      for (const r of (pd || [])) meta.set(r.id, { name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(), div: r.division });
+    }
+    const rows = updates.map((u: any) => { const st = stored.get(u.id); return { u, s: st, m: st ? meta.get(st.player_id) : undefined }; })
+      .filter((r: any) => r.s && r.m?.div === "D1");
+    const qual = rows.filter((r: any) => Number(r.u.patch.projected_pa ?? r.s.projected_pa) >= 100);
+    console.log(`\n${C.bold}D1 rows with a stored comparison: ${rows.length} · QUALIFIED (projected_pa>=100): ${qual.length}${C.reset}`);
+    for (const [lbl, col, dp] of [["p_avg", "p_avg", 3], ["p_obp", "p_obp", 3], ["p_slg", "p_slg", 3],
+                                  ["p_wrc_plus", "p_wrc_plus", 1], ["o_war", "o_war", 3],
+                                  ["tot_hit_war", "total_hitter_war", 3], ["market", "market_value", 0]] as Array<[string, string, number]>) {
+      _rangeReport(lbl, qual.map((r: any) => ({ before: r.s[col] == null ? null : Number(r.s[col]),
+        after: r.u.patch[col] === undefined ? (r.s[col] == null ? null : Number(r.s[col])) : (r.u.patch[col] == null ? null : Number(r.u.patch[col])) })), dp);
+    }
+    const movers = qual.map((r: any) => ({ name: r.m.name, pa: Number(r.u.patch.projected_pa ?? r.s.projected_pa),
+        b: r.s.p_wrc_plus == null ? NaN : Number(r.s.p_wrc_plus),
+        a: r.u.patch.p_wrc_plus == null ? NaN : Number(r.u.patch.p_wrc_plus) }))
+      .filter((x: any) => Number.isFinite(x.b) && Number.isFinite(x.a))
+      .map((x: any) => ({ ...x, d: x.a - x.b })).sort((p: any, q: any) => Math.abs(q.d) - Math.abs(p.d));
+    console.log(`\n${C.bold}20 LARGEST p_wrc_plus MOVES (qualified):${C.reset}`);
+    for (const x of movers.slice(0, 20)) {
+      const arrow = x.d >= 0 ? `${C.green}▲` : `${C.red}▼`;
+      console.log(`   ${x.name.padEnd(26)} pa=${String(Math.round(x.pa)).padStart(4)}  ${_fmt(x.b, 1)} → ${_fmt(x.a, 1)}  ${arrow}${x.d >= 0 ? "+" : ""}${_fmt(x.d, 1)}${C.reset}`);
+    }
+    const unchanged = movers.filter((x: any) => Math.abs(x.d) < 1e-6).length;
+    console.log(`\n   unchanged (|Δ|<1e-6): ${unchanged}/${movers.length}`);
     return;
   }
 

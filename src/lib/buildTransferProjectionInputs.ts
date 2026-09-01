@@ -253,6 +253,15 @@ export function buildHitterTransferInputs(
   const obpStdPower = readEquationValue("t_obp_std_pr", 31.89504, remoteEquationValues); // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
   const obpStdNcaa = toRate(readEquationValue("t_obp_std_ncaa", 0.046781, remoteEquationValues));
 
+  // ★ PER-STAT RATING CENTRES (2026-09-01). The z-shift divides `(rating - CENTRE) / sd`, and the
+  //   hitter power ratings are NOT centred at 100 on D1/PA>=100 (BA 102.588 · OBP 99.977 · ISO
+  //   103.235 on staging). Each metric uses ITS OWN rating and ITS OWN centre — `h_*_pr_center`.
+  // ⚠ These are the PLAYER's ratings. Do NOT confuse them with `from/to*Plus`, which are CONFERENCE
+  //   avg+/obp+/iso+ values carrying the from→to environment delta and nothing about the player.
+  const baPrCenter = readEquationValue("h_ba_pr_center", 102.9887, remoteEquationValues);
+  const obpPrCenter = readEquationValue("h_obp_pr_center", 100.3109, remoteEquationValues);
+  const isoPrCenter = readEquationValue("h_iso_pr_center", 103.7939, remoteEquationValues);
+
   const srcW = transferWeightsForSource(player.division || undefined);
   const jucoWeight = (k: keyof typeof srcW, d1: number) => (isJucoSource ? srcW[k] : d1);
   const baPowerWeight = toRate(jucoWeight("t_ba_power_weight", readEquationValue("t_ba_power_weight", 0.70, remoteEquationValues)));
@@ -286,6 +295,9 @@ export function buildHitterTransferInputs(
     baPR: safePR(baPR),
     obpPR: safePR(obpPR),
     isoPR: safePR(isoPR),
+    baPrCenter,
+    obpPrCenter,
+    isoPrCenter,
     fromAvgPlus: fromAvgPlus as number,
     toAvgPlus: toAvgPlus as number,
     fromObpPlus: fromObpPlus as number,
