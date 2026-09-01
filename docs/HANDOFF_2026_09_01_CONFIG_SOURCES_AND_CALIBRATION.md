@@ -146,27 +146,76 @@ is blind to this class of bug**, and to the one it replaces.
 
 ## 📋 PASTE-READY RESUME TEXT (for a fresh session)
 
-> Resuming RSTR IQ on `feature/war-recalibration`. Read
-> `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md` first — it is current.
+> Resuming RSTR IQ on `feature/war-recalibration` (PR #171 → `staging`).
 >
-> Context: two root causes were found and FIXED IN CODE on 2026-09-01. (1) Gate B — prod's returner
-> wRC+ ran a different equation because the legacy `"Equation Weights"` 2025 table overrode the code
-> defaults; proven by the legacy formula reproducing the stored value for 5,122/5,122 D1 returner
-> hitters vs 1,164 for canonical. (2) C1 — ERAs ran ~4% low because the calibration had no division
-> filter (477 JUCO = 27% of the sample) and the z-shift assumed PR+ centres at 100 when the true
-> D1/IP>=40 centres are 109.73–123.16.
+> **READ FIRST, IN THIS ORDER:**
+> 1. `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md` — **THIS FILE. Current state, the
+>    three-config-system discovery, both solved gates, steps 1–3 done, resume at step 4.**
+> 2. `docs/PLAN_2026_09_01_onboarding_verify_and_wrc_audit.md` — the GATES. Gate A (onboarding),
+>    **Gate B (wRC+ — SOLVED, old hypotheses archived in place)**, Gate C (ERA/HR9 calibration), plus
+>    the logged shortcomings: small-sample pRV+, the 146 stale projections, and the CLOSED relink.
+> 3. `docs/PIPELINE_pitch_log_to_projections.md` — **TRACK B, the canonical build spec.** Stage 5.5 =
+>    calibration + rating centres. Contains the three MUST READ blocks: *where constants come from*,
+>    *the `model_config` key naming convention*, and *stage 5.5 is D1-only / the z-shift does not
+>    subtract 100*. Also the AUTOFILL requirement (stage 5.5 must run from the upload chain — NOT BUILT).
+> 4. `docs/AGENT_LEARNINGS_snapshot_read_path_2026_09_01.md` — why four surfaces disagreed and the
+>    doctrine that came out of it (**read the same ROW, don't compute the same ANSWER**).
+> 5. `docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md` — the two-sided SD
+>    method (correct as designed) **plus the MUST READ correcting its population choices**.
 >
-> Config consolidation steps 1–3 are DONE: the legacy table is renamed `_LEGACY_2025` on both
-> databases, the legacy reads are removed, and `model_config` (admin_ui, season 2026) is now the single
-> source of truth with the rating centres wired into the `fields` mapping.
+> **WHEN YOU ARE ABOUT TO RUN SOMETHING:**
+> · `docs/PROD_PUSH_RUNBOOK_war_recalibration.md` — the steps · `docs/PROD_PUSH_BULLETPROOF_CHECKLIST.md`
+> — the GATES that must be true (VALUE/MEMBERSHIP/CARDINALITY/LOG-CONTENT, never counts or exit codes) ·
+> `PROD_MIGRATIONS_TODO.md` — every prod migration incl. the unapplied 41-key `model_config` upsert ·
+> `docs/JUCO_AUDIT_2026_05_24.md` — JUCO is knowingly wrong and PARKED; do not chase it.
 >
-> **NOTHING HAS BEEN WRITTEN TO EITHER DATABASE'S `model_config`, AND NO PROJECTION HAS BEEN
-> RECOMPUTED.** Every stored `p_era` / `p_war` / `p_wrc_plus` / `market_value` still carries both
-> biases.
+> **CODE ENTRY POINTS:** `scripts/compute-projection-calibration.ts` (stage 5.5 producer) ·
+> `src/lib/pitchingEquations.ts` (the `fields` mapping — **a key is INERT unless listed there**) ·
+> `src/lib/predictionEngine.ts` (`loadEngineConfig`, the returner/transfer configs) ·
+> `src/hooks/useActiveBuildSnapshot.ts` (the one snapshot resolver) ·
+> `supabase/functions/process-precompute-jobs/index.ts` (onboarding — still has its own constants and
+> its own hardcoded `100`).
 >
-> **Resume at STEP 4** in that handoff: apply the calibration to staging, then prod, then mirror the
-> edge function, then re-run precomputes and verify ACROSS THE RANGE (p05/p10/median/p90 — a mean-only
-> check is blind to this class of bug). Do not redo steps 1–3.
+> **CONTEXT.** Two root causes were found and **FIXED IN CODE** on 2026-09-01. **(1) Gate B** — prod's
+> returner wRC+ ran a different equation because the legacy `"Equation Weights"` 2025 table overrode the
+> code defaults; proven by the legacy formula reproducing the stored value for **5,122/5,122** D1
+> returner hitters vs **1,164** for canonical. **(2) C1** — ERAs ran ~4% low because the calibration had
+> no division filter (**477 JUCO = 27% of the sample**) and the z-shift assumed PR+ centres at 100 when
+> the true D1/IP≥40 centres are **109.73–123.16** (bb9 worst).
+>
+> Config consolidation **steps 1–3 are DONE**: legacy table renamed `_LEGACY_2025` on BOTH databases,
+> legacy reads removed, `model_config` (admin_ui, season 2026) is the single source of truth, and the
+> rating centres are wired into the `fields` mapping.
+>
+> 🛑 **NOTHING HAS BEEN WRITTEN TO EITHER DATABASE'S `model_config`, AND NO PROJECTION HAS BEEN
+> RECOMPUTED.** Every stored `p_era` / `p_war` / `p_wrc_plus` / `market_value` still carries both biases.
+> **No displayed number has changed.**
+>
+> **RESUME AT STEP 4.** Apply calibration (staging → prod) → mirror the edge fn → re-run precomputes →
+> verify **ACROSS THE RANGE** (p05/p10/median/p90; a mean-only check is blind to this class of bug).
+> **Do not redo steps 1–3.**
+
+## 📚 DOCUMENT MAP — what lives where
+
+| document | role | read it when |
+|---|---|---|
+| **`docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md`** | **THIS FILE — current state + resume point** | **first, always** |
+| `docs/PLAN_2026_09_01_onboarding_verify_and_wrc_audit.md` | the GATES (A onboarding · **B wRC+ SOLVED** · C ERA/HR9) + logged shortcomings | before starting any gate |
+| `docs/PIPELINE_pitch_log_to_projections.md` | **TRACK B — canonical build spec**, 19-stage order, all MUST READs, key-naming convention, autofill requirement | before touching any stage |
+| `docs/AGENT_LEARNINGS_snapshot_read_path_2026_09_01.md` | why 4 surfaces disagreed; the read-the-same-row doctrine | touching profiles / TB / GM hub / target board |
+| `docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md` | two-sided SD method + the correction to its population choices | touching calibration or SDs |
+| `docs/PROD_PUSH_RUNBOOK_war_recalibration.md` | the step list | when running the push |
+| `docs/PROD_PUSH_STEPS_2026_08_26.md` | step ordering | when sequencing |
+| `docs/PROD_PUSH_BULLETPROOF_CHECKLIST.md` | gate DEFINITIONS + measured values | before/after every step |
+| `docs/PROD_PUSH_BULLETPROOF_CHECKLIST_BRANCHWIDE.md` | branch-wide readiness + **SILENT-FAILURE REGISTRY** | before promoting anything |
+| `docs/PROD_PUSH_HANDOFF_RESUME_2026_08_26.md` | earlier resume point (⚠ its projection verifications are VOID — computed against the legacy formula) | historical only |
+| `docs/HANDOFF_2026_08_31_EOD.md` | prod state as of 08-31 | for "what was true then" |
+| `docs/HANDOFF_WHATS_AHEAD_2026_08_31.md` | Track B blockers + the earned rules | planning |
+| `docs/HANDOFF_RESUME_2026_08_31_SNAPSHOTS.md` | snapshot state (⚠ numbers inside carry the bias) | snapshot work |
+| `docs/HANDOFF_2026_08_31_MASTERS_AND_TRACKB.md` | Track B architecture write-up | architecture questions |
+| `PROD_MIGRATIONS_TODO.md` | **every prod migration** — incl. the UNAPPLIED 41-key upsert and the completed legacy rename | before any prod write |
+| `docs/JUCO_AUDIT_2026_05_24.md` | JUCO is knowingly wrong and PARKED | **so you do not chase JUCO** |
+| `docs/FUTURE_WORK_BACKLOG_2026_08_26.md` | deliberately deferred work | when tempted to widen scope |
 
 ## ⛔ TRAPS — each of these already cost time today
 
