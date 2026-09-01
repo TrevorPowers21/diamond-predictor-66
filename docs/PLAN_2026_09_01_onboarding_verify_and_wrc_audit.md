@@ -142,6 +142,69 @@ default build. A wRC+ correction is NOT display-only. Scope the downstream recom
 
 ---
 
+## GATE C — ERA / HR9 CALIBRATION (added 2026-08-31, Trevor: *"eras felt pretty low in projections"*)
+
+### ✅ The two-sided SD IS implemented and IS live on prod — this is not a "did we ship it" question
+`model_config` (admin_ui / 2026) carries all six pitching stats with `_ncaa_avg` + `_ncaa_sd` +
+`_ncaa_sd_bad`: era 5.483/1.587/2.304 · fip 5.098/1.315/1.869 · whip 1.514/0.257/0.341 ·
+k9 8.502/2.340/1.982 · bb9 4.014/1.304/1.763 · hr9 1.062/0.221/0.281.
+Built 2026-08-25, commit `57e8f12`. See
+`docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md`.
+
+### ★ The original bug IS fixed — verify this stays true, don't re-litigate it
+| | before (1-sided SD) | now (prod, measured 2026-08-31) | actual 2026 |
+|---|---|---|---|
+| elite ERA | 1.13 (impossible) | **2.79** | p05 **2.93** |
+| HR9 negatives | 66 | **0** | 0 |
+| HR9 min | −0.23 | **0.407** | 0.000 |
+
+### 🔴 C1 — ERA RUNS UNIFORMLY LOW (Trevor's read is correct)
+D1, regular-season IP ≥ 40, same 1,181 pitchers projected forward:
+```
+                  n       mean   p05     p10    median  p90    min
+ACTUAL 2026     1,181     5.30   2.93    3.42   5.09    7.52   1.16
+PROJECTED 2027  1,181     5.10   2.79    3.19   4.91    7.32   1.15
+delta                    −0.20  −0.14   −0.23  −0.18   −0.20  −0.01
+ratio proj/actual         0.962  0.952   0.933  0.965   0.973
+```
+⇒ **NOT a tail problem and NOT the SD.** The shape is right; the whole distribution is shifted down
+~3–5%, and the ratios are near-constant, which is the signature of a **multiplicative** adjustment
+applied league-wide — i.e. the class-progression (`class_era_*`) and/or `dev_aggressiveness` terms, not
+the two-sided SD.
+**Investigate in this order:**
+1. `class_era_fs/sj/js/gr` — these are in the edge fn's const block with **NO `model_config`
+   counterpart** (part of the 75 unbacked keys), so they silently win and cannot be tuned per program.
+2. `dev_aggressiveness · 0.06` in `projected = blended × (1 ∓ classAdj ∓ devAgg·0.06)`.
+3. Is a league-wide ~4% ERA improvement even intended? The same 1,181 arms a year older should NOT
+   collectively improve at every percentile including p90.
+⚠ Note the anchor points the OTHER way: `era_plus_ncaa_avg = 5.483` is ABOVE the measured IP≥40 mean
+of 5.30, so the calibrated mean would push projections UP. The downward shift is happening downstream
+of it. Do not "fix" this by lowering the anchor.
+
+### 🔴 C2 — HR9 IS NOW OVER-REGRESSED (the known holdout, over-corrected)
+```
+                  mean    p05(elite)   median   p90     min    negatives
+ACTUAL 2026       1.011     0.350      0.960    1.650   0.000      0
+PROJECTED 2027    1.039     0.620      1.028    1.387   0.407      0
+```
+Mean is right (+0.03) and the negatives are gone, but the **spread collapsed to ~59% of reality**
+(projected p05→p90 range 0.767 vs actual 1.300). Elite HR-preventers project **0.62 when reality is
+0.35**; the bad side projects 1.39 vs a real 1.65.
+⇒ The HR9 shrinkage (data-K = 71, baked into HR9's mean/SD by `compute-projection-calibration.ts`)
+traded the impossible-value bug for the exact failure the 8/24 doc rejected in uniform Pearson shrink:
+**"a projection tool whose 'elite' is barely above average fails its one job."**
+This is the doc's own open holdout — *"is the HR9 composite over-inflating ratings, or does HR9's
+genuinely weak signal (corr 0.32) warrant more regression?"* — still unresolved, now with evidence that
+the current answer over-compresses.
+⛔ Do NOT fix with a floor or a dial (explicitly rejected 2026-08-24).
+
+### Gates on any C fix
+- Re-run the across-the-range table above. Projected percentiles must track actual within ~0.05 ERA at
+  p05 / median / p90 — **the whole range, not the mean** (that is the 8/24 doctrine).
+- HR9 elite must reach ~0.35, p90 ~1.65, with **zero** negatives.
+- ⚠ ERA/HR9 feed `p_rv_plus` → `pWAR` → market value → `player_snapshot`. Any change needs the same
+  scoped downstream recompute as the wRC+ fix in Gate B.
+
 ## ALSO OPEN (not blocking, do not lose)
 - **Modeling question for Trevor:** is a 3:1 OBP:SLG weighting the intent? It means a power bat with a
   mediocre OBP always grades ~league-average. Lauaki is the poster case.
