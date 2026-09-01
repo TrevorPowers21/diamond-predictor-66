@@ -74,15 +74,34 @@ async function boardSnapshot(
   if (rows.length === 0) return null;
 
   const wantPitcher = side === "pitcher";
+
+  // 🛑 SELECT BY THE SNAPSHOT'S OWN VALUES — NOT `position_slot`, WHICH IS ALMOST ALWAYS NULL.
+  //    Measured 2026-09-01:
+  //      position_slot NULL   STAGING 157/169 (93%)   PROD 177/185 (96%)
+  //    Picking by slot means `isPitcherSlot(null)` → false → every board PITCHER is selected into the
+  //    hitter branch, fails the field guard, and returns null. That is the whole board defect.
+  //
+  // ★ The populated VALUES are mutually exclusive, so they are a reliable side key:
+  //      by value  STAGING  93 pitcher · 74 hitter · **0 BOTH** · 2 neither
+  //                PROD     98 pitcher · 84 hitter · **0 BOTH** · 3 neither
+  //    (A `?` key-presence test is MISLEADING here — the keys exist carrying null values, which is
+  //     why an earlier count showed 122/169 with "both". Always test the value, not the key.)
+  //
+  // ⚠ `players.position` is populated 100% in both environments and is a valid fallback, but the
+  //    snapshot's own values are better: they describe the line actually stored on this row, so a
+  //    mislabeled position cannot mis-route the read.
+  const sideOf = (snap: any): BuildSnapshotSide | null =>
+    snap?.p_era != null ? "pitcher"
+      : (snap?.p_wrc_plus != null || snap?.p_avg != null) ? "hitter"
+        : null;
+
   const match =
-    rows.length === 1 && isPitcherSlot(rows[0].position_slot) === wantPitcher
-      ? rows[0]
-      : rows.find((r: any) => isPitcherSlot(r.position_slot) === wantPitcher);
+    rows.find((r: any) => sideOf(r.transfer_snapshot) === side)
+    // TWP tiebreaker only: if two rows somehow carry the SAME side, fall back to the slot to choose.
+    ?? rows.find((r: any) => isPitcherSlot(r.position_slot) === wantPitcher && sideOf(r.transfer_snapshot) === side);
   if (!match) return null;
 
   const raw = match.transfer_snapshot as Record<string, any>;
-  if (wantPitcher && raw.p_era == null) return null;
-  if (!wantPitcher && raw.p_wrc_plus == null && raw.p_avg == null) return null;
 
   // Normalize to the build-snapshot shape so callers never branch on the source table.
   return {
