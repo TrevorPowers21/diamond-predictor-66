@@ -404,6 +404,59 @@ Of the 26 D1 rows with `pRV+ >= 120` AND `ERA >= 6`:
 ⛔ **There are TWO Ethan Smiths** — a 2023 stub and a real 2026 pitcher. Same trap as Harrison Cook.
 **Any cleanup must key on `player_id`, never on name.**
 
+## ✅ CLOSED — THE 191 NULL-`player_id` ROWS ARE **CORRECTLY** UNLINKED. DO NOT RELINK.
+
+Investigated and **closed without writing**, 2026-09-01. `scripts/relink-build-player-ids.ts` exists
+(dry-run default, `--active-only`, `--list`) and stays as documentation of what is recoverable. The
+answer is: **nothing.**
+
+### Why — the orphans are FRESHMEN, and the "matches" are other people
+Trevor's question — *"are they not freshman?"* — is what closed this out. It is the right read:
+```
+production_notes on the unmatched orphans:  classTransition "FS"  rosterStatus "returner"
+   Aj Calio · Bo Holloway · Brody Carr · Eli Herst · Gunner Skelton   [Vanderbilt Projected]
+   Grey Sanders                                                       [2027 Proj Jayhawks]
+```
+**`FS` = freshman.** They have no `players` row because they have **no college stats yet**. The 35
+"no match" skips are the system behaving correctly, not a data gap.
+
+### 🛑 ALL SIX PROPOSED MATCHES WERE THE WRONG PEOPLE
+| proposed match | what that `players` row actually is |
+|---|---|
+| Ned Frutchey | D1, **no team**, last pitched **2025** |
+| Payton Gubler | D1, **no team**, last pitched **2025** |
+| Rockwell Lybbert | D1, **no team**, last pitched **2025** |
+| Jaxon Grossman | D1, **no team**, last pitched **2023** |
+| Jake Berkland | D2 Minnesota State, **SO**, **270 PA in 2026** |
+| Logan Harrell | D2 Trevecca Nazarene, **JR**, **93 IP in 2026** |
+
+The four D1 "matches" are **stale stubs from the exact population whose 2027 projections were deleted
+the same day**. The two D2 ones are established players with full 2026 seasons. Trevor confirmed the
+build rows were **manually added**, so these are **name collisions, not recoveries** — the Harrison
+Cook failure mode, harder to see because each name is unique in `players`.
+⇒ Writing those 6 links would have permanently bound real roster rows to the wrong humans.
+**NULL is strictly better: it is honest about not knowing.**
+
+### The rows are safe as they stand
+```
+49 orphan rows on ACTIVE builds
+   player_snapshot 23 · neutral_snapshot 0 · named 41 · included_in_roster 49 · nil_value>0 20
+   wrc / owar / era: ALL NULL  → they contribute ZERO WAR
+```
+They hold a roster slot with a name and a position and nothing else. Nothing breaks; they do not rank,
+do not corrupt totals, do not poison snapshots. A freshman with no stats **should** have no projection.
+
+### ⬜ Two loose ends (small, not blocking)
+1. **8 of the 49 have no name at all** — empty rows holding a roster slot. Not a player in any sense.
+2. **All 49 count as `included_in_roster`**, so they sit in the roster denominator. Probably intended
+   for a freshman placeholder, but **not traced** against the budget-share floor
+   ([[project_budget_share_roster_floor]]). Worth confirming before it matters for pay math.
+
+★ **PROCESS NOTE.** The dry run plus Trevor's freshman question is the only reason this did not become
+a bad prod write. I had scoped it, guarded it, and recommended running it. **A heuristic that passes
+its own guards can still be wrong about the world** — the guards proved "exactly one row bears this
+name", which is not the same as "this is that person".
+
 ## ALSO OPEN (not blocking, do not lose)
 - **Modeling question for Trevor:** is a 3:1 OBP:SLG weighting the intent? It means a power bat with a
   mediocre OBP always grades ~league-average. Lauaki is the poster case.
