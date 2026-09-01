@@ -21,6 +21,14 @@ pitchers **1,754/1,755 at IP>=40** — ⚠ sub-40 IP diverges (33% under 10 IP).
 - **Last live compute removed** from the TeamBuilder add path (102 lines).
 - **Loud fallbacks shipped** — unresolved `model_config` keys are now named, not silent.
 
+✅ **RETRACTED 2026-09-01:** an earlier version of this block listed a `total_hitter_war` rounding
+drift as OPEN. **It is not real.** Stored `total_hitter_war` = `o_war + d_war + bsr_war` EXACTLY on
+**102,420/102,420** staging and **105,281/105,281** prod transfer rows (max drift 0.00000000).
+The claim came from measuring the LOCAL components against the EDGE total — which proves the edge is
+exact and says nothing about the local total. 🛑 Same error as the "sub-40 pitcher divergence": two
+GENERATIONS of a row compared as if they were two IMPLEMENTATIONS. **Prove both sides are FRESH
+before diffing.**
+
 **Staging only — PROD UNTOUCHED.** Full detail: Track B (`docs/PIPELINE_pitch_log_to_projections.md`).
 
 

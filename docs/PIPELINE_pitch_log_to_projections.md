@@ -640,10 +640,28 @@ blend/damping handling differing between `projectPitchingRate` and the transfer 
 These players are filtered from most displays but still carry STORED pWAR and market values.
 **Not verified. Do not describe pitcher onboarding as parity-checked until this is closed.**
 
-#### ⚠ OPEN — local `total_hitter_war` rounding
-The edge function's total equals `o+d+bsr` exactly (4.4e-16). The LOCAL transfer script stores a total
-that drifts up to **0.001** from its own components. Cosmetic, but two paths storing different totals
-is how the next Helfrick starts.
+#### ✅ RETRACTED — there is NO `total_hitter_war` rounding drift
+An earlier version of this entry claimed the local transfer script stored a total that drifted up to
+**0.001** from its own `o_war`/`d_war`/`bsr_war`. **That was WRONG and is retracted.**
+
+**MEASURED against the stored rows — `total_hitter_war` = `o_war + d_war + bsr_war` EXACTLY:**
+```
+staging  transfer 102,420/102,420 exact · returner 6,811/6,811 exact   max drift 0.00000000
+prod     transfer 105,281/105,281 exact · returner 6,806/6,806 exact   max drift 0.00000000
+```
+The code cannot produce a mismatch: `oWar` is computed ONCE
+(`precompute-transfer-projections.ts:439`), summed at :444, and the component and the sum are both
+stored from those same variables.
+
+🛑 **HOW THE FALSE CLAIM WAS MADE — this is the reusable lesson.** The diff measured
+`|local_o + local_d + local_bsr − EDGE_total| = 4.4e-16`. That proves the **edge** total is exact. It
+says **NOTHING** about whether the LOCAL total matches the LOCAL components — that check was never
+run. A conclusion was stated that the evidence did not contain.
+The 0.000977 was a **transient between two writes of the same row** (local wrote it, then the edge job
+rewrote it and called `refresh_composite_war`). Both generations were internally consistent.
+⇒ **Identical error to the "sub-40 pitcher divergence": comparing two GENERATIONS of a row and
+reading the difference as a disagreement between two IMPLEMENTATIONS.** Before diffing two paths,
+prove both sides are FRESH — check `updated_at`, or re-run both and diff again.
 
 #### STATE
 Staging: returners + transfers recomputed for **all 18 teams**; edge function **deployed to staging**.
