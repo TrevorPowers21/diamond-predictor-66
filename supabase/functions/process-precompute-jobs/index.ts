@@ -1684,7 +1684,7 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
       // IP + regular_season_ip added 2026-08-31 for the depth-role anchor (registry #9). Neither was
       // selected before, so the role was assigned off `players.ip` — an identity-table copy nothing
       // keeps in sync — which mis-tiers the role and flows into projected IP and pWAR.
-      supabase.from("Pitching Master").select("source_player_id, Role, G, GS, ERA, FIP, WHIP, K9, BB9, HR9, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, bb9_pr_plus, hr9_pr_plus, TeamID, IP, regular_season_ip")
+      supabase.from("Pitching Master").select("source_player_id, Role, G, GS, ERA, FIP, WHIP, K9, BB9, HR9, combined_used, blended_era, blended_fip, blended_whip, blended_k9, blended_bb9, blended_hr9, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, bb9_pr_plus, hr9_pr_plus, TeamID, IP, regular_season_ip")
         .eq("Season", CURRENT_SEASON).in("source_player_id", chunk),
     );
     pmRows.push(...r);
@@ -1765,9 +1765,25 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
       pm.G && pm.GS != null ? ((Number(pm.GS) / Number(pm.G)) < 0.5 ? "RP" : "SP") : null
     );
 
+    // ★★★ COMBINED-PLAYER BLEND (2026-09-01) ★★★
+    // A pitcher whose season is stitched from more than one stint carries the correct season line in
+    // `blended_*`; raw ERA/FIP/... is then only ONE stint. `scripts/precompute-pitchers.ts:383` and
+    // `usePitchingSeedData` have always used the blend — THIS FUNCTION DID NOT, so onboarding
+    // projected combined pitchers off a partial line while the batch used the full one.
+    // Measured 2026-09-01 (Georgia, staging, local vs deployed): agreement was 1,754/1,755 at IP>=40
+    // but fell apart below it — 22.4% of 10-19 IP arms and 33.1% of sub-10 IP arms differed >10% on
+    // ERA, BIDIRECTIONALLY (blended can land either side of raw). 1,636/8,072 (20%) of 2026 Pitching
+    // Master rows carry combined_used, and they skew thin-sample — exactly the observed shape.
+    // ⇒ Keep this ternary identical to precompute-pitchers.ts::pmToStats.
+    const cu = !!(pm as any).combined_used;
+    const bl = (b: any, raw: any) => (cu ? (b ?? raw) : raw);
     const input: TransferPitcherInputDeno = {
-      era: Number(pm.ERA), fip: Number(pm.FIP), whip: Number(pm.WHIP),
-      k9: Number(pm.K9), bb9: Number(pm.BB9), hr9: Number(pm.HR9),
+      era: Number(bl((pm as any).blended_era, pm.ERA)),
+      fip: Number(bl((pm as any).blended_fip, pm.FIP)),
+      whip: Number(bl((pm as any).blended_whip, pm.WHIP)),
+      k9: Number(bl((pm as any).blended_k9, pm.K9)),
+      bb9: Number(bl((pm as any).blended_bb9, pm.BB9)),
+      hr9: Number(bl((pm as any).blended_hr9, pm.HR9)),
       storedPrPlus: {
         era: Number(pm.era_pr_plus), fip: Number(pm.fip_pr_plus), whip: Number(pm.whip_pr_plus),
         k9: Number(pm.k9_pr_plus), bb9: Number(pm.bb9_pr_plus), hr9: Number(pm.hr9_pr_plus),
