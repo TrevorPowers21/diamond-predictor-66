@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 const APPLY = process.argv.includes("--apply");
 const sb=createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-const F="player_id,customer_team_id,model_type,variant,p_avg,p_obp,p_slg,p_wrc_plus,p_era,p_fip,p_whip,p_k9,p_bb9,p_hr9,p_rv_plus,p_war,o_war,market_value,twp_hitter_market_value,twp_pitcher_market_value";
+const F="player_id,customer_team_id,model_type,variant,p_avg,p_obp,p_slg,p_wrc_plus,p_era,p_fip,p_whip,p_k9,p_bb9,p_hr9,p_rv_plus,p_war,o_war,d_war,bsr_war,total_hitter_war,hitter_depth_role,pitcher_depth_role,market_value,twp_hitter_market_value,twp_pitcher_market_value";
 async function page(tbl:string,sel:string,flt:(q:any)=>any){let f=0,out:any[]=[];while(true){let q=sb.from(tbl).select(sel);q=flt(q);const{data,error}=await q.range(f,f+999);if(error)throw error;out=out.concat(data||[]);if(!data||data.length<1000)break;f+=1000;}return out;}
 (async()=>{
   const tb=await page("target_board","id,player_id,customer_team_id,transfer_snapshot",q=>q);
@@ -29,7 +29,7 @@ async function page(tbl:string,sel:string,flt:(q:any)=>any){let f=0,out:any[]=[]
     const p=pick(r.player_id,r.customer_team_id);
     if(!p){noPred++;continue;}
     const isTwp=twp.has(r.player_id);
-    const snap={p_avg:p.p_avg,p_obp:p.p_obp,p_slg:p.p_slg,p_wrc_plus:p.p_wrc_plus,p_era:p.p_era,p_fip:p.p_fip,p_whip:p.p_whip,p_k9:p.p_k9,p_bb9:p.p_bb9,p_hr9:p.p_hr9,p_rv_plus:p.p_rv_plus,p_war:p.p_war,owar:p.o_war,nil_valuation:isTwp?null:p.market_value,twp_hitter_market_value:p.twp_hitter_market_value,twp_pitcher_market_value:p.twp_pitcher_market_value,is_twp:isTwp};
+    const snap={p_avg:p.p_avg,p_obp:p.p_obp,p_slg:p.p_slg,p_wrc_plus:p.p_wrc_plus,p_era:p.p_era,p_fip:p.p_fip,p_whip:p.p_whip,p_k9:p.p_k9,p_bb9:p.p_bb9,p_hr9:p.p_hr9,p_rv_plus:p.p_rv_plus,p_war:p.p_war,owar:p.o_war,o_war:p.o_war,d_war:p.d_war,bsr_war:p.bsr_war,total_hitter_war:p.total_hitter_war,hitter_depth_role:p.hitter_depth_role,pitcher_depth_role:p.pitcher_depth_role,nil_valuation:isTwp?null:p.market_value,twp_hitter_market_value:p.twp_hitter_market_value,twp_pitcher_market_value:p.twp_pitcher_market_value,is_twp:isTwp};
     updates.push({id:r.id,transfer_snapshot:snap}); ok++;
     if(samples.length<6) samples.push(`  ${r.player_id.slice(0,8)} ctid=${r.customer_team_id.slice(0,8)}: ${p.o_war!=null?`oWAR=${Number(p.o_war).toFixed(3)}`:`pWAR=${p.p_war?.toFixed?.(3)}`} wRC+=${p.p_wrc_plus} rv=${p.p_rv_plus} mkt=${p.market_value==null?"-":Math.round(p.market_value)} twpH=${p.twp_hitter_market_value==null?"-":Math.round(p.twp_hitter_market_value)} twpP=${p.twp_pitcher_market_value==null?"-":Math.round(p.twp_pitcher_market_value)}`);
   }
