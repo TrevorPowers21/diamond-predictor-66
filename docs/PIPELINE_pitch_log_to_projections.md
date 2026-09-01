@@ -565,6 +565,92 @@ reintroduces a constant offset of ~1.7 rating points ≈ **0.09 ERA** — i.e. i
 They are consistent today because both come from `twoSided()`/`CENTERS` over the identical row set.
 ⇒ If weighting is ever changed, change it in **BOTH** places in the same commit, and re-apply together.
 
+### ★★★ 2026-09-01 (PM) — CENTRES EVERYWHERE · total_hitter_war · CROSS-IMPLEMENTATION DIFF ★★★
+
+🛑 **THE METHOD THAT FOUND THE REAL BUG — RUN TWO IMPLEMENTATIONS AND DIFF THEM.**
+Reading the code, typechecking it, and sanity-checking the output ALL PASSED on a function that was
+handing every `IF` player a 10% market shortfall. It surfaced only by running the deployed edge
+function and the local precompute over the SAME team and diffing row-by-row. **Make this the gate for
+onboarding parity from now on** — it is the only check that has ever caught a drift bug in this repo.
+
+**RESULT (Georgia, staging, local scripts vs deployed edge function):**
+```
+HITTERS  7,814/7,814 identical — p_avg · p_obp · p_slg · wRC+ · o_war · d_war · bsr_war · market_value
+PITCHERS 1,754/1,755 identical at IP>=40 (0.1% divergent)
+         ⚠ sub-40 IP DIVERGES: 20-39 4.6% · 10-19 22.4% · <10 33.1%   ← OPEN, see below
+```
+
+#### 1. THE Z-SHIFT MUST CENTRE ON THE STORED AVERAGE — IN EVERY COPY
+`(rating − CENTRE) / sd`. The ratings do NOT centre at 100 (era 109.64 · bb9 121.68 · ba 102.59 ·
+obp 99.98 · iso 103.24). Four separate places still assumed 100:
+- **`predictionEngine` returner hitters** — hardcoded `ncaaPR: 100`, and the hitter path read
+  `model_config` **ZERO times**. Now reads `h_ba/obp/iso_pr_center` with a LOUD warn on a miss.
+  ⇒ hitters moved for the first time: wRC+ 100.6→100.1, market −2.1%. **OBP correctly did NOT move —
+  its centre really is ~100 (99.977). That non-move is the correctness proof, not a failure.**
+- **`transferPitcherProjection`** — the `prCenter` params EXISTED but **no caller ever passed one**,
+  so all six stats silently defaulted to 100. A parameter with a default is not a wired parameter.
+- **`transferProjection` / `buildTransferProjectionInputs`** — per-stat centres now passed through.
+- **`dsd` (two-sided SD)** split at **100** in BOTH transfer copies while `projectPitchingRate` split
+  at `prCenter`. Every arm between 100 and 109.64 got `sd_good` (1.443) when it belonged on `sd_bad`
+  (1.897). Trevor 2026-09-01: *"it needs to be split at the stored average."* Fixed in all three.
+  ⚠ **This did NOT close the local-vs-edge pitcher gap** — both copies were byte-identical, so
+  changing both the same way cannot change their agreement. Correct fix, different symptom.
+
+#### 2. ONE BUG, SIX SELECTS — `total_hitter_war`
+**A column that is not SELECTed cannot be written.** `useTargetBoard`, `TeamBuilder:2807`,
+`useTeamBuilderSimulation:526`, `useLoadBuild` (×2) and the edge function's snapshot select all
+omitted `total_hitter_war`/`d_war`/`bsr_war`, so every snapshot carried the **oWAR COMPONENT**.
+Symptom: Ryder Helfrick added at **2.5**, jumping to **5.02** when the DB row arrived.
+🔑 **`market_value` was in every select and was always correct. That asymmetry is what located the
+cause** — when one field is right and its neighbour is wrong, compare what was ASKED FOR.
+Read path (`useTeamBuilderSimulation:653`) now prefers `total_hitter_war` over the component.
+⇒ **No backfill was needed** — 0 hitter board rows on either DB were missing it. An earlier claim of
+"89 staging / 95 prod rows to backfill" was WRONG: those are PITCHER rows, which carry an `owar` key
+that is null by nature.
+
+#### 3. `IF` WAS MISSING FROM THE 1.1 POSITION TIER (edge function only)
+`getPositionValueMultiplier` omitted `IF`/`INF`/`INFIELD`, so an `IF` player got **1.0× on onboarding
+and 1.1× everywhere else** — a flat 10% market shortfall on 371 Georgia hitters, and it would have hit
+Georgia Tech's whole infield. Keep that list byte-identical to `src/lib/nilProgramSpecific.ts`.
+
+#### 4. THE SAME COLUMN MEANS DIFFERENT THINGS BY `model_type`
+`from_avg_plus`/`to_avg_plus` = the **player's BA power rating** on RETURNER rows
+(`createPredictionsFromMaster:191`) but the **CONFERENCE avg+** on TRANSFER rows
+(`TeamBuilder:2623`). Reading them as the player's rating on a transfer row typechecks, runs, and is
+silently wrong. Documented at both points of use.
+
+#### 5. NO LIVE COMPUTES — the last one on the add path is GONE
+Removed the 102-line `computeTransferProjection` block from `addPlayerFromTargetSearch`. Trevor:
+*"that is dead code in general. We dont have live computes only read stored rows now."* A second
+implementation drifts from the precompute and CONFLICTS with what save writes.
+⇒ A manually-seeded hitter with no stored row now lands with seed rates and null WAR/NIL until a
+precompute gives it a row. **Blank is correct; invented-and-conflicting is not.**
+`recalcTransfer` (ZERO callers) marked: it scales all three rates off the OVERALL rating, which
+hitting does not use — deliberately left at 100 rather than centring a wrong input.
+
+#### 6. LOUD FALLBACKS (item A of the hardcoded-constant plan) — SHIPPED
+`readEquationValue` logs every unresolved key; job completion logs a summary; the centre overlay
+NAMES what is missing instead of printing `7/9`. A count tells you something is missing, not what.
+
+#### ⚠ OPEN — SUB-40-IP PITCHER DIVERGENCE
+Local and edge agree at IP>=40 (1,754/1,755) but diverge below it, scaling inversely with innings
+(33% of sub-10-IP arms differ >10% on ERA). `projected_ip` matches on all but 2 rows and the gap is
+BIDIRECTIONAL, so it is NOT depth-role and NOT a missing multiplier — it points at small-sample
+blend/damping handling differing between `projectPitchingRate` and the transfer projectors.
+These players are filtered from most displays but still carry STORED pWAR and market values.
+**Not verified. Do not describe pitcher onboarding as parity-checked until this is closed.**
+
+#### ⚠ OPEN — local `total_hitter_war` rounding
+The edge function's total equals `o+d+bsr` exactly (4.4e-16). The LOCAL transfer script stores a total
+that drifts up to **0.001** from its own components. Cosmetic, but two paths storing different totals
+is how the next Helfrick starts.
+
+#### STATE
+Staging: returners + transfers recomputed for **all 18 teams**; edge function **deployed to staging**.
+ERA mean 5.649 vs anchor 5.2429 — **EXPECTED**, Trevor: *"projected into the SEC is a more difficult
+environment to pitch in so it is going to be higher."* **PROD: UNTOUCHED.**
+Commit `ffc161d`. tsc 154 = baseline · deno check 2 = baseline · tests 265/265.
+
 ### 🔒 NOTHING MAY BE HARDCODED — 66 CONSTANTS STILL REQUIRE A DEPLOY (logged 2026-09-01)
 
 **Trevor's standing rule:** *"we don't want anything hardcoded and unchangeable, that's my main thing."*

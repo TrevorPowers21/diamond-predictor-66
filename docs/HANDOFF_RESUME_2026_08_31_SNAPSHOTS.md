@@ -1,4 +1,30 @@
 # ▶️ HANDOFF — PICK UP HERE. Written 2026-08-31, after commit `ab893cf`.
+
+## ★ 2026-09-01 (PM) — CENTRES · total_hitter_war · CROSS-IMPL DIFF (commit `ffc161d`)
+
+🛑 **New required gate: diff the deployed edge function against the local precompute over the same
+team.** Code review, typecheck and eyeballing the output ALL passed on a function giving every `IF`
+player a 10% market shortfall. Only the row-by-row diff caught it.
+**Georgia, staging:** hitters **7,814/7,814 identical** (incl. market, after the `IF` fix);
+pitchers **1,754/1,755 at IP>=40** — ⚠ sub-40 IP diverges (33% under 10 IP). **OPEN.**
+
+- **Centres**: `predictionEngine` returner hitters were hardcoded at 100 and read `model_config` zero
+  times; `transferPitcherProjection`'s `prCenter` params existed but **no caller passed them** (bb9's
+  true centre is 121.68); `dsd` split at 100 in both transfer copies vs `prCenter` in
+  `projectPitchingRate` — now the stored average everywhere. OBP correctly did not move (centre ≈100).
+- **`total_hitter_war`**: six selects omitted it, so snapshots carried the oWAR COMPONENT (Helfrick
+  2.5 → 5.02). `market_value` was in every select and always right — that asymmetry found it.
+  **No backfill needed**; 0 hitter rows affected on either DB.
+- **`IF`/`INF`/`INFIELD`** missing from the edge function's 1.1 tier — would have hit Georgia Tech's
+  whole infield.
+- **`from/to_*_plus` mean different things by `model_type`** — player rating on returner rows,
+  CONFERENCE avg+ on transfer rows.
+- **Last live compute removed** from the TeamBuilder add path (102 lines).
+- **Loud fallbacks shipped** — unresolved `model_config` keys are now named, not silent.
+
+**Staging only — PROD UNTOUCHED.** Full detail: Track B (`docs/PIPELINE_pitch_log_to_projections.md`).
+
+
 ## 🛑 MUST READ — PROJECTION CALIBRATION IS **WRONG ON PROD RIGHT NOW** (found 2026-09-01)
 
 ## 🔒 HARDCODED CONSTANTS — 66 STILL NEED A DEPLOY. ORDER OF WORK LOGGED (2026-09-01)
