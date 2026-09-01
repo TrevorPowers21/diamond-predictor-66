@@ -5,6 +5,29 @@
 >   exit code and a plausible number. **NOT ONE raised an error.** Each entry says where it belongs in Track B.
 > **A stage that "ran fine" tells you nothing.**
 
+## 🔒 HARDCODED CONSTANTS — 66 STILL NEED A DEPLOY. ORDER OF WORK LOGGED (2026-09-01)
+
+Trevor's rule: *"we don't want anything hardcoded and unchangeable."* Measured on
+`DEFAULT_PITCHING_WEIGHTS` (115 constants): **49 tunable via `model_config`, 66 NOT** —
+24 class transitions · 12 composite weights · 12 SP↔RP role transition · **9 MARKET / dollars-per-WAR**
+· 6 plus scales · **3 projected IP per depth role**.
+⚠ `market_dollars_per_war` and `market_tier_sec` mean **a program's pay-per-WAR cannot be changed
+without shipping code**; `pwar_ip_sp/rp/sm` drive every pWAR.
+
+✅ **Nothing is broken today** — all 127 edge-fn constants resolve correctly (46 overlaid · 72 identical
+to `src/lib` · 9 read through `readEquationValue`, which checks `model_config` first). Onboarding uses
+the same numbers as the batch. 🛑 The danger is that these are SILENT fallbacks: they fire only when a
+`model_config` key is missing, and substitute a stale value with no warning.
+
+**ORDER (deliberate):** **A** loud fallbacks now (cheap, no behaviour change) → **B** step 6 recompute +
+across-the-range verify → **C** Gate A onboarding + Georgia Tech (**NOT blocked by the 66**) → **D** seed
+the 66 into `model_config`, AFTER C, because it moves market values and pWAR and would otherwise land
+two uncontrolled changes inside one verification.
+⛔ D needs a NAMING decision first — `loadPitchingPowerEq` only takes `p_`-prefixed keys, and `market_*`
+is shared with the hitter path, so it is not a pitching key. A wrong prefix recreates the
+written-but-never-read problem. Full detail: Track B + `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md`.
+
+
 ## ✅ STATUS 2026-09-01 — CONFIG CONSOLIDATION STEPS 1–4 **DONE** (calibration APPLIED to BOTH DBs). RESUME AT STEP 5.
 
 **The config-source problem described below is FIXED IN CODE.** `model_config` (`model_type='admin_ui'`,

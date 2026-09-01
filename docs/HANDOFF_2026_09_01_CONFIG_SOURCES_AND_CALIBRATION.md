@@ -135,6 +135,52 @@ that is CORRECT, each database calibrates to its own data. Do not "sync" them.
 **WEIGHTING = PER-ROW, by decision** — see the Track B ⚖️ block. Anchors and centres must always be
 computed the same way on the same rows; mixing per-row and IP-weighted recreates C1 (~0.09 ERA).
 
+## 🔒 NOTHING MAY BE HARDCODED — 66 CONSTANTS STILL REQUIRE A DEPLOY (logged 2026-09-01)
+
+**Trevor's standing rule:** *"we don't want anything hardcoded and unchangeable, that's my main thing."*
+
+**MEASURED against `src/lib/pitchingEquations.ts` `DEFAULT_PITCHING_WEIGHTS` (115 constants):**
+```
+✅ tunable via model_config : 49
+🔒 HARDCODED (no key)       : 66
+
+  24  class transition adjustments   class_era_fs/sj/js/gr, class_fip_*, class_whip_*, …
+  12  composite weights              fip_plus_weight, era_plus_weight, whip_plus_weight, …
+  12  SP↔RP role transition          sp_to_rp_reg_era_pct, rp_to_sp_low_better_tier*_mult, …
+   9  MARKET / dollars-per-WAR       market_tier_sec, market_dollars_per_war, market_pvf_*, …
+   6  plus scales                    era_plus_scale, fip_plus_scale, …
+   3  projected IP per depth role    pwar_ip_sp, pwar_ip_rp, pwar_ip_sm
+```
+
+⚠ **THE GROUPS MATTER MORE THAN THE COUNT.**
+- `market_tier_sec` / `market_dollars_per_war` — **a program's pay-per-WAR cannot be tuned without
+  shipping code.** A business lever living in a source file.
+- `pwar_ip_sp/rp/sm` — projected innings per depth role, which drives EVERY pWAR.
+- `class_era_*` — the class-progression adjustments. These were the prime suspect for the ~4% ERA bias
+  before it was traced to the anchor/centre; had they been the cause, fixing them would have needed a
+  DEPLOY.
+
+**✅ NOTHING IS BROKEN TODAY.** All 127 edge-function constants resolve correctly:
+46 overlaid from `model_config` · 72 identical to `src/lib` · 9 differ but are read through
+`readEquationValue`, which checks `model_config` FIRST. Onboarding uses the same numbers as the batch.
+
+🛑 **THE REAL DANGER IS SILENCE, NOT THE VALUES.** These are *fallbacks*. They fire only when a
+`model_config` key is missing — and when they do, they substitute a stale constant with **no warning**.
+That is the identical failure shape as every bug found on 2026-09-01.
+
+### ORDER OF WORK — deliberately sequenced
+| # | work | when | why that order |
+|---|---|---|---|
+| **A** | **Loud fallbacks.** `readEquationValue` + both overlays log every key they could NOT resolve. | **NOW — cheap, no behaviour change** | Converts the whole class from silent to visible. This is the actual mitigation. |
+| **B** | Step 6 — re-run precomputes, verify across the range | next | Establishes a clean verified baseline |
+| **C** | Gate A — onboarding verification + Georgia Tech | after B | **NOT blocked by the 66.** GT would use the same constants the batch uses. |
+| **D** | **Seed the 66 into `model_config`** + add to the `fields` mapping | **after C** | ⚠ Touches MARKET VALUES and pWAR. Doing it between the calibration fix and the recompute would land two uncontrolled changes inside one verification. |
+
+⛔ **D IS NOT PURELY MECHANICAL.** `loadPitchingPowerEq` filters to `p_`-prefixed keys only, so each
+group needs a prefix decision first — and `market_*` is **shared with the hitter market path**, so it is
+not a pitching-domain key at all. Getting a prefix wrong recreates the written-but-never-read problem
+that made stage 5.5 inert. Settle naming BEFORE writing any key.
+
 ## ▶️ RESUME HERE — STEP 5. (Steps 1–4 are done; do not redo them.)
 
 **4. Apply the calibration — STAGING FIRST.**
@@ -213,8 +259,22 @@ is blind to this class of bug**, and to the one it replaces.
 > changed** — verified: 5,122 D1 returner hitters at mean wRC+ 98.82, identical before and after.
 >
 > **RESUME AT STEP 5.** Mirror the edge fn → re-run precomputes →
-> verify **ACROSS THE RANGE** (p05/p10/median/p90; a mean-only check is blind to this class of bug).
+> verify **ACROSS THE RANGE** (p05/p10/median/p90 on the **QUALIFIED** population, IP>=40 — comparing
+> against the full population's 6.902 mean would look alarming and mean nothing).
 > **Do not redo steps 1–4.**
+>
+> **THEN, IN THIS ORDER — the hardcoded-constant work is sequenced deliberately, do not reorder:**
+> **A)** loud fallbacks now (`readEquationValue` + both overlays log every key they cannot resolve —
+> cheap, no behaviour change); **B)** step 6 recompute + across-the-range verify; **C)** Gate A
+> onboarding + Georgia Tech — **NOT blocked**, GT uses the same constants the batch uses; **D)** seed
+> the **66 hardcoded constants** into `model_config`, only after C.
+> Measured: `DEFAULT_PITCHING_WEIGHTS` has 115 constants — **49 tunable, 66 not** (24 class transitions ·
+> 12 composite weights · 12 SP↔RP role · **9 market/dollars-per-WAR** · 6 plus scales · **3 projected IP
+> per depth role**). Nothing is broken today (all 127 edge-fn constants resolve: 46 overlaid · 72
+> identical · 9 via `readEquationValue`, which checks `model_config` first) — the danger is that they are
+> SILENT fallbacks. ⛔ D needs a NAMING decision first: `loadPitchingPowerEq` only accepts `p_`-prefixed
+> keys and `market_*` is shared with the hitter path, so a wrong prefix recreates the
+> written-but-never-read trap. Full detail in this doc above and in Track B.
 
 ## 📚 DOCUMENT MAP — what lives where
 

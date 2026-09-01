@@ -228,3 +228,41 @@ players.team_id NULL   STAGING 15,560/15,561 (99.99%)   PROD 15,763/31,467 (50%)
 `project_teambuilder_owar_snapshot_regression` (TB live-rebuild vs snapshot — same family) ·
 `project_players_team_id_null` (the stub population) ·
 `feedback_detected_is_not_fixed` · `project_composite_war` (total = o+d+bsr).
+
+---
+
+## ★★★ LESSON — A CONSTANT WITH NO KEY IS A DEPLOY. AND ITS FALLBACK IS SILENT. (2026-09-01) ★★★
+
+> Trevor's standing rule: *"we don't want anything hardcoded and unchangeable, that's my main thing."*
+
+**The generalisable failure is not the VALUE — it is the SILENCE.** Every config bug found on
+2026-09-01 has the identical shape: a lookup misses, a plausible default takes over, and **nothing
+anywhere says so**. The number that comes out is well-formed, in range, and wrong.
+- Stage 5.5 wrote 41 keys that were never read — because they weren't in the `fields` mapping.
+- The z-shift assumed PR+ centres at 100 — a default nobody chose, that nobody could see.
+- The legacy `"Equation Weights"` table quietly outranked the code for 5,122/5,122 returners.
+
+**⇒ The mitigation is not "pick better defaults." It is to make every fallback LOUD.**
+`readEquationValue` and both edge-function overlays must log every key they could not resolve. A
+missing key should be a line in the log, not an invisible substitution. Do this BEFORE seeding new
+keys — otherwise the seeding itself can't be verified.
+
+**MEASURED SCOPE (`src/lib/pitchingEquations.ts`, `DEFAULT_PITCHING_WEIGHTS`, 115 constants):**
+**49 tunable via `model_config` · 66 NOT** — 24 class transitions · 12 composite weights · 12 SP↔RP
+role transition · **9 market/dollars-per-WAR** · 6 plus scales · **3 projected IP per depth role**.
+⚠ `market_dollars_per_war` / `market_tier_sec` mean **a program's pay-per-WAR cannot be retuned without
+shipping code** — a business lever living in a source file. `pwar_ip_sp/rp/sm` drives every pWAR.
+✅ Nothing is broken today: all 127 edge-fn constants resolve correctly (46 overlaid from `model_config`
+· 72 identical to `src/lib` · 9 differ but are read via `readEquationValue`, which checks `model_config`
+FIRST). Onboarding uses the same numbers as the batch — Georgia Tech is **not blocked** by this.
+
+**⛔ SEEDING IS NOT MECHANICAL — SETTLE NAMING FIRST.** `loadPitchingPowerEq` filters to `p_`-prefixed
+keys only, and `market_*` is shared with the hitter market path, so it is not a pitching-domain key.
+Writing a key under the wrong prefix recreates the written-but-never-read problem exactly. Decide the
+prefix, THEN write, THEN confirm the key is in the `fields` mapping — a key not listed there is INERT.
+
+**SEQUENCING (method, not preference):** do the seeding as its OWN pass, AFTER the recompute is
+verified. Landing a market/pWAR change inside the same verification window as the calibration fix
+means two uncontrolled changes and no way to attribute a delta to either.
+Full plan + ordering: `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md` and Track B
+(`docs/PIPELINE_pitch_log_to_projections.md`).
