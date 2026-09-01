@@ -227,7 +227,10 @@ function computeTransferProjection(input: TransferProjectionInputs) {
   const toIsoPark = input.toIsoPark ?? input.toPark;
 
   const safeBaStdPower = input.baStdPower === 0 ? 1 : input.baStdPower;
-  const baScaled = input.ncaaAvgBA + (((input.baPR - 100) / safeBaStdPower) * input.baStdNcaa);
+  // 🛑 baPrCenter, not 100 — the HITTER power ratings are not centred at 100 either
+  //    (D1/PA>=100: ba 102.9887 · obp 100.3109 · iso 103.7939). Smaller offsets than pitching,
+  //    but the SAME defect class, so they come from model_config the same way.
+  const baScaled = input.ncaaAvgBA + (((input.baPR - (input.baPrCenter ?? 100)) / safeBaStdPower) * input.baStdNcaa);
   const baBlended = input.lastAvg * (1 - input.baPowerWeight) + baScaled * input.baPowerWeight;
   const baMultiplier = 1
     + (input.baConferenceWeight * ((input.toAvgPlus - input.fromAvgPlus) / 100))
@@ -236,7 +239,7 @@ function computeTransferProjection(input: TransferProjectionInputs) {
   const pAvgRaw = baBlended * baMultiplier;
 
   const safeObpStdPower = input.obpStdPower === 0 ? 1 : input.obpStdPower;
-  const obpScaled = input.ncaaAvgOBP + (((input.obpPR - 100) / safeObpStdPower) * input.obpStdNcaa);
+  const obpScaled = input.ncaaAvgOBP + (((input.obpPR - (input.obpPrCenter ?? 100)) / safeObpStdPower) * input.obpStdNcaa);
   const obpBlended = input.lastObp * (1 - input.obpPowerWeight) + obpScaled * input.obpPowerWeight;
   const obpMultiplier = 1
     + (input.obpConferenceWeight * ((input.toObpPlus - input.fromObpPlus) / 100))
@@ -245,7 +248,7 @@ function computeTransferProjection(input: TransferProjectionInputs) {
   const pObpRaw = obpBlended * obpMultiplier;
 
   const lastIso = input.lastSlg - input.lastAvg;
-  const ratingZ = input.isoStdPower > 0 ? (input.isoPR - 100) / input.isoStdPower : 0;
+  const ratingZ = input.isoStdPower > 0 ? (input.isoPR - (input.isoPrCenter ?? 100)) / input.isoStdPower : 0;
   const scaledIso = input.ncaaAvgISO + (ratingZ * input.isoStdNcaa);
   const isoPowerWeight = input.isoPowerWeight ?? 0.7;
   const isoBlended = (lastIso * (1 - isoPowerWeight)) + (scaledIso * isoPowerWeight);
@@ -461,6 +464,13 @@ function buildHitterTransferInputs(args: {
   const inputs = {
     lastAvg: lastAvg as number, lastObp: lastObp as number, lastSlg: lastSlg as number,
     baPR: safePR(baPR), obpPR: safePR(obpPR), isoPR: safePR(isoPR),
+    // 🛑 Rating CENTRES — the hitter power ratings are NOT centred at 100 either.
+    //    Measured D1/PA>=100: ba 102.9887 · obp 100.3109 · iso 103.7939. Read from model_config
+    //    (`h_<stat>_pr_center`); the literals are the offline fallback if it has not been applied.
+    //    ⚠ NOT passed through toRate() — these are rating points, not weights.
+    baPrCenter: readEquationValue("h_ba_pr_center", 102.9887, remoteEquationValues),
+    obpPrCenter: readEquationValue("h_obp_pr_center", 100.3109, remoteEquationValues),
+    isoPrCenter: readEquationValue("h_iso_pr_center", 103.7939, remoteEquationValues),
     fromAvgPlus, toAvgPlus, fromObpPlus, toObpPlus, fromIsoPlus, toIsoPlus,
     fromStuff, toStuff,
     fromPark: fromBaPark, toPark: toBaPark,
@@ -523,6 +533,10 @@ const PITCHING_EQ_DEFAULTS = {
   k9_plus_weight: 0.15, bb9_plus_weight: 0.10, hr9_plus_weight: 0.05,
   // avg/sd/sd_bad refreshed to the 2026 two-sided-SD calibration (2026-08-26). sd_bad = the wide
   // worse-than-mean semi-deviation; the overlay loads live model_config values, these are fallbacks.
+  // Rating CENTRES — population mean of each stat's PR+ on D1/IP>=40. NOT 100.
+  // Overridden at runtime from model_config `p_<stat>_pr_center`; these are the offline fallback only.
+  era_pr_center: 109.7253, fip_pr_center: 108.2875, whip_pr_center: 108.4028,
+  k9_pr_center: 101.6919, bb9_pr_center: 123.1615, hr9_pr_center: 102.0359,
   era_plus_ncaa_avg: 5.474523, era_plus_ncaa_sd: 1.545191, era_plus_ncaa_sd_bad: 2.264985, era_pr_sd: 29.48780404, era_plus_scale: 20,
   fip_plus_ncaa_avg: 5.074767, fip_plus_ncaa_sd: 1.272503, fip_plus_ncaa_sd_bad: 1.843704, fip_pr_sd: 22.20492306, fip_plus_scale: 20,
   whip_plus_ncaa_avg: 1.531371, whip_plus_ncaa_sd: 0.255751, whip_plus_ncaa_sd_bad: 0.337614, whip_pr_sd: 24.58561805, whip_plus_scale: 20,
@@ -609,9 +623,12 @@ const projectLowerP = (
   compWeight: number, fromTalent: number, toTalent: number,
   parkWeight: number | null, fromPark: number | null, toPark: number | null,
   dampFactor = 1,
+  /** population mean of this stat's PR+ (model_config `p_<stat>_pr_center`); defaults to 100 */
+  prCenter = 100,
 ) => {
   const safePrSd = prSd === 0 ? 1 : prSd;
-  const powerAdj = ncaaAvg - (((prPlus - 100) / safePrSd) * ncaaSd);
+  // 🛑 prCenter, not 100 — the rating is NOT centred at 100 on the population the anchor uses.
+  const powerAdj = ncaaAvg - (((prPlus - (Number.isFinite(prCenter as number) ? (prCenter as number) : 100)) / safePrSd) * ncaaSd);
   const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
   const confTerm = confWeight * ((toPlus - fromPlus) / 100);
   const compTerm = compWeight * ((toTalent - fromTalent) / 100);
@@ -625,9 +642,12 @@ const projectHigherP = (
   last: number, prPlus: number, ncaaAvg: number, prSd: number, ncaaSd: number,
   powerWeight: number, confWeight: number, fromPlus: number, toPlus: number,
   compWeight: number, fromTalent: number, toTalent: number,
+  /** population mean of this stat's PR+ (model_config `p_<stat>_pr_center`); defaults to 100 */
+  prCenter = 100,
 ) => {
   const safePrSd = prSd === 0 ? 1 : prSd;
-  const powerAdj = ncaaAvg + (((prPlus - 100) / safePrSd) * ncaaSd);
+  // 🛑 prCenter, not 100 — higher-is-better twin of the site above.
+  const powerAdj = ncaaAvg + (((prPlus - (Number.isFinite(prCenter as number) ? (prCenter as number) : 100)) / safePrSd) * ncaaSd);
   const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
   const confTerm = confWeight * ((toPlus - fromPlus) / 100);
   const compTerm = compWeight * ((toTalent - fromTalent) / 100);
@@ -707,15 +727,15 @@ function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: P
   const fromHr9Pf = input.fromHr9ParkRaw != null ? parkToIndex(input.fromHr9ParkRaw) : null;
   const toHr9Pf = input.toHr9ParkRaw != null ? parkToIndex(input.toHr9ParkRaw) : null;
 
-  const pEra = projectLowerP(input.era, input.storedPrPlus.era, eq.era_plus_ncaa_avg, eq.era_pr_sd, dsd(input.storedPrPlus.era, eq.era_plus_ncaa_sd, eq.era_plus_ncaa_sd_bad), eq.transfer_era_power_weight, eq.transfer_era_conference_weight, input.fromEraPlus, input.toEraPlus, eq.transfer_era_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_era_park_weight, fromRg, toRg);
-  const pFip = projectLowerP(input.fip, input.storedPrPlus.fip, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, dsd(input.storedPrPlus.fip, eq.fip_plus_ncaa_sd, eq.fip_plus_ncaa_sd_bad), eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, input.fromFipPlus, input.toFipPlus, eq.transfer_fip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_fip_park_weight, fromRg, toRg);
-  const pWhip = projectLowerP(input.whip, input.storedPrPlus.whip, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(input.storedPrPlus.whip, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, input.fromWhipPlus, input.toWhipPlus, eq.transfer_whip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
-  const pK9 = projectHigherP(input.k9, input.storedPrPlus.k9, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(input.storedPrPlus.k9, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, input.fromK9Plus, input.toK9Plus, eq.transfer_k9_competition_weight, input.fromHitterTalent, input.toHitterTalent);
-  const pBb9 = projectLowerP(input.bb9, input.storedPrPlus.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(input.storedPrPlus.bb9, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, input.fromBb9Plus, input.toBb9Plus, eq.transfer_bb9_competition_weight, input.fromHitterTalent, input.toHitterTalent, null, null, null);
+  const pEra = projectLowerP(input.era, input.storedPrPlus.era, eq.era_plus_ncaa_avg, eq.era_pr_sd, dsd(input.storedPrPlus.era, eq.era_plus_ncaa_sd, eq.era_plus_ncaa_sd_bad), eq.transfer_era_power_weight, eq.transfer_era_conference_weight, input.fromEraPlus, input.toEraPlus, eq.transfer_era_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_era_park_weight, fromRg, toRg, 1, eq.era_pr_center);
+  const pFip = projectLowerP(input.fip, input.storedPrPlus.fip, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, dsd(input.storedPrPlus.fip, eq.fip_plus_ncaa_sd, eq.fip_plus_ncaa_sd_bad), eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, input.fromFipPlus, input.toFipPlus, eq.transfer_fip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_fip_park_weight, fromRg, toRg, 1, eq.fip_pr_center);
+  const pWhip = projectLowerP(input.whip, input.storedPrPlus.whip, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(input.storedPrPlus.whip, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, input.fromWhipPlus, input.toWhipPlus, eq.transfer_whip_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75, eq.whip_pr_center);
+  const pK9 = projectHigherP(input.k9, input.storedPrPlus.k9, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(input.storedPrPlus.k9, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, input.fromK9Plus, input.toK9Plus, eq.transfer_k9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.k9_pr_center);
+  const pBb9 = projectLowerP(input.bb9, input.storedPrPlus.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(input.storedPrPlus.bb9, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, input.fromBb9Plus, input.toBb9Plus, eq.transfer_bb9_competition_weight, input.fromHitterTalent, input.toHitterTalent, null, null, null, 1, eq.bb9_pr_center);
   // HR9-only physical floor at 0 (mirror src/lib floorAtZero, Trevor 2026-08-25): HR9 is the lone
   // luck-dominated rate where a thin-sample blend can dip below 0 even after the two-sided SD. Every
   // OTHER rate stays unfloored so a negative surfaces as a real bug, not silently masked.
-  const pHr9 = Math.max(0, projectLowerP(input.hr9, input.storedPrPlus.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(input.storedPrPlus.hr9, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, input.fromHr9Plus, input.toHr9Plus, eq.transfer_hr9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf));
+  const pHr9 = Math.max(0, projectLowerP(input.hr9, input.storedPrPlus.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(input.storedPrPlus.hr9, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, input.fromHr9Plus, input.toHr9Plus, eq.transfer_hr9_competition_weight, input.fromHitterTalent, input.toHitterTalent, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf, 1, eq.hr9_pr_center));
 
   const roleCurve = {
     tier1Max: eq.rp_to_sp_low_better_tier1_max, tier2Max: eq.rp_to_sp_low_better_tier2_max, tier3Max: eq.rp_to_sp_low_better_tier3_max,
@@ -1448,6 +1468,37 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
       if (Number.isFinite(v)) eqD1[k] = v;
     }
   }
+  // 🛑 RATING CENTRES + SDs from model_config (2026-09-01). The overlay above is deliberately NARROW
+  //    (`transfer_*` / `*_plus_ncaa_*`), which is why `p_*` keys never reached this function and why
+  //    its local constants drifted from src/lib (era_pr_sd 29.48780404 here vs 28.11694 there).
+  //    These keys carry no `_plus_ncaa_` substring, so they need their own pass.
+  // ⚠ `p_<stat>_pr_center` is the population mean of that stat's PR+ — NOT 100. On D1/IP>=40:
+  //    era 109.7253 · fip 108.2875 · whip 108.4028 · k9 101.6919 · bb9 123.1615 · hr9 102.0359.
+  //    Assuming 100 hands every qualified pitcher a free head start (+0.44 ERA for era).
+  const prCenters: Record<string, number> = {};
+  const prSds: Record<string, number> = {};
+  for (const r of mcPitch || []) {
+    const k = String(r.config_key);
+    const v = Number(r.config_value);
+    if (!Number.isFinite(v)) continue;
+    let m = k.match(/^p_(era|fip|whip|k9|bb9|hr9)_pr_center$/);
+    if (m) { prCenters[m[1]] = v; continue; }
+    m = k.match(/^p_(era|fip|whip|k9|bb9|hr9)_pr_sd$/);
+    if (m) { prSds[m[1]] = v; continue; }
+    m = k.match(/^h_(ba|obp|iso)_pr_center$/);
+    if (m) { prCenters[m[1]] = v; continue; }
+  }
+  // Fall back to the measured D1/IP>=40 values only if model_config has not been applied yet.
+  const CTR_FALLBACK: Record<string, number> = {
+    era: 109.7253, fip: 108.2875, whip: 108.4028, k9: 101.6919, bb9: 123.1615, hr9: 102.0359,
+    ba: 102.9887, obp: 100.3109, iso: 103.7939,
+  };
+  const ctr = (k: string) => (Number.isFinite(prCenters[k]) ? prCenters[k] : CTR_FALLBACK[k]);
+  for (const s of ["era", "fip", "whip", "k9", "bb9", "hr9"]) {
+    if (Number.isFinite(prSds[s])) eqD1[`${s}_pr_sd`] = prSds[s];
+    eqD1[`${s}_pr_center`] = ctr(s);
+  }
+  console.log(`[calibration] pr_centers from model_config: ${Object.keys(prCenters).length}/9 · pr_sds: ${Object.keys(prSds).length}/6`);
   const eqJucoOrD2: typeof PITCHING_EQ_DEFAULTS = { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS };
   // 2026-08-21: PTM tiers from model_config `nil_tier_<code>` (single source; falls back to consts).
   const mcMapP: Record<string, number> = {};
