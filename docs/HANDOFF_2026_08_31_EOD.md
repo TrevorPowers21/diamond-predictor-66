@@ -1,4 +1,43 @@
 # ▶️ HANDOFF — RSTR IQ, end of 2026-08-31. **START HERE.**
+
+## 🛑 MUST READ — PROJECTION CALIBRATION IS **WRONG ON PROD RIGHT NOW** (found 2026-09-01)
+
+Two constants were **fit on one population and applied to another**. Both bias EVERY pitcher's
+projection by a CONSTANT — equal discrepancies at every percentile and in every class bucket.
+
+**(1) Stage 5.5 had NO division filter.** Baselines were computed across every division:
+`D1 1,295 (mean ERA 5.264) · NJCAA_D1 477 (6.118) · ALL 1,773 (5.492)` at the producer's own
+`IP >= 40` qualifier. **477 JUCO pitchers — 27% of the sample — inflated the D1 anchor by 0.229 ERA
+(4.3%).** `git log` confirms the filter was NEVER present.
+
+**(2) The z-shift subtracts a hardcoded `100`, but PR+ is not centered at 100 on that population.**
+True D1/`IP>=40` centers: `era 109.7253 · fip 108.2875 · whip 108.4028 · k9 101.6919 · bb9 123.1615 ·
+hr9 102.0359 · overall 109.0064`. On all-division/`IP>=20` they are 96.3–104.0 (≈100) — PR+ was FIT
+there, APPLIED here. ERA carried **+0.44 of phantom improvement** per pitcher; **BB9 is worst at 123.16**.
+
+**MEASURED EFFECT** (real ERA constants) — a constant offset; the spread is unchanged:
+`AVERAGE pitcher 4.9280 → 5.2757 (actual 5.3040) · ELITE 3.8457 → 4.1934 · WEAK 6.2359 → 6.7028`
+
+★ Hitting is **not** contaminated the same way (its anchors were already D1-scoped; centers
+100.31–103.79). Centers are stored for both sides regardless — nothing may assume 100.
+
+⛔ **CODE IS FIXED, DATA IS NOT.** As of this writing: `model_config` has **not** been written on either
+database, the **edge function still has its own constant copies and its own hardcoded `100`** (so
+onboarding still projects with the old bias), and **precomputes have not been re-run** — every stored
+`p_era`/`p_war`/`market_value` on prod still carries the bias.
+
+⚠ After applying, **re-verify the ACROSS-THE-RANGE table, not the mean.** And note the trap: this bug
+is invisible to a range check, because a miscentered rating shifts the LEVEL while keeping the SHAPE.
+The tell was *equal* discrepancies everywhere. **A constant offset with correct spread ⇒ a population
+mismatch in the constants, not a broken model.**
+
+Full detail: `docs/PIPELINE_pitch_log_to_projections.md` stage 5.5 MUST READ.
+
+**CORRECTS THE STATE RECORDED IN THIS FILE.** Anything here describing the two-sided SD calibration as
+complete is accurate about the METHOD and wrong about the POPULATION: the shipped constants were
+computed across all divisions and against an assumed rating center of 100. Prod's `model_config` still
+holds the all-division values (`era_plus_ncaa_avg 5.483215`).
+
 **Companion: `docs/HANDOFF_WHATS_AHEAD_2026_08_31.md` — what is AHEAD (Track B blockers + the earned rules). This file is CURRENT STATE.**
 Supersedes `HANDOFF_2026_08_31_MASTERS_AND_TRACKB.md` as the entry point (that file is still valid for the Track B
 architecture write-up). Step-by-step: `docs/PLAN_finish_prod_push_2026_08_31.md`.
