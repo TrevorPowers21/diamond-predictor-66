@@ -30,6 +30,12 @@
  *   npx tsx scripts/backfill-neutral-snapshots.ts --apply         # staging, WRITES
  *   npx tsx scripts/backfill-neutral-snapshots.ts --prod          # prod, dry run
  *   npx tsx scripts/backfill-neutral-snapshots.ts --prod --apply  # prod, WRITES
+ *   npx tsx scripts/backfill-neutral-snapshots.ts --refresh --apply        # staging, REWRITE ALL
+ *   npx tsx scripts/backfill-neutral-snapshots.ts --prod --refresh --apply # prod,    REWRITE ALL
+ *
+ * ⚠ RUN --refresh AFTER EVERY PRECOMPUTE. Without it the snapshots keep pre-recompute values and
+ *   Team Builder silently shows numbers from the previous model while Player Profile shows the new
+ *   ones.
  *
  * ⚠ IDEMPOTENT: only touches rows WHERE neutral_snapshot IS NULL. Re-running is safe and a second
  *   run should report 0 candidates.
@@ -39,6 +45,27 @@ import pg from "pg";
 
 const isProd = process.argv.includes("--prod");
 const apply = process.argv.includes("--apply");
+/**
+ * --refresh : ALSO rewrite rows that ALREADY have a neutral_snapshot.
+ *
+ * ★ WHY THIS EXISTS (2026-09-01). `neutral_snapshot` is a COPY of the prediction row. A precompute
+ *   rewrites `player_predictions` but NOTHING cascades to the copies, so after every recalibration
+ *   every neutral snapshot is stale. Measured on staging right after the 2026-09-01 returner +
+ *   transfer recomputes: 310 of 586 comparable rows STALE. Symptom (Trevor): "player profile is
+ *   showing properly on staging but team builder is not" — Player Profile reads
+ *   `player_predictions` directly; Team Builder reads the snapshot.
+ *
+ * ✅ SAFE FOR TOGGLES — THIS IS THE WHOLE REASON IT IS THE NEUTRAL SCRIPT THAT GAINS THE FLAG.
+ *   A neutral snapshot is the dev_agg=0 base and carries NO toggle state; the coach's toggles live in
+ *   `production_notes` and are applied ON TOP at read time
+ *   (`useTeamBuilderSimulation.ts:1361` → `shown = p.neutralPrediction ?? p.prediction`, then a
+ *   devAggScale RATIO multiplies it). Refreshing neutral therefore fixes the DISPLAY for clean AND
+ *   toggled rows and cannot disturb a toggle.
+ *   ⛔ Do NOT add a --refresh to a script that writes `player_snapshot`/`transfer_snapshot` from
+ *      predictions instead. Those are the TOGGLE-BAKED copies; rebuilding them from a prediction
+ *      flattens every coach's toggle back to neutral.
+ */
+const refresh = process.argv.includes("--refresh");
 const envFile = isProd ? ".env.production.local" : ".env.local";
 
 const C = { red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", dim: "\x1b[2m", reset: "\x1b[0m" };
@@ -96,11 +123,11 @@ async function main() {
            (tbp.player_snapshot is not null) as has_player_snap
     from team_build_players tbp
     join team_builds tb on tb.id = tbp.build_id
-    where tbp.neutral_snapshot is null
+    where ${refresh ? "true" : "tbp.neutral_snapshot is null"}
       and tbp.player_id is not null
     order by tbp.id
   `);
-  console.log(`candidates (neutral_snapshot IS NULL): ${candidates.length}`);
+  console.log(`candidates (${refresh ? "REFRESH — ALL rows, existing snapshots WILL be overwritten" : "neutral_snapshot IS NULL"}): ${candidates.length}`);
   if (candidates.length === 0) {
     console.log(`${C.green}nothing to do${C.reset}`);
     await client.end();
@@ -162,7 +189,7 @@ async function main() {
   for (const u of updates) {
     const r = await client.query(
       `update team_build_players set neutral_snapshot = $2
-       where id = $1 and neutral_snapshot is null`,
+       where id = $1 ${refresh ? "" : "and neutral_snapshot is null"}`,
       [u.id, JSON.stringify(u.snap)],
     );
     done += r.rowCount ?? 0;
