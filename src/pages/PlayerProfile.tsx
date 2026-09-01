@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveActiveBuildId } from "@/lib/activeBuild";
 import { computeWrcPlus, computeWrcRaw } from "@/lib/wrc";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
@@ -604,6 +605,51 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
     }
     return predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
   })();
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // 🛑 ROSTERED/BOARD PLAYERS READ THE SAVED SNAPSHOT — NO LIVE COMPUTE (Trevor, 2026-09-01)
+  //   "for player profiles on roster or target board it just needs to read the saved
+  //    player/transfer snapshot across all the sites. No live compute."
+  //
+  // This page was the ONLY surface not wired to the active build. GM Roster, GM Targets,
+  // TeamBuilder and TargetBoardSubtab all resolve it; PlayerProfile read `player_predictions` and
+  // multiplied by `devAggScale` AT RENDER — that multiplication IS the live compute, and it is why
+  // the profile disagreed with the Team Builder row (measured on Arkansas: snapshot ÷ team-scoped
+  // row was exactly 1.02941 / 1.05882 = a build saved at dev_aggressiveness 0.5 / 1.0 while the
+  // stored prediction is dev-neutral at 0).
+  //
+  // ⛔ The build snapshot is ALREADY dev-adjusted — it baked the slider in at save time. Do NOT
+  //    apply devAggScale/depthScale on top of it or the adjustment compounds.
+  // Mirrors TargetBoardSubtab.tsx:351-381 exactly, including the TWP `${pid}|hitter` /
+  // `${pid}|pitcher` keying so each side reads its OWN slot's snapshot rather than a merge.
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  const { data: buildSnap = null } = useQuery({
+    queryKey: ["profile-active-build-snapshot", id, effectiveTeamId ?? null],
+    enabled: !!id && !!effectiveTeamId,
+    queryFn: async () => {
+      const { data: blds } = await (supabase as any)
+        .from("team_builds")
+        .select("id, is_active, is_default, team, academic_year, updated_at, created_at")
+        .eq("customer_team_id", effectiveTeamId);
+      const activeId = resolveActiveBuildId(blds);
+      if (!activeId) return null;
+      const { data: bps } = await (supabase as any)
+        .from("team_build_players")
+        .select("player_id, position_slot, included_in_roster, player_snapshot")
+        .eq("build_id", activeId)
+        .eq("included_in_roster", true)
+        .eq("player_id", id);
+      const rows = (bps || []).filter((r: any) => r.player_snapshot);
+      if (rows.length === 0) return null;
+      const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+      // This profile block renders the HITTER line. A TWP has two rows — take the hitter slot.
+      const hitterRow = rows.length === 1 ? rows[0] : rows.find((r: any) => !isPit(r.position_slot));
+      if (!hitterRow || isPit(hitterRow.position_slot)) return null;
+      return hitterRow.player_snapshot as any;
+    },
+  });
+  /** True when this player is on the active build's roster/board ⇒ pure-read, no session overlays. */
+  const isSnapshotBacked = !!buildSnap;
+
   const { isTransferPortal, isReturner, fromTeamData } = useTransferPortalContext(
     player, predictions, effectiveTeamId,
   );
@@ -932,7 +978,12 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const sessionDevAggNum = Number(sessionDevAgg);
   const _storedMult = 1 + devAggClassAdj + (storedDevAgg * 0.06);
   const _sessionMult = 1 + devAggClassAdj + (sessionDevAggNum * 0.06);
-  const devAggScale = _storedMult > 0 ? _sessionMult / _storedMult : 1;
+  // 🛑 SNAPSHOT-BACKED ⇒ SCALE IS FORCED TO 1. A rostered/board player's snapshot already has the
+  //    coach's dev setting baked in; scaling it again compounds the adjustment.
+  //    For a NON-rostered player this stays live ON PURPOSE — Trevor 2026-09-01: "for player
+  //    profiles not on target board or on roster they still need a local live compute that then
+  //    resets on refresh and doesn't save anywhere." It is display-only and never persisted.
+  const devAggScale = isSnapshotBacked ? 1 : (_storedMult > 0 ? _sessionMult / _storedMult : 1);
   const applyDevScale = (v: number | null | undefined) =>
     v == null || !Number.isFinite(Number(v)) ? null : Number(v) * devAggScale;
 
@@ -1011,12 +1062,19 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
-  const projectedAvg = applyDevScale(regularPred?.p_avg);
-  const projectedObp = applyDevScale(regularPred?.p_obp);
-  const projectedSlg = applyDevScale(regularPred?.p_slg);
+  // 🛑 PURE READ when the player is on the active build: take the SAVED snapshot verbatim.
+  //    Otherwise read the stored NEUTRAL precompute (player_predictions is dev-neutral —
+  //    dev_aggressiveness measured 0.000 across all 7,062 projected rows on prod) and let the
+  //    session toggle scale it for display only.
+  const projectedAvg = isSnapshotBacked ? (buildSnap.p_avg ?? null) : applyDevScale(regularPred?.p_avg);
+  const projectedObp = isSnapshotBacked ? (buildSnap.p_obp ?? null) : applyDevScale(regularPred?.p_obp);
+  const projectedSlg = isSnapshotBacked ? (buildSnap.p_slg ?? null) : applyDevScale(regularPred?.p_slg);
   const fromDerived = computeDerived(predFromAvg, predFromObp, predFromSlg);
   const projectedDerived = computeDerived(projectedAvg, projectedObp, projectedSlg);
-  const projectedWrcPlus = applyDevScale(regularPred?.p_wrc_plus);
+  // Same rule as AVG/OBP/SLG above: snapshot verbatim when rostered, neutral+session otherwise.
+  const projectedWrcPlus = isSnapshotBacked
+    ? (buildSnap.p_wrc_plus ?? null)
+    : applyDevScale(regularPred?.p_wrc_plus);
 
   // Always use 2025 row for determining if player has data — don't bail on historical year with no AB
   const activeMasterRow = currentHitterRow;
