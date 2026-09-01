@@ -341,7 +341,16 @@ async function main() {
       .from("Pitching Master")
       .select("*")
       .eq("Season", CURRENT_SEASON)
-      .gte("IP", 1)
+      // ★ 2026-09-01 — floor lowered from IP>=1 to IP>0 (Trevor: "just have the local script capture
+      //   it in the next wave"). A BLOCKED row is never rewritten, so it keeps whatever an older run
+      //   left in it FOREVER — every calibration fix silently skips it. Emil Estrella (0.333 IP) sat
+      //   at p_era 31.18 from a pre-fix run while a fresh compute gives 9.457, and that stale value is
+      //   what made the local-vs-edge diff look like an implementation disagreement for hours.
+      //   The edge function has no IP floor, so this also stops the two paths disagreeing by design.
+      // ⚠ Still blocked and still stale by construction: players with NO Pitching Master row at all,
+      //   and JUCO sources with no stored from-conference env+ (the 2026-08-21 GAP 2 guard, which
+      //   blocks on purpose rather than neutral-filling with 100). Those are NOT addressed here.
+      .gt("IP", 0)
       .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)"),
   );
   console.log(`  ${pmRows.length} Pitching Master rows`);

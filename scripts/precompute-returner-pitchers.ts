@@ -236,7 +236,10 @@ async function main() {
       .from("Pitching Master")
       .select("*")
       .eq("Season", CURRENT_SEASON)
-      .gte("IP", 1)
+      // ★ 2026-09-01 — floor lowered from IP>=1 to IP>0, same reason as precompute-pitchers.ts:
+      //   a BLOCKED row is never rewritten, so it keeps a pre-fix value forever and every calibration
+      //   change silently skips it. Keep these two floors identical.
+      .gt("IP", 0)
       .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)"),
   );
   console.log(`  ${pmRows.length} Pitching Master rows`);
