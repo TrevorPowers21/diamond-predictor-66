@@ -245,6 +245,53 @@ Builder row and the Player Profile.
 one of the two is still deriving a value at render time instead of reading it. **Find the live compute
 and remove it — that is the fix.** The number agreeing afterwards is a side effect, not the goal.
 
+### ✅ DIAGNOSED 2026-09-01 — Trevor's guess was exactly right, and the gap is bigger than 1 point
+**The two surfaces read DIFFERENT SOURCES, and one applies a multiplier the other does not:**
+
+| surface | source | transform |
+|---|---|---|
+| Team Builder (`PlayerTableRow.tsx:612`) | `projection.shown` → `p.prediction ?? p.transfer_snapshot` = the stored **`team_build_players.player_snapshot`** | **none** |
+| Player Profile (`PlayerProfile.tsx:1014`) | `regularPred.p_avg` from **`player_predictions`** | **`× devAggScale`** (`:935`) |
+
+`devAggScale = _sessionMult / _storedMult`, where `_storedMult = 1 + devAggClassAdj + storedDevAgg·0.06`
+and `_sessionMult` uses the SESSION slider. It equals 1 only when the session slider matches what was
+stored.
+
+**Measured on prod (Arkansas, `6deca66a-b4c0-403f-9614-a9d32f1d5994`):**
+- **Default build: 0 of 12 differ.** The edge fn writes it from neutral predictions — clean.
+- **Saved build "Arkansas Baseball 2027 Roster" (`is_default=false`): 11 of 46 differ from the
+  team-scoped row, 20 of 46 from the global row.**
+- The deltas are **not** 1 point. A.J. Evasco snapshot `.35424` vs team-scoped `.33456`; Jonathan Gomez
+  `.30564` vs global `.357` (~51 points).
+
+**★ The multiplier is EXACT and identifies the cause beyond doubt.** `snapshot ÷ team_scoped` is
+precisely `1.02941` or `1.05882`:
+```
+(1 + 0.02 + 0.5·0.06) / (1 + 0.02 + 0·0.06) = 1.05/1.02 = 1.029411…   ⇒ saved at dev_aggressiveness 0.5
+(1 + 0.02 + 1.0·0.06) / (1 + 0.02 + 0·0.06) = 1.08/1.02 = 1.058823…   ⇒ saved at dev_aggressiveness 1.0
+```
+with `devAggClassAdj = 0.02` and stored `dev_aggressiveness = 0` (confirmed: 0.000 across all 7,062
+projected rows). ⇒ **The build snapshot bakes the session dev slider in at save time.** It is not a
+stale copy and not rounding — it is a deliberately *adjusted* number being compared against a *neutral*
+one.
+
+⚠ **Each player appears TWICE in that build** — once at dev 0.5 and once at dev 1.0 (Evasco, Marin,
+Traeger, Zeb Allen all duplicated). Determine whether that is intentional scenario rows or a
+duplicate-insert bug **before** any dedupe.
+
+### 🔑 THE DECISION THIS FORCES (needs Trevor)
+Trevor's requirement is that **both surfaces read `player_snapshot` and nothing is live**. But the
+snapshot currently stores a *dev-adjusted* value, while the profile shows the *neutral* projection
+scaled by the session slider. Those are two different quantities, so "read the same thing" requires
+choosing which one is canonical:
+- **(a)** Profile reads the active build's `player_snapshot` → matches TB exactly, but the profile then
+  shows a coach-adjusted number rather than the player's neutral projection.
+- **(b)** Snapshots store the NEUTRAL value and the dev slider is applied at render on both surfaces →
+  keeps the profile neutral, but then TB is not purely reading either.
+- **(c)** Snapshots store BOTH (neutral + adjusted) and each surface reads the field it means.
+⇒ **(c) is the only option that satisfies pure-read without losing the coach's adjustment.** Confirm
+before building.
+
 **Where to look:**
 1. Does the Team Builder row read `team_build_players.player_snapshot`, or re-derive from
    `player_predictions` / the sim? `useTeamBuilderSimulation` re-runs projection math — if the
