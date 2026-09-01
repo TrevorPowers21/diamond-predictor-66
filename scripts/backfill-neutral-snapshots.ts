@@ -43,6 +43,16 @@
 import fs from "fs";
 import pg from "pg";
 
+// 🛑 node-postgres returns PostgreSQL `numeric` (OID 1700) and `int8` (OID 20) as STRINGS.
+//    The PITCHER path below copies the prediction row VERBATIM, so without this every numeric field
+//    lands in the snapshot as a JSON string. The UI then calls .toFixed() on it and the Team Builder
+//    page CRASHES: "shownMetric.toFixed is not a function" (PlayerTableRow.tsx:834).
+//    Measured 2026-09-01 after the first --refresh run: 627 pitcher snapshots had p_war/p_era as
+//    strings on BOTH staging and prod. The HITTER path never hit this because it coerces via num().
+// ⇒ Parse numerics as JS numbers at the DRIVER, so the verbatim copy stays verbatim AND typed.
+pg.types.setTypeParser(1700, (v: string | null) => (v === null ? null : Number(v)));
+pg.types.setTypeParser(20, (v: string | null) => (v === null ? null : Number(v)));
+
 const isProd = process.argv.includes("--prod");
 const apply = process.argv.includes("--apply");
 /**
