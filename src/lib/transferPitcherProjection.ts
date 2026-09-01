@@ -135,9 +135,16 @@ const projectLower = (
   // HR9 is the lone luck-dominated stat where a thin-sample blend can dip below 0; the
   // other lower-is-better rates stay unfloored so a negative surfaces as a real bug.
   floorAtZero = false,
+  /** Population mean of this stat's PR+ (model_config `<stat>_pr_center`). Defaults to 100 so an
+   *  un-migrated caller is unchanged. See the long note on projectPitchingRate. */
+  prCenter = 100,
 ): RateWork => {
   const safePrSd = prSd === 0 ? 1 : prSd;
-  const powerAdj = ncaaAvg - (((prPlus - 100) / safePrSd) * ncaaSd);
+  // 🛑 prCenter, not 100 — see the note on projectPitchingRate in pitcherProjection.ts.
+  //    PR+ is fit on all-division/IP>=20 (~100) but applied to D1/IP>=40 (era 109.73 … bb9 123.16),
+  //    so assuming 100 hands every qualified pitcher a phantom improvement.
+  const safeCenter = Number.isFinite(prCenter as number) ? (prCenter as number) : 100;
+  const powerAdj = ncaaAvg - (((prPlus - safeCenter) / safePrSd) * ncaaSd);
   const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
   const confTerm = confWeight * ((toPlus - fromPlus) / 100);
   const compTerm = compWeight * ((toTalent - fromTalent) / 100);
@@ -175,9 +182,13 @@ const projectHigher = (
   compWeight: number,
   fromTalent: number,
   toTalent: number,
+  /** Population mean of this stat's PR+ (model_config `<stat>_pr_center`); defaults to 100. */
+  prCenter = 100,
 ): RateWork => {
   const safePrSd = prSd === 0 ? 1 : prSd;
-  const powerAdj = ncaaAvg + (((prPlus - 100) / safePrSd) * ncaaSd);
+  // 🛑 prCenter, not 100 — higher-is-better twin of the lower-is-better site above.
+  const safeCenterHi = Number.isFinite(prCenter as number) ? (prCenter as number) : 100;
+  const powerAdj = ncaaAvg + (((prPlus - safeCenterHi) / safePrSd) * ncaaSd);
   const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
   const confTerm = confWeight * ((toPlus - fromPlus) / 100);
   const compTerm = compWeight * ((toTalent - fromTalent) / 100);

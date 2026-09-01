@@ -135,6 +135,7 @@ export const projectPitchingRate = ({
   ncaaSd,
   ncaaSdBad,
   prSd,
+  prCenter,
   classAdjustment,
   devAggressiveness,
   thresholds,
@@ -151,6 +152,24 @@ export const projectPitchingRate = ({
    *  (symmetric) when absent. Stage 5.5 (compute-projection-calibration) supplies both. */
   ncaaSdBad?: number;
   prSd: number;
+  /**
+   * 🛑 The population mean of THIS stat's PR+ — NOT 100. Read from model_config
+   *    `<stat>_pr_center`, emitted by compute-projection-calibration.ts on the SAME population as
+   *    ncaaAvg/ncaaSd (D1, IP >= 40).
+   *
+   * ★ WHY THIS EXISTS. `rawZ` used to be `(prPlus - 100) / prSd`, which assumes the rating is
+   *   centered where the anchor is. It is not: PR+ was fit on the ALL-DIVISION, IP>=20 population
+   *   (centers 96.3-104.0 there, i.e. ~100) but is APPLIED to D1/IP>=40, where the true centers are
+   *   era 109.73 · fip 108.29 · whip 108.40 · k9 101.69 · bb9 123.16 · hr9 102.04.
+   *   Every qualified D1 pitcher therefore carried a free head start — for ERA,
+   *   ((109.73-100)/27.90) x 1.425 = +0.44 ERA of phantom improvement. That is the "ERAs run ~4% low
+   *   at every percentile, in every class bucket" symptom, and BB9 was the extreme at 123.16.
+   *
+   * ⚠ Defaults to 100 so an un-migrated caller behaves exactly as before rather than silently
+   *   shifting. Once model_config carries the key, PASS IT — leaving the default in place keeps the
+   *   bias.
+   */
+  prCenter?: number;
   classAdjustment: number;
   devAggressiveness: number;
   /** read-only: accepts `as const` / frozen arrays. See dampFactorForProjected. */
@@ -188,7 +207,7 @@ export const projectPitchingRate = ({
   // through the physical floor (impossible negative HR9). PR+ higher = better talent for every stat,
   // so a positive rating-z projects toward the GOOD side (use sd_good = ncaaSd); negative toward the
   // BAD side (use ncaaSdBad). Falls back to symmetric (ncaaSd) when ncaaSdBad is absent.
-  const rawZ = (prPlus - 100) / prSd;
+  const rawZ = (prPlus - (Number.isFinite(prCenter as number) ? (prCenter as number) : 100)) / prSd;
   const dirSd = rawZ >= 0 ? ncaaSd : (Number.isFinite(ncaaSdBad as number) ? (ncaaSdBad as number) : ncaaSd);
   const zShift = rawZ * dirSd;
   const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
@@ -456,12 +475,12 @@ export function computePitcherProjection(
   const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
 
   // Step 1: raw projected rates from last-stat + PR+ + class/dev.
-  const pEra = projectPitchingRate({ lastStat: input.era, prPlus: prPlus.eraPrPlus, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, ncaaSdBad: eq.era_plus_ncaa_sd_bad, prSd: eq.era_pr_sd, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
-  const pFip = projectPitchingRate({ lastStat: input.fip, prPlus: prPlus.fipPrPlus, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, ncaaSdBad: eq.fip_plus_ncaa_sd_bad, prSd: eq.fip_pr_sd, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
-  const pWhip = projectPitchingRate({ lastStat: input.whip, prPlus: prPlus.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, ncaaSdBad: eq.whip_plus_ncaa_sd_bad, prSd: eq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
-  const pK9 = projectPitchingRate({ lastStat: input.k9, prPlus: prPlus.k9PrPlus, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, ncaaSdBad: eq.k9_plus_ncaa_sd_bad, prSd: eq.k9_pr_sd, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
-  const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, ncaaSdBad: eq.bb9_plus_ncaa_sd_bad, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
-  const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, ncaaSdBad: eq.hr9_plus_ncaa_sd_bad, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true, floorAtZero: true });
+  const pEra = projectPitchingRate({ lastStat: input.era, prPlus: prPlus.eraPrPlus, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, ncaaSdBad: eq.era_plus_ncaa_sd_bad, prSd: eq.era_pr_sd, prCenter: eq.era_pr_center, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
+  const pFip = projectPitchingRate({ lastStat: input.fip, prPlus: prPlus.fipPrPlus, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, ncaaSdBad: eq.fip_plus_ncaa_sd_bad, prSd: eq.fip_pr_sd, prCenter: eq.fip_pr_center, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
+  const pWhip = projectPitchingRate({ lastStat: input.whip, prPlus: prPlus.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, ncaaSdBad: eq.whip_plus_ncaa_sd_bad, prSd: eq.whip_pr_sd, prCenter: eq.whip_pr_center, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
+  const pK9 = projectPitchingRate({ lastStat: input.k9, prPlus: prPlus.k9PrPlus, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, ncaaSdBad: eq.k9_plus_ncaa_sd_bad, prSd: eq.k9_pr_sd, prCenter: eq.k9_pr_center, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
+  const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, ncaaSdBad: eq.bb9_plus_ncaa_sd_bad, prSd: eq.bb9_pr_sd, prCenter: eq.bb9_pr_center, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
+  const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, ncaaSdBad: eq.hr9_plus_ncaa_sd_bad, prSd: eq.hr9_pr_sd, prCenter: eq.hr9_pr_center, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true, floorAtZero: true });
 
   // Park factor is intentionally NOT applied to returner projections — the
   // pitcher's lastStat already reflects their home park, and they're staying

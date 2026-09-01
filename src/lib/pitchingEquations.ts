@@ -8,6 +8,17 @@ export type PitchingEquationWeights = {
   era_plus_ncaa_avg: number;
   era_plus_ncaa_sd: number;
   era_plus_ncaa_sd_bad: number;
+  /** Population mean of each stat's PR+ — model_config `<stat>_pr_center`, emitted by
+   *  compute-projection-calibration.ts on the SAME population as the anchors (D1, IP >= 40).
+   *  🛑 NOT 100. Measured 2026-09-01: era 109.73 · fip 108.29 · whip 108.40 · k9 101.69 ·
+   *     bb9 123.16 · hr9 102.04. PR+ was fit on all-division/IP>=20 (~100) and applied to
+   *     D1/IP>=40, handing every qualified pitcher a phantom improvement. */
+  era_pr_center: number;
+  fip_pr_center: number;
+  whip_pr_center: number;
+  k9_pr_center: number;
+  bb9_pr_center: number;
+  hr9_pr_center: number;
   era_pr_sd: number;
   era_plus_scale: number;
   fip_plus_ncaa_avg: number;
@@ -206,6 +217,14 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   era_plus_ncaa_avg: 6.21,
   era_plus_ncaa_sd: 1.587898316,
   era_plus_ncaa_sd_bad: 1.587898316,
+  // Rating centers — measured on prod D1/IP>=40, Season 2026. Overridden by model_config
+  // `<stat>_pr_center` at runtime; these are only the offline fallback.
+  era_pr_center: 109.7253,
+  fip_pr_center: 108.2875,
+  whip_pr_center: 108.4028,
+  k9_pr_center: 101.6919,
+  bb9_pr_center: 123.1615,
+  hr9_pr_center: 102.0359,
   era_pr_sd: 28.11694,       // std_pr on 2026 pitch-log ratings (IP≥40); was 29.48780404
   era_plus_scale: 20,
   fip_plus_ncaa_avg: 5.08,
@@ -348,6 +367,17 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       era_plus_ncaa_avg: Number.isFinite(parsed.era_plus_ncaa_avg) ? Number(parsed.era_plus_ncaa_avg) : base.era_plus_ncaa_avg,
       era_plus_ncaa_sd: Number.isFinite(parsed.era_plus_ncaa_sd) ? Number(parsed.era_plus_ncaa_sd) : base.era_plus_ncaa_sd,
       era_plus_ncaa_sd_bad: Number.isFinite(parsed.era_plus_ncaa_sd_bad) ? Number(parsed.era_plus_ncaa_sd_bad) : base.era_plus_ncaa_sd_bad,
+      // 🛑 Rating centers are DATA-DERIVED (model_config `<stat>_pr_center`, refreshed by
+      //    compute-projection-calibration.ts each run). They come from `base`, which already has the
+      //    Supabase overlay applied — deliberately NOT read from localStorage, because a coach
+      //    hand-editing a population mean would silently re-introduce the phantom-improvement bias
+      //    this fixes. See the note on PitchingEquationWeights.
+      era_pr_center: base.era_pr_center,
+      fip_pr_center: base.fip_pr_center,
+      whip_pr_center: base.whip_pr_center,
+      k9_pr_center: base.k9_pr_center,
+      bb9_pr_center: base.bb9_pr_center,
+      hr9_pr_center: base.hr9_pr_center,
       era_pr_sd: Number.isFinite(parsed.era_pr_sd) ? Number(parsed.era_pr_sd) : base.era_pr_sd,
       era_plus_scale: Number.isFinite(parsed.era_plus_scale) ? Number(parsed.era_plus_scale) : base.era_plus_scale,
       fip_plus_ncaa_avg: Number.isFinite(parsed.fip_plus_ncaa_avg) ? Number(parsed.fip_plus_ncaa_avg) : base.fip_plus_ncaa_avg,
