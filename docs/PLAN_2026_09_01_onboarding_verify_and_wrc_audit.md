@@ -307,6 +307,56 @@ before building.
 source row directly in the DB, and confirm both surfaces render that stored value **byte-for-byte**.
 No tolerance band — the architecture says zero.
 
+## 🔴 LOGGED SHORTCOMING (2026-09-01) — SMALL-SAMPLE pRV+ IS DECOUPLED FROM ERA
+
+**Not fixed. Logged deliberately** (Trevor: *"lets just log that as a problem"*). Surfaced while chasing
+Harrison Cook on the Top 5; he turned out to be one instance of a class, and not the important one.
+
+### The mechanism — an ABSENT event on a tiny sample reads as EXCELLENCE
+`pRV+` is FIP-driven (K/9, BB/9, HR/9); `p_era` is ERA-driven. On a 1–3 inning sample nobody gives up
+a homer, so HR/9 = 0, and HR/9 is heavily weighted in projected RA9. The result is an elite rating
+sitting next to a terrible ERA. Measured on PROD (2027, `variant='regular'`, active):
+
+| player | actual IP | G | K/9 | BB/9 | **HR/9** | FIP | actual ERA | **pRV+** |
+|---|---|---|---|---|---|---|---|---|
+| Lucas Dixon | **1.0** | 1 | 9.0 | 0 | **0** | 1.16 | 0.00 | **142** |
+| Brad Curtis | **1.3** | 1 | 13.5 | 6.75 | **0** | 2.41 | 47.25 | 133 |
+| Andrew Carter | **1.7** | 2 | 22.5 | 4.5 | **0** | 1.16 | 10.80 | 144 |
+| Carson Boyer | **2.3** | 3 | **0** | 0 | **0** | 4.79 | 11.57 | 133 |
+
+★ Carson Boyer rates **133 with ZERO strikeouts**. HR/9 = 0 for every member of the set.
+`D1 contradictory set: avg 12.4 IP · min 1.0 · max 50 · 13 of 24 under 5 IP.`
+
+### Scale, by division (PROD, all divisions — earlier counts in this doc were D1-scoped)
+```
+division     pRV+>=120 AND ERA>=6     projected_ip<=10 AND pRV+>=120     total rated
+D1                   27                          119                        5,459
+NJCAA_D1             53                            0                        1,172
+D2                    0                            0                            1
+```
+- **D1: 119 pitchers with <=10 projected IP can outrank genuine starters** on any pRV+-sorted board.
+  All 27 contradictory rows sit at `projected_ip = 6` — the `specialist_reliever` thin-sample tier.
+- **JUCO is 53 of the 80 contradictory rows (66%) at ~9x the D1 rate** (4.5% vs 0.5%) — but with
+  **ZERO** tiny-IP cases (Reagan King 149 / 7.92 ERA on **30** IP; O'Gorman 136 / 9.28 on **50**).
+  ⇒ **A DIFFERENT BUG.** Trevor, 2026-09-01: *"the juco fip is destroyed anyway and wasn't calculated
+  properly, which is a future audit."* Consistent with JUCO rating against **D1 baselines** and
+  TrackMan skewing to the upper crust. Belongs to the JUCO restructure, not here.
+  See [[project_juco_restructure_planned]], `docs/JUCO_AUDIT_2026_05_24.md`.
+
+### Why the `team_id` display filter was the WRONG fix (do not retry it)
+Harrison Cook was the only STUB in the set; the other 26 D1 rows are real, current 2026 players.
+`team_id IS NULL` was a proxy that correlated on prod and carried **zero** signal on staging
+(99.99% NULL there) — it hid one symptom, missed the class, and emptied the list in the other
+environment. ⇒ **The rating is what is wrong, not the visibility of the row.**
+
+### When picked up
+Same family as [[project_small_sample_pullback]] (`<75 AB / 25 IP` blend prior year). The fix belongs
+in the projection, not a display gate: regress the FIP inputs toward the population mean by sample
+size, so an unobserved home run on 1 IP stops reading as elite HR prevention.
+⚠ Cross-check against the HR9 holdout in
+`docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md` — HR9's rating is already the
+weakest predictor (corr **0.32**), and this is that weakness showing up at the low-IP tail.
+
 ## ALSO OPEN (not blocking, do not lose)
 - **Modeling question for Trevor:** is a 3:1 OBP:SLG weighting the intent? It means a power bat with a
   mediocre OBP always grades ~league-average. Lauaki is the poster case.
