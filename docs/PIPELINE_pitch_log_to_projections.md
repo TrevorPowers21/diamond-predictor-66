@@ -484,6 +484,51 @@ and the producer matches it.
 **single source of truth**. `"Equation Weights"` is legacy → rename to `"Equation Weights_LEGACY_2025"`
 (**rename, not delete** — a missed reader must crash loudly, not fall back silently to code defaults).
 
+### 🔑 `model_config` KEY NAMING — THE CONVENTION (settled 2026-09-01)
+
+**Prefix = DOMAIN. This is not decoration — a reader filters on it.**
+
+| prefix | domain | consumed by | examples |
+|---|---|---|---|
+| `p_…` | **PITCHING** constant | `loadPitchingPowerEq` (`predictionEngine.ts:694`) takes **only** keys starting `p_`; plus the `fields` mapping in `pitchingEquations.ts` | `p_era_pr_sd`, `p_era_stuff_plus_weight`, **`p_era_pr_center`** |
+| `h_…` | **HITTING** rating constant (NEW 2026-09-01) | calibration output; reader TBD | **`h_ba_pr_center`**, `h_overall_pr_center` |
+| `r_…` | **RETURNER** hitter equation | `predictionEngine` returner config | `r_w_obp`, `r_obp_std_ncaa` |
+| `t_…` | **TRANSFER** hitter equation | `predictionEngine` transfer config | `t_ba_ncaa_avg`, `t_obp_park_weight` |
+| `<stat>_plus_…` | calibration of the **STAT itself** (its mean / SDs) — NOT the rating's | `fields` mapping | `era_plus_ncaa_avg`, `_ncaa_sd`, `_ncaa_sd_bad` |
+
+★ **`pr` = power rating.** So `p_era_pr_center` is *the centre of the pitching ERA power-rating
+distribution* — distinct from `era_plus_ncaa_avg`, which is the centre of **ERA itself**. The z-shift
+measures FROM the rating centre and scales BY the stat SD; mixing the two is what caused C1.
+
+🛑 **WRITING A KEY TO `model_config` IS NOT ENOUGH.** It only reaches the app if it is ALSO listed in
+the `fields` mapping in `pitchingEquations.ts`. The first cut of these keys was named
+`era_plus_pr_center`, matched no reader's filter, and was **written but never read** — completely
+inert. If a constant "isn't taking effect", check the mapping before checking the data.
+
+### 📥 REQUIRED — THESE MUST AUTOFILL THROUGH THE FULL UPLOAD PROCESS (Trevor, 2026-09-01)
+
+⬜ **NOT BUILT.** Stage 5.5 is currently a **manual** script run. It must become part of the upload /
+ingest chain so the constants re-derive from each new season's actuals instead of being hand-run.
+
+> *"it also needs to be logged that this is gonna need to autofill and interpret through the full
+> upload process."*
+
+**What that requires:**
+1. **Fire stage 5.5 automatically** after any ingest that changes the Masters (TruMedia CSV import,
+   pitch-log ingest, a Masters rebuild) — not on a human remembering to run it.
+2. **Re-derive, never carry forward.** Every value here is a population statistic of the CURRENT
+   season's qualified D1 population. A stale constant is exactly the C1 defect: a number fit on one
+   population applied to another.
+3. **Interpret, don't just copy.** The producer must recompute the centre AND the SD for every rating,
+   and re-derive HR9's shrink `K` from the data (it moved 70.8 → 157 when the population was corrected
+   to D1-only — a hardcoded K would have been silently wrong).
+4. **Order matters:** it depends on stage 4 (power ratings must exist to have a centre) and feeds
+   stage 6 (projections). It sits at 5.5 for that reason.
+5. **Fail loudly on an empty/short population** rather than writing a mean over 12 rows. ⚠ A
+   qualifier that silently matches nothing would poison every projection downstream.
+⚠ Until this is automated, **any Masters refresh silently invalidates these constants** and nothing
+warns you.
+
 ### 🛑 MUST READ — STAGE 5.5 IS **D1 ONLY**, AND THE Z-SHIFT DOES **NOT** SUBTRACT 100 (2026-09-01)
 
 Two constants were **fit on one population and applied to another**. Same root cause, two places.

@@ -230,6 +230,24 @@ function _loadSupabasePitchingWeights() {
         ["transfer_hr9_conference_weight", "transfer_hr9_conference_weight"],
         ["transfer_hr9_competition_weight", "transfer_hr9_competition_weight"],
         ["transfer_hr9_park_weight", "transfer_hr9_park_weight"],
+        // 🛑 RATING CENTERS + SDs — added 2026-09-01. WITHOUT THESE LINES THE KEYS ARE INERT:
+        //    writing to model_config is not enough, a key only reaches the app if it is mapped here.
+        //    Emitted by scripts/compute-projection-calibration.ts on the D1 / IP>=40 population,
+        //    the SAME population the `<stat>_plus_ncaa_*` anchors use — that alignment is the fix.
+        //    `p_` = pitching-domain (matches the 54 p_* keys already in model_config, e.g.
+        //    p_era_pr_sd). ⛔ Do not rename to `era_plus_pr_center` — nothing reads that.
+        ["era_pr_center", "p_era_pr_center"],
+        ["fip_pr_center", "p_fip_pr_center"],
+        ["whip_pr_center", "p_whip_pr_center"],
+        ["k9_pr_center", "p_k9_pr_center"],
+        ["bb9_pr_center", "p_bb9_pr_center"],
+        ["hr9_pr_center", "p_hr9_pr_center"],
+        ["era_pr_sd", "p_era_pr_sd"],
+        ["fip_pr_sd", "p_fip_pr_sd"],
+        ["whip_pr_sd", "p_whip_pr_sd"],
+        ["k9_pr_sd", "p_k9_pr_sd"],
+        ["bb9_pr_sd", "p_bb9_pr_sd"],
+        ["hr9_pr_sd", "p_hr9_pr_sd"],
       ];
       for (const [field, key] of fields) {
         const v = get(key);

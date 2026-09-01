@@ -149,18 +149,38 @@ const STATS: StatDef[] = [
  *    how `era_pr_sd` came to differ between src/lib (28.11694) and the edge fn (29.48780404).
  */
 type CenterDef = { key: string; table: "Pitching Master" | "Hitter Master"; ratingCol: string; qualCol: string; qualMin: number };
+/**
+ * 🛑 KEY NAMING — SETTLED 2026-09-01. Match the EXISTING families; do not invent a third pattern.
+ *
+ *   `p_…`  PITCHING-domain constant. 54 already exist in model_config on BOTH databases
+ *          (`p_era_pr_sd`, `p_era_stuff_plus_weight`, …) and `loadPitchingPowerEq`
+ *          (`predictionEngine.ts:694`) consumes **only** keys starting `p_`.
+ *   `h_…`  HITTING-domain rating constant. NEW, symmetric with `p_`.
+ *   `r_…`  returner hitter equation (`r_w_obp`, `r_obp_std_ncaa`)
+ *   `t_…`  transfer hitter equation (`t_ba_ncaa_avg`, `t_obp_park_weight`)
+ *   `<stat>_plus_…`  per-stat CALIBRATION of the stat itself (`era_plus_ncaa_avg`, `_ncaa_sd`,
+ *                    `_ncaa_sd_bad`) — the stat's mean/SD, NOT the rating's.
+ *
+ * ⇒ A rating CENTER is `p_<stat>_pr_center` / `h_<stat>_pr_center`, sitting directly beside the
+ *   `p_<stat>_pr_sd` that already exists. `pr` = power rating; `center`/`sd` describe the rating's
+ *   own distribution, which is what the z-shift measures FROM.
+ *
+ * ⛔ Writing a key here is NOT enough. It only reaches the app if it is ALSO listed in the `fields`
+ *    mapping in `pitchingEquations.ts`. That is exactly why the first version of these keys
+ *    (`era_plus_pr_center`) was inert: written, never read, matching no reader's filter.
+ */
 const CENTERS: CenterDef[] = [
-  { key: "era_plus",  table: "Pitching Master", ratingCol: "era_pr_plus",  qualCol: "IP", qualMin: 40 },
-  { key: "fip_plus",  table: "Pitching Master", ratingCol: "fip_pr_plus",  qualCol: "IP", qualMin: 40 },
-  { key: "whip_plus", table: "Pitching Master", ratingCol: "whip_pr_plus", qualCol: "IP", qualMin: 40 },
-  { key: "k9_plus",   table: "Pitching Master", ratingCol: "k9_pr_plus",   qualCol: "IP", qualMin: 40 },
-  { key: "bb9_plus",  table: "Pitching Master", ratingCol: "bb9_pr_plus",  qualCol: "IP", qualMin: 40 },
-  { key: "hr9_plus",  table: "Pitching Master", ratingCol: "hr9_pr_plus",  qualCol: "IP", qualMin: 40 },
-  { key: "pitch_overall", table: "Pitching Master", ratingCol: "overall_pr_plus", qualCol: "IP", qualMin: 40 },
-  { key: "t_ba",  table: "Hitter Master", ratingCol: "ba_power_rating",      qualCol: "pa", qualMin: 100 },
-  { key: "t_obp", table: "Hitter Master", ratingCol: "obp_power_rating",     qualCol: "pa", qualMin: 100 },
-  { key: "t_iso", table: "Hitter Master", ratingCol: "iso_power_rating",     qualCol: "pa", qualMin: 100 },
-  { key: "hit_overall", table: "Hitter Master", ratingCol: "overall_power_rating", qualCol: "pa", qualMin: 100 },
+  { key: "p_era",  table: "Pitching Master", ratingCol: "era_pr_plus",  qualCol: "IP", qualMin: 40 },
+  { key: "p_fip",  table: "Pitching Master", ratingCol: "fip_pr_plus",  qualCol: "IP", qualMin: 40 },
+  { key: "p_whip", table: "Pitching Master", ratingCol: "whip_pr_plus", qualCol: "IP", qualMin: 40 },
+  { key: "p_k9",   table: "Pitching Master", ratingCol: "k9_pr_plus",   qualCol: "IP", qualMin: 40 },
+  { key: "p_bb9",  table: "Pitching Master", ratingCol: "bb9_pr_plus",  qualCol: "IP", qualMin: 40 },
+  { key: "p_hr9",  table: "Pitching Master", ratingCol: "hr9_pr_plus",  qualCol: "IP", qualMin: 40 },
+  { key: "p_overall", table: "Pitching Master", ratingCol: "overall_pr_plus", qualCol: "IP", qualMin: 40 },
+  { key: "h_ba",  table: "Hitter Master", ratingCol: "ba_power_rating",      qualCol: "pa", qualMin: 100 },
+  { key: "h_obp", table: "Hitter Master", ratingCol: "obp_power_rating",     qualCol: "pa", qualMin: 100 },
+  { key: "h_iso", table: "Hitter Master", ratingCol: "iso_power_rating",     qualCol: "pa", qualMin: 100 },
+  { key: "h_overall", table: "Hitter Master", ratingCol: "overall_power_rating", qualCol: "pa", qualMin: 100 },
 ];
 
 async function main() {
