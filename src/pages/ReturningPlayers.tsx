@@ -3491,13 +3491,42 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right text-sm tabular-nums">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
                               {(() => {
-                                // STORED-FIRST (2026-08-23): read the stored *_score first; live
-                                // pitch-log percentile only when the stored value is null.
+                                // ⛔ SAME-SOURCE RULE (2026-08-31, Trevor): this column MUST read the
+                                // SAME source as the PitcherProfile scouting grades, which is the same
+                                // source Season Stats reads on the "all pitches" (full-season) filter:
+                                // the `pitch_log_pitcher_totals` accumulator at dimension_key='all',
+                                // percentile-ranked over the qualified pop (usePitchLog2026PitcherPop).
+                                //
+                                // This REVERSES the stored-first flip from 95f22a6 (2026-08-23) FOR THE
+                                // PITCHER CHIPS ONLY. That flip was fine for the Season Stats FILTERED
+                                // dimension bars (no stored equivalent exists per-dimension); it was NOT
+                                // correct here, because "all pitches" is full-season data that already
+                                // lives in the accumulator.
+                                //
+                                // `player_predictions.*_score` is a DIFFERENT derivation (baseline
+                                // normalization via computeAndStoreScores/pitcherBaselines), not the
+                                // pitch-log percentile — so it is the wrong source, not a stale copy.
+                                // Measured on prod 2026-08-31, agreement within 2 points vs the profile:
+                                //   stuff 571/4585 (12%) · whiff 968/4613 (21%)
+                                //   bb  1427/4613 (31%) · barrel 1219/4553 (27%)
+                                // e.g. Dylan Volantis read 69.58 here vs 76.9 on his profile.
+                                //
+                                // 🛑 PITCH-LOG PERCENTILE **ONLY** — NO FALLBACK (Trevor, 2026-08-31:
+                                //    "The scouting column needs to read the pitch log percentile only").
+                                // Do NOT re-add `?? r.*_score`. Falling back to the stored prediction score
+                                // silently reintroduces the SECOND derivation into the same column, which is
+                                // the exact inconsistency this fix removes — a blank cell is correct, a
+                                // number from the wrong source is not.
+                                // A player with no pitch_log row (under the 100-pitch qualifier in
+                                // usePitchLog2026PitcherPop) simply shows no chips.
+                                // ⚠ The HITTER chips above stay stored-first ON PURPOSE — there the stored
+                                //    score and the pitch-log percentile are the same number, and hitters
+                                //    already agree across all three pages. Do not "fix" them to match.
                                 const live = livePitchLogPitcherScores((r as any).source_player_id);
-                                const stf = r.stuff_score ?? live?.stuff;
-                                const whf = r.whiff_score ?? live?.whiff;
-                                const bb = r.bb_score ?? live?.bb;
-                                const brl = r.barrel_score ?? live?.barrel;
+                                const stf = live?.stuff ?? null;
+                                const whf = live?.whiff ?? null;
+                                const bb = live?.bb ?? null;
+                                const brl = live?.barrel ?? null;
                                 const anyValue = stf != null || whf != null || bb != null || brl != null;
                                 return anyValue ? (
                                   <div className="flex gap-1 justify-center flex-wrap">

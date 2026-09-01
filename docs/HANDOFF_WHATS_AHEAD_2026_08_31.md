@@ -1081,10 +1081,27 @@ thing, and the overlap is itself the problem.**
 | | `process-precompute-jobs` (G46) | **Track B** |
 |---|---|---|
 | trigger | a **customer team is ADDED** (`trg_customer_teams_autofire_precompute` → `pg_net.http_post`), or the Admin "Re-run" button | **DAILY, on pitch-log ingest** |
-| scope | ONE team's transfer projections | the WHOLE chain |
-| stages | **stage 18 ONLY** | stages 1–19 |
-⇒ It is **one stage, for one team, fired by onboarding** — not a pipeline. Track B is the daily run that should
-*contain* stage 18.
+| scope | ONE team — **full program onboarding** | the WHOLE chain |
+| stages | stage 18 **plus default-roster build + GM init** | stages 1–19 |
+
+### 🛑 MUST READ — CORRECTION (2026-08-31): "STAGE 18 ONLY" WAS **WRONG**
+Those two rows previously read *"ONE team's transfer projections"* / *"**stage 18 ONLY**"*. That understated the
+function badly. Trevor, 2026-08-31: *"part of what adding a new team is is basically running the precomputes into
+the program, building a default roster for them and storing the neutral snapshots based on the projections."*
+**Correct.** Verified in `supabase/functions/process-precompute-jobs/index.ts` — it writes **four** surfaces:
+`player_predictions` (1274 hitters, 1658 pitchers), **`team_builds` + `team_build_players` — DELETEd and
+recreated** (1879–1905, the default roster + frozen neutral snapshots), and `gm_budget` / `gm_activity` (1930–31).
+
+★ `team_build_players.player_snapshot` freezes `o_war`, `p_war`, `market_value` and the depth role, so
+`regular_season_pa/ip → depth role → projected PA/IP → oWAR/pWAR → market value → snapshot`. A mis-tiered role
+**bakes a wrong WAR and market value into the roster the program sees on day one.**
+
+⚠ Registry #9 is in this function in **three** places. Hitter (~1214) and pitcher (~1613) precomputes fixed
+2026-08-31 (the Master selects had to be widened first — `regular_season_*` was selected nowhere, and the
+Pitching Master select lacked `IP`). ⬜ **OPEN:** default-build fallback ~1836/1838 still reads `p.pa` / `p.ip`;
+fires only when the stored depth role is missing, so logged rather than patched.
+
+Full detail in the matching block in `docs/PIPELINE_pitch_log_to_projections.md`.
 
 ## 🚨 WHY IT STILL HAD TO BE DEPLOYED — A LIVE REGRESSION, NOT A FEATURE
 ```
@@ -1182,7 +1199,10 @@ Never assume the mirror is the stale one.
 `player_predictions` on onboarding. **Not done — do not onboard a customer team until this is settled.**
 
 ## 🅱️ HOW IT FITS INTO TRACK B — NEXT FEATURE BRANCH
-`process-precompute-jobs` is **stage 18 for ONE team, event-triggered** — a fragment of Track B, not a parallel system.
+`process-precompute-jobs` is **full program onboarding for ONE team, event-triggered** — precomputes +
+default-roster build (with frozen neutral snapshots) + GM init. 🛑 It is **NOT** "stage 18 only"; that earlier
+characterisation was wrong — see the MUST READ correction under *WHAT `process-precompute-jobs` ACTUALLY IS*.
+It is still a **fragment of Track B, not a parallel system** — Track B must absorb it, or Track B is copy #4.
 It is the **THIRD** implementation of the projection math (batch `scripts/`, this Deno mirror, and whatever Track B
 builds). Its own header admits the duplication: *"the math is duplicated from `src/lib/`. Supabase Edge Functions run
 on Deno and can't `import` from the Vite src tree."*

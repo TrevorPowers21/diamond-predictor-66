@@ -91,6 +91,15 @@ export default function Dashboard() {
         .in("model_type", ["returner", "transfer"])
         .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
         .not("players.division", "eq", "NJCAA_D1")
+        // GHOST FILTER (2026-08-31). `players.team_id IS NULL` marks the ~15.7k empty STUB rows —
+        // players with no current team whose only volume is a stale identity-table copy from an old
+        // season. They still receive a PROJECTION_SEASON projection, so they surface on the
+        // leaderboard as if active. Measured on prod: 0 such hitters today, 71 such pitchers, of
+        // which 1 (Harrison Cook, last real season 2024, p_rv_plus NULL in all his Master rows)
+        // was ranking 150 in the visible top 50. Kept on both paths so they stay identical.
+        // ⚠ This HIDES them only. Why stubs get projections at all is the separate, larger cleanup
+        //    tracked in [[project_players_team_id_null]] — do not treat this as that fix.
+        .not("players.team_id", "is", null)
         .gte("players.pa", 75)
         .not("p_wrc_plus", "is", null)
         .order("p_wrc_plus", { ascending: false })
@@ -169,6 +178,9 @@ export default function Dashboard() {
         .in("model_type", ["returner", "transfer"])
         .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
         .not("players.division", "eq", "NJCAA_D1")
+        // GHOST FILTER (2026-08-31) — see the matching note on the hitter query above.
+        // This is the path Trevor hit: 71 stubs in this population, 1 visible in the top 50.
+        .not("players.team_id", "is", null)
         .gte("players.ip", 20)
         .not("p_rv_plus", "is", null)
         .order("p_rv_plus", { ascending: false })

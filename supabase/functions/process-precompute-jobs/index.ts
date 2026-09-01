@@ -832,6 +832,96 @@ const PROJECTION_SEASON = 2027;
 const PRED_ID_BATCH = 200;
 const UPSERT_BATCH = 500;
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🛑 CONFIG-DRIFT ASSERTION (2026-08-31) — Trevor: *"The key is making sure it catches all the
+//    updates in the program to your multiplier and model config in the equation."*
+//
+// WHY THIS EXISTS. The projection math lives in THREE places (src/lib, batch scripts/, and this Deno
+// mirror). This file carries its own hardcoded copies of every weight. At runtime `model_config` is
+// overlaid ON TOP of those consts — so when a key exists in BOTH, model_config wins and a stale const
+// is harmless. The danger is the OTHER case: a const with **no model_config counterpart silently wins
+// forever**, and nothing anywhere reports it. That is precisely how this function drifted before.
+//
+// Measured on prod 2026-08-31 against `model_config` (model_type='admin_ui', season=2026):
+//   • 43 consts DRIFT from model_config  (masked at runtime by the overlay — reported, not fatal)
+//   • 75 consts have NO counterpart      (const silently wins — the real exposure)
+// e.g. transfer_k9_conference_weight = 0.4 here vs 0.115 in model_config;
+//      whip_plus_ncaa_avg = 1.531371 here vs 1.513529 in model_config.
+//
+// ⛔ CRITICAL keys below are the ones that reach WAR and dollars. If one of them is missing from
+//    model_config we FAIL THE JOB rather than quietly project with a local guess — a wrong roster
+//    written into a customer's program is worse than no roster.
+// ⚠ Everything else is reported loudly (console.warn + returned in the job diagnostics) but does not
+//    block, so a benign new weight cannot brick onboarding mid-demo.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ⛔ FATAL set — keys that BOTH reach WAR/dollars AND are verified present in model_config today.
+//    Verified on prod 2026-08-31: `pwar_runs_per_win` = 13.1 (admin_ui/2026). If it ever goes missing
+//    or drifts, every pWAR in the roster is wrong by a constant factor — refuse rather than guess.
+// 🛑 DO NOT ADD `pwar_ip_sp` / `pwar_ip_rp` / `pwar_ip_sm` / `market_dollars_per_war` HERE.
+//    Verified ABSENT from model_config entirely (any model_type, any season) on 2026-08-31. They are
+//    intentionally const-only today. Listing them as fatal would throw on EVERY onboarding and brick
+//    the flow. They are reported via `noCounterpart` instead — see KNOWN_LOCAL_ONLY below.
+const DRIFT_CRITICAL_KEYS = ["pwar_runs_per_win"] as const;
+
+// Consts with no model_config counterpart that are KNOWN and accepted today. Kept separate so the
+// `noCounterpart` warning highlights genuinely NEW unbacked keys instead of drowning in known ones.
+// ⚠ These silently win. If a program ever needs to tune projected IP per depth role, or dollars-per-WAR,
+//    it CANNOT do it from model_config today — it requires a code change + redeploy of this function.
+//    That is a real gap, logged in Track B, not a bug in this assertion.
+const KNOWN_LOCAL_ONLY = new Set([
+  "pwar_ip_sp", "pwar_ip_rp", "pwar_ip_sm", "market_dollars_per_war",
+]);
+
+export type ConfigDriftReport = {
+  drifted: { key: string; local: number; model_config: number }[];
+  noCounterpart: string[];
+  criticalMissing: string[];
+  checked: number;
+};
+
+function assertNoConfigDrift(
+  // `unknown` on purpose: HITTER_DEFAULTS mixes plain numbers with nested `{mean, sd}` shapes
+  // (contact, lineDrive, avgExitVelo, popUp, …). Non-numeric entries are skipped below rather than
+  // excluded by the caller, so callers can pass a whole defaults block without pre-filtering.
+  localConsts: Record<string, unknown>,
+  remote: Record<string, number>,
+  label: string,
+): ConfigDriftReport {
+  const drifted: ConfigDriftReport["drifted"] = [];
+  const noCounterpart: string[] = [];
+  for (const [key, raw] of Object.entries(localConsts)) {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) continue;
+    const local: number = raw;
+    if (!(key in remote) || !Number.isFinite(remote[key])) { noCounterpart.push(key); continue; }
+    if (Math.abs(remote[key] - local) > 1e-9) drifted.push({ key, local, model_config: remote[key] });
+  }
+  const criticalMissing = DRIFT_CRITICAL_KEYS.filter((k) => noCounterpart.includes(k));
+  const report: ConfigDriftReport = {
+    drifted, noCounterpart, criticalMissing, checked: Object.keys(localConsts).length,
+  };
+  if (drifted.length) {
+    console.warn(`[config-drift:${label}] ${drifted.length} const(s) differ from model_config ` +
+      `(model_config wins via overlay): ` +
+      drifted.slice(0, 12).map((d) => `${d.key} ${d.local}→${d.model_config}`).join(", ") +
+      (drifted.length > 12 ? ` …+${drifted.length - 12}` : ""));
+  }
+  const unexpected = noCounterpart.filter((k) => !KNOWN_LOCAL_ONLY.has(k));
+  if (unexpected.length) {
+    console.warn(`[config-drift:${label}] ${unexpected.length} const(s) have NO model_config ` +
+      `counterpart and SILENTLY WIN: ${unexpected.slice(0, 20).join(", ")}` +
+      (unexpected.length > 20 ? ` …+${unexpected.length - 20}` : ""));
+  }
+  if (criticalMissing.length) {
+    // ⛔ Refuse to write a roster off a local guess for a WAR/dollar input.
+    throw new Error(
+      `[config-drift:${label}] REFUSING TO RUN — critical key(s) absent from model_config ` +
+      `(model_type='admin_ui', season=${CURRENT_SEASON}): ${criticalMissing.join(", ")}. ` +
+      `These drive pWAR and market value. Seed them in model_config, then re-run.`,
+    );
+  }
+  return report;
+}
+
 // ── Unified per-conference PTM (mirror src/lib/nilProgramSpecific.ts — EXACT normalized-code
 // lookup, NOT fuzzy name matching). ONE resolver for BOTH hitter + pitcher. Values reverse-
 // engineered 2026-08-21; Independent has its OWN entry (Oregon State, NOT low-major). ──
@@ -952,12 +1042,29 @@ function computeHitterMarketValue(oWar: number | null, conference: string | null
   return Math.max(0, oWar * HITTER_DOLLARS_PER_WAR * ptm * pvm);
 }
 
-async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[]) {
-  if (scope === "pitchers_d1" || scope === "pitchers_juco") return runPitcherPrecompute(supabase, customerTeamId, scope, sourcePlayerIds);
-  return runHitterPrecompute(supabase, customerTeamId, scope, sourcePlayerIds);
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🧪 DRY-RUN (2026-08-31) — Trevor: *"add the dry run then i'll add georgia tech once we get it on prod."*
+//
+// WHY. Onboarding writes FOUR surfaces and one of them (`team_builds`) is DELETE-then-recreate. Before
+// this flag the ONLY way to see what a team would get was to let it write and inspect afterward — i.e.
+// a wrong roster is already live in a customer's program by the time you can tell.
+//
+// SEMANTICS. `dry_run: true` computes EVERYTHING exactly as a real run (same reads, same math, same
+// drift gate) and then **skips every write**: no `player_predictions` upsert, no `team_builds` /
+// `team_build_players` delete+recreate, no `gm_budget` / `gm_activity` insert. It returns the rows it
+// WOULD have written plus the config-drift report, so the numbers can be checked first.
+// ⛔ Any NEW write added to this function must be wrapped in `if (!dryRun)`. If you add a write and
+//    forget, dry-run silently becomes a real run — the exact failure this flag exists to prevent.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+type PrecomputeOpts = { dryRun?: boolean };
+
+async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[], opts: PrecomputeOpts = {}) {
+  if (scope === "pitchers_d1" || scope === "pitchers_juco") return runPitcherPrecompute(supabase, customerTeamId, scope, sourcePlayerIds, opts);
+  return runHitterPrecompute(supabase, customerTeamId, scope, sourcePlayerIds, opts);
 }
 
-async function runHitterPrecompute(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[]) {
+async function runHitterPrecompute(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[], opts: PrecomputeOpts = {}) {
+  const dryRun = opts.dryRun === true;
   // Resolve customer team → destination team
   const { data: ct, error: ctErr } = await supabase
     .from("customer_teams")
@@ -996,6 +1103,14 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
   for (const r of overrides || []) remoteEquationValues[r.config_key] = Number(r.config_value);
   // 2026-08-21: PTM tiers from model_config `nil_tier_<code>` (single source; falls back to consts).
   const nilTiers = buildNilTiers(remoteEquationValues);
+
+  // 🛑 CONFIG-DRIFT GATE (2026-08-31) — run AFTER the per-team overrides overlay, so what we check is
+  //    exactly what the math will use. Throws only on DRIFT_CRITICAL_KEYS; everything else is loud.
+  const hitterDriftReport = assertNoConfigDrift(
+    { ...TRANSFER_WEIGHT_DEFAULTS, ...HITTER_DEFAULTS },
+    remoteEquationValues,
+    "hitters",
+  );
 
   // Conference Stats (quoted table)
   const { data: confRows } = await supabase
@@ -1151,7 +1266,9 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const chunk = hitterSourceIds.slice(i, i + PRED_ID_BATCH);
     const r = await loadAllPaged(() =>
       supabase.from("Hitter Master")
-        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war")
+        // regular_season_pa added 2026-08-31 for the depth-role anchor (registry #9). Without it the
+        // fix below silently reads `undefined` and falls straight back to the stale identity copy.
+        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war, regular_season_pa")
         .eq("Season", CURRENT_SEASON).in("source_player_id", chunk));
     masterPRRows.push(...r);
   }
@@ -1211,7 +1328,14 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const final = applyTransferPostprocess(projected, result.inputs, result.transferMultiplier);
 
     // Auto-assign depth role from raw PA; projected_pa is the tier value.
-    const hitterDepthRole = defaultHitterDepthRoleFromActualPa((p as any).pa ?? null);
+    // 🛑 REGISTRY #9 FIX (2026-08-31) — anchor on the Master's REGULAR-SEASON PA, exactly like the
+    //    canonical path (useTeamBuilderData.ts:239 `regular_season_pa ?? pa ?? ab`).
+    //    `players.pa` is an identity-table copy that NOTHING keeps in sync; using it mis-tiers the
+    //    depth role, which sets projected_pa, which sets oWAR, which sets market value.
+    //    ⛔ Do not "simplify" this back to `(p as any).pa`.
+    const hitterMasterRow = masterPRBySourceId.get(String((p as any).source_player_id));
+    const hitterPaAnchor = (hitterMasterRow?.regular_season_pa ?? (p as any).pa) ?? null;
+    const hitterDepthRole = defaultHitterDepthRoleFromActualPa(hitterPaAnchor);
     const projectedPa = paForHitterDepthRole(hitterDepthRole);
     const oWar = computeHitterOWar(final.pWrcPlus, hitterDepthRole);
     // STEP 7 (2026-08-13): market rides TOTAL hitter WAR (oWAR + dWAR + bsrWAR), not oWAR alone.
@@ -1259,24 +1383,31 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     });
   }
 
-  // UPSERT in batches
-  for (let i = 0; i < upserts.length; i += UPSERT_BATCH) {
-    const slice = upserts.slice(i, i + UPSERT_BATCH);
-    const { error } = await supabase.from("player_predictions").upsert(slice, {
-      onConflict: "player_id,customer_team_id,model_type,variant,season",
-    });
-    if (error) throw new Error(`batch ${i / UPSERT_BATCH + 1} failed: ${error.message}`);
-  }
+  // UPSERT in batches — 🧪 skipped entirely on dry-run (see PrecomputeOpts).
+  if (dryRun) {
+    console.log(`[dry-run:hitters] would upsert ${upserts.length} player_predictions rows; ` +
+      `skipping propagate_hitter_scores_to_predictions. NOTHING WRITTEN.`);
+  } else {
+    for (let i = 0; i < upserts.length; i += UPSERT_BATCH) {
+      const slice = upserts.slice(i, i + UPSERT_BATCH);
+      const { error } = await supabase.from("player_predictions").upsert(slice, {
+        onConflict: "player_id,customer_team_id,model_type,variant,season",
+      });
+      if (error) throw new Error(`batch ${i / UPSERT_BATCH + 1} failed: ${error.message}`);
+    }
 
-  // Forward hitter scouting scores (barrel/ev/contact/chase) onto the newly
-  // upserted precomputed rows so Player Dashboard chip rendering matches the
-  // global regular variant. Without this, a freshly precomputed customer team
-  // ships with NULL chip fields on every row.
-  const { error: propErr } = await supabase.rpc(
-    "propagate_hitter_scores_to_predictions",
-    { target_season: CURRENT_SEASON },
-  );
-  if (propErr) console.error("hitter score propagation failed:", propErr);
+    // Forward hitter scouting scores (barrel/ev/contact/chase) onto the newly
+    // upserted precomputed rows so Player Dashboard chip rendering matches the
+    // global regular variant. Without this, a freshly precomputed customer team
+    // ships with NULL chip fields on every row.
+    // ⚠ This RPC rewrites scores for the WHOLE season, not just this team — it must never
+    //   fire on a dry-run.
+    const { error: propErr } = await supabase.rpc(
+      "propagate_hitter_scores_to_predictions",
+      { target_season: CURRENT_SEASON },
+    );
+    if (propErr) console.error("hitter score propagation failed:", propErr);
+  }
 
   const topBlockReasons: Record<string, number> = {};
   for (const [k, v] of [...blockReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) {
@@ -1295,7 +1426,8 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
 // Mirrors scripts/precompute-pitchers.ts logic.
 // ─────────────────────────────────────────────────────────────────────────
 
-async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1", sourcePlayerIds?: string[]) {
+async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1", sourcePlayerIds?: string[], opts: PrecomputeOpts = {}) {
+  const dryRun = opts.dryRun === true;
   const isJucoScope = scope === "pitchers_juco";
   const JUCO_IP_THRESHOLD = 20;
   // Per-pitcher weight selection happens inside the loop (search "// Pick eq
@@ -1321,6 +1453,13 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
   const mcMapP: Record<string, number> = {};
   for (const r of mcPitch || []) { const v = Number(r.config_value); if (Number.isFinite(v)) mcMapP[String(r.config_key)] = v; }
   const nilTiersP = buildNilTiers(mcMapP);
+
+  // 🛑 CONFIG-DRIFT GATE (2026-08-31). ⚠ NOTE THE ASYMMETRY: the overlay above is NARROW — it only
+  //    applies keys matching `transfer_*` or `*_plus_ncaa_*`. Every OTHER pitching const (including
+  //    `pwar_runs_per_win`, RPW) is NOT overlaid, so on this path a drifted const genuinely WINS
+  //    rather than being masked. That makes the check more load-bearing here than on the hitter side.
+  //    Verified 2026-08-31: model_config pwar_runs_per_win = 13.1 == the const, so it agrees today.
+  const pitcherDriftReport = assertNoConfigDrift(PITCHING_EQ_DEFAULTS as unknown as Record<string, number>, mcMapP, "pitchers");
 
   // Resolve customer team → destination
   const { data: ct, error: ctErr } = await supabase
@@ -1447,7 +1586,10 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
   for (let i = 0; i < sourceIds.length; i += PRED_ID_BATCH) {
     const chunk = sourceIds.slice(i, i + PRED_ID_BATCH);
     const r = await loadAllPaged(() =>
-      supabase.from("Pitching Master").select("source_player_id, Role, G, GS, ERA, FIP, WHIP, K9, BB9, HR9, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, bb9_pr_plus, hr9_pr_plus, TeamID")
+      // IP + regular_season_ip added 2026-08-31 for the depth-role anchor (registry #9). Neither was
+      // selected before, so the role was assigned off `players.ip` — an identity-table copy nothing
+      // keeps in sync — which mis-tiers the role and flows into projected IP and pWAR.
+      supabase.from("Pitching Master").select("source_player_id, Role, G, GS, ERA, FIP, WHIP, K9, BB9, HR9, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, bb9_pr_plus, hr9_pr_plus, TeamID, IP, regular_season_ip")
         .eq("Season", CURRENT_SEASON).in("source_player_id", chunk),
     );
     pmRows.push(...r);
@@ -1598,7 +1740,14 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     const isTwpRow = !!(p as any).is_twp;
     // Auto-derive granular depth role from player's actual IP + coarse role
     // (mirrors hitter_depth_role's storage pattern).
-    const pitcherDepthRole = defaultPitcherDepthRoleFromIp((p as any).ip ?? null, final.pitcher_role);
+    // 🛑 REGISTRY #9 FIX (2026-08-31) — anchor on the Master's REGULAR-SEASON IP, exactly like the
+    //    canonical path (useTeamBuilderData.ts:254 `regular_season_ip ?? IP`).
+    //    `players.ip` is an identity-table copy that NOTHING keeps in sync; using it mis-tiers the
+    //    depth role, which sets projected_ip, which sets pWAR, which sets market value.
+    //    ⛔ Do not "simplify" this back to `(p as any).ip`.
+    const pitcherMasterRow = pmBySourceId.get(String((p as any).source_player_id));
+    const pitcherIpAnchor = (pitcherMasterRow?.regular_season_ip ?? pitcherMasterRow?.IP ?? (p as any).ip) ?? null;
+    const pitcherDepthRole = defaultPitcherDepthRoleFromIp(pitcherIpAnchor, final.pitcher_role);
     // Recompute pWAR + market value using the granular depth role's projected IP.
     // Without this, a weekday_starter would get pWAR off the coarse SP/RP/SM IP
     // (e.g. 85 IP instead of 50), inflating both pWAR and MV.
@@ -1634,23 +1783,30 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     });
   }
 
-  for (let i = 0; i < upserts.length; i += UPSERT_BATCH) {
-    const slice = upserts.slice(i, i + UPSERT_BATCH);
-    const { error } = await supabase.from("player_predictions").upsert(slice, {
-      onConflict: "player_id,customer_team_id,model_type,variant,season",
-    });
-    if (error) throw new Error(`pitcher batch ${i / UPSERT_BATCH + 1} failed: ${error.message}`);
-  }
+  // 🧪 skipped entirely on dry-run (see PrecomputeOpts).
+  if (dryRun) {
+    console.log(`[dry-run:pitchers] would upsert ${upserts.length} player_predictions rows; ` +
+      `skipping propagate_pitcher_scores_to_predictions. NOTHING WRITTEN.`);
+  } else {
+    for (let i = 0; i < upserts.length; i += UPSERT_BATCH) {
+      const slice = upserts.slice(i, i + UPSERT_BATCH);
+      const { error } = await supabase.from("player_predictions").upsert(slice, {
+        onConflict: "player_id,customer_team_id,model_type,variant,season",
+      });
+      if (error) throw new Error(`pitcher batch ${i / UPSERT_BATCH + 1} failed: ${error.message}`);
+    }
 
-  // Forward pitcher scouting scores (whiff/iz_whiff/barrel/chase/ev/bb) onto
-  // the newly upserted precomputed pitcher rows. Same rationale as the hitter
-  // propagate above — without this, a fresh customer team has NULL pitcher
-  // chip fields.
-  const { error: propErr } = await supabase.rpc(
-    "propagate_pitcher_scores_to_predictions",
-    { target_season: CURRENT_SEASON },
-  );
-  if (propErr) console.error("pitcher score propagation failed:", propErr);
+    // Forward pitcher scouting scores (whiff/iz_whiff/barrel/chase/ev/bb) onto
+    // the newly upserted precomputed pitcher rows. Same rationale as the hitter
+    // propagate above — without this, a fresh customer team has NULL pitcher
+    // chip fields.
+    // ⚠ Season-wide RPC — must never fire on a dry-run.
+    const { error: propErr } = await supabase.rpc(
+      "propagate_pitcher_scores_to_predictions",
+      { target_season: CURRENT_SEASON },
+    );
+    if (propErr) console.error("pitcher score propagation failed:", propErr);
+  }
 
   const topBlockReasons: Record<string, number> = {};
   for (const [k, v] of [...blockReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) topBlockReasons[k] = v;
@@ -1712,7 +1868,12 @@ function buildPlayerMetaJson(rosterStatus: string, depthRole: string | null): st
   });
 }
 
-async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string): Promise<{ buildId: string; rows: number } | null> {
+// 🧪 dryRun: computes the full roster (same reads, same snapshot construction) and returns what it
+//    WOULD write, without the DELETE + recreate. `buildId` comes back as "(dry-run)".
+// ⛔ This is the single most destructive path in the function — it DELETEs the team's existing default
+//    build before recreating it. Never let a dry-run reach the delete.
+async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string, opts: PrecomputeOpts = {}): Promise<{ buildId: string; rows: number } | null> {
+  const dryRun = opts.dryRun === true;
   const academicYear = PROJECTION_SEASON_FOR_DEFAULT;
 
   // Resolve customer team → school name
@@ -1848,6 +2009,20 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
     }
   }
 
+  // 🧪 DRY-RUN EXIT — return BEFORE the destructive delete. Everything above this line is pure
+  //    computation; everything below deletes and rewrites the team's default build.
+  if (dryRun) {
+    const withSnap = playerRows.filter((r: any) => r.player_snapshot != null).length;
+    const sample = playerRows.slice(0, 5).map((r: any) => ({
+      name: r.custom_name, slot: r.position_slot,
+      depth: (() => { try { return JSON.parse(r.production_notes || "{}")?.depth ?? null; } catch { return null; } })(),
+      snapshot: r.player_snapshot,
+    }));
+    console.log(`[dry-run:default-build] would delete+recreate the default build for ${customerTeamId} ` +
+      `and insert ${playerRows.length} team_build_players rows (${withSnap} with a snapshot). NOTHING WRITTEN.`);
+    return { buildId: "(dry-run)", rows: playerRows.length, dryRun: true, withSnapshot: withSnap, sample } as any;
+  }
+
   // Delete existing default build for this team + year, then recreate
   const { data: existing } = await supabase
     .from("team_builds")
@@ -1932,9 +2107,37 @@ Deno.serve(async (req: Request) => {
   try { body = await req.json(); } catch { body = {}; }
   // sourcePlayerIds (optional): when present, restricts the run to exactly those players.
   // When omitted/empty, behavior is identical to the original bulk scope.
+  // 🧪 dry_run (2026-08-31): compute everything, write nothing. See PrecomputeOpts.
+  //    Accepts `dry_run` or `dryRun`. Requires `customerTeamId` — a dry-run never touches
+  //    `precompute_jobs`, so there is no job to claim and `jobId` is not a valid dry-run entry point.
   const { jobId, customerTeamId: directTeamId, scope: directScope, sourcePlayerIds } = body || {};
+  const dryRun = body?.dry_run === true || body?.dryRun === true;
 
   try {
+    if (dryRun && !directTeamId) {
+      return new Response(JSON.stringify({
+        ok: false,
+        reason: "dry_run requires customerTeamId (a dry-run must not create or claim a precompute_jobs row)",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 });
+    }
+
+    // 🧪 DRY-RUN PATH — no job row is created or claimed, no status transitions, no composite-WAR
+    //    refresh, no GM init. Computes predictions + the roster it WOULD build, returns both.
+    if (dryRun) {
+      const result: any = await runPrecomputeForTeam(supabase, directTeamId, directScope || "hitters_d1", sourcePlayerIds, { dryRun: true });
+      let defaultBuild: any = null;
+      try {
+        defaultBuild = await createOrRefreshDefaultBuild(supabase, directTeamId, { dryRun: true });
+      } catch (dbErr: any) {
+        defaultBuild = { error: dbErr instanceof Error ? dbErr.message : String(dbErr) };
+      }
+      return new Response(JSON.stringify({
+        ok: true, dryRun: true, wrote: "NOTHING",
+        customerTeamId: directTeamId, scope: directScope || "hitters_d1",
+        ...result, defaultBuild,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // Claim job (or accept direct customer_team_id for ad-hoc runs)
     let job: any = null;
     if (jobId) {
