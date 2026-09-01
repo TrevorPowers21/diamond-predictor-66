@@ -452,6 +452,38 @@ exact mistake the prod runbook made; see `docs/AUDIT_dependency_order_vs_topic_o
 | 6 | Projections | returner + transfer engine (blend → competition translation via Stuff+/HTP/park → class/dev → depth-role → WAR → market); **reads stage-5.5 two-sided SDs (directional) AND `<stat>_pr_center`** — the z-shift is `((PR+ − pr_center) / pr_sd) × ncaa_sd`, **NOT `− 100`** (see the 5.5 MUST READ). 🛑 **ORDER: this stage READS `team_season_stats.faced_stuff_plus`/`.faced_htp`** (`precompute-transfer-projections.ts:225`, `precompute-pitchers.ts:279`) for Independent from-programs, and **swallows the error / coerces to `[]`** — so `refresh_team_season_stats` MUST run BEFORE it or Independents silently lose the faced-competition adjustment. | `player_predictions` (o_war, p_war, total_hitter_war, market_value, rates) | Rankings, Profiles, Team Builder, Transfer Portal |
 | 7 | NIL + need | score = total_WAR × PTM → allocateNil curve + need premium | (computed live; GM `gm_budget.nil_allocation_mode`) | Team Builder, GM, Target Board |
 
+### 🛑 MUST READ — **WHERE CONSTANTS COME FROM.** THREE CONFIG SYSTEMS ARE LIVE (2026-09-01)
+
+Every stage below reads constants. **They do not all read the same place**, and the hitter path reads a
+DIFFERENT SOURCE ON PROD THAN ON STAGING. Nothing in this spec is trustworthy until this is fixed.
+
+| path | reads | PROD | STAGING |
+|---|---|---|---|
+| Pitching — `readPitchingWeights` (`pitchingEquations.ts:147`) | `"Equation Weights"` @ **2025** | 0 of 40 mapped keys present → **code defaults** | table EMPTY → **code defaults** |
+| Hitting — `predictionEngine.ts:261` | `"Equation Weights"` @ **2025** | **333 keys — LIVE, overrides code** | table EMPTY → **code defaults** |
+| Pitcher power ratings — `loadPitchingPowerEq` (`predictionEngine.ts:694`) | `model_config` admin_ui @ **2026**, **keys starting `p_` ONLY** | ✅ | ✅ |
+| Batch precomputes + edge fn | `model_config` admin_ui @ **CURRENT_SEASON** | ✅ | ✅ |
+
+⛔ **`predictionEngine`'s "fall back to `model_config`" branch is DEAD CODE.** It filters
+`model_type IN ('returner','transfer')`, but `model_config` contains **only `admin_ui`** rows in both
+databases (prod 2025:140 / 2026:220 · staging 2025:157 / 2026:220). It has never returned a value.
+
+🚨 **THE COST OF THIS, MEASURED:** prod's returner **wRC+ runs a different equation than the code**
+(`.45/.30/.15/.10 ÷ .364` instead of `.691/.235/0/0 ÷ .3782`). Across 5,122 D1 returner hitters the
+legacy formula reproduces the stored `p_wrc_plus` for **5,122 (100%)** and the canonical for **1,164
+(23%)**. Staging looked correct only because its table is EMPTY and the override block is guarded by
+`if (eqWeights.size > 0)`. See GATE B in `docs/PLAN_2026_09_01_onboarding_verify_and_wrc_audit.md`.
+
+⚠ **KEY-CONVENTION CONFLICT — resolve before writing any calibration key.** `loadPitchingPowerEq`
+consumes only `p_`-prefixed keys (`p_era_pr_sd` already exists in `model_config`), while
+`compute-projection-calibration.ts` emits `era_plus_pr_center` / `era_plus_pr_sd`. **Nothing reads
+`pr_center` or `pr_sd` from any table today**, so stage 5.5's output is INERT until one convention wins
+and the producer matches it.
+
+**TARGET STATE (approved 2026-09-01):** `model_config`, `model_type='admin_ui'`, `season=2026` is the
+**single source of truth**. `"Equation Weights"` is legacy → rename to `"Equation Weights_LEGACY_2025"`
+(**rename, not delete** — a missed reader must crash loudly, not fall back silently to code defaults).
+
 ### 🛑 MUST READ — STAGE 5.5 IS **D1 ONLY**, AND THE Z-SHIFT DOES **NOT** SUBTRACT 100 (2026-09-01)
 
 Two constants were **fit on one population and applied to another**. Same root cause, two places.

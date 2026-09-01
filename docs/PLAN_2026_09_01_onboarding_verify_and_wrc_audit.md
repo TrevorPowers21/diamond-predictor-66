@@ -92,7 +92,51 @@ Real run. On a NEW team the default-build DELETE is a no-op, so it is the safe c
 
 ---
 
-## GATE B — wRC+ AUDIT
+## ✅ GATE B — **SOLVED 2026-09-01.** It was none of the four hypotheses below.
+
+🛑 **PROD RUNS A DIFFERENT wRC+ EQUATION THAN THE CODE**, because the legacy `"Equation Weights"` table
+(Season 2025) OVERRIDES the code defaults at `predictionEngine.ts:379-405`
+(comment: *"Equation Weights table values (Supabase, **primary source**)"*), guarded by
+`if (eqWeights.size > 0)`.
+
+```
+code default (predictionEngine.ts:120 / :316)
+    intercept .011 · obp .691 · slg .235 · avg 0   · iso 0    ÷ .3782
+prod, overridden by "Equation Weights" 2025
+    intercept .011 · obp .450 · slg .300 · avg .15 · iso .10  ÷ .364
+```
+Computed at `:543`, which multiplies **all four** terms — so on prod AVG and ISO carry real weight
+where the canonical formula zeroes them.
+
+**PROOF — n = 5,122 D1 returner hitters, reproducing the STORED `p_wrc_plus` within ±1.5:**
+```
+Equation Weights formula   5,122   (100%)
+canonical formula          1,164    (23%)
+```
+⇒ That is Lauaki's **113** where canonical gives **100.5**. It also explains the original asymmetry
+(**returners 64% mismatched, transfers 19%**): the transfer path has its OWN config block
+(`:428-456`) with its own defaults, so it was only partly affected.
+
+★ **THE GUARD IS WHY STAGING LOOKED FINE.** `if (eqWeights.size > 0)` — staging's `"Equation Weights"`
+table is EMPTY (0 rows), so the whole override block is SKIPPED there and staging runs the canonical
+formula from code. **Prod: 361 rows, live.** Same code, different equation, purely because one table is
+populated. ⚠ This is the THIRD environment split found in one day — verify config on BOTH databases.
+
+**BLAST RADIUS of reverting to canonical** — approved by Trevor 2026-09-01 (*"AVG lowering is fine"*):
+```
+mean −1.43 · median −1.5 · p05 −9.1 · p95 +6.5 · extremes −18.0 / +19.8 · 62% down / 38% up
+```
+A **redistribution, not a repricing**: the four-stat formula double-counts AVG (ISO = SLG − AVG), so
+contact hitters lose and high-OBP walkers gain. wRC+ → oWAR → market are ~linear ⇒ ≈1.5% median
+downstream. **This is far smaller than the pitching change** (C1), which shifts every ERA ~0.35 one way.
+
+**THE FIX** = step 1+2 of the config consolidation: rename `"Equation Weights"` →
+`"Equation Weights_LEGACY_2025"` (rename, **not** delete — a missed reader must crash loudly rather than
+fall back silently), then delete the `:379-405` override block and the dead `model_config`
+returner/transfer fallback beneath it. See `docs/HANDOFF_2026_09_01_CONFIG_SOURCES_AND_CALIBRATION.md`.
+
+### 🗄️ SUPERSEDED — the four hypotheses below were all WRONG. Kept only so nobody re-runs them.
+
 
 ### What is already established (do not re-derive)
 Canonical (CLAUDE.md): `wRC+ = ((0.011 + 0.691·OBP + 0.235·SLG) / 0.3782) × 100`
@@ -119,7 +163,7 @@ TRANSFER (precomputed):  3,229 match /   771 MISMATCH   (19% wrong)
 ```
 Most deviations are small (±3–6); Lauaki's returner is **+13**.
 
-### Hypotheses to test, in order
+#### (archived) hypotheses — none of these was the cause
 1. **`applyDevScale` ordering.** `p_obp`/`p_slg` may be stored POST-scale while `p_wrc_plus` was
    computed PRE-scale (or vice versa). Would explain a systematic small-and-signed gap.
    ⇒ Recompute wRC+ from unscaled inputs and see if the 2,574 collapse.

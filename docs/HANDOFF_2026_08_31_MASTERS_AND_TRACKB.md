@@ -1,6 +1,42 @@
 # ⚠️ SUPERSEDED AS THE ENTRY POINT — START AT `docs/HANDOFF_2026_08_31_EOD.md`
 ## 🛑 MUST READ — PROJECTION CALIBRATION IS **WRONG ON PROD RIGHT NOW** (found 2026-09-01)
 
+## 🛑 MUST READ — **WHERE CONSTANTS COME FROM.** THREE CONFIG SYSTEMS ARE LIVE (2026-09-01)
+
+Every stage below reads constants. **They do not all read the same place**, and the hitter path reads a
+DIFFERENT SOURCE ON PROD THAN ON STAGING. Nothing in this spec is trustworthy until this is fixed.
+
+| path | reads | PROD | STAGING |
+|---|---|---|---|
+| Pitching — `readPitchingWeights` (`pitchingEquations.ts:147`) | `"Equation Weights"` @ **2025** | 0 of 40 mapped keys present → **code defaults** | table EMPTY → **code defaults** |
+| Hitting — `predictionEngine.ts:261` | `"Equation Weights"` @ **2025** | **333 keys — LIVE, overrides code** | table EMPTY → **code defaults** |
+| Pitcher power ratings — `loadPitchingPowerEq` (`predictionEngine.ts:694`) | `model_config` admin_ui @ **2026**, **keys starting `p_` ONLY** | ✅ | ✅ |
+| Batch precomputes + edge fn | `model_config` admin_ui @ **CURRENT_SEASON** | ✅ | ✅ |
+
+⛔ **`predictionEngine`'s "fall back to `model_config`" branch is DEAD CODE.** It filters
+`model_type IN ('returner','transfer')`, but `model_config` contains **only `admin_ui`** rows in both
+databases (prod 2025:140 / 2026:220 · staging 2025:157 / 2026:220). It has never returned a value.
+
+🚨 **THE COST OF THIS, MEASURED:** prod's returner **wRC+ runs a different equation than the code**
+(`.45/.30/.15/.10 ÷ .364` instead of `.691/.235/0/0 ÷ .3782`). Across 5,122 D1 returner hitters the
+legacy formula reproduces the stored `p_wrc_plus` for **5,122 (100%)** and the canonical for **1,164
+(23%)**. Staging looked correct only because its table is EMPTY and the override block is guarded by
+`if (eqWeights.size > 0)`. See GATE B in `docs/PLAN_2026_09_01_onboarding_verify_and_wrc_audit.md`.
+
+⚠ **KEY-CONVENTION CONFLICT — resolve before writing any calibration key.** `loadPitchingPowerEq`
+consumes only `p_`-prefixed keys (`p_era_pr_sd` already exists in `model_config`), while
+`compute-projection-calibration.ts` emits `era_plus_pr_center` / `era_plus_pr_sd`. **Nothing reads
+`pr_center` or `pr_sd` from any table today**, so stage 5.5's output is INERT until one convention wins
+and the producer matches it.
+
+**TARGET STATE (approved 2026-09-01):** `model_config`, `model_type='admin_ui'`, `season=2026` is the
+**single source of truth**. `"Equation Weights"` is legacy → rename to `"Equation Weights_LEGACY_2025"`
+(**rename, not delete** — a missed reader must crash loudly, not fall back silently to code defaults).
+
+**TRACK B ARCHITECTURE IMPACT:** this file's Track B write-up assumes one config source. There are
+three, and the hitter path differs by environment. Any stage description here that says "reads the
+equation weights" must specify WHICH table and WHICH season.
+
 Two constants were **fit on one population and applied to another**. Both bias EVERY pitcher's
 projection by a CONSTANT — equal discrepancies at every percentile and in every class bucket.
 
