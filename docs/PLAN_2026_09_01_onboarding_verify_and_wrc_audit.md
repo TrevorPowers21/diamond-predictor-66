@@ -357,6 +357,53 @@ size, so an unobserved home run on 1 IP stops reading as elite HR prevention.
 `docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md` — HR9's rating is already the
 weakest predictor (corr **0.32**), and this is that weakness showing up at the low-IP tail.
 
+## 🧹 STALE PROJECTIONS — 146 D1 PLAYERS WHO HAVE NOT PLAYED SINCE 2022–2025 (2026-09-01)
+
+Found while chasing Harrison Cook. **Cook was not a special case — he was the highest-ranked of a
+population of 146.** Trevor deleted his row manually; the rest are scoped below.
+
+### What they are
+D1 players carrying a **2027 projection** with **no 2026 Master row on either side** (hitter or pitcher):
+```
+players:                          146
+  team_id NULL (gone):            145
+  still rostered (PROTECT):         1   ← Carson Wiggins, P, Arkansas, last pitched 2025, 14 IP
+prediction rows:                  457   (146 regular + 311 precomputed)
+by last season played:  2025 → 52 · 2024 → 40 · 2023 → 18 · 2022 → 36
+in use on a build:                  0
+in use on a target board:           0
+```
+⇒ **Nothing references them.** Deleting their projections breaks no build, board, or roster.
+
+### 🛑 WHY THE `ip >= 20` GUARD DOES NOT CATCH THEM
+The Top 5 filters `players.ip >= 20` — but `players.ip` is the **stale identity copy** from whatever
+season they last played. A pitcher who threw 46 innings in 2025 still reads `ip = 46.333` today and
+sails through. **69 stale D1 pitchers clear the guard this way.** Ethan Walker (last pitched 2025,
+ip 46.3) sits at **pRV+ 143 against a ~144 cutoff** — one data refresh from being visible.
+★ This is the SAME identity-copy defect as the depth-role anchor (registry #9), on a different surface.
+**Any guard reading `players.ip` / `players.pa` is reading a column nothing keeps in sync.**
+
+### ⚠ THE ONE CASE THAT MUST NOT BE DELETED
+A player who **redshirted or was injured through 2026** legitimately has no 2026 Master row and SHOULD
+keep his 2027 projection. Exactly one such player exists (Carson Wiggins,
+`31d52121-0522-451a-b6dd-a1f2a8e7b9b0`), and `team_id IS NOT NULL` separates him cleanly. **Any future
+sweep MUST keep that guard** — the discriminator is "still on a roster", not "has no recent stats".
+
+### Scope decisions
+- **D1 ONLY.** JUCO is deliberately excluded pending the restructure.
+- Deletes **all variants** (regular + per-team precomputed).
+- Not reversible, but safe: nothing references these rows, and the precompute regenerates anything needed.
+
+### ★ THE ACCOUNTING THAT CLOSED THIS OUT
+Of the 26 D1 rows with `pRV+ >= 120` AND `ERA >= 6`:
+| | count | verdict |
+|---|---|---|
+| blocked by `ip >= 20` | 19 | small sample, never visible ✅ |
+| genuine FIP-vs-ERA divergence | 6 | **working as designed** — Tate Jones 50 IP, FIP 3.29 vs ERA 5.94; Kalkbrenner 42.3 IP, FIP 4.32 vs ERA 9.35. A FIP-based metric is SUPPOSED to flag peripherals outrunning run prevention. NOT a bug. ✅ |
+| stale stub | 1 | Ethan Smith, last pitched 2023 ⚠ |
+⛔ **There are TWO Ethan Smiths** — a 2023 stub and a real 2026 pitcher. Same trap as Harrison Cook.
+**Any cleanup must key on `player_id`, never on name.**
+
 ## ALSO OPEN (not blocking, do not lose)
 - **Modeling question for Trevor:** is a 3:1 OBP:SLG weighting the intent? It means a power bat with a
   mediocre OBP always grades ~league-average. Lauaki is the poster case.
