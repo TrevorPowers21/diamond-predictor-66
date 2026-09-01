@@ -198,12 +198,67 @@ genuinely weak signal (corr 0.32) warrant more regression?"* — still unresolve
 the current answer over-compresses.
 ⛔ Do NOT fix with a floor or a dial (explicitly rejected 2026-08-24).
 
+### 🔬 C1 narrowing done 2026-08-31 — READ THIS BEFORE RE-INVESTIGATING
+Trevor: *"It's consistent so something is scaled improperly which is easier."* Agreed — the evidence
+says a single misapplied SCALAR, not a broken model.
+
+**❌ `dev_aggressiveness` is ELIMINATED as the cause.** Measured on the projected rows
+(season 2027, `variant='regular'`, `customer_team_id is null`, `p_era` not null, n=7,062):
+```
+mean 0.000 · min 0 · max 0 · 148 nulls
+```
+Every value is **zero**, so the `∓ devAgg·0.06` term contributes NOTHING. Do not spend time there.
+
+**⚠ The by-class breakdown did NOT run — `"Pitching Master".class_year` is NULL for all 1,181 rows.**
+Re-run it against **`players.class_year`** instead. That test is still the decisive one:
+*if graduates/seniors also improve ~4%, it is NOT class progression* and the scalar is somewhere else.
+
+⇒ **Prime remaining suspect: `class_era_fs/sj/js/gr`.** These live only in the const blocks with **NO
+`model_config` counterpart** (part of the 75 unbacked keys), so they silently win, cannot be tuned, and
+never get validated against anything. Check whether a class adjustment is being applied to players who
+should receive none — a default that is not 1.0 applied league-wide would produce exactly the observed
+uniform ~0.962 ratio.
+
+**The signature to match:** ratio is 0.962 overall and 0.93–0.97 at every percentile. Whatever is found
+must explain a near-constant multiplicative factor, not a tail effect.
+
 ### Gates on any C fix
 - Re-run the across-the-range table above. Projected percentiles must track actual within ~0.05 ERA at
   p05 / median / p90 — **the whole range, not the mean** (that is the 8/24 doctrine).
 - HR9 elite must reach ~0.35, p90 ~1.65, with **zero** negatives.
 - ⚠ ERA/HR9 feed `p_rv_plus` → `pWAR` → market value → `player_snapshot`. Any change needs the same
   scoped downstream recompute as the wRC+ fix in Gate B.
+
+## GATE D — TEAM BUILDER vs PLAYER PROFILE DISAGREE BY 1 POINT (added 2026-08-31)
+
+**Reported:** a couple of **Arkansas** players show AVG and OBP **1 point apart** between the Team
+Builder row and the Player Profile.
+
+🛑 **THE SIZE OF THE GAP IS NOT THE POINT — THE EXISTENCE OF IT IS.** Trevor, 2026-08-31:
+> *"I'm gonna guess it's a dev aggressiveness thing that causes that but the reality is we need to only
+> be reading player snapshots for both team builder rows and player profiles so there shouldn't even be
+> 1 point of difference cause nothing is live."*
+
+⇒ Do **not** chase the rounding. Under the pure-read architecture
+([[project_stored_derived_values_architecture]]) both surfaces read the SAME stored
+`player_snapshot`, so the correct difference is **exactly zero**. A 1-point gap is proof that at least
+one of the two is still deriving a value at render time instead of reading it. **Find the live compute
+and remove it — that is the fix.** The number agreeing afterwards is a side effect, not the goal.
+
+**Where to look:**
+1. Does the Team Builder row read `team_build_players.player_snapshot`, or re-derive from
+   `player_predictions` / the sim? `useTeamBuilderSimulation` re-runs projection math — if the
+   displayed AVG/OBP comes from the sim rather than the snapshot, that is the bug.
+   ⚠ Related known issue: [[project_teambuilder_owar_snapshot_regression]] — *TB live-rebuilds vs
+   snapshot*. This may be the same root cause surfacing on a different column.
+2. Does PlayerProfile read stored (`applyDevScale(regularPred?.p_*)`) or compute?
+3. `applyDevScale` is the likeliest culprit if one surface applies it and the other does not —
+   **note `dev_aggressiveness` measured 0.000 across all projected rows on 2026-08-31**, so if
+   dev-scaling explains the gap, something is applying a non-zero scale where the stored value has none.
+
+**Gate:** pick the 2 Arkansas players, read `team_build_players.player_snapshot` and the profile's
+source row directly in the DB, and confirm both surfaces render that stored value **byte-for-byte**.
+No tolerance band — the architecture says zero.
 
 ## ALSO OPEN (not blocking, do not lose)
 - **Modeling question for Trevor:** is a 3:1 OBP:SLG weighting the intent? It means a power bat with a
@@ -217,11 +272,30 @@ the current answer over-compresses.
 - Vercel: `diamond-predictor-66` git link removed 2026-08-31 (nothing deleted; `player.rstriq.com`
   still serves its 08-26 build). It cannot deploy from `main` until `apps/player` lands there.
 
+## SCOUTING COLUMN — STATUS 2026-08-31 (carry forward)
+✅ **Rendering again.** The blank column was MY regression: the pitcher chips were keyed on
+`r.source_player_id`, but the PITCHING row type has no such field — pitcher rows carry
+**`id` = source_player_id** (numeric TruMedia id, not a UUID). Fixed to `?? r.id`. The defect predated
+the branch; it was invisible while the stored score was preferred, because `live` was never reached.
+Confirmed in data: **4,613 of 5,522 D1 rows will show chips**, 909 blank (under the 100-pitch
+qualifier — the same bar PitcherProfile uses).
+⬜ **ACCURACY NOT YET CHECKED** (Trevor: *"I didn't check accuracy but it's showing will check
+tomorrow"*). Gate: pick 3–4 pitchers incl. **Dylan Volantis** and confirm the dashboard chip equals the
+PitcherProfile grade EXACTLY. Volantis should read **77**, not 69.58.
+
 ## ORDER OF OPERATIONS
 ```
+D  TB-vs-Profile snapshot read     (cheapest; pure-read violation, no math)
+C1 ERA scalar hunt                 (class_era_*; devAgg ELIMINATED — measured 0.000)
+   verify scouting accuracy        (Volantis must read 77)
+B  wRC+ audit                      (the 113; returners 64% mismatched)
+   ── all three of the above change stored values ⇒ ONE scoped downstream recompute ──
 A0 pitching-const diff  →  A1 deploy  →  A2 dry-run existing team  →  A3 gates
-                                                                        ↓
-                            B wRC+ audit (+ downstream oWAR/market recompute)
-                                                                        ↓
-                            A4 add Georgia Tech  →  staging→main PR  →  Trevor merges
+                                       ↓
+                       A4 add Georgia Tech  →  staging→main PR  →  Trevor merges
+
+⚠ B, C1 and D all move numbers that feed p_rv_plus / oWAR → market → player_snapshot. Do the math
+  fixes FIRST, then ONE recompute, then verify onboarding against corrected values. Running A before
+  them means dry-running against numbers we already know are wrong.
+★ HR9 is FINE per Trevor (2026-08-31) — C2 is CLOSED, do not re-open it.
 ```
