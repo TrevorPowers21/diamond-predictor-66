@@ -91,15 +91,19 @@ export default function Dashboard() {
         .in("model_type", ["returner", "transfer"])
         .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
         .not("players.division", "eq", "NJCAA_D1")
-        // GHOST FILTER (2026-08-31). `players.team_id IS NULL` marks the ~15.7k empty STUB rows —
-        // players with no current team whose only volume is a stale identity-table copy from an old
-        // season. They still receive a PROJECTION_SEASON projection, so they surface on the
-        // leaderboard as if active. Measured on prod: 0 such hitters today, 71 such pitchers, of
-        // which 1 (Harrison Cook, last real season 2024, p_rv_plus NULL in all his Master rows)
-        // was ranking 150 in the visible top 50. Kept on both paths so they stay identical.
-        // ⚠ This HIDES them only. Why stubs get projections at all is the separate, larger cleanup
-        //    tracked in [[project_players_team_id_null]] — do not treat this as that fix.
-        .not("players.team_id", "is", null)
+        // 🛑 DO NOT FILTER ON `players.team_id` HERE. REVERTED 2026-09-01.
+        // A ghost filter `.not("players.team_id","is",null)` was added 2026-08-31 to hide the empty
+        // STUB rows (Harrison Cook, last real season 2024, ranking 150). It is correct on prod but
+        // it EMPTIES THIS LIST ON STAGING, because `players.team_id` was never backfilled there:
+        //     STAGING  15,560 of 15,561 players have team_id NULL  (99.99%)
+        //     PROD     15,763 of 31,467                            (50%)
+        // Local dev reads staging, so the Top 5 rendered "No data." while the Vercel preview (which
+        // reads PROD) looked fine — which is exactly why it survived review.
+        // ★ LESSON: never gate a display on a column whose population differs by environment. Verify
+        //   a filter on BOTH databases, not just the one the preview happens to point at.
+        // The stub problem is real but belongs at the data layer, not here — see
+        // [[project_players_team_id_null]]. This path must mirror the Player Dashboard, which does
+        // not filter on team_id and is why it kept working.
         .gte("players.pa", 75)
         .not("p_wrc_plus", "is", null)
         .order("p_wrc_plus", { ascending: false })
@@ -178,9 +182,8 @@ export default function Dashboard() {
         .in("model_type", ["returner", "transfer"])
         .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
         .not("players.division", "eq", "NJCAA_D1")
-        // GHOST FILTER (2026-08-31) — see the matching note on the hitter query above.
-        // This is the path Trevor hit: 71 stubs in this population, 1 visible in the top 50.
-        .not("players.team_id", "is", null)
+        // 🛑 team_id ghost filter REVERTED 2026-09-01 — see the full note on the hitter query above.
+        //    It emptied this list on staging (team_id is NULL for 99.99% of staging players).
         .gte("players.ip", 20)
         .not("p_rv_plus", "is", null)
         .order("p_rv_plus", { ascending: false })
