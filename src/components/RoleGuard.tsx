@@ -2,7 +2,7 @@ import { Navigate } from "react-router-dom";
 import { Activity } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
-type AllowedRole = "superadmin" | "team_admin";
+type AllowedRole = "superadmin" | "team_admin" | "general_user";
 
 interface RoleGuardProps {
   allow: AllowedRole[];
@@ -22,9 +22,11 @@ export default function RoleGuard({ allow, redirectTo = "/dashboard", children }
   }
 
   // Superadmins are implicitly allowed for any role check below.
+  // Otherwise the user's TEAM role (from user_team_access) must be in `allow`. Written generically
+  // rather than special-casing team_admin, so adding a role means changing the caller, not this file.
   const allowed =
     isSuperadmin ||
-    (allow.includes("team_admin") && userTeamRole === "team_admin");
+    (!!userTeamRole && allow.includes(userTeamRole as AllowedRole));
 
   if (!allowed) return <Navigate to={redirectTo} replace />;
   return <>{children}</>;
