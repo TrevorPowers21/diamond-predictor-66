@@ -13,13 +13,21 @@
  *   ⛔ NEVER edit anchors.fixture.json or loosen a tolerance to make a change pass.
  *   ⛔ Anchors green but you cannot explain WHY the change was safe = treat as a failure.
  *
- * ⚠ COVERAGE IS PARTIAL — READ THIS BEFORE TRUSTING A GREEN RUN (§7 residual risk)
- *   GATED:     the returner path identity, the full pitcher chain, and structural invariants.
- *   NOT GATED: the TRANSFER path's oWAR. Measured 2026-09-02 on prod: returner/regular reproduces
- *              454/454 (100%), transfer/precomputed only 4,597/7,546 (60.9%). The divergence is
- *              systematic — see "transfer-path divergence" below. Gating it needs the transfer
- *              projection's conference/park inputs frozen too, which this fixture does not yet
- *              carry. Anchor-green does NOT mean the transfer path is verified.
+ * ⛔ D1 IS THE CONSISTENCY BOUNDARY — every assertion here filters `division === "D1"` except the
+ *   JUCO block. Measured on prod 2026-09-02, and the filter is the whole story:
+ *
+ *       D1 transfer/precomputed     18,505 / 18,917   97.8% reproduce
+ *       NJCAA_D1 transfer            10 / 19,034       0.1% reproduce
+ *       unfiltered                                    ~60%  ← MEANINGLESS
+ *
+ *   An unfiltered sample reports ~60% and supports a confident, wrong conclusion. That is cause C1
+ *   repeating (477 JUCO rows were 27% of the calibration sample). Never measure across divisions.
+ *
+ * ⚠ COVERAGE IS PARTIAL — READ BEFORE TRUSTING A GREEN RUN (§7 residual risk)
+ *   GATED:     D1 returner + D1 transfer identity, the pitcher chain, structural invariants.
+ *   NOT GATED: the transfer projection's own inputs (conference env+, park) are not frozen, so this
+ *              proves the stored row is self-consistent — NOT that the projection that produced it
+ *              is right. JUCO is pinned as broken, not verified.
  *
  * Regenerate deliberately (reads PROD read-only): npx tsx scripts/build-anchor-fixtures.ts
  */
@@ -75,8 +83,8 @@ describe("anchor — RETURNER oWAR reproduces exactly, WHEN A DEPTH ROLE IS SET"
    * null-role rows is handled separately below, not swept in here.
    */
   const rows = all().filter(
-    (r) => r.model_type === "returner" && r.o_war != null && r.p_wrc_plus != null
-      && r.projected_pa > 0 && r.hitter_depth_role != null,
+    (r) => r.division === "D1" && r.model_type === "returner" && r.o_war != null
+      && r.p_wrc_plus != null && r.projected_pa > 0 && r.hitter_depth_role != null,
   );
 
   it("the returner population is present in the fixture", () => {
@@ -92,35 +100,60 @@ describe("anchor — RETURNER oWAR reproduces exactly, WHEN A DEPTH ROLE IS SET"
   }
 });
 
-describe("⚠ anchor — NULL depth role: projected_pa is NOT the PA the math used", () => {
+describe("anchor — every fixture row is FRESH (post-recalibration)", () => {
   /**
-   * FINDING, 2026-09-02, surfaced by this suite on its first run.
+   * CORRECTED 2026-09-02. This suite first reported TWO findings — "the transfer path diverges at
+   * 60%" and "NULL depth-role rows don't reproduce". Both were the SAME thing, and neither was a
+   * model difference:
    *
-   * When `hitter_depth_role` is NULL, stored oWAR does not reproduce from `projected_pa` — solving
-   * for the PA that fits gives a different number (Magill 176.5 vs a stored 196; Clapp 199 vs 221).
-   * This is the depth-role rule showing up from the data side: **PA/IP come from the depth role,
-   * and the stored `projected_pa` / `projected_ip` column is not what the projection used.**
+   *   - the 60% came from an UNFILTERED sample; JUCO reproduces at 0.1% and swamped D1's 97.8%
+   *   - the null-role rows were all `updated_at = 2026-08-31`, i.e. never re-baked on 09-01
    *
-   * Pinned so the population cannot quietly change. Not a bug report — whether a null depth role
-   * should be possible at all is a modelling question (§4.6).
+   * The 2026-09-01 recalibration populated `hitter_depth_role` AND rewrote oWAR together. Rows it
+   * missed kept a NULL role and a stale value, so "null role" and "stale" are the same population
+   * viewed two ways.
+   *
+   * ⇒ ONE finding, not two: ~743 D1 transfer rows on prod were never re-baked.
+   *   Identify them with: hitter_depth_role IS NULL AND updated_at < '2026-09-01'.
+   *   ⚠ NOT fixed here — a re-bake is a data write and needs to be talked through.
+   *
+   * This guard exists so a stale row can never be frozen as an anchor again. Freezing one pins
+   * PRE-recalibration behaviour as if it were correct — the quietest possible way for a gate to
+   * certify the wrong thing. It caught exactly that on its first run (Spike Magill, 2026-08-31).
    */
-  const nullRole = all().filter(
-    (r) => r.o_war != null && r.p_wrc_plus != null && r.projected_pa > 0 && r.hitter_depth_role == null,
-  );
-
-  it("the null-depth-role population exists in the fixture", () => {
-    expect(nullRole.length).toBeGreaterThan(0);
+  it("no fixture row predates the 2026-09-01 recalibration", () => {
+    for (const r of all()) {
+      if (!r.updated_at) continue;
+      expect(
+        new Date(r.updated_at) >= new Date("2026-09-01T00:00:00Z"),
+        `${name(r)} updated_at ${r.updated_at} predates the recalibration — re-run ` +
+        `npx tsx scripts/build-anchor-fixtures.ts rather than editing the fixture`,
+      ).toBe(true);
+    }
   });
 
-  it("does NOT satisfy the canonical identity — pinned as a known divergence", () => {
-    // If one of these starts reproducing, the population changed. That deserves a conversation,
-    // not a silent pass.
-    for (const r of nullRole) {
-      const canonical = computeOWar(r.p_wrc_plus, r.projected_pa) as number;
+  it("a depth role snaps PA to a canonical bucket — that is what 'PA comes from the role' means", () => {
+    /**
+     * Measured on prod 2026-09-02, FRESH D1 rows carrying an o_war:
+     *   with a depth role   70,497 rows, projected_pa strictly within 25..245
+     *   NULL depth role        236 rows (0.33%), raw unsnapped PA — 1, 2, 4, 6, 10, 17, 34 ...
+     *
+     * So the role does not merely label a player: it REPLACES raw PA with the bucket for that role.
+     * bench 25 · utility 85 · platoon_starter 145 · everyday_starter 215 · cornerstone 245.
+     *
+     * ⚠ An earlier version of this test asserted every fresh D1 row carries a depth role. That was
+     * too strong — Owen Pincince is fresh, D1, and roleless at 7 PA. A player with negligible
+     * playing time legitimately has no role. Assert the bucket rule, which is what was measured.
+     */
+    const BUCKETS = [25, 85, 145, 215, 245];
+    const withRole = all().filter(
+      (r) => r.division === "D1" && r.hitter_depth_role != null && r.projected_pa > 0,
+    );
+    expect(withRole.length).toBeGreaterThan(0);
+    for (const r of withRole) {
       expect(
-        Math.abs(canonical - r.o_war) >= TOL.war,
-        `${name(r)} now REPRODUCES (stored ${r.o_war}, canonical ${canonical.toFixed(4)}) — ` +
-        `the null-depth-role divergence may have been fixed. Re-freeze deliberately.`,
+        BUCKETS.includes(r.projected_pa),
+        `${name(r)} role=${r.hitter_depth_role} has PA ${r.projected_pa}, not a canonical bucket`,
       ).toBe(true);
     }
   });
@@ -205,61 +238,54 @@ describe("anchor — dWAR / bsrWAR convert runs at RUNS_PER_WIN", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe("⚠ anchor — TRANSFER-PATH DIVERGENCE (pinned, NOT endorsed)", () => {
+describe("anchor — D1 TRANSFER oWAR reproduces, when the row is FRESH", () => {
   /**
-   * FINDING, 2026-09-02, surfaced by this suite on its first run.
+   * CORRECTED 2026-09-02. An earlier read of this claimed the transfer path diverged at ~60%. That
+   * number came from an UNFILTERED sample and was wrong twice over:
    *
-   * On prod, `o_war` on transfer/precomputed rows does NOT reproduce from
-   * computeOWar(p_wrc_plus, projected_pa), while returner rows reproduce 454/454.
+   *   1. no division filter — JUCO (0.1% reproduce) swamped D1 (97.8%). Cause C1, repeated.
+   *   2. no freshness filter — divergence tracks `updated_at`, not implementation:
+   *        rows updated 2026-08-31 (pre-recalibration):    741 / 743    diverge  99.7%
+   *        rows updated 2026-09-01 (post-recalibration):   319 / 39,257 diverge   0.8%
    *
-   * The divergence is systematic, not noise. Solving for the wRC+ that WOULD produce the stored
-   * oWAR gives a value consistently HIGHER than the stored p_wrc_plus, with the gap widening as
-   * wRC+ falls:  +5.4 at wRC+ 99  ·  +19.2 at 75  ·  +30.1 at 56.
+   * ⇒ There is no transfer-path model divergence. There are STALE ROWS. "Prove both sides are FRESH
+   *   before diffing" exists precisely because stale-vs-fresh is indistinguishable from an
+   *   implementation disagreement — see docs/AGENT_LEARNINGS_INDEX.md.
    *
-   * That shape is regression toward the mean. HYPOTHESIS (NOT CONFIRMED): the transfer path derives
-   * oWAR from a pulled-back wRC+ while storing the unregressed projection in p_wrc_plus — plausibly
-   * the small-sample pullback. If so it is BY DESIGN, and the consequence is still worth stating:
-   * o_war and p_wrc_plus on the same transfer row are not consistent with each other under the
-   * canonical formula, so any surface deriving one from the other will disagree with the stored value.
-   *
-   * ⛔ NOT a bug report, and NOT the agent's call — this is a modeling question (§4.6). Trevor decides.
-   *
-   * These tests pin the divergence AS IT IS so it cannot change silently in either direction.
+   * ⚠ OPEN, for Trevor: ~743 D1 transfer rows on prod still carry pre-recalibration oWAR, plus a
+   *   residual ~0.8% among freshly baked rows. Not fixed here — a re-bake is a data write.
    */
-  const transfers = all().filter(
-    (r) => r.model_type === "transfer" && r.o_war != null && r.p_wrc_plus != null && r.projected_pa > 0,
+  const rows = all().filter(
+    (r) => r.division === "D1" && r.model_type === "transfer" && r.o_war != null
+      && r.p_wrc_plus != null && r.projected_pa > 0 && r.hitter_depth_role != null,
   );
 
-  it("transfer rows exist in the fixture", () => {
-    expect(transfers.length).toBeGreaterThan(0);
+  it("D1 transfer rows are present in the fixture", () => {
+    expect(rows.length).toBeGreaterThan(0);
   });
 
-  it("stored transfer oWAR is >= the canonical formula (pullback only ever helps)", () => {
-    // If this ever fails, the pullback hypothesis is wrong and the finding needs re-opening.
-    for (const r of transfers) {
-      const canonical = computeOWar(r.p_wrc_plus, r.projected_pa) as number;
-      expect(
-        r.o_war >= canonical - TOL.war,
-        `${name(r)}: stored ${r.o_war} < canonical ${canonical.toFixed(4)}`,
-      ).toBe(true);
-    }
-  });
-
-  it("below-average transfer hitters diverge; near-average ones barely do", () => {
-    const gap = (r: Row) => r.o_war - (computeOWar(r.p_wrc_plus, r.projected_pa) as number);
-    const low = transfers.filter((r) => r.p_wrc_plus < 90);
-    const near = transfers.filter((r) => r.p_wrc_plus >= 95);
-    if (low.length && near.length) {
-      const avg = (xs: Row[]) => xs.reduce((a, r) => a + gap(r), 0) / xs.length;
-      expect(avg(low), "below-average gap should exceed near-average gap").toBeGreaterThan(avg(near));
-    }
-  });
+  for (const r of rows) {
+    it(`${name(r)} — oWAR ${r.o_war} @ wRC+ ${r.p_wrc_plus} / ${r.projected_pa} PA`, () => {
+      const got = computeOWar(r.p_wrc_plus, r.projected_pa);
+      expect(got).not.toBeNull();
+      expect(Math.abs((got as number) - r.o_war)).toBeLessThan(TOL.war);
+    });
+  }
 });
 
 describe("⚠ anchor — JUCO pinned at CURRENT behaviour, not correct behaviour", () => {
-  // ~62% of prod JUCO transfer rows are stale (the no_from_conf guard blocks them, and blocked rows
-  // are never rewritten). Pinned so that fixing JUCO shows up as an explicit, reviewable diff rather
-  // than passing silently. EXPECT THESE TO FAIL when workstream C lands — that is the anchor working.
+  /**
+   * MEASURED 2026-09-02: JUCO transfer oWAR reproduces on 10 of 19,034 rows — 0.1%. Not "62% stale";
+   * effectively the whole population is wrong. The no_from_conf guard blocks JUCO sources whose
+   * origin conference has no stored env+, and blocked rows are never rewritten.
+   *
+   * ⛔ JUCO IS EXCLUDED FROM EVERY OTHER ASSERTION IN THIS FILE. Including it silently drags any
+   *    cross-division measurement to a meaningless middle — that is exactly what happened when the
+   *    transfer path was first (wrongly) reported as 60% divergent.
+   *
+   * Pinned as BROKEN so a JUCO fix shows up as an explicit, reviewable diff. EXPECT THESE TO FAIL
+   * when workstream C lands — that is the anchor doing its job.
+   */
   const rows = shape("juco_transfer");
 
   it("JUCO rows are division NJCAA_D1 (not 'JUCO')", () => {
@@ -271,5 +297,17 @@ describe("⚠ anchor — JUCO pinned at CURRENT behaviour, not correct behaviour
     for (const r of rows) {
       expect(r.o_war != null || r.p_war != null, `${name(r)} lost both WAR values`).toBe(true);
     }
+  });
+
+  it("JUCO oWAR does NOT reproduce — pinned as broken, not endorsed", () => {
+    const withPa = rows.filter((r) => r.o_war != null && r.p_wrc_plus != null && r.projected_pa > 0);
+    if (!withPa.length) return;
+    const reproduce = withPa.filter(
+      (r) => Math.abs((computeOWar(r.p_wrc_plus, r.projected_pa) as number) - r.o_war) < TOL.war,
+    );
+    expect(
+      reproduce.length < withPa.length,
+      "JUCO now fully reproduces — workstream C may have landed. Re-freeze deliberately.",
+    ).toBe(true);
   });
 });

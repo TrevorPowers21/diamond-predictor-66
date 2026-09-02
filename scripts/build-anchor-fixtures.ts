@@ -10,6 +10,15 @@
  *   - the fixture is checked into the repo, so the gate never depends on a live DB or on staging
  *     drifting underneath it
  *
+ * ⛔ FRESH ROWS ONLY (updated_at >= 2026-09-01) on every D1 shape. A pre-recalibration row frozen
+ *    as an anchor pins the OLD behaviour as if it were correct — the quietest way for this gate to
+ *    certify the wrong thing. JUCO is exempt: it is pinned as broken on purpose.
+ *
+ * ⛔ D1 IS THE CONSISTENCY BOUNDARY. Every shape except `juco_transfer` filters `division='D1'`.
+ * Omitting that filter is exactly cause C1 — 477 JUCO rows were 27% of the calibration sample and
+ * dragged the whole result. Measured 2026-09-02: D1 transfer oWAR reproduces 97.8%, JUCO 0.1%.
+ * An unfiltered sample reports ~60% and means nothing.
+ *
  * SHAPES COVERED (§2.1 requires shapes that break DIFFERENTLY, not just more rows):
  *   hitter · starting pitcher · relief pitcher · two-way player · JUCO transfer · returner ·
  *   zero/missing scouting inputs (the `0 -> —` case)
@@ -56,6 +65,7 @@ const COLS = `
   pr.market_value, pr.twp_hitter_market_value, pr.twp_pitcher_market_value,
   pr.projected_ip, pr.projected_pa, pr.hitter_depth_role, pr.pitcher_depth_role, pr.pitcher_role,
   pr.power_rating_plus, pr.power_rating_score, pr.ev_score, pr.barrel_score, pr.chase_score,
+  pr.updated_at,
   p.first_name, p.last_name, p.division, p.position, p.is_twp, p.class_year
 `;
 
@@ -70,7 +80,7 @@ const SHAPES: { key: string; why: string; sql: string }[] = [
     key: "hitter_returner",
     why: "the ordinary hitter — an internal returner projection",
     sql: `SELECT ${COLS} FROM player_predictions pr JOIN players p ON p.id = pr.player_id
-          WHERE pr.model_type = 'returner' AND p.division = 'D1'
+          WHERE pr.model_type = 'returner' AND p.division = 'D1' AND pr.updated_at >= '2026-09-01'
             AND pr.p_wrc_plus IS NOT NULL AND pr.o_war IS NOT NULL AND pr.projected_pa > 150
             AND COALESCE(p.is_twp,false) = false
           ORDER BY pr.player_id LIMIT 4`,
@@ -79,7 +89,7 @@ const SHAPES: { key: string; why: string; sql: string }[] = [
     key: "hitter_transfer",
     why: "the transfer path is a DIFFERENT implementation from the returner path",
     sql: `SELECT ${COLS} FROM player_predictions pr JOIN players p ON p.id = pr.player_id
-          WHERE pr.model_type = 'transfer' AND p.division = 'D1'
+          WHERE pr.model_type = 'transfer' AND p.division = 'D1' AND pr.updated_at >= '2026-09-01'
             AND pr.p_wrc_plus IS NOT NULL AND pr.o_war IS NOT NULL AND pr.projected_pa > 150
             AND COALESCE(p.is_twp,false) = false
           ORDER BY pr.player_id LIMIT 3`,
@@ -88,7 +98,7 @@ const SHAPES: { key: string; why: string; sql: string }[] = [
     key: "starting_pitcher",
     why: "pWAR scales off depth-role IP — the Neiswonger bug (1.14 -> 3.329) lived here",
     sql: `SELECT ${COLS} FROM player_predictions pr JOIN players p ON p.id = pr.player_id
-          WHERE p.division = 'D1' AND pr.p_war IS NOT NULL AND pr.p_rv_plus IS NOT NULL
+          WHERE p.division = 'D1' AND pr.updated_at >= '2026-09-01' AND pr.p_war IS NOT NULL AND pr.p_rv_plus IS NOT NULL
             AND pr.projected_ip >= 60 AND COALESCE(p.is_twp,false) = false
           ORDER BY pr.player_id LIMIT 3`,
   },
@@ -96,7 +106,7 @@ const SHAPES: { key: string; why: string; sql: string }[] = [
     key: "relief_pitcher",
     why: "low IP changes the replacement-level term's weight entirely",
     sql: `SELECT ${COLS} FROM player_predictions pr JOIN players p ON p.id = pr.player_id
-          WHERE p.division = 'D1' AND pr.p_war IS NOT NULL AND pr.p_rv_plus IS NOT NULL
+          WHERE p.division = 'D1' AND pr.updated_at >= '2026-09-01' AND pr.p_war IS NOT NULL AND pr.p_rv_plus IS NOT NULL
             AND pr.projected_ip > 0 AND pr.projected_ip <= 40 AND COALESCE(p.is_twp,false) = false
           ORDER BY pr.player_id LIMIT 3`,
   },
@@ -104,7 +114,7 @@ const SHAPES: { key: string; why: string; sql: string }[] = [
     key: "two_way",
     why: "BOTH sides on ONE row; shared market_value stays NULL, values in the twp_* columns",
     sql: `SELECT ${COLS} FROM player_predictions pr JOIN players p ON p.id = pr.player_id
-          WHERE p.is_twp = true
+          WHERE p.is_twp = true AND pr.updated_at >= '2026-09-01'
             AND (pr.twp_hitter_market_value IS NOT NULL OR pr.twp_pitcher_market_value IS NOT NULL)
           ORDER BY pr.player_id LIMIT 3`,
   },
@@ -120,6 +130,7 @@ const SHAPES: { key: string; why: string; sql: string }[] = [
     why: "variant='precomputed' + a customer_team_id outranks global 'regular' in predRank",
     sql: `SELECT ${COLS} FROM player_predictions pr JOIN players p ON p.id = pr.player_id
           WHERE pr.variant = 'precomputed' AND pr.customer_team_id IS NOT NULL
+            AND p.division = 'D1' AND pr.updated_at >= '2026-09-01'
             AND pr.p_wrc_plus IS NOT NULL AND pr.o_war IS NOT NULL
           ORDER BY pr.player_id LIMIT 3`,
   },
@@ -127,7 +138,7 @@ const SHAPES: { key: string; why: string; sql: string }[] = [
     key: "zero_scouting_inputs",
     why: "exact zero is MISSING and must render as an em dash, not 0",
     sql: `SELECT ${COLS} FROM player_predictions pr JOIN players p ON p.id = pr.player_id
-          WHERE pr.p_wrc_plus IS NOT NULL
+          WHERE pr.p_wrc_plus IS NOT NULL AND p.division = 'D1' AND pr.updated_at >= '2026-09-01'
             AND (pr.ev_score = 0 OR pr.barrel_score = 0 OR pr.chase_score = 0
                  OR pr.ev_score IS NULL OR pr.barrel_score IS NULL)
           ORDER BY pr.player_id LIMIT 3`,
