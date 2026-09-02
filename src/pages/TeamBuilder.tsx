@@ -1808,6 +1808,15 @@ export default function TeamBuilder() {
     const currentYearCoachBuilds = coachBuilds.filter((b: any) => b.academic_year === PROJECTION_SEASON);
     const toLoad = (activeBuild ?? currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
     if (!toLoad) return;
+    // ★★★ 2026-09-01 — NEVER CLOBBER UNSAVED WORK. ★★★
+    // This effect re-runs whenever `buildsLoading` flips, which happens on ANY React Query refetch —
+    // window focus being the usual trigger. loadBuild() rebuilds rosterPlayers from the DB, which
+    // wipes `_dirty` and the in-session toggle. Symptom: toggle dev aggressiveness, the value scales
+    // correctly, then a refetch lands, the row is rebuilt CLEAN, the display falls back to the stored
+    // (neutral) line, and the toggle is lost before the save can fire — "went up properly then went
+    // backwards to neutral and never reached the database".
+    // ⇒ A row mid-toggle is unsaved work. Reloading over it is data loss, not a refresh.
+    if (rosterPlayers.some((rp: any) => rp?._dirty)) return;
     setHasSavedOnce(!toLoad.is_default);
     loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
