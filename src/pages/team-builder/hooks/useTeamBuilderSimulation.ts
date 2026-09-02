@@ -669,7 +669,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // WAR 33) and then swapped to the live precomputed line (31.46). That is the flicker: a race
     // between a stored value and an async query, which the async query always won because it landed
     // second. There is nothing to race — the snapshot is on disk before the page mounts.
-    const livePred = p.prediction;
+    // ⛔ REAL snapshots only — `p.prediction` is `snapshot ?? predictionMap[...]` and degrades to
+    //    the raw prediction row on a lookup miss (Stevens: showed the $62,490 neutral/precompute
+    //    instead of his $102,304 saved snapshot).
+    const livePred = ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null);
     if (!livePred) {
       return snapshotFallback;
     }
@@ -1409,11 +1412,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // (not a wrong-team transfer number, the bug the old snapshot-always guard was papering over).
     const boardOnlyTarget = p.roster_status === "target" && !(p as any).included_in_roster;
     const shown = boardOnlyTarget
-      ? ((p.prediction ?? (p as any).transfer_snapshot ?? null) as any)
+      ? (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) as any)
       // ★ 2026-09-01 — STORED SNAPSHOT ONLY. The neutral fallback is REMOVED.
       // Neutral is the dev_agg=0 checkpoint the DIRTY recompute scales from — never a display
       // source. Reading it here is what showed the un-toggled line on every transfer.
-      : ((treatAsPitcher ? (p.prediction ?? computeReturnerPitchingProjection(p)) : p.prediction) as any);
+      : ((treatAsPitcher ? (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? computeReturnerPitchingProjection(p)) : ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) as any);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       // Mirror hitter dev_agg pattern: one ratio formula, no target-only gate,

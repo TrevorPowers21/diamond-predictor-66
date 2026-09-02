@@ -52,7 +52,7 @@ const classAdjFor = (ct: string | null | undefined) => {
 
   const { rows } = await c.query(`
     select tbp.id, tbp.player_snapshot ps, tbp.neutral_snapshot ns, tbp.production_notes pn,
-           pl.position, pl.is_twp, ct.name team_name, t.conference
+           pl.position, pl.is_twp, tbp.position_slot, ct.name team_name, t.conference
     from team_build_players tbp
     join team_builds b on b.id = tbp.build_id
     left join customer_teams ct on ct.id = b.customer_team_id
@@ -63,7 +63,7 @@ const classAdjFor = (ct: string | null | undefined) => {
   // depth-role -> expected IP needs the pitching equation weights (pwar_ip_sp / _sm / _rp)
   const pEq = await readPitchingWeights();
   const updates: Array<{ id: string; patch: any; before: number; after: number }> = [];
-  let skippedPitcher = 0, skippedNoToggle = 0, unverifiablePwar = 0;
+  let skippedPitcher = 0, skippedNoToggle = 0, unverifiablePwar = 0, wrongSideNeutral = 0;
 
   for (const r of rows) {
     const ns = r.ns as any;
@@ -71,7 +71,14 @@ const classAdjFor = (ct: string | null | undefined) => {
     // Mirrors useTeamBuilderSimulation:1425-1444. Lower-is-better rates take the INVERSE scale;
     // K9 and pRV+ take the same direction as a hitter. Note the pitcher class table has a JS case
     // (0.015) the hitter table does not.
-    if (ns.p_era != null || ns.p_war != null) {
+    // 🛑 BRANCH ON THE SLOT, NOT ON WHAT THE NEUTRAL CONTAINS. Kenny Ishikawa's SP row carried a
+    //    HITTER neutral, so a content-based branch fed hitter fields onto a pitcher slot: wRC+ 118 /
+    //    oWAR 1.187 / hitter_depth_role platoon_starter on an SP row, competing with his real RF row
+    //    (oWAR 2.006). Two rows claiming hitter values is why his role change looked like it never
+    //    persisted. The SLOT is authoritative for which side a row represents.
+    const isPitSlot = /^(SP|RP|CL|P|LHP|RHP)/i.test(String((r as any).position_slot || ""));
+    if (isPitSlot) {
+      if (ns.p_era == null && ns.p_war == null) { wrongSideNeutral++; continue; }
       const pn0 = typeof r.pn === "string" ? JSON.parse(r.pn) : (r.pn || {});
       const sDev = Number(pn0.devAggressiveness ?? 0);
       const stDev = Number(ns.dev_aggressiveness ?? 0);
@@ -125,14 +132,21 @@ const classAdjFor = (ct: string | null | undefined) => {
         pitcher_role: pn0.pitcherRole ?? ns.pitcher_role ?? null,
         pitcher_depth_role: pn0.depthRole ?? ns.pitcher_depth_role ?? null,
         dev_aggressiveness: sDev,
+        // own-side only: a pitcher row must not carry hitter fields
+        p_avg: null, p_obp: null, p_slg: null, p_iso: null, p_wrc_plus: null,
+        o_war: null, total_hitter_war: null, hitter_depth_role: null,
         // ★ MARKET IS STORED, NOT DERIVED AT READ TIME. If pWAR moves and this is not rewritten the
         //   row keeps a market value from the old WAR (Neiswonger: 3.229 pWAR still showing $99k).
         // 🛑 TWP CONVENTION (src/lib/twpMarketValue.ts): a two-way player NULLs the SHARED
         //    `market_value` and carries the value in twp_pitcher_market_value / twp_hitter_market_value.
         //    Writing the shared column on a TWP pollutes every surface that reads it directly (the
         //    target board). Measured: this script had written market_value onto 9 TWP rows.
+        // 🛑 OWN-SIDE ONLY. The pitcher neutral is a VERBATIM copy of the prediction row, so it
+        //    carries twp_hitter_market_value too. Leaving it on a PITCHER row makes the display pick
+        //    the hitter market for a pitcher — Kenny Ishikawa showed $117,921 (his hitter value) on a
+        //    P row with 2.00 pWAR. Mirrors useTargetBoard's hitterSnap/pitcherSnap split.
         ...((r as any).is_twp
-          ? { market_value: null, twp_pitcher_market_value: pMkt }
+          ? { market_value: null, twp_pitcher_market_value: pMkt, twp_hitter_market_value: null }
           : { market_value: pMkt }),
       };
       const bP = Number((r.ps as any)?.p_era ?? NaN);
@@ -144,7 +158,7 @@ const classAdjFor = (ct: string | null | undefined) => {
         || Number((r.ps as any)?.p_rv_plus) !== rv
         || (pWar != null && (!Number.isFinite(psWar) || Math.abs(psWar - pWar) > 1e-6))
         || (newMkt != null && (!Number.isFinite(psMkt) || Math.abs(psMkt - Number(newMkt)) > 1))
-        || ((r as any).is_twp && (r.ps as any)?.market_value != null);
+        || ((r as any).is_twp && ((r.ps as any)?.market_value != null || (r.ps as any)?.twp_hitter_market_value != null));
       if (!changedP) { skippedNoToggle++; continue; }
       updates.push({ id: r.id, patch: patchP, before: bP, after: aP });
       continue;
@@ -189,10 +203,14 @@ const classAdjFor = (ct: string | null | undefined) => {
       total_hitter_war: oWar != null ? oWar + dWar + bsrWar : null,
       hitter_depth_role: depthRole,
       dev_aggressiveness: sessionDev,   // so the app's guardrail can see what is baked in
+      // own-side only: a hitter row must not carry pitcher fields
+      p_era: null, p_fip: null, p_whip: null, p_k9: null, p_bb9: null, p_hr9: null,
+      p_rv_plus: null, p_war: null, projected_ip: null, pitcher_depth_role: null,
       // ★ same rule for hitters — market rides TOTAL hitter WAR (o+d+bsr).
       // 🛑 same TWP convention on the hitter side.
+      // 🛑 OWN-SIDE ONLY — same rule, hitter side.
       ...((r as any).is_twp
-        ? { market_value: null, twp_hitter_market_value: hMkt }
+        ? { market_value: null, twp_hitter_market_value: hMkt, twp_pitcher_market_value: null }
         : { market_value: hMkt }),
     };
     const before = Number((r.ps as any)?.p_avg ?? NaN);
@@ -204,12 +222,12 @@ const classAdjFor = (ct: string | null | undefined) => {
       || Number((r.ps as any)?.p_wrc_plus) !== adjWrc
       || (oWar != null && (!Number.isFinite(psOwar) || Math.abs(psOwar - oWar) > 0.005))
       || (newMktH != null && (!Number.isFinite(psMktH) || Math.abs(psMktH - Number(newMktH)) > 1))
-      || ((r as any).is_twp && (r.ps as any)?.market_value != null);
+      || ((r as any).is_twp && ((r.ps as any)?.market_value != null || (r.ps as any)?.twp_pitcher_market_value != null));
     if (!changed) { skippedNoToggle++; continue; }
     updates.push({ id: r.id, patch, before, after });
   }
 
-  console.log(`rows: ${rows.length} · to update: ${updates.length} · already correct: ${skippedNoToggle} · non-hitter/non-pitcher skipped: ${skippedPitcher} · ⚠ pitchers SKIPPED (pWAR formula unverifiable on that row): ${unverifiablePwar}`);
+  console.log(`rows: ${rows.length} · to update: ${updates.length} · already correct: ${skippedNoToggle} · non-hitter/non-pitcher skipped: ${skippedPitcher} · ⚠ pWAR unverifiable: ${unverifiablePwar} · ⚠ WRONG-SIDE neutral (slot says pitcher, neutral is a hitter row): ${wrongSideNeutral}`);
   for (const u of updates.slice(0, 8)) {
     console.log(`   ${u.id.slice(0, 8)}  p_avg ${Number.isFinite(u.before) ? u.before.toFixed(4) : "—"} → ${u.after.toFixed(4)}  wRC+ ${u.patch.p_wrc_plus}  oWAR ${u.patch.o_war?.toFixed(3)}`);
   }
