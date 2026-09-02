@@ -531,6 +531,11 @@ export function useLoadBuild({
                   // True when this row's values came from a STORED snapshot, which means the toggle
                   // and depth role are ALREADY BAKED IN and must not be scaled again.
                   _snapshotBacked: !!rawSnapshot,
+                  // ★ 2026-09-01 — the RAW team_build_players.player_snapshot for this row+side.
+                  // `prediction` is NOT a snapshot: it is `snapshot ?? predictionMap[...]`, so it
+                  // silently becomes the PREDICTION ROW whenever the snapshot lookup misses. Display
+                  // must read this field, never `prediction`.
+                  player_snapshot: rawSnapshot ?? null,
                   player: pd
                     ? {
                         first_name: pd.first_name,

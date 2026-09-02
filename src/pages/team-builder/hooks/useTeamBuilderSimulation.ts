@@ -1310,7 +1310,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // A DIRTY row (toggle moved this session) still falls through to the recompute below, which
     // scales from neutral — the guardrail that stops a toggle compounding on a baked line.
     if (!(p as any)._dirty) {
-      const stored: any = p.prediction ?? (p as any).transfer_snapshot ?? null;
+      // ⛔ NOT `p.prediction` — that is `snapshot ?? predictionMap[...]` and degrades to the raw
+      //    prediction row on a snapshot miss, which is exactly how the un-toggled line kept winning.
+      //    Only the two real snapshots are acceptable here.
+      const stored: any = (p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null;
       if (stored) {
         if (treatAsPitcher) {
           if (stored.p_war != null) {
