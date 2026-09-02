@@ -662,7 +662,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     if (!selectedTeam) return snapshotFallback;
     if (!p.player) return snapshotFallback;
     const livePlayer = (p.player_id ? liveTargetPlayerById.get(p.player_id) : null) || p.player;
-    const livePred = (p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null) || p.prediction;
+    // ★ 2026-09-01 — stored snapshot FIRST; the async live precomputed row is only the fallback for
+    // a row that has no snapshot yet. Preferring the live row discarded every saved toggle.
+    const livePred = p.prediction ?? (p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null);
     if (!livePred) {
       return snapshotFallback;
     }
@@ -1367,7 +1369,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const boardOnlyTarget = p.roster_status === "target" && !(p as any).included_in_roster;
     const shown = boardOnlyTarget
       ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
-      : (treatAsPitcher ? ((p.neutralPrediction ?? p.prediction) ?? computeReturnerPitchingProjection(p)) : (p.neutralPrediction ?? p.prediction));
+      // ★ 2026-09-01 — STORED SNAPSHOT ONLY. The neutral fallback is REMOVED.
+      // Neutral is the dev_agg=0 checkpoint the DIRTY recompute scales from — never a display
+      // source. Reading it here is what showed the un-toggled line on every transfer.
+      : ((treatAsPitcher ? (p.prediction ?? computeReturnerPitchingProjection(p)) : p.prediction) as any);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       // Mirror hitter dev_agg pattern: one ratio formula, no target-only gate,
