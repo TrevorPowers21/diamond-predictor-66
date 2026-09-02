@@ -3,6 +3,42 @@
 
 
 
+
+## 🛑 TEAM BUILDER READ/WRITE PATH — 2026-09-01 (read before touching snapshots)
+
+**One defect class behind every symptom: a stored copy nobody recomputes, behind a `??` chain that
+silently changes which source wins when a field becomes populated.**
+
+- **`p.prediction` IS NOT A SNAPSHOT.** `useLoadBuild:411` = `snapshot ?? predictionMap[...]`, so it
+  degrades to the raw prediction row on a lookup miss. Display now reads
+  **`p.player_snapshot ?? p.transfer_snapshot`** (useLoadBuild exposes `player_snapshot`).
+- **Filling a previously-NULL field flipped the whole page.** `shown = neutralPrediction ?? prediction`
+  worked only because neutral was mostly NULL; backfilling it made a dead branch live for 1,254 rows.
+  **A `??` chain is not a precedence decision.**
+- **THREE GUARDRAILS, all required:** (1) `_dirty` gate — a clean row is NEVER scaled; (2) base =
+  neutral while dirty — scaling a BAKED snapshot is what compounded (.342 → .356); (3) `snapshotBacked`
+  forces `devAggScale = 1` on a clean row (mirrors `PlayerProfile.tsx:986`).
+  Sequence: toggle → dirty → scale neutral ONCE (the live bridge) → save bakes it → clean → verbatim.
+- **The save bakes NEUTRAL × the toggle** (`playerProjection({...rp, _dirty:true})`), never a re-read
+  projection — otherwise it writes the UNSCALED line while production_notes records the toggle.
+- **Every local state update after a save must refresh EVERY snapshot copy** — `saveTargetToggle`
+  updated only `transfer_snapshot`, so the row fell back to a stale `player_snapshot`: the flash
+  up → down → correct-after-DB.
+- **An effect with `exhaustive-deps` disabled closes over STALE state.** The auto-load effect re-runs
+  on any refetch and wiped `_dirty` + the unsaved toggle; guard via a **ref**, not the array.
+- **Roster vs board:** a player can hold two copies. Once rostered, **the board reads the roster's
+  snapshot** (staging 32 / prod 47 synced, 0 differing). Board spells oWAR `owar`, market `nil_valuation`.
+- **Slot is authoritative for side**, not snapshot content (Kenny Ishikawa's SP row held hitter fields).
+- **Depth role drives IP/PA; market is STORED, not derived.** Neiswonger 30 IP → 85 ⇒ pWAR 1.14 → 3.329,
+  $99k → $332,852.
+
+⚠ **OPEN:** 10 staging / 18 prod pitchers with unverifiable pWAR (skipped, not guessed) · 1 wrong-side
+neutral · JUCO PTM (Blair) · removal-from-roster semantics undefined · **the durable fix is ONE save
+path owning every derived copy** — tonight's scripts are repairs.
+
+Full detail: Track B (`docs/PIPELINE_pitch_log_to_projections.md`).
+
+
 ## 🛑 SNAPSHOT LAYERS — REFRESHING THE BASE DOES NOT FIX THE SURFACE (2026-09-01)
 
 Trevor found this **by clicking**, after every automated check passed: Hudson Brown **.396** in Team
