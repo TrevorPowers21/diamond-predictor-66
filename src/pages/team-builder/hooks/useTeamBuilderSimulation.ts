@@ -672,7 +672,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // ⛔ REAL snapshots only — `p.prediction` is `snapshot ?? predictionMap[...]` and degrades to
     //    the raw prediction row on a lookup miss (Stevens: showed the $62,490 neutral/precompute
     //    instead of his $102,304 saved snapshot).
-    const livePred = ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null);
+    // dirty -> neutral (no compounding); clean -> stored snapshot
+    const livePred = ((p as any)._dirty ? (p.neutralPrediction ?? ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) : (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? p.neutralPrediction)) as any;
     if (!livePred) {
       return snapshotFallback;
     }
@@ -1416,7 +1417,15 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       // ★ 2026-09-01 — STORED SNAPSHOT ONLY. The neutral fallback is REMOVED.
       // Neutral is the dev_agg=0 checkpoint the DIRTY recompute scales from — never a display
       // source. Reading it here is what showed the un-toggled line on every transfer.
-      : ((treatAsPitcher ? (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? computeReturnerPitchingProjection(p)) : ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) as any);
+      // ★★★ CLEAN -> STORED SNAPSHOT.  DIRTY -> NEUTRAL. ★★★
+      // A DIRTY row is mid-toggle and the overlay below MULTIPLIES the rates by the dev ratio. If the
+      // base were the stored snapshot — which already has the toggle BAKED IN — the rates would be
+      // scaled twice: Jake Hanley stored .342 rendering .356 at dev 1. (WAR and market hid it, because
+      // oWAR is REBUILT from wRC+ rather than scaled from stored.)
+      // Neutral is the dev_agg=0 checkpoint precisely so the recompute cannot compound.
+      : ((treatAsPitcher
+          ? ((p as any)._dirty ? (p.neutralPrediction ?? ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) : (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? p.neutralPrediction)) ?? computeReturnerPitchingProjection(p)
+          : ((p as any)._dirty ? (p.neutralPrediction ?? ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) : (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? p.neutralPrediction))) as any);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       // Mirror hitter dev_agg pattern: one ratio formula, no target-only gate,
