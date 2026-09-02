@@ -52,7 +52,7 @@ const classAdjFor = (ct: string | null | undefined) => {
 
   const { rows } = await c.query(`
     select tbp.id, tbp.player_snapshot ps, tbp.neutral_snapshot ns, tbp.production_notes pn,
-           pl.position, ct.name team_name, t.conference
+           pl.position, pl.is_twp, ct.name team_name, t.conference
     from team_build_players tbp
     join team_builds b on b.id = tbp.build_id
     left join customer_teams ct on ct.id = b.customer_team_id
@@ -107,6 +107,11 @@ const classAdjFor = (ct: string | null | undefined) => {
       if (!formulaHolds) { unverifiablePwar++; continue; }
       // COMPUTE with the ROLE-derived IP — the actual correction.
       const pWar = rv != null && Number.isFinite(ip) ? pwarWith(rv, ip) : null;
+      const pMkt = computePitcherMarketValue(pWar, {
+        conference: (r as any).conference ?? null,
+        role: (pn0.pitcherRole ?? ns.pitcher_role ?? "RP") as any,
+        team: (r as any).team_name ?? null,
+      });
       const patchP: any = {
         p_era: ns.p_era != null ? Number(ns.p_era) * invP : null,
         p_fip: ns.p_fip != null ? Number(ns.p_fip) * invP : null,
@@ -122,21 +127,24 @@ const classAdjFor = (ct: string | null | undefined) => {
         dev_aggressiveness: sDev,
         // ★ MARKET IS STORED, NOT DERIVED AT READ TIME. If pWAR moves and this is not rewritten the
         //   row keeps a market value from the old WAR (Neiswonger: 3.229 pWAR still showing $99k).
-        market_value: computePitcherMarketValue(pWar, {
-          conference: (r as any).conference ?? null,
-          role: (pn0.pitcherRole ?? ns.pitcher_role ?? "RP") as any,
-          team: (r as any).team_name ?? null,
-        }),
+        // 🛑 TWP CONVENTION (src/lib/twpMarketValue.ts): a two-way player NULLs the SHARED
+        //    `market_value` and carries the value in twp_pitcher_market_value / twp_hitter_market_value.
+        //    Writing the shared column on a TWP pollutes every surface that reads it directly (the
+        //    target board). Measured: this script had written market_value onto 9 TWP rows.
+        ...((r as any).is_twp
+          ? { market_value: null, twp_pitcher_market_value: pMkt }
+          : { market_value: pMkt }),
       };
       const bP = Number((r.ps as any)?.p_era ?? NaN);
       const aP = patchP.p_era;
       const psWar = Number((r.ps as any)?.p_war ?? NaN);
       const psMkt = Number((r.ps as any)?.market_value ?? NaN);
-      const newMkt = patchP.market_value;
+      const newMkt = pMkt;
       const changedP = (aP != null && (!Number.isFinite(bP) || Math.abs(bP - aP) > 1e-9))
         || Number((r.ps as any)?.p_rv_plus) !== rv
         || (pWar != null && (!Number.isFinite(psWar) || Math.abs(psWar - pWar) > 1e-6))
-        || (newMkt != null && (!Number.isFinite(psMkt) || Math.abs(psMkt - Number(newMkt)) > 1));
+        || (newMkt != null && (!Number.isFinite(psMkt) || Math.abs(psMkt - Number(newMkt)) > 1))
+        || ((r as any).is_twp && (r.ps as any)?.market_value != null);
       if (!changedP) { skippedNoToggle++; continue; }
       updates.push({ id: r.id, patch: patchP, before: bP, after: aP });
       continue;
@@ -165,6 +173,10 @@ const classAdjFor = (ct: string | null | undefined) => {
     const dWar = Number.isFinite(Number(ns.d_war)) ? Number(ns.d_war) : 0;
     const bsrWar = Number.isFinite(Number(ns.bsr_war)) ? Number(ns.bsr_war) : 0;
 
+    const hMkt = computeHitterMarketValue(oWar != null ? oWar + dWar + bsrWar : null, {
+      conference: (r as any).conference ?? null,
+      position: (r as any).position ?? null,
+    });
     const patch: any = {
       p_avg: ns.p_avg != null ? Number(ns.p_avg) * scale : null,
       p_obp: ns.p_obp != null ? Number(ns.p_obp) * scale : null,
@@ -178,20 +190,21 @@ const classAdjFor = (ct: string | null | undefined) => {
       hitter_depth_role: depthRole,
       dev_aggressiveness: sessionDev,   // so the app's guardrail can see what is baked in
       // ★ same rule for hitters — market rides TOTAL hitter WAR (o+d+bsr).
-      market_value: computeHitterMarketValue(oWar != null ? oWar + dWar + bsrWar : null, {
-        conference: (r as any).conference ?? null,
-        position: (r as any).position ?? null,
-      }),
+      // 🛑 same TWP convention on the hitter side.
+      ...((r as any).is_twp
+        ? { market_value: null, twp_hitter_market_value: hMkt }
+        : { market_value: hMkt }),
     };
     const before = Number((r.ps as any)?.p_avg ?? NaN);
     const after = patch.p_avg;
     const psMktH = Number((r.ps as any)?.market_value ?? NaN);
-    const newMktH = patch.market_value;
+    const newMktH = hMkt;
     const psOwar = Number((r.ps as any)?.o_war ?? NaN);
     const changed = !Number.isFinite(before) || Math.abs(before - after) > 1e-9
       || Number((r.ps as any)?.p_wrc_plus) !== adjWrc
       || (oWar != null && (!Number.isFinite(psOwar) || Math.abs(psOwar - oWar) > 0.005))
-      || (newMktH != null && (!Number.isFinite(psMktH) || Math.abs(psMktH - Number(newMktH)) > 1));
+      || (newMktH != null && (!Number.isFinite(psMktH) || Math.abs(psMktH - Number(newMktH)) > 1))
+      || ((r as any).is_twp && (r.ps as any)?.market_value != null);
     if (!changed) { skippedNoToggle++; continue; }
     updates.push({ id: r.id, patch, before, after });
   }
