@@ -5232,3 +5232,29 @@ five hard requirements (see "STAGING CATCH-UP — HARD REQUIREMENTS").
 
 
 
+
+## 20260902120000_player_predictions_scope_select_by_team.sql — ⏳ STAGING ONLY, awaiting "prod, now?"
+
+**What:** replaces `SELECT USING (true)` on `player_predictions` with a team-scoped policy.
+Global rows (`customer_team_id IS NULL`) stay shared; team-scoped precomputed rows become visible
+only to that team, its team_admin, and superadmins. **Writes unchanged.**
+
+**Why:** the app scoped reads client-side via `applyTeamScopeFilter`; RLS did not. Any authenticated
+user could call PostgREST directly with `?customer_team_id=eq.<other_team>` and read another
+program's precomputed valuations — what each program's model says a transfer is worth to them.
+
+**Applied to staging 2026-09-02.** Verified:
+- catalog read of `pg_policies` (not the runner's return): old policy gone, new present, write policy intact
+- DENY path, end to end: a non-staff user with no team access → **0 rows** of another team, **15,551**
+  global rows still readable
+- ALLOW path, predicate level: real user → own team TRUE, other team FALSE
+- 305 tests pass
+
+**⚠ Read before applying to prod:**
+- Prod has real multi-team users; staging has ONE user and they are a **superadmin**, so the first
+  functional test was inconclusive (superadmins legitimately see everything, and the pre-existing
+  `Staff can manage` ALL policy independently grants them SELECT).
+- After applying, spot-check a **non-superadmin coach** account: their own roster/board must still
+  load. That is the case staging could not exercise.
+- Rollback: `supabase/rollback/20260902120000_player_predictions_scope_select_by_team_rollback.sql`
+  (reopens cross-program reads — treat as a bug to fix, not a state to remain in).

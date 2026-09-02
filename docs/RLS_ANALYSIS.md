@@ -100,7 +100,7 @@ database: STAGING · 100 tables · 127 policies
   gm_target_offer                              ✅ scoped
   gm_vendor                                    ✅ scoped
   high_follow                                  ⚠ policies ignore it
-  player_predictions                           ⚠ policies ignore it
+  player_predictions                           ✅ scoped
   precompute_jobs                              ⚠ policies ignore it
   target_board                                 ✅ scoped
   team_builds                                  ✅ scoped
@@ -260,8 +260,8 @@ database: STAGING · 100 tables · 127 policies
       ALL           {public}         Admin/staff can manage internal ratings
       SELECT        {public}         Admins can read internal ratings
   player_predictions
-      SELECT        {public}         Authenticated users can read player_predictions
       ALL           {public}         Staff can manage player_predictions
+      SELECT        {authenticated}  Team-scoped read of player_predictions
   player_slot_values
       SELECT        {authenticated}  player_slot_values_read_authenticated
   players
