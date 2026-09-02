@@ -185,7 +185,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center gap-3 border-b border-border/60 px-4 py-2.5 lg:px-6 bg-background/80 backdrop-blur-sm">
+        {/* min-h-[52px] pins the header height so the AreaToggle tab bar is identical for every role.
+            Without it the height is set by the tallest child, and TeamSwitcher (h-8, superadmin
+            only) is that child — so a coach got a ~40px header, a superadmin 52px, and the gold
+            underline sat at a different place for each. 32px control + 20px py-2.5 = 52px. */}
+        <header className="flex min-h-[52px] items-center gap-3 border-b border-border/60 px-4 py-2.5 lg:px-6 bg-background/80 backdrop-blur-sm">
           <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-4 w-4" />
           </Button>
