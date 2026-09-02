@@ -23,7 +23,8 @@
 import fs from "fs";
 import pg from "pg";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
-import { paForHitterDepthRole } from "@/lib/depthRoles";
+import { paForHitterDepthRole, pitcherExpectedIp, computePitcherMarketValue, computeHitterMarketValue } from "@/lib/depthRoles";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
 
 pg.types.setTypeParser(1700, (v: string | null) => (v === null ? null : Number(v)));
 pg.types.setTypeParser(20, (v: string | null) => (v === null ? null : Number(v)));
@@ -50,10 +51,17 @@ const classAdjFor = (ct: string | null | undefined) => {
   if (isProd && apply) console.log("!!! PROD WRITE !!!");
 
   const { rows } = await c.query(`
-    select tbp.id, tbp.player_snapshot ps, tbp.neutral_snapshot ns, tbp.production_notes pn
+    select tbp.id, tbp.player_snapshot ps, tbp.neutral_snapshot ns, tbp.production_notes pn,
+           pl.position, ct.name team_name, t.conference
     from team_build_players tbp
+    join team_builds b on b.id = tbp.build_id
+    left join customer_teams ct on ct.id = b.customer_team_id
+    left join players pl on pl.id = tbp.player_id
+    left join "Teams Table" t on t.id = ct.school_team_id
     where tbp.neutral_snapshot is not null and tbp.player_snapshot is not null`);
 
+  // depth-role -> expected IP needs the pitching equation weights (pwar_ip_sp / _sm / _rp)
+  const pEq = await readPitchingWeights();
   const updates: Array<{ id: string; patch: any; before: number; after: number }> = [];
   let skippedPitcher = 0, skippedNoToggle = 0, unverifiablePwar = 0;
 
@@ -72,10 +80,17 @@ const classAdjFor = (ct: string | null | undefined) => {
       const scaleP = (1 + adjP + sDev * 0.06) / (1 + adjP + stDev * 0.06);
       const invP = scaleP > 0 ? 1 / scaleP : 1;
       const rv = ns.p_rv_plus != null ? Math.round(Number(ns.p_rv_plus) * scaleP) : null;
-      const ip = Number(ns.projected_ip);
+      // ★★★ IP COMES FROM THE DEPTH ROLE, NOT stored projected_ip ★★★
+      // [[feedback_projected_ip_from_depth_role]]. Using the stored value is why Luke Neiswonger —
+      // a WEEKEND STARTER at 3.21 ERA / 2.82 FIP — showed 1.14 pWAR and $99k: his row carried a
+      // reliever-sized projected_ip, and pWAR is linear in IP. weekend_starter = pwar_ip_sp (~85).
+      const depthRoleP = String(pn0.depthRole ?? ns.pitcher_depth_role ?? "").trim();
+      const ipFromRole = depthRoleP ? pitcherExpectedIp(depthRoleP as any, pEq) : NaN;
+      const ip = Number.isFinite(ipFromRole) && ipFromRole > 0 ? ipFromRole : Number(ns.projected_ip);
       // pWAR — canonical formula (CLAUDE.md / src/savant/lib/war.ts):
       //   (((pRV+ - 100) / 100) * (IP/9) * 6.915 + (IP/9 * 1.92)) / 13.1
-      const pwarFrom = (rvIn: number) => ((((rvIn - 100) / 100) * (ip / 9) * 6.915) + ((ip / 9) * 1.92)) / 13.1;
+      const pwarWith = (rvIn: number, ipIn: number) =>
+        ((((rvIn - 100) / 100) * (ipIn / 9) * 6.915) + ((ipIn / 9) * 1.92)) / 13.1;
       // 🛑 SELF-CHECK BEFORE WRITING. Verified on 400 staging neutral rows: this formula reproduces
       //    the stored pWAR on 391 and MISSES on 9 (worst 0.2285) — role-dependent constants the
       //    canonical formula does not capture. Rather than write a guessed pWAR on those rows, prove
@@ -83,10 +98,15 @@ const classAdjFor = (ct: string | null | undefined) => {
       //    and IP, and only proceed if it lands on the stored neutral value.
       const nsRv = ns.p_rv_plus != null ? Number(ns.p_rv_plus) : null;
       const nsWar = ns.p_war != null ? Number(ns.p_war) : null;
-      const formulaHolds = nsRv != null && nsWar != null && Number.isFinite(ip)
-        && Math.abs(pwarFrom(nsRv) - nsWar) <= 0.005;
+      // ⚠ VALIDATE with the NEUTRAL's OWN stored IP — that is what produced ns.p_war. Validating
+      //   against the role-derived IP would fail on exactly the rows whose stored IP is wrong, which
+      //   are the rows we are here to fix (Neiswonger).
+      const nsIp = Number(ns.projected_ip);
+      const formulaHolds = nsRv != null && nsWar != null && Number.isFinite(nsIp)
+        && Math.abs(pwarWith(nsRv, nsIp) - nsWar) <= 0.005;
       if (!formulaHolds) { unverifiablePwar++; continue; }
-      const pWar = rv != null ? pwarFrom(rv) : null;
+      // COMPUTE with the ROLE-derived IP — the actual correction.
+      const pWar = rv != null && Number.isFinite(ip) ? pwarWith(rv, ip) : null;
       const patchP: any = {
         p_era: ns.p_era != null ? Number(ns.p_era) * invP : null,
         p_fip: ns.p_fip != null ? Number(ns.p_fip) * invP : null,
@@ -96,15 +116,27 @@ const classAdjFor = (ct: string | null | undefined) => {
         p_k9: ns.p_k9 != null ? Number(ns.p_k9) * scaleP : null,
         p_rv_plus: rv,
         p_war: pWar,
-        projected_ip: Number.isFinite(ip) ? ip : null,
+        projected_ip: Number.isFinite(ip) ? ip : null,   // derived from depth role
         pitcher_role: pn0.pitcherRole ?? ns.pitcher_role ?? null,
         pitcher_depth_role: pn0.depthRole ?? ns.pitcher_depth_role ?? null,
         dev_aggressiveness: sDev,
+        // ★ MARKET IS STORED, NOT DERIVED AT READ TIME. If pWAR moves and this is not rewritten the
+        //   row keeps a market value from the old WAR (Neiswonger: 3.229 pWAR still showing $99k).
+        market_value: computePitcherMarketValue(pWar, {
+          conference: (r as any).conference ?? null,
+          role: (pn0.pitcherRole ?? ns.pitcher_role ?? "RP") as any,
+          team: (r as any).team_name ?? null,
+        }),
       };
       const bP = Number((r.ps as any)?.p_era ?? NaN);
       const aP = patchP.p_era;
+      const psWar = Number((r.ps as any)?.p_war ?? NaN);
+      const psMkt = Number((r.ps as any)?.market_value ?? NaN);
+      const newMkt = patchP.market_value;
       const changedP = (aP != null && (!Number.isFinite(bP) || Math.abs(bP - aP) > 1e-9))
-        || Number((r.ps as any)?.p_rv_plus) !== rv;
+        || Number((r.ps as any)?.p_rv_plus) !== rv
+        || (pWar != null && (!Number.isFinite(psWar) || Math.abs(psWar - pWar) > 1e-6))
+        || (newMkt != null && (!Number.isFinite(psMkt) || Math.abs(psMkt - Number(newMkt)) > 1));
       if (!changedP) { skippedNoToggle++; continue; }
       updates.push({ id: r.id, patch: patchP, before: bP, after: aP });
       continue;
@@ -112,7 +144,16 @@ const classAdjFor = (ct: string | null | undefined) => {
     if (ns.p_wrc_plus == null) { skippedPitcher++; continue; }   // hitters only
     const pn = typeof r.pn === "string" ? JSON.parse(r.pn) : (r.pn || {});
     const sessionDev = Number(pn.devAggressiveness ?? 0);
-    const depthRole = pn.depthRole ?? ns.hitter_depth_role ?? "everyday_starter";
+    // 🛑 TWP ROLE MIXING. On a two-way player `production_notes.depthRole` holds the PITCHER-side
+    //    role, so feeding it to paForHitterDepthRole silently falls back to a default PA. Measured
+    //    on staging: hitter snapshots carrying `low_impact_reliever` / `high_leverage_reliever`.
+    //    ⇒ Only accept a HITTER role from production_notes; otherwise use the snapshot's own
+    //      hitter_depth_role.
+    const HITTER_ROLES = ["cornerstone", "everyday_starter", "platoon_starter", "utility", "bench"];
+    const pnRole = String(pn.depthRole ?? "");
+    const depthRole = HITTER_ROLES.includes(pnRole)
+      ? pnRole
+      : (ns.hitter_depth_role ?? "everyday_starter");
     const storedDev = Number(ns.dev_aggressiveness ?? 0);
     const ct = pn.classTransition ?? ns.class_transition ?? "SJ";
 
@@ -136,11 +177,21 @@ const classAdjFor = (ct: string | null | undefined) => {
       total_hitter_war: oWar != null ? oWar + dWar + bsrWar : null,
       hitter_depth_role: depthRole,
       dev_aggressiveness: sessionDev,   // so the app's guardrail can see what is baked in
+      // ★ same rule for hitters — market rides TOTAL hitter WAR (o+d+bsr).
+      market_value: computeHitterMarketValue(oWar != null ? oWar + dWar + bsrWar : null, {
+        conference: (r as any).conference ?? null,
+        position: (r as any).position ?? null,
+      }),
     };
     const before = Number((r.ps as any)?.p_avg ?? NaN);
     const after = patch.p_avg;
+    const psMktH = Number((r.ps as any)?.market_value ?? NaN);
+    const newMktH = patch.market_value;
+    const psOwar = Number((r.ps as any)?.o_war ?? NaN);
     const changed = !Number.isFinite(before) || Math.abs(before - after) > 1e-9
-      || Number((r.ps as any)?.p_wrc_plus) !== adjWrc;
+      || Number((r.ps as any)?.p_wrc_plus) !== adjWrc
+      || (oWar != null && (!Number.isFinite(psOwar) || Math.abs(psOwar - oWar) > 0.005))
+      || (newMktH != null && (!Number.isFinite(psMktH) || Math.abs(psMktH - Number(newMktH)) > 1));
     if (!changed) { skippedNoToggle++; continue; }
     updates.push({ id: r.id, patch, before, after });
   }
