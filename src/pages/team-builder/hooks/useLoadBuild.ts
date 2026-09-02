@@ -527,6 +527,10 @@ export function useLoadBuild({
                   projection_tier: meta.projectionTier ?? null,
                   nil_value_overridden: meta.nilValueOverridden,
                   transfer_snapshot: meta.transferSnapshot ?? null,
+                  // ★ 2026-09-01 — mirrors PlayerProfile's `isSnapshotBacked` (PlayerProfile.tsx:651).
+                  // True when this row's values came from a STORED snapshot, which means the toggle
+                  // and depth role are ALREADY BAKED IN and must not be scaled again.
+                  _snapshotBacked: !!rawSnapshot,
                   player: pd
                     ? {
                         first_name: pd.first_name,

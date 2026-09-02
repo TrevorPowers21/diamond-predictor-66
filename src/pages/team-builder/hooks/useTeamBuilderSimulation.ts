@@ -688,7 +688,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const devAggClassAdj = ctRaw === "FS" ? 0.03 : ctRaw === "GR" ? 0.01 : 0.02;
       const storedMult = 1 + devAggClassAdj + storedDevAgg * 0.06;
       const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
-      const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
+      // ★★★ 2026-09-01 — THE GUARDRAIL, COPIED FROM PlayerProfile.tsx:986 ★★★
+      //   const devAggScale = isSnapshotBacked ? 1 : (_storedMult > 0 ? _sessionMult / _storedMult : 1);
+      // A snapshot-backed row ALREADY HAS the toggle and depth role baked in. Scaling it again is a
+      // DOUBLE RECOMPUTE: toggle to 1 scales and the save bakes it; toggle back to 0 then recomputes
+      // off the BAKED line so nothing moves; toggle to 1 again scales the baked value a second time.
+      // That is the target-board bug. PlayerProfile forces the scale to 1 whenever a stored snapshot
+      // exists and has never had this problem — Team Builder computed the ratio unconditionally.
+      // A DIRTY row still scales, because it recomputes from neutral (dev_agg=0) and cannot compound.
+      const snapshotBacked = !!(p as any)._snapshotBacked && !(p as any)._dirty;
+      const devAggScale = snapshotBacked ? 1 : (storedMult > 0 ? sessionMult / storedMult : 1);
       void depthScale; // depth now flows through session PA in computeOWar below
       // oWAR REBUILT from the dev-adjusted wRC+ over the session depth PA
       // (computeOWar) — NOT scaled from stored oWAR. oWAR is affine in wRC+, so
