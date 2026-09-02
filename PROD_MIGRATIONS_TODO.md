@@ -5250,10 +5250,23 @@ program's precomputed valuations — what each program's model says a transfer i
 - ALLOW path, predicate level: real user → own team TRUE, other team FALSE
 - 305 tests pass
 
+**✅ NOW VERIFIED END TO END on staging** with a purpose-built non-superadmin coach
+(`npm run agent:rls-test-coach`, account `rls-test-coach@rstriq.test`, Arkansas, `general_user`,
+**no `user_roles` row** — so it depends solely on this policy, exactly like the 51 real prod coaches):
+
+```
+service role (RLS bypassed):  own=10,216  other=14,134  global=15,551
+as the coach:                 own=10,216  other=0       global=15,551
+```
+own team visible · other team blocked · global reference rows still shared.
+
 **⚠ Read before applying to prod:**
-- Prod has real multi-team users; staging has ONE user and they are a **superadmin**, so the first
-  functional test was inconclusive (superadmins legitimately see everything, and the pre-existing
-  `Staff can manage` ALL policy independently grants them SELECT).
+- Prod has **56 users across 13 teams — 51 with NO role**, 4 superadmin, 1 admin, 0 staff. Those 51
+  are the population this policy governs; nothing else covers them.
+- The original staging test was inconclusive: staging's only real login is a **superadmin**, who
+  satisfies both this policy's superadmin clause and the pre-existing `Staff can manage` ALL policy
+  (permissive policies are OR'd). **Superadmin impersonation does NOT test this** — it changes
+  `effectiveTeamId` in the app, but RLS still evaluates `has_role()` against the real uid.
 - After applying, spot-check a **non-superadmin coach** account: their own roster/board must still
   load. That is the case staging could not exercise.
 - Rollback: `supabase/rollback/20260902120000_player_predictions_scope_select_by_team_rollback.sql`
