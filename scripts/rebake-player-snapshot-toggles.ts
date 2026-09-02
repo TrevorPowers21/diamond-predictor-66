@@ -34,6 +34,9 @@ const envFile = isProd ? ".env.production.local" : ".env.local";
 const m = fs.readFileSync(envFile, "utf8").match(/^PGURI=(.*)$/m);
 if (!m) throw new Error(`No PGURI in ${envFile}`);
 
+// ⚠ class transition is ALREADY BAKED INTO THE PROJECTIONS upstream — it is NOT a snapshot field
+// and is never written by this script. It is read only to size the dev-aggressiveness ratio, where
+// it appears in BOTH numerator and denominator (a damping term, not a class bump).
 const classAdjFor = (ct: string | null | undefined) => {
   const c = String(ct || "SJ").toUpperCase();
   return c === "FS" ? 0.03 : c === "GR" ? 0.01 : 0.02;
@@ -52,10 +55,60 @@ const classAdjFor = (ct: string | null | undefined) => {
     where tbp.neutral_snapshot is not null and tbp.player_snapshot is not null`);
 
   const updates: Array<{ id: string; patch: any; before: number; after: number }> = [];
-  let skippedPitcher = 0, skippedNoToggle = 0;
+  let skippedPitcher = 0, skippedNoToggle = 0, unverifiablePwar = 0;
 
   for (const r of rows) {
     const ns = r.ns as any;
+    // ── PITCHERS ──────────────────────────────────────────────────────────────────────────────
+    // Mirrors useTeamBuilderSimulation:1425-1444. Lower-is-better rates take the INVERSE scale;
+    // K9 and pRV+ take the same direction as a hitter. Note the pitcher class table has a JS case
+    // (0.015) the hitter table does not.
+    if (ns.p_era != null || ns.p_war != null) {
+      const pn0 = typeof r.pn === "string" ? JSON.parse(r.pn) : (r.pn || {});
+      const sDev = Number(pn0.devAggressiveness ?? 0);
+      const stDev = Number(ns.dev_aggressiveness ?? 0);
+      const ctP = String(pn0.classTransition ?? ns.class_transition ?? "SJ").toUpperCase();
+      const adjP = ctP === "FS" ? 0.03 : ctP === "JS" ? 0.015 : ctP === "GR" ? 0.01 : 0.02;
+      const scaleP = (1 + adjP + sDev * 0.06) / (1 + adjP + stDev * 0.06);
+      const invP = scaleP > 0 ? 1 / scaleP : 1;
+      const rv = ns.p_rv_plus != null ? Math.round(Number(ns.p_rv_plus) * scaleP) : null;
+      const ip = Number(ns.projected_ip);
+      // pWAR — canonical formula (CLAUDE.md / src/savant/lib/war.ts):
+      //   (((pRV+ - 100) / 100) * (IP/9) * 6.915 + (IP/9 * 1.92)) / 13.1
+      const pwarFrom = (rvIn: number) => ((((rvIn - 100) / 100) * (ip / 9) * 6.915) + ((ip / 9) * 1.92)) / 13.1;
+      // 🛑 SELF-CHECK BEFORE WRITING. Verified on 400 staging neutral rows: this formula reproduces
+      //    the stored pWAR on 391 and MISSES on 9 (worst 0.2285) — role-dependent constants the
+      //    canonical formula does not capture. Rather than write a guessed pWAR on those rows, prove
+      //    the formula on THIS row first: recompute the row's own NEUTRAL pWAR from its neutral pRV+
+      //    and IP, and only proceed if it lands on the stored neutral value.
+      const nsRv = ns.p_rv_plus != null ? Number(ns.p_rv_plus) : null;
+      const nsWar = ns.p_war != null ? Number(ns.p_war) : null;
+      const formulaHolds = nsRv != null && nsWar != null && Number.isFinite(ip)
+        && Math.abs(pwarFrom(nsRv) - nsWar) <= 0.005;
+      if (!formulaHolds) { unverifiablePwar++; continue; }
+      const pWar = rv != null ? pwarFrom(rv) : null;
+      const patchP: any = {
+        p_era: ns.p_era != null ? Number(ns.p_era) * invP : null,
+        p_fip: ns.p_fip != null ? Number(ns.p_fip) * invP : null,
+        p_whip: ns.p_whip != null ? Number(ns.p_whip) * invP : null,
+        p_bb9: ns.p_bb9 != null ? Number(ns.p_bb9) * invP : null,
+        p_hr9: ns.p_hr9 != null ? Number(ns.p_hr9) * invP : null,
+        p_k9: ns.p_k9 != null ? Number(ns.p_k9) * scaleP : null,
+        p_rv_plus: rv,
+        p_war: pWar,
+        projected_ip: Number.isFinite(ip) ? ip : null,
+        pitcher_role: pn0.pitcherRole ?? ns.pitcher_role ?? null,
+        pitcher_depth_role: pn0.depthRole ?? ns.pitcher_depth_role ?? null,
+        dev_aggressiveness: sDev,
+      };
+      const bP = Number((r.ps as any)?.p_era ?? NaN);
+      const aP = patchP.p_era;
+      const changedP = (aP != null && (!Number.isFinite(bP) || Math.abs(bP - aP) > 1e-9))
+        || Number((r.ps as any)?.p_rv_plus) !== rv;
+      if (!changedP) { skippedNoToggle++; continue; }
+      updates.push({ id: r.id, patch: patchP, before: bP, after: aP });
+      continue;
+    }
     if (ns.p_wrc_plus == null) { skippedPitcher++; continue; }   // hitters only
     const pn = typeof r.pn === "string" ? JSON.parse(r.pn) : (r.pn || {});
     const sessionDev = Number(pn.devAggressiveness ?? 0);
@@ -83,7 +136,6 @@ const classAdjFor = (ct: string | null | undefined) => {
       total_hitter_war: oWar != null ? oWar + dWar + bsrWar : null,
       hitter_depth_role: depthRole,
       dev_aggressiveness: sessionDev,   // so the app's guardrail can see what is baked in
-      class_transition: ct,
     };
     const before = Number((r.ps as any)?.p_avg ?? NaN);
     const after = patch.p_avg;
@@ -93,7 +145,7 @@ const classAdjFor = (ct: string | null | undefined) => {
     updates.push({ id: r.id, patch, before, after });
   }
 
-  console.log(`rows: ${rows.length} · hitters to update: ${updates.length} · already correct: ${skippedNoToggle} · pitcher rows skipped: ${skippedPitcher}`);
+  console.log(`rows: ${rows.length} · to update: ${updates.length} · already correct: ${skippedNoToggle} · non-hitter/non-pitcher skipped: ${skippedPitcher} · ⚠ pitchers SKIPPED (pWAR formula unverifiable on that row): ${unverifiablePwar}`);
   for (const u of updates.slice(0, 8)) {
     console.log(`   ${u.id.slice(0, 8)}  p_avg ${Number.isFinite(u.before) ? u.before.toFixed(4) : "—"} → ${u.after.toFixed(4)}  wRC+ ${u.patch.p_wrc_plus}  oWAR ${u.patch.o_war?.toFixed(3)}`);
   }
