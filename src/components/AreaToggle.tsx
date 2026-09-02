@@ -8,12 +8,13 @@ import { cn } from "@/lib/utils";
  * bar: the current area is gold with a gold underline; the others are clickable
  * links. Designed to grow — add entries to `items`.
  *
- * Only users with Front Office access see the tabs (superadmin / team_admin for
- * now; a dedicated gm_user role is a later migration).
+ * Only users with Front Office access see the tabs: superadmin, or ANY member of a customer team.
+ * ⚠ This MUST stay in agreement with GMRoute's `allow` list — if the tab shows but the route guard
+ * disagrees, clicking it bounces the user back to /dashboard.
  */
 export function useHasFrontOfficeAccess() {
   const { isSuperadmin, userTeamRole } = useAuth();
-  return isSuperadmin || userTeamRole === "team_admin";
+  return isSuperadmin || !!userTeamRole;
 }
 
 export default function AreaToggle({ current }: { current: "eval" | "gm" }) {

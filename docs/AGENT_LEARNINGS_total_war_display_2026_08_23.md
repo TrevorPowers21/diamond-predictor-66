@@ -1,5 +1,12 @@
 # AGENT LEARNINGS — total_hitter_war stored fix + Step 7b display swap (2026-08-23)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+> ⚠ **SUPERSEDED (2026-09-01).** `total_hitter_war` (o+d+bsr) is the position-player headline. Six
+> selects omitted it, so snapshots carried the oWAR COMPONENT (Helfrick 2.32 vs 4.94).
+> **A column you do not SELECT cannot be written.**
+
 ## THE WHY (diagnosis) — why total_hitter_war was stale after the re-price
 - The precompute (batch `precompute-transfer-projections.ts` + edge fn `process-precompute-jobs`) computes
   `totalHitterWar = o_war + d_war + bsr_war` **inline, only to price market value**. It wrote `o_war` + `market_value`

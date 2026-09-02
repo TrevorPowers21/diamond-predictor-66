@@ -1,5 +1,9 @@
 # AGENT LEARNINGS — UI + What's New + copy decisions (2026-08-26)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Companion to `AGENT_LEARNINGS_hitter_run_values_2026_08_26.md`. Covers the display/frontend + release-note work
 done this session and the copy decisions behind it (reusable).
 

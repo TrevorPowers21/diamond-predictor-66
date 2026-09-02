@@ -44,3 +44,9 @@ Prod_Target_Boards_*
 scripts/.rosters_before.json
 scripts/.rosters_after.json
 scripts/drs/output/
+
+# Claude Code — compaction marker (ephemeral, one-shot) and personal overrides.
+# .claude/settings.json, hooks/, and state/current.md ARE committed on purpose:
+# the agent lives in the repo, not in a personal ~/.claude (docs/rstr-agent-plan.md §7a).
+.claude/state/.compacted
+.claude/settings.local.json

@@ -1,5 +1,11 @@
 # AGENT LEARNINGS — Projection calibration: the z-shift over-projects the extremes; the fix is a two-sided (split) SD (2026-08-24)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+> ⚠ **METHOD CORRECT, POPULATIONS CORRECTED (2026-09-01).** Calibration is **D1-only** and **per-row**,
+> and the two-sided SD splits at the **stored centre** (`<stat>_pr_center`), not at 100.
+
 
 
 

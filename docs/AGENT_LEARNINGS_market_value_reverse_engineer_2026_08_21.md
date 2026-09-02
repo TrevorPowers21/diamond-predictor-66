@@ -1,5 +1,12 @@
 # MARKET VALUE — reverse-engineering the Program Tier Multiplier (2026-08-21)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+> ⚠ **PARTLY SUPERSEDED (2026-09-01).** `market_value` is a STORED snapshot field — nothing derives it
+> at read time, so a WAR change without a market rewrite leaves the old value. A TWP nulls the SHARED
+> `market_value` entirely and carries `twp_hitter_market_value` / `twp_pitcher_market_value`, own side only.
+
 Trevor's directive: recalibrate market value by REVERSE-ENGINEERING the PTM from real roster-spend
 knowledge, not the coach-claimed "$40k/win." Keep the base `$25,000/WAR`; PTM carries the conference
 spend differences. Biggest change: **SEC PTM must go UP** (1.5 is far too low).

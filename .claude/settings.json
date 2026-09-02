@@ -1,0 +1,48 @@
+{
+  "$comment": [
+    "Repo-committed Claude Code config. Per docs/rstr-agent-plan.md §7a, the agent lives in the REPO,",
+    "not in a personal ~/.claude — the point is that it is the same agent for everyone, including a",
+    "future hire. Personal overrides belong in .claude/settings.local.json (gitignored).",
+    "",
+    "Hooks here solve the compaction problem (§7b): compaction replaces real history with a lossy",
+    "summary and nothing forces a re-ground afterwards. PreCompact drops a marker; SessionStart",
+    "(compact) or the next UserPromptSubmit consumes it exactly once and re-injects the state file."
+  ],
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/precompact-marker.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/postcompact-reground.sh session",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/postcompact-reground.sh prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
