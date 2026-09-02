@@ -1937,7 +1937,19 @@ export default function TeamBuilder() {
           // value either way. Safe now that the read path reads the snapshot
           // directly for clean rows (no re-overlay → no double dev-agg on reload).
           player_snapshot: (() => {
-            const proj = playerProjection(rp);
+            // ★★★ 2026-09-01 — SAVE BAKES **NEUTRAL x THE TOGGLE**, ALWAYS. ★★★
+            // Trevor: "we arent using the player projections, we are using the neutral into player
+            // snapshots."
+            // playerProjection() returns the STORED snapshot verbatim for a CLEAN row. If the row
+            // has already been marked clean by the time we serialize, the save writes the UNSCALED
+            // line back — which is exactly what happened: production_notes recorded
+            // devAggressiveness 1 while player_snapshot held .3172 / wRC+ 122 / dev_aggressiveness 0.
+            // The intent persisted and the effect did not, so every reload showed neutral again.
+            // Forcing `_dirty` here makes the projection take the DIRTY path: base = neutral
+            // (dev_agg=0) scaled ONCE by the session toggle. That is the same derivation
+            // scripts/rebake-player-snapshot-toggles.ts performs offline, so a saved row and a
+            // re-baked row agree by construction.
+            const proj = playerProjection({ ...rp, _dirty: true } as any);
             if (!proj) return rp.prediction ?? null;
             const base: any = rp.prediction ? { ...rp.prediction } : (rp.neutralPrediction ? { ...rp.neutralPrediction } : {});
             const shown: any = proj.shown ?? {};
