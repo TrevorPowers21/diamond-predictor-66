@@ -2419,7 +2419,11 @@ export default function TeamBuilder() {
     // the other side keeps its own snapshot untouched.
     setRosterPlayers((prev) => prev.map((p) =>
       p.player_id === pid && (p.roster_status || "returner") === "target" && (!isTwp || isPitcher(p) === treatAsPitcher)
-        ? { ...p, prediction: null, transfer_snapshot: t, _dirty: false } : p));
+        // ★ 2026-09-01 — MUST also refresh `player_snapshot`. Display reads
+        //   `player_snapshot ?? transfer_snapshot`, so updating only transfer_snapshot left the row
+        //   falling back to the STALE player_snapshot the moment _dirty cleared — the flash back
+        //   down right after a toggle. Both copies settle to the just-saved line together.
+        ? { ...p, prediction: null, player_snapshot: t, transfer_snapshot: t, _dirty: false } : p));
   }, [effectiveTeamId, playerProjection, projectedNilForPlayer, selectedBuildId]);
   const saveTargetToggleRef = useRef(saveTargetToggle);
   useEffect(() => { saveTargetToggleRef.current = saveTargetToggle; }, [saveTargetToggle]);
@@ -3065,6 +3069,10 @@ export default function TeamBuilder() {
             const cur: any = p.prediction;
             const same = cur && cur.o_war === norm.o_war && cur.p_war === norm.p_war && cur.p_wrc_plus === norm.p_wrc_plus
               && cur.p_rv_plus === norm.p_rv_plus && cur.twp_hitter_market_value === norm.twp_hitter_market_value && cur.twp_pitcher_market_value === norm.twp_pitcher_market_value;
+            // ★ HOLD THE LIVE VALUE UNTIL THE DB CATCHES UP (2026-09-01).
+            // `same` means the saved row does NOT yet carry the toggle we just applied. Clearing
+            // _dirty here would flip the row clean against the OLD snapshot — the visible flash
+            // down before the write lands. Stay dirty so the live value keeps showing.
             if (same) return p;
             changed = true;
             return { ...p, prediction: norm, _dirty: false };
@@ -3073,6 +3081,7 @@ export default function TeamBuilder() {
           const same = cur && cur.owar === s.owar && cur.p_war === s.p_war && cur.p_wrc_plus === s.p_wrc_plus
             && cur.p_rv_plus === s.p_rv_plus && cur.nil_valuation === s.nil_valuation
             && cur.twp_hitter_market_value === s.twp_hitter_market_value && cur.twp_pitcher_market_value === s.twp_pitcher_market_value;
+          // ★ same rule on the target path — hold the live value until the saved row reflects it.
           if (same) return p;
           changed = true;
           const meta = parseBuildPlayerMeta(saved.production_notes);
