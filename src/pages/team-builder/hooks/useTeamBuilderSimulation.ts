@@ -1299,6 +1299,37 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block O: playerProjection ────────────────────────────────────────────────
   const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
+    // ★★★ 2026-09-01 — STORED SNAPSHOT ONLY. NO FALLBACKS. (Trevor) ★★★
+    //   "just remove the fallback all together. It needs to be transfer snapshot and player
+    //    snapshot only with the guardrails that is all"
+    // A CLEAN row returns its stored snapshot verbatim and NOTHING below runs — no neutral, no
+    // async live precomputed query, no overlay, no live projection. Those fallbacks are what
+    // produced every symptom today: the un-toggled line on transfers, and total WAR rendering 33
+    // then settling to 31.46 when an async query landed second and re-ran this memo.
+    // ⇒ There is nothing to fall back TO. The snapshot is on disk before the page mounts.
+    // A DIRTY row (toggle moved this session) still falls through to the recompute below, which
+    // scales from neutral — the guardrail that stops a toggle compounding on a baked line.
+    if (!(p as any)._dirty) {
+      const stored: any = p.prediction ?? (p as any).transfer_snapshot ?? null;
+      if (stored) {
+        if (treatAsPitcher) {
+          if (stored.p_war != null) {
+            return {
+              sim: null, shown: stored,
+              shownWrc: stored.p_rv_plus != null ? Math.round(Number(stored.p_rv_plus)) : null,
+              owar: Number(stored.p_war), pwar: Number(stored.p_war),
+            };
+          }
+        } else if (stored.p_wrc_plus != null) {
+          const hw = pickHitterWar(stored);
+          return {
+            sim: null, shown: stored,
+            shownWrc: Math.round(Number(stored.p_wrc_plus)),
+            owar: hw != null ? Number(hw) : null, pwar: null,
+          };
+        }
+      }
+    }
     // ── Phase B: CLEAN read ──────────────────────────────────────────────────
     // A CLEAN row (no toggle changed this session) reads its STORED adjusted
     // snapshot directly — synchronous, no async recompute, so no load flicker.
