@@ -5233,41 +5233,28 @@ five hard requirements (see "STAGING CATCH-UP — HARD REQUIREMENTS").
 
 
 
-## 20260902120000_player_predictions_scope_select_by_team.sql — ⏳ STAGING ONLY, awaiting "prod, now?"
+## 20260902120000_player_predictions_scope_select_by_team.sql — ⛔ DO NOT APPLY TO PROD
 
-**What:** replaces `SELECT USING (true)` on `player_predictions` with a team-scoped policy.
-Global rows (`customer_team_id IS NULL`) stay shared; team-scoped precomputed rows become visible
-only to that team, its team_admin, and superadmins. **Writes unchanged.**
+**Prod already has this policy.** Applying it would create a second, redundant SELECT policy next to
+the existing `player_predictions_select_team_scoped`.
 
-**Why:** the app scoped reads client-side via `applyTeamScopeFilter`; RLS did not. Any authenticated
-user could call PostgREST directly with `?customer_team_id=eq.<other_team>` and read another
-program's precomputed valuations — what each program's model says a transfer is worth to them.
+**This entry originally said the opposite.** It claimed prod had `SELECT USING (true)` and needed
+scoping. That was wrong:
 
-**Applied to staging 2026-09-02.** Verified:
-- catalog read of `pg_policies` (not the runner's return): old policy gone, new present, write policy intact
-- DENY path, end to end: a non-staff user with no team access → **0 rows** of another team, **15,551**
-  global rows still readable
-- ALLOW path, predicate level: real user → own team TRUE, other team FALSE
-- 305 tests pass
+| | SELECT policy on `player_predictions` |
+|---|---|
+| **PROD** | `player_predictions_select_team_scoped` — already scoped by `is_team_member()` |
+| **STAGING** (before 2026-09-02) | `USING (true)` ← the actual gap |
 
-**✅ NOW VERIFIED END TO END on staging** with a purpose-built non-superadmin coach
-(`npm run agent:rls-test-coach`, account `rls-test-coach@rstriq.test`, Arkansas, `general_user`,
-**no `user_roles` row** — so it depends solely on this policy, exactly like the 51 real prod coaches):
+The RLS analysis was run against its **default target (staging)** and reported as if it described
+prod. Same code, two databases, different config — **Gate B repeating**. Prod was never exposed.
 
-```
-service role (RLS bypassed):  own=10,216  other=14,134  global=15,551
-as the coach:                 own=10,216  other=0       global=15,551
-```
-own team visible · other team blocked · global reference rows still shared.
+**What the migration now does:** brings STAGING in line with prod, copying prod's policy verbatim
+(same name, same expression, same role) so the two databases match byte for byte. Applied to staging
+2026-09-02; cross-database diff confirms **IDENTICAL**.
 
-**⚠ Read before applying to prod:**
-- Prod has **56 users across 13 teams — 51 with NO role**, 4 superadmin, 1 admin, 0 staff. Those 51
-  are the population this policy governs; nothing else covers them.
-- The original staging test was inconclusive: staging's only real login is a **superadmin**, who
-  satisfies both this policy's superadmin clause and the pre-existing `Staff can manage` ALL policy
-  (permissive policies are OR'd). **Superadmin impersonation does NOT test this** — it changes
-  `effectiveTeamId` in the app, but RLS still evaluates `has_role()` against the real uid.
-- After applying, spot-check a **non-superadmin coach** account: their own roster/board must still
-  load. That is the case staging could not exercise.
-- Rollback: `supabase/rollback/20260902120000_player_predictions_scope_select_by_team_rollback.sql`
-  (reopens cross-program reads — treat as a bug to fix, not a state to remain in).
+**Verified on PROD** with a real non-superadmin coach (Gardner-Webb, `general_user`, no `user_roles`
+row): own team 14,268 rows visible · other team **0** · global 31,369 readable. Prod's boundary
+already holds.
+
+⇒ **Nothing to do on prod for this one.** Kept in the log so the correction is on record.

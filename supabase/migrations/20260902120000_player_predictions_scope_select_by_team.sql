@@ -1,32 +1,36 @@
 -- ============================================================================
--- player_predictions — scope SELECT by team access
+-- player_predictions — align STAGING's SELECT policy with the one PROD already has
 --
--- WHY
---   The policy was `SELECT USING (true)` for {public}: every authenticated user could read EVERY
---   prediction row for EVERY program, including team-scoped precomputed valuations. The app already
---   restricts reads to the user's own team via applyTeamScopeFilter(), but that runs in the BROWSER.
---   A user with their own valid JWT could call PostgREST directly —
---       GET /rest/v1/player_predictions?customer_team_id=eq.<other_team>
---   — and the database had no reason to refuse. Identity was enforced (user_team_access is locked to
---   superadmin / team_admin, so nobody can reassign their own team); the DATA boundary was not.
+-- ⛔ DO NOT APPLY TO PROD. Prod already has this policy. Applying would add a second, redundant
+--    SELECT policy alongside `player_predictions_select_team_scoped`.
 --
---   Exposed: per-destination-team projections and market values, i.e. what each program's model says
---   a given transfer is worth to them.
+-- CORRECTED 2026-09-02 — the original version of this file claimed to close a PRODUCTION security
+-- hole. That was wrong, and the error is worth recording because it is Gate B repeating:
 --
--- WHAT CHANGES
---   Global rows (customer_team_id IS NULL) stay readable by everyone — they are the shared
---   returner/reference population every surface falls back to. Team-scoped rows become visible only
---   to that team, its team_admin, and superadmins.
+--   PROD    player_predictions_select_team_scoped
+--           USING (customer_team_id IS NULL
+--                  OR has_role(auth.uid(), 'superadmin') OR is_team_member(customer_team_id))
+--   STAGING USING (true)                                   ← the actual problem
 --
---   This MIRRORS what the app already queries, so no application change is needed. It moves the
---   boundary from convention to enforcement.
+-- The RLS analysis was run with its default target (STAGING) and reported as though it described
+-- prod. Same code, two databases, different config — exactly the shape of Gate B, where prod ran a
+-- different wRC+ equation because a legacy table existed there and not on staging.
+-- ⇒ VERIFY CONFIG ON BOTH DATABASES. The finding was real; the database it applied to was not.
 --
--- VERIFIED BEFORE WRITING (2026-09-02)
---   * every call site passes effectiveTeamId, which resolves from user_team_access server-side
---   * PlayerComparison's `destTeamId` is `= effectiveTeamId` (line 139) — not a cross-team read
---   * the WAR benchmark / comparison cards read team_war_snapshots, a DIFFERENT table, unaffected
---   * WRITES are unchanged: 'Staff can manage player_predictions' (admin/staff) still governs them
---   * has_role() and is_team_admin_of() are both SECURITY DEFINER, so no policy recursion
+-- WHAT THIS DOES
+--   Replaces staging's `USING (true)` with prod's policy, copied VERBATIM — same name, same
+--   expression, same role. An earlier attempt used an equivalent-but-differently-written policy
+--   (an inline EXISTS plus a redundant `is_team_admin_of`), which left the two databases holding
+--   two spellings of one rule. That is the drift this file now removes.
+--
+--   Writes are untouched: "Staff can manage player_predictions" (admin/staff) still governs them.
+--
+-- VERIFIED
+--   * is_team_member(uuid) exists on BOTH databases, STABLE SECURITY DEFINER, search_path=public,
+--     and is exactly `EXISTS (SELECT 1 FROM user_team_access WHERE user_id = auth.uid()
+--     AND customer_team_id = _team_id)` — so no policy recursion.
+--   * on prod, with a real non-superadmin coach (Gardner-Webb, general_user, no user_roles row):
+--     own team 14,268 rows visible - other team 0 - global 31,369 readable.
 --
 -- ROLLBACK
 --   supabase/rollback/20260902120000_player_predictions_scope_select_by_team_rollback.sql
@@ -34,25 +38,20 @@
 
 BEGIN;
 
+-- staging's wide-open policy
 DROP POLICY IF EXISTS "Authenticated users can read player_predictions" ON public.player_predictions;
+-- the equivalent-but-differently-written policy from this file's first version
+DROP POLICY IF EXISTS "Team-scoped read of player_predictions" ON public.player_predictions;
 
-CREATE POLICY "Team-scoped read of player_predictions"
+-- Prod's definition, copied verbatim so the two databases match byte for byte.
+CREATE POLICY player_predictions_select_team_scoped
   ON public.player_predictions
   FOR SELECT
   TO authenticated
   USING (
-    -- shared reference population: global returner/regular rows
-    customer_team_id IS NULL
-    -- superadmins see everything (the "all clients" view is additionally backend-gated)
+    (customer_team_id IS NULL)
     OR has_role(auth.uid(), 'superadmin'::app_role)
-    -- a team's own precomputed rows
-    OR EXISTS (
-      SELECT 1 FROM public.user_team_access uta
-      WHERE uta.user_id = auth.uid()
-        AND uta.customer_team_id = player_predictions.customer_team_id
-    )
-    -- a team_admin managing that team
-    OR is_team_admin_of(customer_team_id)
+    OR is_team_member(customer_team_id)
   );
 
 COMMIT;

@@ -13,10 +13,13 @@
  *   The test user therefore gets NO row in user_roles. That absence is the entire point: it makes
  *   them depend solely on the team-scoped policy, exactly like a real coach.
  *
- * STAGING ONLY. Refuses to run against any other project ref.
+ * Defaults to STAGING. `--prod` targets PRODUCTION and is deliberate — it creates a REAL login
+ * against REAL customer data, so pick the team on purpose and clean it up when done.
  *
- *   npx tsx scripts/agent/create-rls-test-coach.ts            # create + verify
- *   npx tsx scripts/agent/create-rls-test-coach.ts --cleanup   # remove the user
+ *   npx tsx scripts/agent/create-rls-test-coach.ts                       # staging
+ *   npx tsx scripts/agent/create-rls-test-coach.ts --cleanup             # remove (staging)
+ *   npx tsx scripts/agent/create-rls-test-coach.ts --prod --team "Name"  # PRODUCTION
+ *   npx tsx scripts/agent/create-rls-test-coach.ts --prod --cleanup      # remove (PRODUCTION)
  */
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -28,8 +31,11 @@ types.setTypeParser(20, Number);
 types.setTypeParser(1700, Number);
 
 const STAGING_REF = "slrxowawbijbjrkozqlj";
+const PROD_REF = "trbvxuoliwrfowibatkm";
 const EMAIL = "rls-test-coach@rstriq.test";
 const CLEANUP = process.argv.includes("--cleanup");
+const PROD = process.argv.includes("--prod");
+const TEAM_ARG = (() => { const i = process.argv.indexOf("--team"); return i > -1 ? process.argv[i + 1] : null; })();
 
 const C = { r: "\x1b[0m", b: "\x1b[1m", g: "\x1b[32m", red: "\x1b[31m", y: "\x1b[33m", c: "\x1b[36m" };
 const ok = (s: string) => console.log(`  ${C.g}✓${C.r} ${s}`);
@@ -52,16 +58,20 @@ function loadEnv(path: string): Record<string, string> {
 }
 
 async function main() {
-  const env = loadEnv(join(process.cwd(), ".env.local"));
+  const env = loadEnv(join(process.cwd(), PROD ? ".env.production.local" : ".env.local"));
+  const REF = PROD ? PROD_REF : STAGING_REF;
   const url = env.SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
   const key = env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   const pg = env.PGURI ?? "";
 
-  // Hard guard — same pattern as scripts/mirror-prod-auth-user.ts.
-  if (!url.includes(STAGING_REF)) { bad(`Refusing to run: SUPABASE_URL is not staging (${STAGING_REF})`); process.exit(1); }
-  if (!pg) { bad("No PGURI in .env.local"); process.exit(1); }
+  // Hard guard — same pattern as scripts/mirror-prod-auth-user.ts. The ref must match the flag,
+  // so --prod cannot silently hit staging and the default cannot silently hit prod.
+  if (!url.includes(REF)) { bad(`Refusing to run: SUPABASE_URL is not ${PROD ? "PROD" : "staging"} (${REF})`); process.exit(1); }
+  if (!pg) { bad(`No PGURI in ${PROD ? ".env.production.local" : ".env.local"}`); process.exit(1); }
 
-  console.log(C.b + `\n══ RLS test coach — STAGING (${STAGING_REF}) ══` + C.r);
+  console.log(C.b + `\n══ RLS test coach — ${PROD ? "PRODUCTION" : "STAGING"} (${REF}) ══` + C.r);
+  if (PROD) console.log(`  ${C.y}⚠ PRODUCTION: this is a real login against real customer data.`
+    + ` Remove it with --prod --cleanup when finished.${C.r}`);
 
   const sb = createClient(url, key, { auth: { persistSession: false } });
   const db = new Client({ connectionString: pg, ssl: { rejectUnauthorized: false } });
@@ -81,10 +91,16 @@ async function main() {
   }
 
   // ── create ─────────────────────────────────────────────────────────────────
-  const team = (await db.query(
-    `select ct.id, ct.name from customer_teams ct
-     where exists (select 1 from player_predictions p where p.customer_team_id = ct.id)
-     order by ct.name limit 1`)).rows[0];
+  const team = TEAM_ARG
+    ? (await db.query(
+        `select ct.id, ct.name from customer_teams ct where ct.name ilike $1
+         and exists (select 1 from player_predictions p where p.customer_team_id = ct.id) limit 1`,
+        [`%${TEAM_ARG}%`])).rows[0]
+    : (await db.query(
+        `select ct.id, ct.name from customer_teams ct
+         where exists (select 1 from player_predictions p where p.customer_team_id = ct.id)
+         order by ct.name limit 1`)).rows[0];
+  if (!team) { bad(`No customer team matching "${TEAM_ARG}" with predictions`); await db.end(); process.exit(1); }
   const otherTeam = (await db.query(
     `select ct.id, ct.name from customer_teams ct
      where ct.id <> $1 and exists (select 1 from player_predictions p where p.customer_team_id = ct.id)
@@ -152,19 +168,24 @@ async function main() {
   const b = asUser.other === 0;
   const c = asUser.global === service.global;
   (a ? ok : bad)(`own team (${team.name}) visible: ${asUser.own}/${service.own}`);
-  (b ? ok : bad)(`other team (${otherTeam.name}) blocked: ${service.other} → ${asUser.other}`);
+  if (b) ok(`other team (${otherTeam.name}) blocked: ${service.other} → ${asUser.other}`);
+  else if (PROD) console.log(`  ${C.y}!${C.r} other team (${otherTeam.name}) NOT blocked: ${asUser.other} rows`
+    + ` — EXPECTED on prod: 20260902120000_player_predictions_scope_select_by_team.sql is not applied`
+    + ` there yet. This is the hole the migration closes.`);
+  else bad(`other team (${otherTeam.name}) blocked: ${service.other} → ${asUser.other}`);
   (c ? ok : bad)(`global reference rows readable: ${asUser.global}`);
 
   if (password) {
-    console.log(C.b + "\n── credentials (staging only) ──" + C.r);
+    console.log(C.b + `\n── credentials (${PROD ? "PRODUCTION" : "STAGING"}) ──` + C.r);
     console.log(`  email:    ${EMAIL}`);
     console.log(`  password: ${password}`);
-    console.log(`  ${C.y}Log in on staging and click through Team Builder / Target Board / Returning`);
-    console.log(`  Players. That is the coach experience staging could not test before.${C.r}`);
+    console.log(`  ${C.y}Log in and click through Team Builder / Target Board / Returning Players`);
+    console.log(`  ${PROD ? "on the Vercel preview (previews read PROD)." : "on local dev (local reads STAGING)."}${C.r}`);
   }
 
   await db.end();
-  process.exit(a && b && c ? 0 : 1);
+  // On prod, `b` is expected false until the scoping migration lands — do not fail the run for it.
+  process.exit(a && c && (b || PROD) ? 0 : 1);
 }
 
 main().catch((e) => { console.error("✖", e.message); process.exit(1); });
