@@ -1,4 +1,8 @@
 # 📚 AGENT LEARNINGS — **WHY things broke, and the rules that came out of it**
+
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
 > **ROLE OF THIS FILE:** the *reasoning* record. Every defect, the false hypotheses tested and rejected, the
 > instrument errors, and the rule each one produced. **It is NOT the build spec and NOT the runbook.**
 > · **To BUILD Track B** → `docs/PIPELINE_pitch_log_to_projections.md` → **"TRACK B — THE CANONICAL BUILD SPEC"** (the authority).

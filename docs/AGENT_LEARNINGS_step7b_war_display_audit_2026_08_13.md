@@ -1,5 +1,11 @@
 # Agent learnings — Step 7b WAR display swap: audit, the scale-reshape, + calibration (2026-08-13)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+> ⚠ **PARTLY SUPERSEDED (2026-09-01).** The display conclusions here predate the read/write path work.
+> Team Builder reads `player_snapshot ?? transfer_snapshot` — never `p.prediction`. See Track B.
+
 Captured for the RSTR IQ dev agent. Task: swap the hitter HEADLINE from offensive `o_war` to TOTAL hitter WAR
 (`total_hitter_war` = o_war + d_war/13.1 + bsr_war/13.1, stored on `player_predictions`) and relabel "oWAR"→"WAR",
 everywhere — incl. Team Builder snapshots-under-toggles, GM side, market value, and the projected/stable-team-value

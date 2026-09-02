@@ -1,5 +1,9 @@
 # AGENT LEARNINGS — snapshot layers, and why the automated checks all passed while the UI was wrong (2026-09-01)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 > ▶️ **CURRENT STATE + ROADMAP: `docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`** — what shipped, what
 > is verified, the 9 open items, and the five queued workstreams (coach agent display · team
 > comparison + 2027 roster upload · JUCO · Track B / agent-as-resource · player development).

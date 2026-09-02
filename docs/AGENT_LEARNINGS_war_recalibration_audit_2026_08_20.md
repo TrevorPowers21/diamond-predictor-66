@@ -1,5 +1,9 @@
 # AGENT LEARNINGS — WAR Recalibration Audit + Plan (2026-08-20)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Companion to `docs/AUDIT_war_recalibration_state.md` (findings) and `docs/PROD_PUSH_RUNBOOK_war_recalibration.md` (the 13-step plan + DB ledger + execution order). This file = the non-obvious learnings so the next session doesn't re-derive them.
 
 ## Verified clean (don't re-audit)

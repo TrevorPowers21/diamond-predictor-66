@@ -1,5 +1,9 @@
 # AGENT LEARNINGS — The snapshot read path: four surfaces, one question, four different answers (2026-09-01)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 
 
 

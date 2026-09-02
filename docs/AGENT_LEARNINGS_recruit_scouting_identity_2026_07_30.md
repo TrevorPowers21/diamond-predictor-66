@@ -1,5 +1,9 @@
 # Agent learnings — recruit identity + scouting reports + GM Settings (2026-07-30)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Captured for the **RSTR IQ dev agent** (memory `project_rstr_dev_agent`). These are
 the decisions/corrections from the `feature/recruit-ids-mobile-board` session — the
 react-and-correct records the agent should carry. **Fold into `docs/knowledge/`** on

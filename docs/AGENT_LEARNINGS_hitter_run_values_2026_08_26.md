@@ -1,5 +1,9 @@
 # AGENT LEARNINGS — Hitter descriptive Run Values on the Season Stats banner (2026-08-26)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 ## What was built
 A "VALUE" cluster on the RIGHT of the hitter Season Stats banner (`/stats` → `PitchLogSection`),
 position players only, shown only on the full-season **unfiltered** view. Three descriptive
