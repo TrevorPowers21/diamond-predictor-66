@@ -664,7 +664,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const livePlayer = (p.player_id ? liveTargetPlayerById.get(p.player_id) : null) || p.player;
     // ★ 2026-09-01 — stored snapshot FIRST; the async live precomputed row is only the fallback for
     // a row that has no snapshot yet. Preferring the live row discarded every saved toggle.
-    const livePred = p.prediction ?? (p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null);
+    // ★ 2026-09-01 — STORED SNAPSHOT ONLY. The async live precomputed row is gone from display.
+    // It resolved AFTER first paint and re-ran this memo, so the page rendered the snapshot (total
+    // WAR 33) and then swapped to the live precomputed line (31.46). That is the flicker: a race
+    // between a stored value and an async query, which the async query always won because it landed
+    // second. There is nothing to race — the snapshot is on disk before the page mounts.
+    const livePred = p.prediction;
     if (!livePred) {
       return snapshotFallback;
     }
@@ -1340,9 +1345,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         }
       }
     }
-    const storedPrecomputed = p.roster_status === "target" && p.player_id
-      ? liveTargetPredictionByPlayerId.get(p.player_id)
-      : null;
+    // ⛔ 2026-09-01 — NO LONGER USED FOR DISPLAY. Kept only so the surrounding code compiles.
+    // This was the async live precomputed row that won the race against the stored snapshot and
+    // caused total WAR to render 33 then settle to 31.46 on every refresh.
+    const storedPrecomputed = null;
+    void liveTargetPredictionByPlayerId;
     // Stored precomputed row is the only source of truth for target players.
     // Primary source: liveTargetPredictionByPlayerId (fresh query keyed per team).
     // Hitter targets fall back to p.prediction (same precomputed row loaded at
@@ -1368,7 +1375,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // (not a wrong-team transfer number, the bug the old snapshot-always guard was papering over).
     const boardOnlyTarget = p.roster_status === "target" && !(p as any).included_in_roster;
     const shown = boardOnlyTarget
-      ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
+      ? ((p.prediction ?? (p as any).transfer_snapshot ?? null) as any)
       // ★ 2026-09-01 — STORED SNAPSHOT ONLY. The neutral fallback is REMOVED.
       // Neutral is the dev_agg=0 checkpoint the DIRTY recompute scales from — never a display
       // source. Reading it here is what showed the un-toggled line on every transfer.
