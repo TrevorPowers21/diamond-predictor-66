@@ -1,6 +1,10 @@
 # RSTR IQ Dev Agent — Plan
 
 > Status: **design complete, not built.** We'll build it on this branch (`docs/rstr-agent-plan`), starting with the bootstrap knowledge pass. No rush.
+>
+> ★ **THIS DOCUMENT + `AGENT_PHASE_ONE_SCOPE.md` ARE THE SOURCE OF TRUTH** (Trevor, 2026-09-02). A
+> separate working plan drafted 2026-09-02 was folded in below (§7a layering, §7b compaction) and its
+> stale assumptions corrected in §7c. Where any other note disagrees with this file, this file wins.
 > Authored 2026-07-17; design worked through with Trevor 2026-07-18 around "a consistent voice across every change."
 
 ## 1. What it is
@@ -102,6 +106,62 @@ Every check traces to a real bug from the GM launch. This is the provable base t
 
 **Architecture: Option A — build ON a coding-agent harness, don't rebuild one.** The harness (agent loop, tools, code editing, git, context management) is inherited; we pour effort into the RSTR-IQ-specific layer (knowledge base, oversight protocol, consistency map, DB rituals). **Claude Code is the primary / blessed harness.** But the brain is kept **portable, not Claude-Code-locked** — the knowledge lives as repo docs (markdown) and the checks as plain scripts/CLI, so a different harness can load the same rules + run the same tools. The Claude-Code-specific config (instructions, sub-agents, skills) is the blessed default; the underlying knowledge + tools are harness-agnostic.
 
+## 7a. Layering — what loads when (folded in 2026-09-02)
+
+The knowledge is not one file. Each layer has a different load cost, so each has a different job.
+
+| layer | lives in | loaded | holds |
+|---|---|---|---|
+| **Rules** | `CLAUDE.md` (repo root) | **every session** | technical facts + hard rules, one line each. ⚠ Currently ~280 lines and narrative — **needs trimming to terse rules**; the prose belongs in `docs/knowledge/`. |
+| **Voice / philosophy** | `docs/PHILOSOPHY.md` *(does not exist — build first)* | every session | **business judgment**, not technical: separation by use case not sport · don't rush pricing before reputation is earned · ERP is back-office only · de-brand vendors where the point is the capability. Mine the RSTR IQ master reference doc; do not author from blank. |
+| **State** | `.claude/state/current.md` *(does not exist)* | every session + **after compaction** | *where things stand right now.* Overwritten, never appended. The file the agent re-reads to snap back. |
+| **Technical judgment** | `docs/knowledge/*.md` | on demand | the named principles (`p-prediction-is-not-a-snapshot`, `prove-comparable-before-diffing`, …). Already exists, 7 files. |
+| **History** | `docs/AGENT_LEARNINGS_INDEX.md` + 17 files | on demand | what was tried, what worked, what superseded what. Already exists. |
+| **Roadmap** | `docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md` | on demand | where we're heading. Already exists. |
+| **Subagents** | `.claude/agents/*.md` | on invoke | specialists *underneath* the one voice — never separate top-level agents with no shared judgment. |
+
+⚠ **Everything above is committed to the REPO, never personal `~/.claude/` config.** The point is that
+it is the same agent for everyone, including a future hire. Session memory in `~/.claude/` is recall
+for one operator — useful, but **never the source of truth**.
+
+**Subagent order:** data first (prove it end to end), then code, then future-ideas. The ideas/
+brainstorming subagent should not have repo write access.
+
+## 7b. The compaction problem (folded in 2026-09-02)
+
+**Compaction replaces real conversation history with a lossy summary, and nothing forces the agent to
+re-ground afterwards.** That is the "off voice for a while" feeling — and it is not cosmetic here: if
+the deliverable is *a consistent voice*, losing it after every compaction defeats the whole point.
+
+⚠ **This is observed, not theoretical.** The 2026-09-01 session compacted mid-work and the summary is
+what carried forward.
+
+**Fix — try existing packages before building:**
+- `cc-compact` (PyPI) — lightweight; preserves task state, prompts a re-read. **Try first.**
+- `claude-compact-controller` (GitHub) — heavier, more state tracking.
+- **Custom mechanism if needed:** `PreCompact` hook saves a state snapshot → `PostCompact` cannot
+  inject context directly (known limitation) → it drops a **marker** → the next `UserPromptSubmit` /
+  `SessionStart(compact)` detects the marker, forces a re-read of `.claude/state/current.md`, then
+  clears it (one-shot).
+
+## 7c. Corrections — assumptions that are no longer true
+
+Recorded so they do not resurface in a future plan:
+
+- ❌ *"No MCP connected yet; agents can only see repo files."* **Supabase MCP IS connected** — two
+  named servers, `supabase-staging` and `supabase-prod`, both `read_only=true`, each pinned to its own
+  `project_ref`, read-only enforced by a Postgres role. Prod being connected is what makes
+  staging↔prod drift checks possible at all. See the Database Access Boundary in `CLAUDE.md`.
+- ❌ *"CI does not exist"* (§8 below still said this) — **`.github/workflows/ci.yml` exists** and gates
+  PRs with vitest + `tsc` delta-vs-base. It caught a real bug on PR #171 that an error **count**
+  comparison had hidden. Sequencing item 3 is **done**.
+- ❌ *"The agent learnings doc"* (singular) — it is **18 files + 7 knowledge files + Track B**, already
+  split into history / roadmap / principles. The remaining work is trimming `CLAUDE.md`, not splitting.
+- ⚠ **`AGENT_PHASE_ONE_SCOPE.md §4.1` is stale.** It says every DB write reaches Trevor as raw SQL to
+  paste. `CLAUDE.md` now states the gate is **that the write was talked through first, not who runs
+  it**, with execution assigned per task and multi-statement work often going to the agent through the
+  repo's scripted migration path. **CLAUDE.md wins; §4.1 needs reconciling.**
+
 ## 8. Output
 
 - Human report (terminal + optional markdown file): the consistency read up top, then ✅/❌ per mechanical check with the failing object and a suggested fix.
@@ -117,9 +177,26 @@ Every check traces to a real bug from the GM launch. This is the provable base t
 
 **We build it right, not quick.** No throwaway MVP — the agent is a real system built to do the job properly from the start (Trevor: "if we are building an agent we should be doing it right"). The order below is *build sequence*, not "cheap version first" — each piece is done properly before it's relied on. **No rush.**
 
-1. **Start here — the bootstrap knowledge pass.** The agent reads the whole codebase + git history + this session's memory and drafts the rules/decisions for Trevor to correct (the react-and-correct loop). Nothing else is trustworthy until the knowledge base exists.
-2. **The guarantees:** the stat → surface map (with toggle permutations) and the DB-safety / RLS living analysis — the two things that most protect the app.
-3. **The gate + voice:** the oversight protocol wired into the real workflow (all activity — pushes, migrations, data-ops), asking the right questions of whoever's at the keyboard, with attribution.
+**Merged sequence (2026-09-02).** The bootstrap knowledge pass is now **largely done** — `docs/knowledge/`,
+`AGENT_LEARNINGS_INDEX.md` and Track B's read/write section are exactly the react-and-correct output it
+was meant to produce.
+
+1. **`docs/PHILOSOPHY.md`** — the voice layer. Business judgment, mined from the RSTR IQ master
+   reference doc. Nothing like it exists; the knowledge files cover *technical* judgment only.
+2. **`.claude/state/current.md` + a compaction hook** (§7b). Cheap, and every session pays for its
+   absence. Pulled ahead of the subagents deliberately.
+3. **Trim `CLAUDE.md`** to terse rules; move its narrative into `docs/knowledge/`.
+4. ★ **The anchor suite — task zero** (`AGENT_PHASE_ONE_SCOPE.md §2.0`). **The gate. Non-negotiable.**
+   2026-09-01 is the argument: every formula test passed while Helfrick rendered 2.32 instead of 4.94
+   and Neiswonger showed 1.14 pWAR instead of 3.329. Formula-constant tests cannot catch a stored
+   value moving. **An agent with voice and no anchors is a confident reviewer that cannot tell when it
+   broke something.**
+5. **The guarantees:** the stat → surface map (with dev-agg / depth-role / SP-RP toggle permutations)
+   and the DB-safety / RLS living analysis. ⚠ The stat→surface map is exactly what would have caught
+   2026-09-01 — consider pulling it level with the anchors rather than after.
+6. **One data subagent**, end to end, before any other.
+7. **The gate + voice:** the oversight protocol wired into real workflow, with attribution.
+8. Code + future-ideas subagents.
 
 ## 11. Still to decide (not blocking the start)
 

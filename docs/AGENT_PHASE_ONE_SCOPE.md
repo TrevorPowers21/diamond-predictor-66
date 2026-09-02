@@ -96,7 +96,22 @@ Deprecated-token → canonical-token sweeps where the diff is one repeated subst
 ## 4. Human-only — never the agent, no exceptions
 
 ### 4.1 All database writes
-Per the Database Access Boundary in `CLAUDE.md`: Supabase MCP is reads and schema introspection only. Every write reaches Trevor as **raw SQL to paste**. Not a TypeScript script for the agent to run, not an MCP write tool, not "just this once."
+⚠ **RECONCILED 2026-09-02 — `CLAUDE.md` supersedes the original wording of this section.**
+
+Supabase MCP stays **reads and schema introspection only** — that has not changed, and both servers
+(`supabase-staging`, `supabase-prod`) are read-only at the Postgres role level.
+
+What changed: **the gate on a write is that it was talked through first, not who runs it.** Execution
+is assigned per task — Trevor pastes some, the agent runs others, and bigger multi-statement work
+tends to go to the agent because hand-pasting a long migration is the *more* error-prone path.
+
+**When the agent executes a write it goes through the repo's scripted migration path, never MCP** —
+that is where the ritual lives: dry-run, apply, verify via the catalog, brief the operator. An MCP
+write returns a bare success with no catalog verification, which is the `exec_sql OK` trap that lost
+`gm_contract` on prod.
+
+**What never changes:** no write happens without being talked through first. Not "just this once
+because it's small." And §4.2 (`:prod`) still requires an explicit "prod, now?" confirmation.
 
 ### 4.2 Anything `:prod`
 The 34 `:prod` npm scripts — `import:prod`, `precompute-transfers:prod`, `precompute-pitchers:prod`, `lock-season:prod`, `recompute-stuff:prod`, `import-juco:prod`, `prod_wipe_and_reprecompute`, and the rest — are human-run. The agent may draft the command and explain what it will do; it does not execute it. Prod actions additionally require an explicit "prod, now?" confirmation.
@@ -197,16 +212,16 @@ The agent volunteers, unprompted, even when nothing failed: anything it skipped,
 | Supabase MCP | Schema introspection, RLS advisories, verification `SELECT`s | Staging ref only, read-only, database + docs groups. No writes, ever. |
 | Playwright MCP | Own before/after screenshots on UI changes — removes Trevor as the manual verification step | Screenshot verification is *additional to*, never a substitute for, the anchor gate |
 | Context7 | Live docs for fast-moving deps (Supabase JS, TanStack Query v5, Tailwind 3→4, Vite) | Advisory only |
-| CI (`.github/workflows`, to be built) | Vitest anchor suite + `tsc -p tsconfig.app.json` delta-vs-base on every PR | The gate the agent cannot talk its way past. Currently **does not exist** — no `.github/workflows` directory in the repo. |
+| CI (`.github/workflows/ci.yml`) | Vitest + `tsc -p tsconfig.app.json` **delta-vs-base** on every PR | The gate the agent cannot talk its way past. ✅ **EXISTS as of 2026-09-02** — it caught a type error on PR #171 that an error *count* comparison had hidden. The anchor suite still needs adding to it (§2.0). |
 | frontend-design | Design work, pinned to `design-system/rstr-iq/MASTER.md` | Installed last, after Phases 4/5 land so the code matches the doc |
 
 ---
 
 ## 9. Sequencing
 
-1. Context7 + Playwright MCP install
-2. Supabase MCP setup — staging-scoped, read-only, database + docs groups
-3. CI workflow built (vitest + `tsc` delta-vs-base)
+1. ✅ **DONE** — Context7 + Playwright MCP install
+2. ✅ **DONE** — Supabase MCP. ⚠ Broader than planned: **both** databases connected as `supabase-staging` + `supabase-prod`, read-only at the role level, `database + docs` groups. Prod being connected is what makes staging↔prod drift checks possible.
+3. ✅ **DONE** — CI workflow (`.github/workflows/ci.yml`): vitest + `tsc` delta-vs-base
 4. Design Phases 4/5/6 on their own branch off staging, **after the dRS thread wraps** — kept pure hex/font consolidation so the diff stays trivially reviewable, and serving as the first PR through the new CI
 5. frontend-design install
 6. **Anchor suite built (§2.0)** — the actual gate for everything below
