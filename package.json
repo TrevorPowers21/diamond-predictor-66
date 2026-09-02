@@ -103,7 +103,8 @@
     "agent:stat-map": "tsx scripts/agent/stat-surface-map.ts",
     "agent:rls": "tsx scripts/agent/rls-analysis.ts",
     "agent:rls:prod": "tsx scripts/agent/rls-analysis.ts --prod",
-    "agent:rls-test-coach": "tsx scripts/agent/create-rls-test-coach.ts"
+    "agent:rls-test-coach": "tsx scripts/agent/create-rls-test-coach.ts",
+    "agent:drift": "tsx scripts/agent/migration-drift.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.99.0",
