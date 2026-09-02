@@ -100,7 +100,9 @@
     "db-query": "supabase db query --linked --agent=no",
     "test:anchors": "vitest run src/test/anchors/",
     "anchors:rebuild": "tsx scripts/build-anchor-fixtures.ts",
-    "agent:stat-map": "tsx scripts/agent/stat-surface-map.ts"
+    "agent:stat-map": "tsx scripts/agent/stat-surface-map.ts",
+    "agent:rls": "tsx scripts/agent/rls-analysis.ts",
+    "agent:rls:prod": "tsx scripts/agent/rls-analysis.ts --prod"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.99.0",

@@ -309,6 +309,49 @@ going to drift, from the same reasoning.
 
 ---
 
+## 17. A rule that only lives in prose is advisory
+
+⚠️ **Added 2026-09-02, and unlike the rest of this file it was learned the expensive way rather than
+mined from the master reference.**
+
+While building the agent meant to catch exactly this, I produced five wrong conclusions in one
+session. Not from missing knowledge — every rule I broke was already written down, in this file, in
+`CLAUDE.md`, and in the learnings index, all loaded and all read.
+
+**The failure was one thing, three times: measuring across a boundary the system is keyed on.**
+
+| # | I grouped without | result |
+|---|---|---|
+| 1 | `division` | JUCO (0.1% reproduce) swamped D1 (97.8%) — reported ~60% and built a model theory on it. **This is cause C1 repeating.** |
+| 2 | `updated_at` | stale rows looked like an implementation disagreement |
+| 3 | `season` | 2026 and 2027 rows looked like duplicates — I recommended DELETING 7,255 legitimate season-2026 rows and called it the safe option |
+
+Each time the missing column was one query away. `player_predictions` has a unique index naming all
+five key columns; I never read it until pushed into the code.
+
+**What this changes about the plan.** `rstr-agent-plan.md` calls the deterministic checks "the
+mechanical floor" and the voice "the higher value." **That ordering is wrong.** The voice layer is the
+part that degrades silently under momentum — a plausible pattern, wanting the finding to be
+interesting, a narrative already half-written. Mechanical checks have no such failure mode.
+
+⇒ **A rule that matters belongs in a script, not a sentence.** `division = 'D1'` in
+`build-anchor-fixtures.ts` is worth more than the three documents that said the same thing in prose.
+Anywhere the doctrine is only written down, treat it as advisory and assume it will be violated.
+
+**Corollaries, each earned:**
+- **Before any aggregate over a table, read its unique constraints.** If the grouping key does not
+  contain one, either fix the grouping or state out loud why it does not.
+- **A green gate plus a confident wrong narrative is the real failure mode.** The tests passed. CI
+  would have passed. The commit was clean. `AGENT_PHASE_ONE_SCOPE.md` §2.2 anticipates this —
+  *"anchors pass but the agent can't explain why the change was safe → treat as a failure"* — but the
+  explanation was available and false. **This is why Tier 1 review is of the reasoning, not the diff.**
+- **Escalate on the FIRST failure, not the fifth.** §5 of the scope doc already says an anchor failure
+  means *report the hypothesis, human decides.* Investigating first and reporting a conclusion is how
+  a hypothesis becomes a claim nobody asked for.
+- **The correction came from one question** — *"make sure it isn't including JUCO."* Cheap to ask,
+  and it unwound two hours. The cost of asking is seconds; the cost of guessing is a paying program
+  seeing wrong numbers.
+
 ## 16. What's genuinely open (don't invent answers)
 
 The master reference ends with ten open questions and means it. Carried here so nothing below gets
@@ -329,6 +372,8 @@ species as the ten above — an open question currently being answered by accide
 
 The ⚠️ lines are inference. In rough order of how much rests on them:
 
+0. **§17 — "a rule that only lives in prose is advisory."** Not inference; it happened. But whether
+   it should reorder the plan's mechanical-floor-vs-voice priority is a judgement call, and yours.
 1. **§15 — the business/engineering mapping.** The whole "one voice" premise rests on it.
 2. **§6 — "an undecided decision, held deliberately, is a position."** Am I reading the pricing stance
    as a general principle when it's specific to pricing?
