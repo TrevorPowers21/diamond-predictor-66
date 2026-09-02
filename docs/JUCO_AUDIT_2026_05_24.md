@@ -244,3 +244,43 @@ ORDER BY pp.p_war DESC NULLS LAST LIMIT 25;
 3. **Do all JUCO teams in `Teams Table` have correct `conference_id`?** If not, resolver fixes are partial.
 4. **Per-customer-team precompute** — also pre-compute JUCO returner-regular baseline in same run, or separate jobs?
 5. **Third parallel JUCO definition in `platformDefaults.ts`** — was that intended as a future Supabase-overridable equation table? If yes, parity test protects against drift; if no, delete.
+
+---
+
+## 🆕 FINDING (2026-08-31) — JUCO IS UNGATED ON THE RETURNING **PITCHING** DASHBOARD
+
+**Surface:** `/dashboard/returning?tab=pitching` → `src/pages/ReturningPlayers.tsx`,
+the `returning-pitcher-predictions-by-source-id` query (~line 2286).
+
+**What it does:** selects from `player_predictions` filtered only by
+`season = PROJECTION_SEASON`, `status in ('active','departed')`, `p_era is not null`
+and the variant/customer_team scoping. **There is no `division` gate.**
+
+**Measured on PROD, 2026-08-31** (join `player_predictions` → `players` → `"Pitching Master"` on
+`source_player_id`, Season 2026, variant `regular`, `customer_team_id is null`):
+
+| division   | rows  | of which scouting is NULL |
+|------------|-------|---------------------------|
+| D1         | 5,075 | 1                         |
+| NJCAA_D1   | 2,695 | **1,558**                 |
+
+⇒ JUCO is **35% of the rows on a D1 surface**, and **58% of the JUCO rows carry no scouting at all**.
+
+**🛑 WHAT THIS FINDING IS *NOT*.** It is NOT the cause of the scouting-percentile mismatch Trevor
+reported (Dylan Volantis: dashboard 70th vs profile 77th). I initially attributed that symptom to this
+population leak; **that was wrong and Trevor correctly rejected it.** The percentile populations on both
+surfaces come from the SAME hook (`usePitchLog2026PitcherPop`, D1-qualified, `total_pitches >= 100`),
+and both derive stuff+ identically (`stuff_plus_sum / stuff_plus_data_pitches`, season 2026,
+`dimension_key='all'`). Verified on prod: live percentile **76.9** vs stored `stuff_score` **69.58**.
+That bug was a **stale stored percentile preferred over the live one**
+(`ReturningPlayers.tsx:3497  const stf = r.stuff_score ?? live?.stuff`) and is fixed separately.
+⇒ **Do not conflate the two.** Row-count leakage and percentile scaling are independent defects.
+
+**Why it is deferred:** Trevor, 2026-08-31 — *"Save this as a part of the JUCO audit we need to do.
+Don't worry about it right now."* This rolls into the planned JUCO restructure (JUCO moves DBs and
+merges with D2/D3); gating it here in isolation would be re-done by that work.
+See [[project_juco_restructure_planned]] — **D1 NCAA is the consistency boundary.**
+
+**The fix when it is picked up:** add the division scope gate to the pitching query so it matches the
+Projections page and Season Stats, which already scope to D1. One filter. Expect ~2,695 rows to drop
+from the returning-pitching population.

@@ -24,6 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
+import { pickHitterWar } from "@/lib/twpMarketValue";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import {
   DndContext,
@@ -42,17 +43,21 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { resolveActiveBuildId } from "@/lib/activeBuild";
 
 // ScoutMiniBox — same component used on Returning Players + Historical
 // tables. Color-coded 20-80 score with a small label.
 const ScoutMiniBox = ({ label, value }: { label: string; value: number | null }) => {
   if (value == null) return null;
+  // Mirror PlayerProfile's 6-tier percentile color scale exactly so a score
+  // shows the same color on the board as on the profile (81 = cyan, not green).
   const tier =
-    value >= 80
-      ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
-      : value >= 50
-      ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
-      : "bg-destructive/15 text-destructive";
+    value >= 90 ? "bg-[hsl(142,71%,45%,0.15)] text-[hsl(142,71%,45%)]" :
+    value >= 75 ? "bg-[hsl(188,90%,42%,0.15)] text-[hsl(188,90%,48%)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,42%)]" :
+    value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]" :
+    value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)]" :
+    "bg-destructive/15 text-destructive";
   return (
     <div
       className={`inline-flex min-w-[34px] flex-col items-center rounded px-1 py-0.5 leading-tight ${tier}`}
@@ -94,8 +99,12 @@ const groupForHitter = (pos: string | null | undefined): GroupKey | null => {
   return "IF";
 };
 
+// A TWP has two rows: the pitcher row carries a pitcher position_slot, the hitter
+// row a hitter slot — so classify by the ROW's slot when present, else the player's
+// position (one-way players have position_slot NULL). Routes Kenny's two rows into
+// the pitcher and hitter tables respectively.
 const isPitcherTarget = (row: TargetBoardRow) =>
-  /^(SP|RP|CL|LHP|RHP|P)$/i.test(String(row.position || "").trim());
+  /^(SP|RP|CL|LHP|RHP|P)$/i.test(String((row.position_slot ?? row.position) || "").trim());
 
 type ViewType = "hitter" | "pitcher";
 type HitterMode = "overall" | "by-position";
@@ -110,6 +119,9 @@ interface ProjectionRow {
   p_ops: number | null;
   p_wrc_plus: number | null;
   o_war: number | null;
+  total_hitter_war: number | null;
+  d_war: number | null;
+  bsr_war: number | null;
   market_value: number | null;
   p_era: number | null;
   p_fip: number | null;
@@ -180,8 +192,8 @@ const applyManualOrder = (rows: TargetBoardRow[], order: string[]): TargetBoardR
   const indexOf = new Map<string, number>();
   order.forEach((id, i) => indexOf.set(id, i));
   return [...rows].sort((a, b) => {
-    const ia = indexOf.has(a.player_id) ? indexOf.get(a.player_id)! : Infinity;
-    const ib = indexOf.has(b.player_id) ? indexOf.get(b.player_id)! : Infinity;
+    const ia = indexOf.has(a.id) ? indexOf.get(a.id)! : Infinity;
+    const ib = indexOf.has(b.id) ? indexOf.get(b.id)! : Infinity;
     if (ia !== ib) return ia - ib;
     // both unranked → preserve incoming order
     return 0;
@@ -312,7 +324,7 @@ export default function TargetBoardSubtab() {
       let q = supabase
         .from("player_predictions")
         .select(
-          "player_id, variant, customer_team_id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, o_war, market_value, p_era, p_fip, p_whip, p_k9, p_bb9, p_rv_plus, p_war, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, barrel_score, hitter_barrel_score, pitcher_barrel_score, ev_score, contact_score, chase_score, stuff_score, whiff_score, bb_score",
+          "player_id, variant, customer_team_id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, o_war, total_hitter_war, d_war, bsr_war, market_value, p_era, p_fip, p_whip, p_k9, p_bb9, p_rv_plus, p_war, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, barrel_score, hitter_barrel_score, pitcher_barrel_score, ev_score, contact_score, chase_score, stuff_score, whiff_score, bb_score",
         )
         .in("player_id", playerIds)
         .eq("season", PROJECTION_SEASON)
@@ -335,6 +347,60 @@ export default function TargetBoardSubtab() {
       return out;
     },
   });
+
+  // Active build's player_snapshots (rostered targets read these, not the board
+  // line). TWP: merge hitter-slot hitter fields + pitcher-slot pitcher fields.
+  const { data: rosterSnapByPid = new Map<string, any>() } = useQuery({
+    queryKey: ["target-board-roster-snaps", effectiveTeamId ?? null],
+    enabled: !!effectiveTeamId,
+    queryFn: async () => {
+      const m = new Map<string, any>();
+      const { data: blds } = await (supabase as any).from("team_builds").select("id, is_active, is_default, team, academic_year, updated_at, created_at").eq("customer_team_id", effectiveTeamId);
+      const activeId = resolveActiveBuildId(blds);
+      if (!activeId) return m;
+      const { data: bps } = await (supabase as any).from("team_build_players").select("player_id, position_slot, included_in_roster, player_snapshot").eq("build_id", activeId).eq("included_in_roster", true);
+      const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+      const byPid = new Map<string, any[]>();
+      for (const bp of (bps || [])) { if (!(bp as any).player_snapshot) continue; (byPid.get((bp as any).player_id) ?? byPid.set((bp as any).player_id, []).get((bp as any).player_id)!).push(bp); }
+      // Key each side's snapshot by `${pid}|hitter` / `${pid}|pitcher` so the board
+      // row for each side reads its OWN slot's roster snapshot (no merge). A one-way
+      // player has a single row → one side key.
+      for (const [pid, list] of byPid) {
+        if (list.length === 1) {
+          const only = list[0];
+          m.set(`${pid}|${isPit(only.position_slot) ? "pitcher" : "hitter"}`, only.player_snapshot);
+          continue;
+        }
+        const h = list.find((r) => !isPit(r.position_slot));
+        const p = list.find((r) => isPit(r.position_slot));
+        if (h) m.set(`${pid}|hitter`, h.player_snapshot);
+        if (p) m.set(`${pid}|pitcher`, p.player_snapshot);
+      }
+      return m;
+    },
+  });
+
+  // The line each target DISPLAYS: rostered → build player_snapshot; else → the
+  // saved transfer_snapshot (normalized owar→o_war, nil_valuation→market_value);
+  // scouting scores come from the live prediction (not stored in snapshots).
+  // Keyed by target_board ROW id (not player_id) so a TWP's two rows each resolve
+  // their own side's line. Rostered → the matching-side roster snapshot; else → the
+  // row's own transfer_snapshot. Scouting comes from the live prediction (by player).
+  const displayByRow = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const r of board) {
+      const pid = r.player_id;
+      const side = isPitcherTarget(r) ? "pitcher" : "hitter";
+      const live = predictionByPlayerId.get(pid);
+      const roster = rosterSnapByPid.get(`${pid}|${side}`);
+      const ts: any = (r as any).transfer_snapshot;
+      const snap = roster
+        ? roster
+        : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, total_hitter_war: ts.total_hitter_war ?? ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
+      m.set(r.id, snap ? { ...(live || {}), ...snap } : (live || null));
+    }
+    return m;
+  }, [board, predictionByPlayerId, rosterSnapByPid]);
 
   const hitterCount = useMemo(() => board.filter((r) => !isPitcherTarget(r)).length, [board]);
   const pitcherCount = useMemo(() => board.filter(isPitcherTarget).length, [board]);
@@ -384,8 +450,8 @@ export default function TargetBoardSubtab() {
     const mul = dir === "asc" ? 1 : -1;
     const arr = [...rows];
     arr.sort((a, b) => {
-      const pa = predictionByPlayerId.get(a.player_id);
-      const pb = predictionByPlayerId.get(b.player_id);
+      const pa = displayByRow.get(a.id);
+      const pb = displayByRow.get(b.id);
       if (sk === "name") {
         return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`) * mul;
       }
@@ -403,6 +469,12 @@ export default function TargetBoardSubtab() {
             ? (pb?.twp_pitcher_market_value ?? pb?.market_value)
             : (pb?.twp_hitter_market_value ?? pb?.market_value)) ?? -Infinity,
         );
+        return (va - vb) * mul;
+      }
+      if (sk === "o_war") {
+        // hitter WAR column reads the headline total_hitter_war (fallback o_war)
+        const va = Number(pickHitterWar(pa as any) ?? -Infinity);
+        const vb = Number(pickHitterWar(pb as any) ?? -Infinity);
         return (va - vb) * mul;
       }
       const va = Number((pa as any)?.[sk] ?? -Infinity);
@@ -460,11 +532,11 @@ export default function TargetBoardSubtab() {
     (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const oldIndex = sortedRows.findIndex((r) => r.player_id === active.id);
-      const newIndex = sortedRows.findIndex((r) => r.player_id === over.id);
+      const oldIndex = sortedRows.findIndex((r) => r.id === active.id);
+      const newIndex = sortedRows.findIndex((r) => r.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
       const next = arrayMove(sortedRows, oldIndex, newIndex);
-      const newOrder = next.map((r) => r.player_id);
+      const newOrder = next.map((r) => r.id);
       setManualOrders((prev) => ({ ...prev, [scope]: newOrder }));
       saveManualOrder(effectiveTeamId, scope, newOrder);
       // Drag implies "I want manual order" — flip the sort selector to
@@ -487,7 +559,7 @@ export default function TargetBoardSubtab() {
     // collapsing every non-portal player to "Watching".
     const c = portalStatusMeta(r.portal_status);
     return (
-      <Badge variant="outline" className={`text-[10px] ${c.bg} ${c.text} border-current/30`}>
+      <Badge variant="outline" className={`text-[10px] whitespace-nowrap ${c.bg} ${c.text} border-current/30`}>
         {c.label}
       </Badge>
     );
@@ -501,27 +573,27 @@ export default function TargetBoardSubtab() {
     return (
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd(sorted, scope, "hitter")}>
         <SortableContext items={sorted.map((r) => r.player_id)} strategy={verticalListSortingStrategy}>
-          <Table>
+          <Table className="table-fixed min-w-[1160px]">
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
-                <TableHead className="w-[28px] p-0"></TableHead>
-                <TableHead className="w-[56px] text-center p-0">
+                <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
+                <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <HitterSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Status</span>
+                <TableHead className="w-[104px]">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="AVG" sk="p_avg" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="OBP" sk="p_obp" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="SLG" sk="p_slg" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="OPS" sk="p_ops" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="wRC+" sk="p_wrc_plus" /></TableHead>
-                <TableHead className="text-right"><HitterSortBtn label="oWAR" sk="o_war" /></TableHead>
+                <TableHead className="text-right"><HitterSortBtn label="WAR" sk="o_war" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="Market Value" sk="market_value" /></TableHead>
-                <TableHead className="text-center min-w-[180px]">
+                <TableHead className="text-center w-[180px]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span>
                 </TableHead>
                 <TableHead className="w-[36px] p-0"></TableHead>
@@ -529,12 +601,12 @@ export default function TargetBoardSubtab() {
             </TableHeader>
             <TableBody>
               {sorted.map((r, i) => {
-                const pred = predictionByPlayerId.get(r.player_id);
+                const pred = displayByRow.get(r.id);
                 return (
-                  <SortableRow key={r.player_id} id={r.player_id}>
+                  <SortableRow key={r.id} id={r.id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
-                        <TableCell className="w-[28px] p-0 text-center align-middle">
+                        <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
                           <button
                             type="button"
                             {...listeners}
@@ -548,41 +620,44 @@ export default function TargetBoardSubtab() {
                             <GripVertical className="h-4 w-4" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-[56px] p-0 text-center align-middle">
+                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-[28px] z-10 bg-[#0a1428]">
                           <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-md text-[12px] font-bold tabular-nums text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/20">
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="sticky left-[84px] z-10 bg-[#0a1428] min-w-[220px]">
-                          <Link
-                            to={profileRouteFor(r.player_id, r.position, r.position)}
-                            className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
-                          >
-                            {r.first_name} {r.last_name}
-                          </Link>
-                          <div className="text-[11px] text-[#8a94a6]">
-                            {r.position || "—"} · {r.team || "—"}
-                            {r.class_year ? ` · ${r.class_year}` : ""}
+                        <TableCell className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                          <div className="w-[188px] overflow-hidden">
+                            <Link
+                              to={profileRouteFor(r.player_id, r.position, r.position)}
+                              className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
+                            >
+                              {r.first_name} {r.last_name}
+                            </Link>
+                            <div className="truncate text-[11px] text-[#8a94a6]">
+                              {r.position || "—"} · {r.team || "—"}
+                              {r.class_year ? ` · ${r.class_year}` : ""}
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell>{portalBadge(r)}</TableCell>
+                        <TableCell className="w-[104px]">{portalBadge(r)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_avg)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_obp)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_slg)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_ops)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt0(pred?.p_wrc_plus)}</TableCell>
-                        <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.o_war)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pickHitterWar(pred))}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">
                           {fmtMv(pred?.twp_hitter_market_value ?? pred?.market_value)}
                         </TableCell>
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
                             {(() => {
+                              // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                               const live = liveHitterScores(r.source_player_id);
-                              const brl = live?.barrel ?? pred?.hitter_barrel_score ?? pred?.barrel_score ?? null;
-                              const ev = live?.ev ?? pred?.ev_score ?? null;
-                              const con = live?.contact ?? pred?.contact_score ?? null;
-                              const chs = live?.chase ?? pred?.chase_score ?? null;
+                              const brl = pred?.hitter_barrel_score ?? pred?.barrel_score ?? live?.barrel ?? null;
+                              const ev = pred?.ev_score ?? live?.ev ?? null;
+                              const con = pred?.contact_score ?? live?.contact ?? null;
+                              const chs = pred?.chase_score ?? live?.chase ?? null;
                               return (
                                 <>
                                   {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
@@ -620,18 +695,18 @@ export default function TargetBoardSubtab() {
     return (
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd(sorted, "pitcher", "pitcher")}>
         <SortableContext items={sorted.map((r) => r.player_id)} strategy={verticalListSortingStrategy}>
-          <Table>
+          <Table className="table-fixed min-w-[1280px]">
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
-                <TableHead className="w-[28px] p-0"></TableHead>
-                <TableHead className="w-[56px] text-center p-0">
+                <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
+                <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <PitcherSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Status</span>
+                <TableHead className="w-[104px]">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="ERA" sk="p_era" /></TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="FIP" sk="p_fip" /></TableHead>
@@ -641,7 +716,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="text-right"><PitcherSortBtn label="pRV+" sk="p_rv_plus" /></TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="pWAR" sk="p_war" /></TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="Market Value" sk="market_value" /></TableHead>
-                <TableHead className="text-center min-w-[180px]">
+                <TableHead className="text-center w-[180px]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span>
                 </TableHead>
                 <TableHead className="w-[36px] p-0"></TableHead>
@@ -649,12 +724,12 @@ export default function TargetBoardSubtab() {
             </TableHeader>
             <TableBody>
               {sorted.map((r, i) => {
-                const pred = predictionByPlayerId.get(r.player_id);
+                const pred = displayByRow.get(r.id);
                 return (
-                  <SortableRow key={r.player_id} id={r.player_id}>
+                  <SortableRow key={r.id} id={r.id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
-                        <TableCell className="w-[28px] p-0 text-center align-middle">
+                        <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
                           <button
                             type="button"
                             {...listeners}
@@ -668,24 +743,26 @@ export default function TargetBoardSubtab() {
                             <GripVertical className="h-4 w-4" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-[56px] p-0 text-center align-middle">
+                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-[28px] z-10 bg-[#0a1428]">
                           <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-md text-[12px] font-bold tabular-nums text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/20">
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="sticky left-[84px] z-10 bg-[#0a1428] min-w-[220px]">
-                          <Link
-                            to={profileRouteFor(r.player_id, r.position, r.position)}
-                            className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
-                          >
-                            {r.first_name} {r.last_name}
-                          </Link>
-                          <div className="text-[11px] text-[#8a94a6]">
-                            {r.position || "—"} · {r.team || "—"}
-                            {r.class_year ? ` · ${r.class_year}` : ""}
+                        <TableCell className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                          <div className="w-[188px] overflow-hidden">
+                            <Link
+                              to={profileRouteFor(r.player_id, r.position, r.position)}
+                              className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
+                            >
+                              {r.first_name} {r.last_name}
+                            </Link>
+                            <div className="truncate text-[11px] text-[#8a94a6]">
+                              {r.position || "—"} · {r.team || "—"}
+                              {r.class_year ? ` · ${r.class_year}` : ""}
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell>{portalBadge(r)}</TableCell>
+                        <TableCell className="w-[104px]">{portalBadge(r)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_era)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_fip)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_whip)}</TableCell>
@@ -699,11 +776,12 @@ export default function TargetBoardSubtab() {
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
                             {(() => {
+                              // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                               const live = livePitcherScores(r.source_player_id);
-                              const stf = live?.stuff ?? pred?.stuff_score ?? null;
-                              const whf = live?.whiff ?? pred?.whiff_score ?? null;
-                              const bb = live?.bb ?? pred?.bb_score ?? null;
-                              const brl = live?.barrel ?? pred?.pitcher_barrel_score ?? pred?.barrel_score ?? null;
+                              const stf = pred?.stuff_score ?? live?.stuff ?? null;
+                              const whf = pred?.whiff_score ?? live?.whiff ?? null;
+                              const bb = pred?.bb_score ?? live?.bb ?? null;
+                              const brl = pred?.pitcher_barrel_score ?? pred?.barrel_score ?? live?.barrel ?? null;
                               return (
                                 <>
                                   {stf != null && <ScoutMiniBox label="Stf+" value={stf} />}

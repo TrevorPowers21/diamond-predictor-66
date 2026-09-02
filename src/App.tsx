@@ -5,35 +5,26 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Outlet, useLocation } from "react-router-dom";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import { AuthProvider } from "@/hooks/useAuth";
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
+import { lazyWithReload } from "@/lib/lazyWithReload";
 import { capturePageView, capturePageLeave } from "@/lib/posthog";
 import Index from "./pages/Index";
 
-// Savant — internal-only, gated, lazy-loaded so RSTR IQ users never download it.
-// Do not link to /savant/* from any RSTR IQ nav.
-const SavantRoute = lazy(() => import("@/savant/components/SavantRoute"));
-const SavantLayout = lazy(() => import("@/savant/components/SavantLayout"));
-const SavantHome = lazy(() => import("@/savant/pages/SavantHome"));
-const SavantLeaderboards = lazy(() => import("@/savant/pages/LeaderboardsPage"));
-const SavantConferenceStats = lazy(() => import("@/savant/pages/ConferenceStatsPage"));
-const SavantTeamsList = lazy(() => import("@/savant/pages/TeamsListPage"));
-const SavantTeamProfile = lazy(() => import("@/savant/pages/TeamProfilePage"));
-const SavantHitterPage = lazy(() => import("@/savant/pages/HitterPage"));
-const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
 
 // GM (front office) — gated + lazy-loaded so Player Evaluation users never
 // download it. Do not link to /gm/* from Player Evaluation nav except the toggle.
-const GMRoute = lazy(() => import("@/gm/components/GMRoute"));
-const GMLayout = lazy(() => import("@/gm/components/GMLayout"));
-const GMRoster = lazy(() => import("@/gm/pages/GMRoster"));
-const GMHome = lazy(() => import("@/gm/pages/GMHome"));
-const GMAnalytics = lazy(() => import("@/gm/pages/GMAnalytics"));
-const GMRecruits = lazy(() => import("@/gm/pages/GMRecruits"));
-const GMScenarios = lazy(() => import("@/gm/pages/GMScenarios"));
-const GMTargets = lazy(() => import("@/gm/pages/GMTargets"));
-const GMAllocations = lazy(() => import("@/gm/pages/GMAllocations"));
-const GMContracts = lazy(() => import("@/gm/pages/GMContracts"));
-const PlayerHub = lazy(() => import("@/pages/PlayerHub"));
+const GMRoute = lazyWithReload(() => import("@/gm/components/GMRoute"));
+const GMLayout = lazyWithReload(() => import("@/gm/components/GMLayout"));
+const GMRoster = lazyWithReload(() => import("@/gm/pages/GMRoster"));
+const GMHome = lazyWithReload(() => import("@/gm/pages/GMHome"));
+const GMAnalytics = lazyWithReload(() => import("@/gm/pages/GMAnalytics"));
+const GMRecruits = lazyWithReload(() => import("@/gm/pages/GMRecruits"));
+const GMScenarios = lazyWithReload(() => import("@/gm/pages/GMScenarios"));
+const GMTargets = lazyWithReload(() => import("@/gm/pages/GMTargets"));
+const GMAllocations = lazyWithReload(() => import("@/gm/pages/GMAllocations"));
+const GMContracts = lazyWithReload(() => import("@/gm/pages/GMContracts"));
+const GMSettings = lazyWithReload(() => import("@/gm/pages/GMSettings"));
+const PlayerHub = lazyWithReload(() => import("@/pages/PlayerHub"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -56,6 +47,7 @@ import RoleGuard from "@/components/RoleGuard";
 import HighFollowList from "./pages/HighFollowList";
 import Targets from "./pages/Targets";
 import Settings from "./pages/Settings";
+const MobileRecruiting = lazyWithReload(() => import("./pages/mobile/MobileRecruiting"));
 
 const queryClient = new QueryClient();
 
@@ -120,6 +112,8 @@ const router = createBrowserRouter([
       { path: "/dashboard/pitcher/:id/stats", element: <ProtectedRoute><PitcherStatsPage /></ProtectedRoute> },
       { path: "/dashboard/team-builder", element: <ProtectedRoute><TeamBuilder /></ProtectedRoute> },
       { path: "/dashboard/targets", element: <ProtectedRoute><Targets /></ProtectedRoute> },
+      // Mobile recruiting board — phone-first coach tool (freshman/JUCO recruits + dated timeline notes)
+      { path: "/m/recruiting", element: <ProtectedRoute><Suspense fallback={null}><MobileRecruiting /></Suspense></ProtectedRoute> },
       // Legacy /dashboard/high-follow URL still works — renders the standalone page so bookmarks don't break.
       { path: "/dashboard/high-follow", element: <ProtectedRoute><HighFollowList /></ProtectedRoute> },
       { path: "/dashboard/admin", element: <ProtectedRoute><AdminDashboard /></ProtectedRoute> },
@@ -141,26 +135,6 @@ const router = createBrowserRouter([
         ),
       },
       { path: "/dashboard/*", element: <ProtectedRoute><Dashboard /></ProtectedRoute> },
-      // Savant — internal only. Gated by SavantRoute (auth + email allowlist).
-      {
-        path: "/savant",
-        element: (
-          <ProtectedRoute>
-            <Suspense fallback={null}>
-              <SavantRoute><SavantLayout /></SavantRoute>
-            </Suspense>
-          </ProtectedRoute>
-        ),
-        children: [
-          { index: true, element: <Suspense fallback={null}><SavantHome /></Suspense> },
-          { path: "leaderboards", element: <Suspense fallback={null}><SavantLeaderboards /></Suspense> },
-          { path: "conferences", element: <Suspense fallback={null}><SavantConferenceStats /></Suspense> },
-          { path: "teams", element: <Suspense fallback={null}><SavantTeamsList /></Suspense> },
-          { path: "team/:id", element: <Suspense fallback={null}><SavantTeamProfile /></Suspense> },
-          { path: "hitter/:id", element: <Suspense fallback={null}><SavantHitterPage /></Suspense> },
-          { path: "pitcher/:id", element: <Suspense fallback={null}><SavantPitcherPage /></Suspense> },
-        ],
-      },
       // GM (front office) — gated by GMRoute (auth + superadmin/team_admin).
       {
         path: "/gm",
@@ -181,6 +155,7 @@ const router = createBrowserRouter([
           { path: "player/:playerId", element: <Suspense fallback={null}><PlayerHub /></Suspense> },
           { path: "analytics", element: <Suspense fallback={null}><GMAnalytics /></Suspense> },
           { path: "recruiting", element: <Suspense fallback={null}><GMRecruits /></Suspense> },
+          { path: "settings", element: <Suspense fallback={null}><GMSettings /></Suspense> },
         ],
       },
       { path: "*", element: <NotFound /> },

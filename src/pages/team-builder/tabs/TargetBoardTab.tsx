@@ -127,7 +127,7 @@ export default function TargetBoardTab({
             <TableHeader>
               <TableRow>
                 <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">Player</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className="min-w-[96px] whitespace-nowrap">Status</TableHead>
                 <TableHead className="text-center">Risk</TableHead>
                 <TableHead className="text-center">Position</TableHead>
                 <TableHead>Dev Agg</TableHead>
@@ -137,7 +137,7 @@ export default function TargetBoardTab({
                 <TableHead className="text-center">Market Value ($)</TableHead>
                 <TableHead className="text-center">Projected Value ($)</TableHead>
                 <TableHead className="text-center">Actual Value ($)</TableHead>
-                <TableHead className="text-center">oWAR</TableHead>
+                <TableHead className="text-center">WAR</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -186,7 +186,7 @@ export default function TargetBoardTab({
             <TableHeader>
               <TableRow>
                 <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">Player</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className="min-w-[96px] whitespace-nowrap">Status</TableHead>
                 <TableHead className="text-center">Risk</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Dev Agg</TableHead>

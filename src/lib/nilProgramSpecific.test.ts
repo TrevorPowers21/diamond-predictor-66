@@ -3,75 +3,81 @@ import {
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
   calcPlayerScore,
-  calcProgramSpecificAllocation,
   DEFAULT_NIL_TIER_MULTIPLIERS,
-  DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
+  NIL_LOW_MAJOR,
+  NIL_JUCO,
 } from "./nilProgramSpecific";
 
-describe("getProgramTierMultiplierByConference", () => {
-  describe("SEC tier (1.5)", () => {
-    it.each([
-      "SEC",
-      "sec",
-      "Southeastern Conference",
-      "southeastern conference",
-    ])('returns 1.5 for "%s"', (conf) => {
+// EXACT per-conference-code lookup (2026-08-21). Test values = the REAL conference codes that
+// appear in players.conference / Teams Table.conference (a controlled set), NOT fuzzy long-form names.
+describe("getProgramTierMultiplierByConference (exact per-conference code)", () => {
+  describe("SEC tier (4.0)", () => {
+    it.each(["SEC", "sec"])('returns 4.0 for "%s"', (conf) => {
       expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.sec);
     });
   });
 
+  describe("ACC tier (1.5 — split out of Big12)", () => {
+    it.each(["ACC", "acc"])('returns 1.5 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.acc);
+    });
+  });
+
+  describe("Big 12 tier (1.2)", () => {
+    it.each(["Big 12", "big12"])('returns 1.2 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.big12);
+    });
+  });
+
   describe("Big Ten tier (1.0)", () => {
-    it.each(["Big Ten", "big ten", "BigTen"])('returns 1.0 for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.bigTen);
+    it.each(["Big Ten", "bigten"])('returns 1.0 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.bigten);
     });
   });
 
-  describe("P4 tier (1.2) — ACC and Big 12", () => {
-    it.each([
-      "ACC",
-      "Atlantic Coast Conference",
-      "Big 12",
-      "big12",
-      "Big12Conference",
-    ])('returns 1.2 for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.p4);
+  describe("Independent tier (1.0 — Oregon State; own key, NOT low-major)", () => {
+    it.each(["Independent", "independent"])('returns 1.0 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.independent);
     });
   });
 
-  describe("Strong Mid-Major tier (0.8)", () => {
+  describe("Strong mid-major tier (0.8)", () => {
     it.each([
       "American Athletic Conference",
-      "AAC",
-      "Sun Belt Conference",
-      "Sunbelt",
-      "Big West Conference",
-      "BigWest",
-      "Mountain West Conference",
-      "MountainWest",
+      "Sun Belt",
+      "Big West",
+      "Mountain West",
     ])('returns 0.8 for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.strongMid);
+      expect(getProgramTierMultiplierByConference(conf)).toBe(0.8);
     });
   });
 
-  describe("Low Major tier (0.5) — default", () => {
+  describe("Low-major default (0.5)", () => {
     it.each([
-      "Southern Conference",
-      "SOCON",
+      "SoCon",
       "America East",
       "NEC",
       "SWAC",
+      "ASUN",
       "",
       null,
       undefined,
     ])('returns 0.5 for "%s"', (conf) => {
-      expect(getProgramTierMultiplierByConference(conf)).toBe(DEFAULT_NIL_TIER_MULTIPLIERS.lowMajor);
+      expect(getProgramTierMultiplierByConference(conf)).toBe(NIL_LOW_MAJOR);
     });
   });
 
-  it("respects custom multiplier overrides", () => {
-    const custom = { ...DEFAULT_NIL_TIER_MULTIPLIERS, sec: 2.0, p4: 1.8 };
+  describe("JUCO (NJCAA districts) → 0.35", () => {
+    it.each(["NJCAA D1 South", "NJCAA D1 East District"])('returns 0.35 for "%s"', (conf) => {
+      expect(getProgramTierMultiplierByConference(conf)).toBe(NIL_JUCO);
+    });
+  });
+
+  it("respects custom per-conference overrides", () => {
+    const custom = { ...DEFAULT_NIL_TIER_MULTIPLIERS, sec: 2.0, acc: 1.8, big12: 1.3 };
     expect(getProgramTierMultiplierByConference("SEC", custom)).toBe(2.0);
     expect(getProgramTierMultiplierByConference("ACC", custom)).toBe(1.8);
+    expect(getProgramTierMultiplierByConference("Big 12", custom)).toBe(1.3);
   });
 });
 
@@ -113,101 +119,35 @@ describe("getPositionValueMultiplier", () => {
 });
 
 describe("calcPlayerScore", () => {
-  it("computes oWAR × PTM × PVM correctly (SS + SEC + 2.0 oWAR)", () => {
-    // SS → PVM 1.3, SEC → PTM 1.5, oWAR = 2.0
-    const result = calcPlayerScore({ owar: 2.0, programTierMultiplier: 1.5, position: "SS" });
-    expect(result).toBeCloseTo(2.0 * 1.5 * 1.3);
+  // PVM removed from the score (spec §1) — score = WAR × PTM only.
+  it("computes oWAR × PTM correctly (SEC + 2.0 oWAR)", () => {
+    // SEC → PTM 1.5, oWAR = 2.0 (position no longer affects the score)
+    const result = calcPlayerScore({ owar: 2.0, programTierMultiplier: 1.5 });
+    expect(result).toBeCloseTo(2.0 * 1.5);
   });
 
-  it("computes 1B + Big Ten + 3.0 oWAR", () => {
-    // 1B → PVM 1.0, Big Ten → PTM 1.0, oWAR = 3.0
-    expect(calcPlayerScore({ owar: 3.0, programTierMultiplier: 1.0, position: "1B" })).toBeCloseTo(3.0);
+  it("computes Big Ten + 3.0 oWAR", () => {
+    // Big Ten → PTM 1.0, oWAR = 3.0
+    expect(calcPlayerScore({ owar: 3.0, programTierMultiplier: 1.0 })).toBeCloseTo(3.0);
   });
 
   it("returns 0 when oWAR is null", () => {
-    expect(calcPlayerScore({ owar: null, programTierMultiplier: 1.5, position: "SS" })).toBe(0);
+    expect(calcPlayerScore({ owar: null, programTierMultiplier: 1.5 })).toBe(0);
   });
 
   it("returns 0 when oWAR is undefined", () => {
-    expect(calcPlayerScore({ owar: undefined, programTierMultiplier: 1.5, position: "SS" })).toBe(0);
+    expect(calcPlayerScore({ owar: undefined, programTierMultiplier: 1.5 })).toBe(0);
   });
 
   it("returns 0 when programTierMultiplier is 0", () => {
-    expect(calcPlayerScore({ owar: 2.0, programTierMultiplier: 0, position: "SS" })).toBe(0);
+    expect(calcPlayerScore({ owar: 2.0, programTierMultiplier: 0 })).toBe(0);
   });
 
   it("handles negative oWAR (bench/replacement-level player)", () => {
-    const result = calcPlayerScore({ owar: -0.5, programTierMultiplier: 1.2, position: "DH" });
-    expect(result).toBeCloseTo(-0.5 * 1.2 * 1.0);
+    const result = calcPlayerScore({ owar: -0.5, programTierMultiplier: 1.2 });
+    expect(result).toBeCloseTo(-0.5 * 1.2);
   });
 });
 
-describe("calcProgramSpecificAllocation", () => {
-  it("uses fallback denominator (68) when roster total is below it", () => {
-    // rosterTotal=30 < 68, so denominator = 68
-    const result = calcProgramSpecificAllocation({
-      playerScore: 5,
-      rosterTotalPlayerScore: 30,
-      nilBudget: 1_000_000,
-    });
-    expect(result).toBeCloseTo((5 / DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE) * 1_000_000);
-  });
-
-  it("uses roster total when it exceeds fallback", () => {
-    // rosterTotal=100 > 68, so denominator = 100
-    const result = calcProgramSpecificAllocation({
-      playerScore: 5,
-      rosterTotalPlayerScore: 100,
-      nilBudget: 1_000_000,
-    });
-    expect(result).toBeCloseTo(50_000);
-  });
-
-  it("uses exact fallback as denominator when roster equals fallback exactly", () => {
-    const result = calcProgramSpecificAllocation({
-      playerScore: 10,
-      rosterTotalPlayerScore: DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
-      nilBudget: 680_000,
-    });
-    // 10 / 68 * 680_000 = 100_000
-    expect(result).toBeCloseTo(100_000);
-  });
-
-  it("returns 0 for zero budget", () => {
-    expect(
-      calcProgramSpecificAllocation({ playerScore: 5, rosterTotalPlayerScore: 100, nilBudget: 0 }),
-    ).toBe(0);
-  });
-
-  it("returns 0 for negative budget", () => {
-    expect(
-      calcProgramSpecificAllocation({ playerScore: 5, rosterTotalPlayerScore: 100, nilBudget: -500 }),
-    ).toBe(0);
-  });
-
-  it("respects custom fallbackTotalPlayerScore", () => {
-    // rosterTotal=20 < customFallback=100, so denominator=100
-    const result = calcProgramSpecificAllocation({
-      playerScore: 10,
-      rosterTotalPlayerScore: 20,
-      nilBudget: 100_000,
-      fallbackTotalPlayerScore: 100,
-    });
-    expect(result).toBeCloseTo(10_000);
-  });
-
-  it("star player (high score) gets proportionally more budget", () => {
-    const star = calcProgramSpecificAllocation({
-      playerScore: 20,
-      rosterTotalPlayerScore: 100,
-      nilBudget: 2_000_000,
-    });
-    const bench = calcProgramSpecificAllocation({
-      playerScore: 2,
-      rosterTotalPlayerScore: 100,
-      nilBudget: 2_000_000,
-    });
-    expect(star).toBeGreaterThan(bench);
-    expect(star / bench).toBeCloseTo(10); // linear proportion
-  });
-});
+// calcProgramSpecificAllocation retired — allocation now flows through
+// allocateNil (src/lib/nilAllocation.ts, tested in nilAllocation.test.ts).

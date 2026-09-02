@@ -171,15 +171,17 @@ export function useLoadBuild({
           }
         }
 
-        // Only fetch player_predictions for rows that don't have a valid snapshot.
+        // Fetch player_predictions for EVERY build player — including ones that
+        // already have a snapshot. The snapshot is the DISPLAYED (possibly
+        // dev-agg-adjusted) line; `activePred` below still prefers it for display.
+        // But the toggle recompute needs the immutable NEUTRAL prediction as its
+        // base (`neutralPrediction`, always predictionMap). If we skip the fetch for
+        // snapshot rows, a player saved with a NON-ZERO dev-agg has a null neutral,
+        // so the recompute falls back to its own already-adjusted snapshot and
+        // COMPOUNDS on every toggle (dev-agg stacks — e.g. Flukey 3.87→3.67→3.47…).
+        // Loading the projection row 1-for-1 for everyone keeps the guard honest.
         const idsNeedingPred = [...new Set(
           players
-            .filter((bp) => {
-              const pid = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
-              if (!isUuid(pid)) return false;
-              const side = isPitcherSlot(bp.position_slot) ? "P" : "H";
-              return !snapshotMap[`${pid}|${side}`];
-            })
             .map((bp) => typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id)
             .filter((id): id is string => isUuid(id))
         )];
@@ -189,7 +191,7 @@ export function useLoadBuild({
             .from("players")
             .select(`
               id, source_player_id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference,
-              player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip),
+              player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip),
               nil_valuations(estimated_value, component_breakdown)
             `)
             .in("id", playerIds);
@@ -212,7 +214,7 @@ export function useLoadBuild({
                 // already fetches at add-time. Non-destructive — these
                 // columns exist on player_predictions; we just weren't
                 // asking for them on the load path.
-                "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip",
+                "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip",
               )
               .eq("season", PROJECTION_SEASON)
               .in("player_id", idsNeedingPred)
@@ -233,7 +235,7 @@ export function useLoadBuild({
             // For non-TWPs we infer the side from the player's natural position
             // (not from pitcher_role, which can be null even for pitcher players).
             const grouped = new Map<string, any[]>();
-            for (const row of predData || []) {
+            for (const row of ((predData || []) as any[])) {
               const pid = String(row.player_id || "");
               if (!pid) continue;
               const list = grouped.get(pid) || [];
@@ -525,6 +527,15 @@ export function useLoadBuild({
                   projection_tier: meta.projectionTier ?? null,
                   nil_value_overridden: meta.nilValueOverridden,
                   transfer_snapshot: meta.transferSnapshot ?? null,
+                  // ★ 2026-09-01 — mirrors PlayerProfile's `isSnapshotBacked` (PlayerProfile.tsx:651).
+                  // True when this row's values came from a STORED snapshot, which means the toggle
+                  // and depth role are ALREADY BAKED IN and must not be scaled again.
+                  _snapshotBacked: !!rawSnapshot,
+                  // ★ 2026-09-01 — the RAW team_build_players.player_snapshot for this row+side.
+                  // `prediction` is NOT a snapshot: it is `snapshot ?? predictionMap[...]`, so it
+                  // silently becomes the PREDICTION ROW whenever the snapshot lookup misses. Display
+                  // must read this field, never `prediction`.
+                  player_snapshot: rawSnapshot ?? null,
                   player: pd
                     ? {
                         first_name: pd.first_name,
@@ -540,6 +551,14 @@ export function useLoadBuild({
                       }
                     : resolvedLocalPlayer || null,
                   prediction: activePred ?? null,
+                  // Phase B: the NEUTRAL base (dev_agg=0 line), kept separate from
+                  // `prediction` (the adjusted snapshot). The toggle handler recomputes
+                  // from THIS, never from the adjusted snapshot, so changes can't
+                  // compound. Prefer the PERSISTED neutral_snapshot on the build row
+                  // (stamped at add/save) so it never depends on the live fetch; fall
+                  // back to the live prediction row if an old row lacks it.
+                  neutralPrediction: (bp as any).neutral_snapshot
+                    ?? (normalizedPlayerId ? predictionMap[`${normalizedPlayerId}|${bpSide}`] ?? null : null),
                   nilVal: pd?.nil_valuations?.[0]?.estimated_value ?? null,
                   nil_owar: pd?.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
                   team_metrics: meta.metrics,

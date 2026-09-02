@@ -9,6 +9,7 @@
 // Pitcher depth role → expected IP fed into the pWAR formula.
 
 import type { PitchingEquationWeights } from "@/lib/pitchingEquations";
+import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -106,7 +107,7 @@ export function pitcherExpectedIp(
   eq: Pick<PitchingEquationWeights, "pwar_ip_sp" | "pwar_ip_sm" | "pwar_ip_rp">,
 ): number {
   switch (depthRole) {
-    case "weekend_starter":        return eq.pwar_ip_sp;  // ~80 IP — Fri/Sat/Sun
+    case "weekend_starter":        return eq.pwar_ip_sp;  // ~85 IP — Fri/Sat/Sun
     case "weekday_starter":        return eq.pwar_ip_sm;  // ~50 IP — midweek SP
     case "swing_starter":          return 30;             // long relief / spot start
     case "workhorse_reliever":     return 50;             // closer/setup workhorse
@@ -116,6 +117,46 @@ export function pitcherExpectedIp(
     case "specialist_reliever":    return 6;              // LOOGY/situational
     default:                       return eq.pwar_ip_rp;  // RP fallback
   }
+}
+
+// Derive the granular pitcher depth role from real (last-season) IP + coarse
+// role. The depth role — NOT a coarse SP/RP/SM role — is what drives projected
+// IP (pitcherExpectedIp) and therefore pWAR/market. Mirrors
+// defaultPitcherDepthRoleFromIp in src/pages/team-builder/helpers.ts.
+export function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP" | "SM"): string {
+  const r: "SP" | "RP" = role === "SP" ? "SP" : "RP";
+  const ipNum = Number(ip);
+  if (!Number.isFinite(ipNum) || ipNum <= 0) {
+    return r === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (r === "SP") {
+    if (ipNum >= 65) return "weekend_starter";
+    if (ipNum >= 35) return "weekday_starter";
+    // Thin-sample SPs (<10 IP) drop to specialist_reliever — without this a
+    // 3-IP arm gets swing_starter's ~30 projected IP (and previously ~85),
+    // scaling pWAR / market way too high.
+    if (ipNum < 10) return "specialist_reliever";
+    return "swing_starter";
+  }
+  if (ipNum >= 40) return "workhorse_reliever";
+  if (ipNum >= 25) return "high_leverage_reliever";
+  if (ipNum >= 15) return "mid_leverage_reliever";
+  if (ipNum >= 8) return "low_impact_reliever";
+  return "specialist_reliever";
+}
+
+// Projected IP for the pWAR formula, derived from real IP via the depth role —
+// the canonical replacement for the coarse `role ? pwar_ip_sp : pwar_ip_rp : pwar_ip_sm`.
+// Falls back to the coarse role IP only when real IP is missing.
+export function projectedIpFromRealIp(
+  ip: number | null | undefined,
+  role: "SP" | "RP" | "SM",
+  eq: Pick<PitchingEquationWeights, "pwar_ip_sp" | "pwar_ip_sm" | "pwar_ip_rp">,
+): number {
+  if (ip == null || !Number.isFinite(Number(ip)) || Number(ip) <= 0) {
+    return role === "SP" ? eq.pwar_ip_sp : role === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  }
+  return pitcherExpectedIp(derivePitcherDepthRole(ip, role) as AnyDepthRole, eq);
 }
 
 // Pitcher depth roles bucket into one of three projected-role categories
@@ -173,6 +214,7 @@ export function computePitcherWar(
 
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
+  DEFAULT_NIL_BASE_PER_WAR,
   getPositionValueMultiplier,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
@@ -204,24 +246,24 @@ export function computePitcherMarketValue(
     role: ProjectedPitcherRole;
     team: string | null;
   },
-  eq: PitchingEquationWeights,
+  // 2026-08-21 UNIFICATION: pitcher market now reads the SAME PTM source as the hitter
+  // (DEFAULT_NIL_TIER_MULTIPLIERS / model_config `nil_tier_*`), not the old `eq.market_tier_*`.
+  // WRITE paths pass model_config-resolved tiers + $/WAR via `opts` (resolveNilTiersFromConfig);
+  // omitting opts uses the shared code defaults (which carry the correct locked values).
+  opts?: {
+    dollarsPerWar?: number;
+    tiers?: typeof DEFAULT_NIL_TIER_MULTIPLIERS;
+  },
 ): number | null {
   if (pWar == null || !Number.isFinite(pWar)) return null;
   if (!canShowPitchingMarketValue(ctx.team, ctx.conference)) return null;
-  const tiers = {
-    sec: eq.market_tier_sec,
-    p4: eq.market_tier_acc_big12,
-    bigTen: eq.market_tier_big_ten,
-    strongMid: eq.market_tier_strong_mid,
-    lowMajor: eq.market_tier_low_major,
-    // JUCO tier: pitcher equation weights don't have a market_tier_juco field
-    // yet (D1-era schema). Mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco directly so
-    // JUCO pitchers don't fall through to undefined and produce NaN dollars.
-    juco: 0.35,
-  };
-  const ptm = getProgramTierMultiplierByConference(ctx.conference, tiers);
-  const pvm = getPitchingPvfForRole(ctx.role, eq);
-  const raw = pWar * eq.market_dollars_per_war * ptm * pvm;
+  const ptm = getProgramTierMultiplierByConference(ctx.conference, opts?.tiers ?? DEFAULT_NIL_TIER_MULTIPLIERS);
+  const dpw = opts?.dollarsPerWar ?? DEFAULT_NIL_BASE_PER_WAR;
+  // PVF dropped: a starter's role value is already in WAR through IP (85 vs 35
+  // innings), so a PVF premium on top double-counts. Market = pWAR × $/WAR × tier,
+  // matching the returner path + Team Builder. `ctx.role` kept for call-site parity.
+  void ctx.role;
+  const raw = pWar * dpw * ptm;
   return Math.max(0, raw);
 }
 
@@ -249,12 +291,12 @@ export function computeHitterOWar(
   const pa = depthRole != null
     ? paForHitterDepthRole(depthRole)
     : (projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 215);
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
+  const runsPerPa = RUNS_PER_PA;
+  const replacementRuns = (pa / 600) * REPLACEMENT_RUNS_PER_600PA;
   const offValue = (wrcPlus - 100) / 100;
   const raa = offValue * pa * runsPerPa;
   const rar = raa + replacementRuns;
-  return rar / 10;
+  return rar / RUNS_PER_WIN;
 }
 
 // ── Hitter market value — single canonical formula ───────────────────────────
@@ -265,7 +307,7 @@ export function computeHitterOWar(
 //
 // Returns null when oWAR is missing so callers can show "—".
 
-const HITTER_DOLLARS_PER_WAR = 25000;
+const HITTER_DOLLARS_PER_WAR = DEFAULT_NIL_BASE_PER_WAR; // shared $/WAR base (model_config nil_base_per_owar)
 
 export function computeHitterMarketValue(
   oWar: number | null | undefined,

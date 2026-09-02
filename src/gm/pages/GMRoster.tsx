@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type LocalProjectionTier, type RowMoney, type ScholarshipMode } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -11,30 +11,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check, Pencil, Plus, Save, SlidersHorizontal, StickyNote, Trash2 } from "lucide-react";
 import { CurrencyInput } from "@/components/CurrencyInput";
+import { money, HintLabel, DollarInput } from "@/gm/components/budgetPrimitives";
+import { SeasonBudgetFields, seedValues, valuesToCaps, type SeasonBudgetValues } from "@/gm/components/settings/SeasonBudgetFields";
+import { ActiveRosterPicker } from "@/gm/components/settings/ActiveRosterPicker";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
-import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { allocateNil } from "@/lib/nilAllocation";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
-const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
 const num = (n: number | null | undefined, d = 1) => (n == null ? "—" : n.toFixed(d));
 const REASON_LABEL: Record<string, string> = { draft: "Draft Pick", graduation: "Graduation", transfer: "Transfer", other: "Other" };
-
-/** A label with an on-hover tooltip (falls back to a plain span when no hint). */
-function HintLabel({ hint, className, style, children }: { hint?: string; className?: string; style?: CSSProperties; children: ReactNode }) {
-  if (!hint) return <span className={className} style={style}>{children}</span>;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={cn(className, "cursor-help")} style={style}>{children}</span>
-      </TooltipTrigger>
-      <TooltipContent>{hint}</TooltipContent>
-    </Tooltip>
-  );
-}
 // Matches Team Builder's Add Incoming Freshman position list exactly.
 const ADD_POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
 const TIER_OPTIONS: { value: LocalProjectionTier; label: string }[] = [
@@ -93,123 +81,37 @@ const equiv = (usedPct: number) => (usedPct / 100).toFixed(1); // sum of % → s
 
 
 /** Controlled dollar input for the budget popup — formats as $ while typing. */
-function DollarInput({ value, onChange }: { value: number | null; onChange: (n: number | null) => void }) {
-  return <CurrencyInput value={value} onChange={onChange} placeholder="$0" className="h-8 w-36 text-right text-sm font-mono tabular-nums" />;
-}
-
 /** Budget-setup popup: the GM edits the four allotments here (nowhere else),
  *  then Finalize sums them and pushes the total into the coach's Team Builder.
  *  The roster boxes stay read-only whole numbers. */
 type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown: GmOtherLine[] };
 function BudgetDialog({ open, onOpenChange, budget, coachTotal, derivedCaps, onSave, onFinalize, onSetScholarshipMode }: { open: boolean; onOpenChange: (o: boolean) => void; budget: GmBudget | null; coachTotal: number | null; derivedCaps: { nil: number; other: number }; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void; onSetScholarshipMode: (m: ScholarshipMode) => void }) {
-  const [rev, setRev] = useState<number | null>(null);
-  const [nil, setNil] = useState<number | null>(null);
-  const [other, setOther] = useState<number | null>(null);
-  const [sch, setSch] = useState<number | null>(null);
-  const [schText, setSchText] = useState(""); // text buffer so "11.7" is typeable
+  const [vals, setVals] = useState<SeasonBudgetValues>(() => seedValues(budget));
   const schMode = budget?.scholarship_mode ?? "pct";
   // Seed only on the open→ transition so toggling the scholarship unit (which
   // saves + refetches budget) doesn't wipe an unsaved edit.
   const wasOpen = useRef(false);
   useEffect(() => {
-    if (open && !wasOpen.current) {
-      setRev(budget?.rev_share_total ?? null);
-      setNil(budget?.nil_total ?? null);
-      setOther(budget?.other_total ?? null);
-      setSch(budget?.scholarship_total ?? null);
-      setSchText(budget?.scholarship_total != null ? String(budget.scholarship_total) : "");
-    }
+    if (open && !wasOpen.current) setVals(seedValues(budget));
     wasOpen.current = open;
   }, [open, budget]);
-  // NIL/Other here is the editable BASE (general, uncategorized) pool. The full
-  // cap = base + this build's Funding Sources categories (derivedCaps). Both
-  // add up, so the dialog shows base and the combined total side by side.
-  const nilCombined = (nil ?? 0) + derivedCaps.nil;
-  const otherCombined = (other ?? 0) + derivedCaps.other;
-  // Scholarship is aid, NOT part of the comp budget — excluded from the total.
-  const total = (rev ?? 0) + nilCombined + otherCombined;
-  const caps = (): BudgetCaps => ({
-    rev_share_total: rev,
-    nil_total: nil,
-    scholarship_total: sch,
-    other_total: other,
-    other_breakdown: [],
-  });
-  const field = (label: string, val: number | null, set: (n: number | null) => void, hint?: string) => (
-    <label className="flex items-center justify-between gap-4">
-      <HintLabel hint={hint} style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</HintLabel>
-      <DollarInput value={val} onChange={set} />
-    </label>
-  );
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader><DialogTitle style={OSWALD}>Season Budget</DialogTitle></DialogHeader>
-        <div className="space-y-3 py-1">
-          {field("Revenue Share", rev, setRev)}
-          {/* NIL base — general/uncategorized. Funding Sources vendors add on top. */}
-          <div>
-            <label className="flex items-center justify-between gap-4">
-              <HintLabel hint="General NIL pool. Funding Sources vendor categories add on top of this." style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">NIL</HintLabel>
-              <DollarInput value={nil} onChange={setNil} />
-            </label>
-            {derivedCaps.nil > 0 && (
-              <p className="mt-0.5 text-right text-[10px] tabular-nums text-muted-foreground">+ {money(derivedCaps.nil)} vendors = <span className="font-semibold text-[#D4AF37]">{money(nilCombined)}</span></p>
-            )}
-          </div>
-          {/* Scholarships: a COUNT of equivalencies (11.7) in % mode, or a dollar pool in $ mode.
-              The unit toggle lives here so the season budget owns it; the per-player
-              Scholarship column reflects whichever unit is chosen. */}
-          <label className="flex items-center justify-between gap-3">
-            <HintLabel hint={schMode === "dollar" ? "Total scholarship dollars available" : "Total scholarships available (equivalencies) — not part of the comp budget"} style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarships</HintLabel>
-            <div className="flex items-center gap-2">
-              <div className="flex gap-0.5 rounded-md border border-border/60 bg-muted/30 p-0.5">
-                {(["pct", "dollar"] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => onSetScholarshipMode(m)}
-                    className={cn("rounded px-2 py-0.5 text-xs font-semibold transition-colors", schMode === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-                    title={m === "pct" ? "Percent of one scholarship (equivalencies)" : "Flat dollar amount per player"}
-                  >
-                    {m === "pct" ? "%" : "$"}
-                  </button>
-                ))}
-              </div>
-              {schMode === "dollar"
-                ? <DollarInput value={sch} onChange={setSch} />
-                : <Input value={schText} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSchText(t); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7 or 35" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />}
-            </div>
-          </label>
-
-          {/* Other base — general/uncategorized. Funding Sources add on top. */}
-          <div>
-            <label className="flex items-center justify-between gap-4">
-              <HintLabel hint="General Other pool. Funding Sources Other categories add on top of this." style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Other</HintLabel>
-              <DollarInput value={other} onChange={setOther} />
-            </label>
-            {derivedCaps.other > 0 && (
-              <p className="mt-0.5 text-right text-[10px] tabular-nums text-muted-foreground">+ {money(derivedCaps.other)} sources = <span className="font-semibold text-[#D4AF37]">{money(otherCombined)}</span></p>
-            )}
-          </div>
-          <p className="text-[10px] leading-tight text-muted-foreground">NIL &amp; Other are typable here <span className="font-semibold text-foreground">and</span> on the Funding Sources tab — the two add together into each cap.</p>
-
-          <div className="flex items-center justify-between border-t pt-3">
-            <span className="text-xs font-bold uppercase tracking-wider" style={OSWALD}>Total</span>
-            <span className={cn("text-base font-bold font-mono tabular-nums", coachTotal != null && Math.round(total) === Math.round(coachTotal) ? "text-emerald-500" : coachTotal != null && total > 0 ? "text-amber-500" : "text-foreground")}>{money(total)}</span>
-          </div>
-          {coachTotal != null && (
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span className="uppercase tracking-wider" style={OSWALD}>Coach's Budget</span>
-              <span className="font-mono tabular-nums">{money(coachTotal)}</span>
-            </div>
-          )}
-        </div>
+        <SeasonBudgetFields
+          values={vals}
+          onChange={(patch) => setVals((v) => ({ ...v, ...patch }))}
+          schMode={schMode}
+          onSetScholarshipMode={onSetScholarshipMode}
+          derivedCaps={derivedCaps}
+          coachTotal={coachTotal}
+        />
         <DialogFooter className="gap-2 sm:gap-2">
           {/* Save = GM-only draft (this local session). Finalize & Push
               communicates the total to the coach — routed through a confirm. */}
-          <Button variant="outline" size="sm" onClick={() => { onSave(caps()); onOpenChange(false); }}>Save</Button>
-          <Button size="sm" onClick={() => { onFinalize(caps()); onOpenChange(false); }}>Finalize &amp; Push</Button>
+          <Button variant="outline" size="sm" onClick={() => { onSave(valuesToCaps(vals)); onOpenChange(false); }}>Save</Button>
+          <Button size="sm" onClick={() => { onFinalize(valuesToCaps(vals)); onOpenChange(false); }}>Finalize &amp; Push</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -243,7 +145,6 @@ export default function GMRoster() {
   const [departuresOpen, setDeparturesOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [activeRosterOpen, setActiveRosterOpen] = useState(false);
-  const [pendingLiveBuild, setPendingLiveBuild] = useState<string>("");
   // Per-player notes — authored + dated log (multiple per player).
   const [noteRow, setNoteRow] = useState<GmRow | null>(null);
   const openNote = (r: GmRow) => { setNoteRow(r); };
@@ -473,18 +374,21 @@ export default function GMRoster() {
   // Used figures reflect the local row drafts, not just the saved DB values.
   const allRows = [...gm.hitters, ...gm.pitchers];
 
-  // Projected Value = Team Builder's budget-share: a player's position-weighted
-  // WAR as a share of the roster's total, times the total budget. (The program-
-  // tier multiplier cancels in numerator/denominator, so it's omitted; the 33
-  // floor matches TB's RAW_WAR_BENCHMARK.) Null when no budget → fall back to
-  // Market Value.
-  const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
-  const rosterScore = allRows.reduce((s, r) => s + posWeightedWar(r), 0);
+  // Projected Value = the NIL allocation curve's share for this player: the roster
+  // ranked by WAR, budget distributed via allocateNil (rank-decay + budget-flex,
+  // sums to budget). PVM is NOT in the score (spec §1) — positional value is priced
+  // by the scarcity layer, not the allocation; PTM cancels within a roster, so raw
+  // WAR is the score. Null when no budget → fall back to Market Value. Mode is
+  // balanced for now; the GM top-heavy toggle threads in when the setting lands.
+  const nilAllocByRow = (() => {
+    const dollars = allocateNil(allRows.map((r) => Number(r.war ?? 0)), coachTotalBudget ?? 0, gm.budget?.nil_allocation_mode ?? "balanced");
+    const m = new Map<GmRow, number>();
+    allRows.forEach((r, i) => m.set(r, dollars[i]));
+    return m;
+  })();
   const projectedValue = (r: GmRow): number | null => {
-    const budget = coachTotalBudget ?? 0;
-    if (budget <= 0) return null;
-    const denom = Math.max(rosterScore, 33);
-    return denom > 0 ? Math.max(0, (posWeightedWar(r) / denom) * budget) : null;
+    if ((coachTotalBudget ?? 0) <= 0) return null;
+    return nilAllocByRow.get(r) ?? null;
   };
   const usedSum = (f: (m: RowMoney) => number | null) => allRows.reduce((s, r) => s + (f(effMoney(r)) ?? 0), 0);
   const revUsed = usedSum((m) => m.rev_share);
@@ -576,7 +480,7 @@ export default function GMRoster() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem onClick={() => setBudgetOpen(true)}>Edit Budget</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { setPendingLiveBuild(gm.liveBuildId ?? ""); setActiveRosterOpen(true); }}>Change Active Roster</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setActiveRosterOpen(true)}>Change Active Roster</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setDeparturesOpen(true)}>
                 Departures
                 {gm.pendingReasonCount > 0 && (
@@ -599,31 +503,11 @@ export default function GMRoster() {
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
           {/* Change Active Roster — pick which build is LIVE (drives every
-              player's profile, projected value, and pay). Tucked in GM Settings. */}
+              player's profile, projected value, and pay). Shared picker. */}
           <Dialog open={activeRosterOpen} onOpenChange={setActiveRosterOpen}>
             <DialogContent className="max-w-sm">
               <DialogHeader><DialogTitle style={OSWALD}>Change Active Roster</DialogTitle></DialogHeader>
-              <div className="space-y-3">
-                <p className="text-xs text-muted-foreground">The <span className="font-semibold text-foreground">active roster</span> is the one build that drives every player's profile, projected WAR / market value, and pay across the whole app. Changing it updates what everyone sees.</p>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Live build</label>
-                  <Select value={pendingLiveBuild} onValueChange={setPendingLiveBuild}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select build" /></SelectTrigger>
-                    <SelectContent>
-                      {gm.builds.map((b) => (
-                        <SelectItem key={b.id} value={b.id} className="text-sm">{b.name}{b.id === gm.liveBuildId ? " · current" : ""}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" size="sm" onClick={() => setActiveRosterOpen(false)}>Cancel</Button>
-                <Button size="sm" disabled={!pendingLiveBuild || pendingLiveBuild === gm.liveBuildId || gm.isChangingLiveBuild}
-                  onClick={() => { gm.setLiveBuild(pendingLiveBuild); setActiveRosterOpen(false); }}>
-                  {gm.isChangingLiveBuild ? "Changing…" : "Change & apply"}
-                </Button>
-              </DialogFooter>
+              <ActiveRosterPicker onApplied={() => setActiveRosterOpen(false)} />
             </DialogContent>
           </Dialog>
           {/* Per-player notes — authored + dated log, team-shared with the coach's

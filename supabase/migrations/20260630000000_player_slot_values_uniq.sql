@@ -1,15 +1,44 @@
--- Enforce one slot value per player per draft year.
+-- Dedupe player_slot_values, then enforce one row per player per draft year.
 --
--- Matches the importer's upsert key (src/lib/importSlotValues.ts):
---   onConflict: "draft_year, player_name, current_school"
+-- Fixes the War Room / Draft IQ duplicate rows. The importer
+-- (src/lib/importSlotValues.ts) upserts on (draft_year, player_name,
+-- current_school), but with no matching unique index, null-school players
+-- re-inserted on every import. Two flavors of duplicate resulted:
+--   1. exact dupes (same year/name/school) -- up to 134x per player
+--   2. school-vs-null splits under one player_id (e.g. "LSU" + NULL)
 --
--- NULLS NOT DISTINCT is the critical part: players whose current_school is
--- NULL otherwise never match the conflict target (NULL != NULL in SQL), so
--- every re-import inserts a fresh row. That is exactly what produced the
--- War Room / Draft IQ duplicates (Costello / Rizy / Moutzouridis / Bell each
--- piled up 134 identical rows), cleaned up on prod 2026-06-30. With this
--- index the existing importer dedupes as designed, null-school players included.
---
--- Additive + idempotent. The table is already deduped, so the index builds clean.
+-- We clean BOTH before adding the index so this is safe on ANY database:
+-- prod was deduped by hand first, but staging / fresh rebuilds need the
+-- cleanup baked in or CREATE UNIQUE INDEX would fail on dirty data.
+-- Idempotent: on an already-clean DB the DELETEs are no-ops and the index
+-- is skipped if it already exists.
+
+-- Pass 1: collapse exact duplicates, keep the lowest id.
+DELETE FROM public.player_slot_values
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY draft_year, player_name, current_school ORDER BY id
+    ) AS rn
+    FROM public.player_slot_values
+  ) t WHERE rn > 1
+);
+
+-- Pass 2: collapse school-vs-null splits for matched players, keeping the
+-- row that actually has a school (non-null current_school sorts first).
+DELETE FROM public.player_slot_values
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY player_id, draft_year
+      ORDER BY (current_school IS NULL), id
+    ) AS rn
+    FROM public.player_slot_values
+    WHERE player_id IS NOT NULL
+  ) t WHERE rn > 1
+);
+
+-- Enforce uniqueness so the importer's onConflict dedupes going forward.
+-- NULLS NOT DISTINCT so null current_school rows collapse too.
 CREATE UNIQUE INDEX IF NOT EXISTS player_slot_values_uniq
   ON public.player_slot_values (draft_year, player_name, current_school) NULLS NOT DISTINCT;

@@ -28,9 +28,9 @@
 import { createHash } from "node:crypto";
 
 import { runVeloDiffPipeline } from "../src/savant/lib/veloDiffPipeline.ts";
-import { runBreakingBallReclassification } from "../src/savant/lib/breakingBallReclassification.ts";
+import { runBreakingBallReclassification } from "../src/savant/lib/legacy_breakingBallReclassification.ts";
 import { runStuffPlusPipeline } from "../src/savant/lib/stuffPlusEngine.ts";
-import { rollupStuffPlusToMaster } from "../src/savant/lib/rollupStuffPlusToMaster.ts";
+import { rollupStuffPlusToMaster } from "../src/savant/lib/legacy_rollupStuffPlusToMaster.ts";
 import { computeAndStorePitchingScores } from "../src/lib/computeAndStoreScores.ts";
 
 const SEASON = 2026;

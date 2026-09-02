@@ -14,8 +14,9 @@ import {
   applyJucoOutlierRegression,
   JUCO_REGRESSION_CONFIG,
 } from "@/lib/transferWeightDefaults";
-import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { batsHandToHandedness } from "@/lib/parkFactors";
+import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
+import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
 import type { TransferProjectionInputs, TransferProjectionOutput } from "@/lib/transferProjection";
 
 // ---------- helpers (kept local so the precompute script doesn't need to
@@ -80,21 +81,23 @@ export type SeedPowerInputs = {
 export type BuildHitterTransferInputsArgs = {
   player: HitterTransferPlayer;
 
-  fromTeam: { id?: string | null; name?: string | null } | null;
-  toTeam: { id?: string | null; name?: string | null } | null;
+  fromTeam: { id?: string | null; name?: string | null; source_id?: string | null } | null;
+  toTeam: { id?: string | null; name?: string | null; source_id?: string | null } | null;
   fromConference: string | null;
   fromConferenceId?: string | null;
   toConference: string | null;
   toConferenceId?: string | null;
+  // 2026-08-21: schedule-FACED Stuff+ (team_season_stats.faced_stuff_plus) for INDEPENDENT
+  // from-programs — the pitchers this program's hitters actually faced, not its own conf Stuff+.
+  fromFacedStuff?: number | null;
 
-  // Stat-specific PR+ values already resolved upstream when available.
-  internals?: {
-    avg_power_rating?: number | null;
+  // COLLAPSE (2026-08-12): stored Master PR by source_player_id (single source, fresh),
+  // NOT the retired player_prediction_internals copy. seedPower live-compute removed (dead — never passed here).
+  masterPR?: {
+    ba_power_rating?: number | null;
     obp_power_rating?: number | null;
-    slg_power_rating?: number | null;
+    iso_power_rating?: number | null;
   } | null;
-  // Optional seed power fallback used to compute PR+ when internals are missing.
-  seedPower?: SeedPowerInputs;
 
   // Resolvers (caller wires these to its data source)
   resolveConferenceHitting: (
@@ -107,6 +110,7 @@ export type BuildHitterTransferInputsArgs = {
     teamName: string | null | undefined,
     metric: "avg" | "obp" | "iso",
     handedness: string | null,
+    sourceTeamId?: string | null, // 2026-08-21 (GAP 5): stable-program park path (preferred)
   ) => number | null;
 
   // Equation values from Supabase (model_config + equation_weights, already
@@ -142,8 +146,7 @@ export function buildHitterTransferInputs(
     fromConferenceId,
     toConference,
     toConferenceId,
-    internals,
-    seedPower,
+    masterPR,
     resolveConferenceHitting,
     resolveParkFactor,
     remoteEquationValues,
@@ -175,29 +178,12 @@ export function buildHitterTransferInputs(
     return (lastAvg ?? rawLastAvg) + adjIso;
   })();
 
-  // PR+ resolution: internals first, then compute from seed power data
-  let baPR = internals?.avg_power_rating ?? null;
-  let obpPR = internals?.obp_power_rating ?? null;
-  let isoPR = internals?.slg_power_rating ?? null;
-
-  if ((baPR == null || obpPR == null || isoPR == null) && seedPower) {
-    const computed = computeHitterPowerRatings({
-      contact: seedPower.contact ?? null,
-      lineDrive: seedPower.lineDrive ?? null,
-      avgExitVelo: seedPower.avgExitVelo ?? null,
-      popUp: seedPower.popUp ?? null,
-      bb: seedPower.bb ?? null,
-      chase: seedPower.chase ?? null,
-      barrel: seedPower.barrel ?? null,
-      ev90: seedPower.ev90 ?? null,
-      pull: seedPower.pull ?? null,
-      la10_30: seedPower.la10_30 ?? null,
-      gb: seedPower.gb ?? null,
-    } as any);
-    if (baPR == null) baPR = computed.baPlus;
-    if (obpPR == null) obpPR = computed.obpPlus;
-    if (isoPR == null) isoPR = computed.isoPlus;
-  }
+  // COLLAPSE (2026-08-12): PR+ from the stored Master by source_player_id (single source).
+  // scrubPR: 0/neg → null (missing input → blocked below), matching backfill/edge fn.
+  const scrubPR = (n: number | null | undefined) => (n != null && n > 0 ? n : null);
+  const baPR = scrubPR(masterPR?.ba_power_rating);
+  const obpPR = scrubPR(masterPR?.obp_power_rating);
+  const isoPR = scrubPR(masterPR?.iso_power_rating);
 
   if (!isJucoSource) {
     if (baPR == null) missingInputs.push("BA Power Rating+");
@@ -214,16 +200,21 @@ export function buildHitterTransferInputs(
   const toObpPlus = toConfStats?.obp_plus ?? null;
   const fromIsoPlus = fromConfStats?.iso_plus ?? null;
   const toIsoPlus = toConfStats?.iso_plus ?? null;
-  const fromStuff = fromConfStats?.stuff_plus ?? null;
+  // 2026-08-21: INDEPENDENT from-program → schedule-FACED Stuff+ (its own conf Stuff+
+  // reflects its own pitchers, not who its hitters faced). Falls back to conf Stuff+.
+  const isIndependentFrom = /independ/i.test(fromConference ?? "");
+  const fromStuff = (isIndependentFrom && args.fromFacedStuff != null)
+    ? Number(args.fromFacedStuff)
+    : (fromConfStats?.stuff_plus ?? null);
   const toStuff = toConfStats?.stuff_plus ?? null;
 
   const playerHand = batsHandToHandedness(player.bats_hand);
-  const fromParkAvgRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "avg", playerHand);
-  const toParkAvgRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "avg", playerHand);
-  const fromParkObpRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "obp", playerHand);
-  const toParkObpRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "obp", playerHand);
-  const fromParkIsoRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "iso", playerHand);
-  const toParkIsoRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "iso", playerHand);
+  const fromParkAvgRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "avg", playerHand, fromTeam?.source_id);
+  const toParkAvgRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "avg", playerHand, toTeam?.source_id);
+  const fromParkObpRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "obp", playerHand, fromTeam?.source_id);
+  const toParkObpRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "obp", playerHand, toTeam?.source_id);
+  const fromParkIsoRaw = resolveParkFactor(fromTeam?.id, fromTeam?.name, "iso", playerHand, fromTeam?.source_id);
+  const toParkIsoRaw = resolveParkFactor(toTeam?.id, toTeam?.name, "iso", playerHand, toTeam?.source_id);
 
   if (fromAvgPlus == null) missingInputs.push("From AVG+");
   if (toAvgPlus == null) missingInputs.push("To AVG+");
@@ -256,11 +247,20 @@ export function buildHitterTransferInputs(
   const ncaaAvgBA = toRate(readEquationValue("t_ba_ncaa_avg", 0.280, remoteEquationValues));
   const ncaaAvgOBP = toRate(readEquationValue("t_obp_ncaa_avg", 0.385, remoteEquationValues));
   const ncaaAvgISO = toRate(readEquationValue("t_iso_ncaa_avg", 0.162, remoteEquationValues));
-  const ncaaAvgWrc = toRate(readEquationValue("t_wrc_ncaa_avg", 0.364, remoteEquationValues));
-  const baStdPower = readEquationValue("t_ba_std_pr", 31.297, remoteEquationValues);
+  const ncaaAvgWrc = toRate(readEquationValue("t_wrc_ncaa_avg", 0.3782, remoteEquationValues));
+  const baStdPower = readEquationValue("t_ba_std_pr", 29.99699, remoteEquationValues);   // std_pr on 2026 pitch-log ratings (PA≥60); was 31.297
   const baStdNcaa = toRate(readEquationValue("t_ba_std_ncaa", 0.043455, remoteEquationValues));
-  const obpStdPower = readEquationValue("t_obp_std_pr", 28.889, remoteEquationValues);
+  const obpStdPower = readEquationValue("t_obp_std_pr", 31.89504, remoteEquationValues); // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
   const obpStdNcaa = toRate(readEquationValue("t_obp_std_ncaa", 0.046781, remoteEquationValues));
+
+  // ★ PER-STAT RATING CENTRES (2026-09-01). The z-shift divides `(rating - CENTRE) / sd`, and the
+  //   hitter power ratings are NOT centred at 100 on D1/PA>=100 (BA 102.588 · OBP 99.977 · ISO
+  //   103.235 on staging). Each metric uses ITS OWN rating and ITS OWN centre — `h_*_pr_center`.
+  // ⚠ These are the PLAYER's ratings. Do NOT confuse them with `from/to*Plus`, which are CONFERENCE
+  //   avg+/obp+/iso+ values carrying the from→to environment delta and nothing about the player.
+  const baPrCenter = readEquationValue("h_ba_pr_center", 102.9887, remoteEquationValues);
+  const obpPrCenter = readEquationValue("h_obp_pr_center", 100.3109, remoteEquationValues);
+  const isoPrCenter = readEquationValue("h_iso_pr_center", 103.7939, remoteEquationValues);
 
   const srcW = transferWeightsForSource(player.division || undefined);
   const jucoWeight = (k: keyof typeof srcW, d1: number) => (isJucoSource ? srcW[k] : d1);
@@ -276,13 +276,13 @@ export function buildHitterTransferInputs(
   const obpParkWeight = toWeight(jucoWeight("t_obp_park_weight", readEquationValue("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues)));
   const isoParkWeight = toWeight(jucoWeight("t_iso_park_weight", readEquationValue("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues)));
 
-  const isoStdPower = readEquationValue("t_iso_std_power", 45.423, remoteEquationValues);
+  const isoStdPower = readEquationValue("t_iso_std_power", 44.91252, remoteEquationValues); // std_pr on 2026 pitch-log ratings (PA≥60); was 45.423
   const isoStdNcaa = toRate(readEquationValue("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
 
-  const wObp = toRate(readEquationValue("r_w_obp", 0.45, remoteEquationValues));
-  const wSlg = toRate(readEquationValue("r_w_slg", 0.30, remoteEquationValues));
-  const wAvg = toRate(readEquationValue("r_w_avg", 0.15, remoteEquationValues));
-  const wIso = toRate(readEquationValue("r_w_iso", 0.10, remoteEquationValues));
+  const wObp = toRate(readEquationValue("r_w_obp", 0.691, remoteEquationValues));
+  const wSlg = toRate(readEquationValue("r_w_slg", 0.235, remoteEquationValues));
+  const wAvg = toRate(readEquationValue("r_w_avg", 0, remoteEquationValues));
+  const wIso = toRate(readEquationValue("r_w_iso", 0, remoteEquationValues));
 
   // JUCO sources: PRs aren't used (power weight=0). Coerce nulls to 100 (NCAA
   // avg) so the math doesn't NaN out — gets multiplied by 0 anyway.
@@ -295,6 +295,9 @@ export function buildHitterTransferInputs(
     baPR: safePR(baPR),
     obpPR: safePR(obpPR),
     isoPR: safePR(isoPR),
+    baPrCenter,
+    obpPrCenter,
+    isoPrCenter,
     fromAvgPlus: fromAvgPlus as number,
     toAvgPlus: toAvgPlus as number,
     fromObpPlus: fromObpPlus as number,
@@ -387,14 +390,14 @@ export function applyTransferPostprocess(
   const pSlg = pAvg + pIso;
   const pOps = pObp + pSlg;
   const { wObp, wSlg, wAvg, wIso, ncaaAvgWrc } = inputs;
-  const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
+  const pWrc = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObp, pSlg, pAvg, pIso);
   const pWrcPlus = ncaaAvgWrc === 0 ? null : Math.round((pWrc / ncaaAvgWrc) * 100);
   const offValue = pWrcPlus == null ? null : (pWrcPlus - 100) / 100;
   const pa = opts?.plateAppearances ?? 260;
-  const runsPerPa = opts?.runsPerPa ?? 0.13;
-  const replacementRuns = (pa / 600) * 25;
+  const runsPerPa = opts?.runsPerPa ?? RUNS_PER_PA;
+  const replacementRuns = (pa / 600) * REPLACEMENT_RUNS_PER_600PA;
   const raa = offValue == null ? null : offValue * pa * runsPerPa;
   const rar = raa == null ? null : raa + replacementRuns;
-  const owar = rar == null ? null : rar / 10;
+  const owar = rar == null ? null : rar / RUNS_PER_WIN;
   return { pAvg, pObp, pSlg, pOps, pIso, pWrc, pWrcPlus, owar };
 }

@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
@@ -10,11 +9,8 @@ import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 import {
   computePitcherWar,
   computePitcherMarketValue,
-  computeHitterOWar,
-  computeHitterMarketValue,
-  defaultHitterDepthRoleFromActualPa,
-  paForHitterDepthRole,
   pitcherExpectedIp,
+  derivePitcherDepthRole,
 } from "@/lib/depthRoles";
 
 // Fetch player meta needed to derive stored p_war / o_war / market_value
@@ -36,32 +32,18 @@ async function fetchPlayerMetaForDerived(playerId: string | null | undefined) {
   };
 }
 
-// Derive pitcher depth role from real IP + coarse role. Mirrors
-// defaultPitcherDepthRoleFromIp in src/pages/team-builder/helpers.ts.
-function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP" | "SM"): string {
-  const r: "SP" | "RP" = role === "SP" ? "SP" : "RP";
-  const ipNum = Number(ip);
-  if (!Number.isFinite(ipNum) || ipNum <= 0) {
-    return r === "SP" ? "weekend_starter" : "high_leverage_reliever";
-  }
-  if (r === "SP") {
-    if (ipNum >= 65) return "weekend_starter";
-    if (ipNum >= 35) return "weekday_starter";
-    return "swing_starter";
-  }
-  if (ipNum >= 40) return "workhorse_reliever";
-  if (ipNum >= 25) return "high_leverage_reliever";
-  if (ipNum >= 15) return "mid_leverage_reliever";
-  if (ipNum >= 8) return "low_impact_reliever";
-  return "specialist_reliever";
-}
+// derivePitcherDepthRole now lives in src/lib/depthRoles.ts (shared with the live
+// projection paths so precompute + overlay agree on depth → projected IP).
 
 // Compute pitcher derived columns from a freshly-recalculated row.
-function derivePitcherStored(
+// Exported so the precompute scripts derive projected_ip / p_war / depth role
+// through the SAME path as the recalc engine (no coarse-role IP fork).
+export function derivePitcherStored(
   pRvPlus: number | null | undefined,
   role: "SP" | "RP" | "SM",
   meta: { conference: string | null; team: string | null; is_twp?: boolean; ip?: number | null },
   eq: ReturnType<typeof readPitchingWeights>,
+  nilTiers?: Record<string, number>, // 2026-08-21: PTM tiers from model_config nil_tier_<code> (single source)
 ) {
   // Derive granular depth role from real IP, then use depth-role-specific
   // projected IP for the pWAR formula. Previously used coarse role IP
@@ -70,7 +52,7 @@ function derivePitcherStored(
   const pitcherDepthRole = derivePitcherDepthRole(meta.ip, role);
   const projectedIp = pitcherExpectedIp(pitcherDepthRole as any, eq);
   const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
-  const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, eq);
+  const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, { dollarsPerWar: eq.market_dollars_per_war, tiers: nilTiers });
   // For TWPs: route MV to twp_pitcher_market_value and NULL out the shared
   // market_value column so the hitter loop's market_value write doesn't get
   // stomped (and so any unconverted read fails loud).
@@ -80,24 +62,9 @@ function derivePitcherStored(
   return { p_war: pWar, market_value: marketValue, projected_ip: projectedIp, pitcher_depth_role: pitcherDepthRole };
 }
 
-function deriveHitterStored(
-  pWrcPlus: number | null | undefined,
-  meta: { conference: string | null; position: string | null; pa: number | null; is_twp?: boolean },
-) {
-  // Derive depth role from raw PA → tier PA, matching per-team precompute math.
-  // Without this, oWAR is computed against raw PA which produces values that
-  // differ from what TB/PlayerProfile display via the depth-role overlay.
-  const hitterDepthRole = defaultHitterDepthRoleFromActualPa(meta.pa);
-  const projectedPa = paForHitterDepthRole(hitterDepthRole);
-  const oWar = computeHitterOWar(pWrcPlus, projectedPa, hitterDepthRole);
-  const marketValue = computeHitterMarketValue(oWar, { conference: meta.conference, position: meta.position });
-  // For TWPs: route MV to twp_hitter_market_value and NULL the shared
-  // market_value column. Pitcher loop's derive does the same on its side.
-  if (meta.is_twp) {
-    return { o_war: oWar, market_value: null, twp_hitter_market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
-  }
-  return { o_war: oWar, market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
-}
+// deriveHitterStored REMOVED 2026-08-23 — it was dead (0 callers) and the only path that priced
+// hitter market off o_war (not total_hitter_war). The live writers are precompute-transfer-projections
+// (total_hitter_war) + the edge fn; the recalc path doesn't use it. Removed to kill the o_war outlier.
 
 type PredictionRow = {
   id: string;
@@ -147,7 +114,9 @@ const DEFAULT_CLASS_BASES: Record<string, { avg: number; obp: number; slg: numbe
 };
 const DEFAULT_DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
 const DEFAULT_DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
-const DEFAULT_WRC_WEIGHTS = { obp: 0.45, slg: 0.3, avg: 0.15, iso: 0.1 };
+// C1 (2026-08-10): est_wOBA = 0.011 + 0.691·OBP + 0.235·SLG (÷ ncaaWrc 0.3782). AVG/ISO redundant → 0.
+// The `intercept` centers league-avg at 100 on the true-wOBA denom; see ncaa_league_averages_2026.json.
+const DEFAULT_WRC_WEIGHTS = { intercept: 0.011, obp: 0.691, slg: 0.235, avg: 0, iso: 0 };
 
 interface ReturnerConfig {
   ncaaAvg: number;
@@ -158,13 +127,19 @@ interface ReturnerConfig {
   obpStdPower: number;
   obpStdNcaa: number;
   ncaaPR: number;
+  /** Population mean of the BA power rating (`h_ba_pr_center`). NOT 100 — see loadEngineConfig. */
+  baPrCenter: number;
+  /** Population mean of the OBP power rating (`h_obp_pr_center`). */
+  obpPrCenter: number;
+  /** Population mean of the ISO power rating (`h_iso_pr_center`). */
+  isoPrCenter: number;
   powerWeight: number;
   ncaaWrc: number;
   classBases: Record<string, { avg: number; obp: number; iso: number }>;
   devCoeffs: { avg: number; obp: number; iso: number };
   isoStdNcaa: number;
   isoStdPower: number;
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   defaultDevAgg: number;
   baDampTier1Max: number;
   baDampTier2Max: number;
@@ -203,7 +178,7 @@ interface TransferConfig {
   isoParkWeight: number;
   isoStdNcaa: number;
   isoStdPower: number;
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   ncaaWrc: number;
 }
 
@@ -285,13 +260,26 @@ function normalizeClassTransition(raw?: string | null): string {
 }
 
 export async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineConfig> {
-  // Load from "Equation Weights" table (primary), fall back to "model_config" (legacy)
-  let eqWeights: Map<string, number>;
-  try {
-    eqWeights = await loadEquationWeightsMap(2025);
-  } catch {
-    eqWeights = new Map();
-  }
+  // 🛑 LEGACY SOURCE REMOVED 2026-09-01. This used to read the `"Equation Weights"` table at
+  //    Season 2025 and treat it as the PRIMARY source, overriding the code defaults below.
+  //
+  // ★ THAT WAS GATE B. Prod's returner wRC+ ran a DIFFERENT EQUATION than the code because of it:
+  //      code    intercept .011 · obp .691 · slg .235 · avg 0   · iso 0    ÷ .3782
+  //      legacy  intercept .011 · obp .450 · slg .300 · avg .15 · iso .10  ÷ .364
+  //    Across 5,122 D1 returner hitters the legacy formula reproduced the STORED p_wrc_plus for
+  //    5,122 (100%); the canonical formula for 1,164 (23%). Staging looked correct only because its
+  //    copy of the table was EMPTY, so the `eqWeights.size > 0` guard below skipped the override —
+  //    same code, different equation, purely because one database had rows and the other did not.
+  //    The table is now `"Equation Weights_LEGACY_2025"` on both databases.
+  //
+  // ⛔ Do NOT reintroduce a table read here. `model_config` (model_type='admin_ui', season=2026) is
+  //    the single source of truth. Anything this function needs must come from there or from the
+  //    code defaults.
+  // ⚠ `eqWeights` is KEPT — it is still the carrier for PER-TEAM overrides below
+  //    ([[project_per_program_equation_overrides]]), which are a real feature, currently 0 rows on
+  //    both databases. With no global source it starts empty, so the `size > 0` guard means the
+  //    override block only fires for a team that actually has overrides. That is the intended shape.
+  const eqWeights: Map<string, number> = new Map();
   // Per-team overrides on equation_weights keys win over globals when provided.
   if (customerTeamId) {
     const { data: ovRows } = await (supabase as any)
@@ -304,14 +292,16 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
   }
   const eq = (key: string) => eqWeights.get(key) ?? eqWeights.get(key.toLowerCase());
 
-  const { data, error } = await supabase
-    .from("model_config")
-    .select("model_type, config_key, config_value");
-
-  if (error && eqWeights.size === 0) throw error;
-
-  let returnerRows = ((data || []) as any[]).filter((row) => row.model_type === "returner");
-  let transferRows = ((data || []) as any[]).filter((row) => row.model_type === "transfer");
+  // 🛑 DEAD CODE REMOVED 2026-09-01 — this query was unfiltered by season AND filtered to
+  //    `model_type IN ('returner','transfer')`, but `model_config` contains ONLY `admin_ui` rows
+  //    (prod 2025:140 / 2026:220 · staging 2025:157 / 2026:220). Both arrays were ALWAYS empty, so
+  //    this branch has never contributed a value. It also carried a season bug in waiting: no
+  //    `.eq("season", …)`, so it would have pulled 2025 and 2026 together the moment such rows existed.
+  //    The per-model_type override overlay that followed it is preserved below.
+  const returnerRowsBase: any[] = [];
+  const transferRowsBase: any[] = [];
+  let returnerRows = returnerRowsBase;
+  let transferRows = transferRowsBase;
 
   // Layer model_type-scoped overrides on top of the legacy model_config rows
   if (customerTeamId) {
@@ -337,13 +327,19 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     ncaaAvg: 0.28,
     ncaaObp: 0.385,
     ncaaIso: 0.162,
-    baStdPower: 31.297,
+    baStdPower: 29.99699,   // std_pr on 2026 pitch-log ratings (PA≥60); was 31.297
     baStdNcaa: 0.043455,
-    obpStdPower: 28.889,
+    obpStdPower: 31.89504,  // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
     obpStdNcaa: 0.046781,
     ncaaPR: 100,
+    // 🛑 The hitter power ratings are NOT centred at 100. These literals mirror
+    //    `process-precompute-jobs/index.ts:471-473` so the batch and the onboarding edge
+    //    function behave identically offline; `model_config` h_*_pr_center overrides both.
+    baPrCenter: 102.9887,
+    obpPrCenter: 100.3109,
+    isoPrCenter: 103.7939,
     powerWeight: 0.7,
-    ncaaWrc: 0.364,
+    ncaaWrc: 0.3782,
     classBases: {
       FS: { avg: 0.03, obp: 0.03, iso: 0.045 },
       SJ: { avg: 0.02, obp: 0.02, iso: 0.03 },
@@ -352,7 +348,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     },
     devCoeffs: { avg: 0.06, obp: 0.06, iso: 0.08 },
     isoStdNcaa: 0.07849797197,
-    isoStdPower: 45.423,
+    isoStdPower: 44.91252,  // std_pr on 2026 pitch-log ratings (PA≥60); was 45.423
     wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
     defaultDevAgg: 0,
     baDampTier1Max: 0.35,
@@ -406,6 +402,40 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     }
   }
 
+  // ★★★ 2026-09-01 — HITTER RATING CENTRES FROM model_config (h_<stat>_pr_center) ★★★
+  //   The z-shift below divides `(rating - CENTRE) / sd`. It used `ncaaPR = 100`, but the hitter
+  //   power ratings are NOT centred at 100 on D1 (staging: BA 102.588 · OBP 99.977 · ISO 103.235).
+  //   The onboarding edge function has read these since the C1 fix; the BATCH did not, so a newly
+  //   onboarded program's hitters were computed on a different centre than every existing team's.
+  //   Measured 2026-09-01: the hitter dry run moved 0/3,794 rows because of this gap.
+  // ⚠ These are the ONLY model_config keys this hitter path reads. The 41 `r_*` / 26 `t_*` keys
+  //   are still INERT here — see the note at the top of this function.
+  {
+    const { data: ctrRows, error: ctrErr } = await (supabase as any)
+      .from("model_config")
+      .select("config_key, config_value")
+      .eq("model_type", "admin_ui")
+      .eq("season", 2026)
+      .in("config_key", ["h_ba_pr_center", "h_obp_pr_center", "h_iso_pr_center"]);
+    if (ctrErr) {
+      console.warn(`[engineConfig] h_*_pr_center read FAILED (${ctrErr.message}) — falling back to code defaults`);
+    } else {
+      const seen = new Set<string>();
+      for (const r of (ctrRows || []) as Array<{ config_key: string; config_value: any }>) {
+        const v = Number(r.config_value);
+        if (!Number.isFinite(v)) continue;
+        seen.add(r.config_key);
+        if (r.config_key === "h_ba_pr_center") returner.baPrCenter = v;
+        else if (r.config_key === "h_obp_pr_center") returner.obpPrCenter = v;
+        else if (r.config_key === "h_iso_pr_center") returner.isoPrCenter = v;
+      }
+      // LOUD FALLBACK — a missing key must never be a silent substitution.
+      for (const k of ["h_ba_pr_center", "h_obp_pr_center", "h_iso_pr_center"]) {
+        if (!seen.has(k)) console.warn(`[engineConfig] ${k} MISSING from model_config — using code default`);
+      }
+    }
+  }
+
   // Override with "Equation Weights" table values (Supabase, primary source)
   if (eqWeights.size > 0) {
     const eqn = (key: string) => eq(key);
@@ -426,6 +456,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     });
     applyEq("iso_std_ncaa", (v) => { returner.isoStdNcaa = toStatRate(v); });
     applyEq("iso_std_power", (v) => { returner.isoStdPower = v; });
+    applyEq("w_intercept", (v) => { returner.wrcWeights.intercept = toWeight(v); });
     applyEq("w_obp", (v) => { returner.wrcWeights.obp = toWeight(v); });
     applyEq("w_slg", (v) => { returner.wrcWeights.slg = toWeight(v); });
     applyEq("w_avg", (v) => { returner.wrcWeights.avg = toWeight(v); });
@@ -437,9 +468,9 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     baNcaaAvg: 0.28,
     obpNcaaAvg: 0.385,
     isoNcaaAvg: 0.162,
-    baStdPower: 31.297,
+    baStdPower: 29.99699,   // std_pr on 2026 pitch-log ratings (PA≥60); was 31.297
     baStdNcaa: 0.043455,
-    obpStdPower: 28.889,
+    obpStdPower: 31.89504,  // std_pr on 2026 pitch-log ratings (PA≥60); was 28.889
     obpStdNcaa: 0.046781,
     baPowerWeight: 0.7,
     obpPowerWeight: 0.7,
@@ -453,9 +484,9 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     obpParkWeight: TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight,
     isoParkWeight: TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight,
     isoStdNcaa: 0.07849797197,
-    isoStdPower: 45.423,
+    isoStdPower: 44.91252,  // std_pr on 2026 pitch-log ratings (PA≥60); was 45.423
     wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
-    ncaaWrc: 0.364,
+    ncaaWrc: 0.3782,
   };
 
   for (const row of transferRows) {
@@ -482,6 +513,7 @@ export async function loadEngineConfig(customerTeamId?: string | null): Promise<
     else if (k === "iso_park_weight") transfer.isoParkWeight = v;
     else if (k === "iso_std_ncaa") transfer.isoStdNcaa = v;
     else if (k === "iso_std_power") transfer.isoStdPower = v;
+    else if (k === "wrc_weight_intercept" || k === "w_intercept") transfer.wrcWeights.intercept = v;
     else if (k.startsWith("wrc_weight_")) {
       const stat = k.replace("wrc_weight_", "") as "obp" | "slg" | "avg" | "iso";
       if (["obp", "slg", "avg", "iso"].includes(stat)) transfer.wrcWeights[stat] = v;
@@ -539,7 +571,7 @@ export function recalcReturner(
     ? null
     : (() => {
       const safeBaStdPower = config.baStdPower === 0 ? 1 : config.baStdPower;
-      const scaledBa = config.ncaaAvg + (((baPlus - config.ncaaPR) / safeBaStdPower) * config.baStdNcaa);
+      const scaledBa = config.ncaaAvg + (((baPlus - config.baPrCenter) / safeBaStdPower) * config.baStdNcaa);
       const baBlended = (fromAvg * (1 - effectivePowerWeight)) + (scaledBa * effectivePowerWeight);
       const baProjected = baBlended * (1 + bases.avg + (devAgg * config.devCoeffs.avg));
       return round3(normalizeProjectedRate(baProjected));
@@ -549,7 +581,7 @@ export function recalcReturner(
     ? null
     : (() => {
       const safeObpStdPower = config.obpStdPower === 0 ? 1 : config.obpStdPower;
-      const scaledObp = config.ncaaObp + (((obpPlus - config.ncaaPR) / safeObpStdPower) * config.obpStdNcaa);
+      const scaledObp = config.ncaaObp + (((obpPlus - config.obpPrCenter) / safeObpStdPower) * config.obpStdNcaa);
       const obpBlended = (fromObp * (1 - effectivePowerWeight)) + (scaledObp * effectivePowerWeight);
       const obpProjected = obpBlended * (1 + bases.obp + (devAgg * config.devCoeffs.obp));
       return round3(normalizeProjectedRate(obpProjected));
@@ -559,7 +591,7 @@ export function recalcReturner(
     ? null
     : (() => {
       const lastIso = fromSlg - fromAvg;
-      const scaledIso = config.ncaaIso + (((isoPlus - config.ncaaPR) / config.isoStdPower) * config.isoStdNcaa);
+      const scaledIso = config.ncaaIso + (((isoPlus - config.isoPrCenter) / config.isoStdPower) * config.isoStdNcaa);
       const blendedIso = (lastIso * (1 - effectivePowerWeight)) + (scaledIso * effectivePowerWeight);
       return round3(normalizeProjectedRate(blendedIso * (1 + bases.iso + (devAgg * config.devCoeffs.iso))));
     })();
@@ -568,7 +600,7 @@ export function recalcReturner(
   const pOps = pObp == null || pSlg == null ? null : round3(normalizeProjectedRate(pObp + pSlg));
   const pWrc = pObp == null || pSlg == null || pAvg == null || pIso == null
     ? null
-    : round3((config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
+    : round3(config.wrcWeights.intercept + (config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
   const pWrcPlus = pWrc == null ? null : Math.round((pWrc / config.ncaaWrc) * 100);
 
   return {
@@ -584,6 +616,12 @@ export function recalcReturner(
   };
 }
 
+// ⛔ DEAD — ZERO CALLERS (the router that used it was removed 2026-08-20; see note below).
+//    It is ALSO WRONG: it scales BA/OBP/ISO off the single OVERALL rating
+//    (`power_rating_plus` = Hitter Master `overall_power_rating`). Hitting does NOT use an overall
+//    rating — each metric must use its OWN power rating, as `transferProjection.ts` (baPR/obpPR/isoPR)
+//    and the returner path do. If this is ever revived, port it to per-stat ratings + per-stat
+//    centres FIRST. Left centred at 100 deliberately: do not "fix" the centre on the wrong input.
 function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
   const fromAvgRaw = normalizeRateInput(Number(pred.from_avg));
   const fromObpRaw = normalizeRateInput(Number(pred.from_obp));
@@ -652,7 +690,7 @@ function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
 
   const pSlg = round3(normalizeProjectedRate(pAvg + pIso));
   const pOps = round3(normalizeProjectedRate(pObp + pSlg));
-  const pWrc = round3((config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
+  const pWrc = round3(config.wrcWeights.intercept + (config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
   const pWrcPlus = config.ncaaWrc === 0 ? null : Math.round((pWrc / config.ncaaWrc) * 100);
 
   return {
@@ -666,10 +704,18 @@ function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
   };
 }
 
-function calculatePrediction(pred: PredictionRow, config: EngineConfig, overrides?: UpdateFields) {
-  if (pred.model_type === "transfer") return recalcTransfer(pred, config.transfer);
-  return recalcReturner(pred, config.returner, undefined, overrides);
-}
+// ⚠ REFERENCE, NOT RUNTIME (2026-08-20): `recalcReturner` is no longer called by
+// the app runtime — `bulkRecalculatePredictionsLocal` is a stub that invokes the
+// `recalculate-prediction` edge fn, and PlayerProfile / TeamBuilder retired the
+// live per-row recompute (they read stored predictions). It is kept as (a) the
+// canonical SD-blend reference — the edge fn's `recalc()` is a verbatim port — and
+// (b) a live dependency of scripts/backfill-2027-hitter-returners.ts, which calls
+// it directly to seed 2027 returner rows. So it is NOT dead and is retained.
+// Its hardcoded config defaults were refreshed to the 2026 pitch-log std_pr above.
+//
+// The former `calculatePrediction(pred, config, overrides)` wrapper was DELETED
+// (2026-08-20): it had no callers (dead), only routed transfer→recalcTransfer /
+// returner→recalcReturner. Call those directly if a router is ever needed again.
 
 // ── Pitcher path ───────────────────────────────────────────────────────────
 
@@ -836,6 +882,7 @@ function recalcPitcher(
     role: scouting?.Role ?? null,
     g: scouting?.G ?? null,
     gs: scouting?.GS ?? null,
+    ip: (scouting as any)?.IP ?? null,
     team: player.team ?? scouting?.Team ?? null,
     teamId: player.teamId ?? scouting?.TeamID ?? null,
     conference: player.conference ?? scouting?.Conference ?? null,
@@ -880,765 +927,41 @@ function recalcPitcher(
   };
 }
 
-async function fetchPitcherContext(
-  predictionId: string,
-  pred: PredictionRow,
-): Promise<{
-  eq: ReturnType<typeof readPitchingWeights>;
-  powerEq: Record<string, number>;
-  parkMap: ParkFactorsMap;
-  scouting: PitcherScoutingRow | null;
-  player: PitcherPlayerContext;
-  storedPrPlus: StoredPitcherPrPlus | null;
-  coachRoleOverride: "SP" | "RP" | "SM" | null;
-}> {
-  const eq = readPitchingWeights();
-  const [powerEq, parkMap, internalsResp] = await Promise.all([
-    loadPitchingPowerEq(),
-    fetchParkFactorsMap(2025),
-    supabase
-      .from("player_prediction_internals")
-      .select("era_power_rating, fip_power_rating, whip_power_rating, k9_power_rating, bb9_power_rating, hr9_power_rating")
-      .eq("prediction_id", predictionId)
-      .maybeSingle(),
-  ]);
-
-  // Layer per-team pitcher equation overrides on top of the global eq object.
-  // Keys that match named fields on the eq shape win over globals when the
-  // prediction row carries a customer_team_id.
-  const customerTeamId = (pred as any).customer_team_id ?? null;
-  if (customerTeamId) {
-    const { data: ovRows } = await (supabase as any)
-      .from("customer_team_equation_overrides")
-      .select("config_key, config_value")
-      .eq("customer_team_id", customerTeamId)
-      .in("model_type", ["pitching", "transfer", "global"]);
-    for (const r of (ovRows || []) as Array<{ config_key: string; config_value: number }>) {
-      if (r.config_key in (eq as any)) {
-        (eq as any)[r.config_key] = Number(r.config_value);
-      }
-    }
-  }
-
-  const internal = internalsResp.data as any;
-  const internalsPr = internal
-    ? {
-        era: internal.era_power_rating ?? null,
-        fip: internal.fip_power_rating ?? null,
-        whip: internal.whip_power_rating ?? null,
-        k9: internal.k9_power_rating ?? null,
-        bb9: internal.bb9_power_rating ?? null,
-        hr9: internal.hr9_power_rating ?? null,
-      }
-    : null;
-
-  let scouting: PitcherScoutingRow | null = null;
-  let player: PitcherPlayerContext = { team: null, teamId: null, conference: null };
-  let coachRoleOverride: "SP" | "RP" | "SM" | null = null;
-
-  if (pred.player_id) {
-    const { data: playerRow } = await supabase
-      .from("players")
-      .select("source_player_id, team, team_id, conference")
-      .eq("id", pred.player_id)
-      .maybeSingle();
-    if (playerRow) {
-      player = {
-        team: (playerRow as any).team ?? null,
-        teamId: (playerRow as any).team_id ?? null,
-        conference: (playerRow as any).conference ?? null,
-      };
-      const sourceId = (playerRow as any).source_player_id;
-      if (sourceId) {
-        const { data: pm } = await supabase
-          .from("Pitching Master")
-          .select(PITCHER_SCOUTING_SELECT)
-          .eq("source_player_id", sourceId)
-          .eq("Season", CURRENT_SEASON)
-          .maybeSingle();
-        if (pm) scouting = mapPitchingMasterRow(pm);
-      }
-    }
-
-    // Coach role override lives in a separate table, NOT in pred.pitcher_role
-    // (which is the engine's own previous output).
-    const { data: roleRow } = await supabase
-      .from("pitcher_role_overrides")
-      .select("role")
-      .eq("player_id", pred.player_id)
-      .maybeSingle();
-    if (roleRow) coachRoleOverride = normalizeRole((roleRow as any).role);
-  }
-
-  // Stored PR+ sources: Pitching Master is the canonical source for all six rates.
-  //
-  // ⚠️ Do NOT fall back to `internalsPr` — that object holds the RAW
-  // `*_power_rating` values from `player_prediction_internals` (per the
-  // table schema). Those are NOT PR+ — they're the unnormalized power
-  // ratings BEFORE division by the NCAA average. For ERA/FIP/WHIP they
-  // happen to equal PR+ because their `*_ncaa_avg_power_rating` constants
-  // are 100; for K9/BB9/HR9 they DON'T (e.g. NCAA avg K9 power rating
-  // ≈ 138.86), so passing the raw value into projectPitchingRate as
-  // `prPlus` produces a silently wrong projection. See
-  // `feedback_pr_plus_vs_power_rating_trap.md` in memory for context.
-  const storedPrPlus: StoredPitcherPrPlus = {
-    era: scouting?.era_pr_plus ?? null,
-    fip: scouting?.fip_pr_plus ?? null,
-    whip: scouting?.whip_pr_plus ?? null,
-    k9: scouting?.k9_pr_plus ?? null,
-    bb9: scouting?.bb9_pr_plus ?? null,
-    hr9: scouting?.hr9_pr_plus ?? null,
+// bulkRecalculatePredictionsLocal — RETIRED (Step 4). The returner-hitter
+// recompute now lives in the Deno edge fn supabase/functions/recalculate-prediction
+// (the SD-blend, reading model_config admin_ui r_* keys). This local copy was dead:
+// it referenced the deleted fetchAllPredictionsForReturnerMode (ReferenceError /
+// TS2304) and carried a stale pitcher-bulk path. Kept as a thin wrapper so the two
+// call sites (AdminDashboard bulk button + runDataCascade) keep working by routing
+// to the edge fn's bulk_recalculate action.
+//
+// NOTE: the edge fn bulk path recomputes returner + transfer hitters. Pitcher bulk
+// recompute is NOT covered here (it was already broken in the old local path); track
+// pitcher bulk recompute separately if/when needed.
+export async function bulkRecalculatePredictionsLocal(_season: number = PROJECTION_SEASON) {
+  void _season;
+  const { data, error } = await supabase.functions.invoke("recalculate-prediction", {
+    body: { action: "bulk_recalculate" },
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as {
+    success?: boolean;
+    updated?: number;
+    updated_returner?: number;
+    updated_transfer?: number;
+    errors?: number;
+    total?: number;
+    error?: string;
   };
-  void internalsPr;
-
-  return { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride };
-}
-
-async function fetchAllPredictionsForReturnerMode(season = 2026): Promise<PredictionRow[]> {
-  const out: PredictionRow[] = [];
-  const pageSize = 1000;
-
-  for (let page = 0; ; page++) {
-    const from = page * pageSize;
-    const to = from + pageSize - 1;
-    // Include hitter rows (from_avg set) AND pitcher rows (from_era set).
-    // Stub rows with neither populated are still skipped.
-    const { data, error } = await supabase
-      .from("player_predictions")
-      .select("*")
-      .eq("season", season)
-      .eq("variant", "regular")
-      .in("model_type", ["returner", "transfer"])
-      .in("status", ["active", "departed"])
-      .or("from_avg.not.is.null,from_era.not.is.null")
-      .range(from, to);
-
-    if (error) throw error;
-    const rows = (data || []) as PredictionRow[];
-    out.push(...rows);
-    if (rows.length < pageSize) break;
+  if (result.success === false || result.error) {
+    throw new Error(result.error ?? "Bulk recalculation failed");
   }
-
-  return out;
-}
-
-export async function recalculatePredictionById(predictionId: string, updates: UpdateFields = {}) {
-  const { data: pred, error: predErr } = await supabase
-    .from("player_predictions")
-    .select("*")
-    .eq("id", predictionId)
-    .single();
-  if (predErr || !pred) throw predErr || new Error("Prediction not found");
-
-  const merged = { ...(pred as PredictionRow), ...updates };
-
-  // Per-team equation overrides flow when the prediction row carries a
-  // customer_team_id (set by the eager pre-compute pipeline). Global rows
-  // (customer_team_id = NULL) keep using the universal weights.
-  const customerTeamId = (merged as any).customer_team_id ?? null;
-
-  // Detect two-way players. For is_twp=true players we run BOTH the hitter
-  // path AND the pitcher path and merge into a single row so dashboards on
-  // both sides can read canonical projections from one prediction row.
-  let isTwp = false;
-  if (merged.player_id) {
-    const { data: playerRow } = await supabase
-      .from("players")
-      .select("is_twp")
-      .eq("id", merged.player_id)
-      .maybeSingle();
-    isTwp = !!(playerRow as any)?.is_twp;
-  }
-
-  // Detect each side from the stat columns (engine still keys off
-  // from_avg / from_era to know what data is available).
-  const hasPitcherStats = isPitcherPred(merged);
-  const hasHitterStats = merged.from_avg != null || merged.from_obp != null || merged.from_slg != null;
-
-  // ─── TWP path: run both sides and merge ─────────────────────────────
-  if (isTwp && hasPitcherStats && hasHitterStats) {
-    const config = await loadEngineConfig(customerTeamId);
-
-    // Pitcher half
-    const { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride } = await fetchPitcherContext(predictionId, merged);
-    const { predictionUpdate: pitcherUpdate, internalsUpdate } = recalcPitcher(merged, eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride, updates);
-
-    // Hitter half
-    let powerContext: ReturnerPowerContext | undefined;
-    let combinedUsed = false;
-    if (merged.model_type === "returner") {
-      const { data: internal } = await supabase
-        .from("player_prediction_internals")
-        .select("avg_power_rating, obp_power_rating, slg_power_rating")
-        .eq("prediction_id", predictionId)
-        .maybeSingle();
-      const manual = MANUAL_INTERNAL_OVERRIDES[predictionId];
-      powerContext = {
-        baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? null,
-        obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
-        isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
-      };
-      if (merged.player_id) {
-        const { data: playerRow2 } = await supabase
-          .from("players")
-          .select("source_player_id")
-          .eq("id", merged.player_id)
-          .maybeSingle();
-        const sourceId = (playerRow2 as any)?.source_player_id;
-        if (sourceId) {
-          const { data: hm } = await supabase
-            .from("Hitter Master")
-            .select("combined_used")
-            .eq("source_player_id", sourceId)
-            .eq("Season", PRIOR_SEASON)
-            .maybeSingle();
-          combinedUsed = !!(hm as any)?.combined_used;
-        }
-      }
-    }
-    const hitterResult = merged.model_type === "returner"
-      ? recalcReturner(merged, config.returner, powerContext, updates, combinedUsed)
-      : recalcTransfer(merged, config.transfer);
-
-    const { error: unlockErr } = await supabase
-      .from("player_predictions")
-      .update({ locked: false })
-      .eq("id", predictionId);
-    if (unlockErr) throw unlockErr;
-
-    const extraFields: Record<string, any> = {};
-    if (updates.class_transition !== undefined) {
-      extraFields.class_transition_overridden = true;
-    }
-    // Derive stored p_war + o_war + market_value so depth/dev/role changes
-    // reflect in displays without re-running the precompute scripts.
-    //
-    // TWP path: derive functions route MV to twp_hitter_market_value /
-    // twp_pitcher_market_value and NULL the shared market_value column, so
-    // neither side's MV write stomps the other. No more "pitcher side wins"
-    // hack — each side has its own destination column.
-    const meta = await fetchPlayerMetaForDerived(merged.player_id);
-    const pitcherRole = ((updates as any).pitcher_role ?? (pitcherUpdate as any).pitcher_role ?? merged.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
-    const pitcherDerived = derivePitcherStored((pitcherUpdate as any).p_rv_plus, pitcherRole, meta, eq);
-    const hitterDerived = deriveHitterStored((hitterResult as any).p_wrc_plus, meta);
-    // Merge hitter result first, then pitcher fields — they target disjoint
-    // columns (p_avg/p_obp/... vs p_era/p_fip/...). For TWPs, derived puts
-    // each side's MV in a different column so order no longer matters.
-    const { error: updateErr } = await supabase
-      .from("player_predictions")
-      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...hitterDerived, ...pitcherDerived, ...extraFields, locked: true })
-      .eq("id", predictionId);
-    if (updateErr) throw updateErr;
-
-    const { error: internalsErr } = await supabase
-      .from("player_prediction_internals")
-      .upsert({ prediction_id: predictionId, ...internalsUpdate }, { onConflict: "prediction_id" });
-    if (internalsErr) console.warn("[recalcTwp] internals upsert failed:", internalsErr.message);
-
-    return { success: true, prediction: { ...hitterResult, ...pitcherUpdate } };
-  }
-
-  // ─── Pitcher path (non-TWP or TWP missing hitter data) ──────────────
-  if (hasPitcherStats) {
-    const { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride } = await fetchPitcherContext(predictionId, merged);
-    const { predictionUpdate, internalsUpdate } = recalcPitcher(merged, eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride, updates);
-
-    const { error: unlockErr } = await supabase
-      .from("player_predictions")
-      .update({ locked: false })
-      .eq("id", predictionId);
-    if (unlockErr) throw unlockErr;
-
-    const extraFields: Record<string, any> = {};
-    if (updates.class_transition !== undefined) {
-      extraFields.class_transition_overridden = true;
-    }
-    // Derive stored p_war + market_value so dev_agg / class / role changes
-    // reflect in profile/dashboard without re-running the precompute scripts.
-    const meta = await fetchPlayerMetaForDerived(merged.player_id);
-    const pitcherRole = ((updates as any).pitcher_role ?? (predictionUpdate as any).pitcher_role ?? merged.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
-    const pitcherDerived = derivePitcherStored((predictionUpdate as any).p_rv_plus, pitcherRole, meta, eq);
-    const { error: updateErr } = await supabase
-      .from("player_predictions")
-      .update({ ...predictionUpdate, ...pitcherDerived, ...extraFields, locked: true })
-      .eq("id", predictionId);
-    if (updateErr) throw updateErr;
-
-    // Upsert internals (pitcher power ratings) — keyed by prediction_id.
-    const { error: internalsErr } = await supabase
-      .from("player_prediction_internals")
-      .upsert({ prediction_id: predictionId, ...internalsUpdate }, { onConflict: "prediction_id" });
-    if (internalsErr) {
-      // Non-fatal: predictions succeeded, internals are admin-only visibility.
-      console.warn("[recalcPitcher] internals upsert failed:", internalsErr.message);
-    }
-
-    return { success: true, prediction: predictionUpdate };
-  }
-
-  // ─── Hitter path (unchanged) ────────────────────────────────────────
-  const config = await loadEngineConfig(customerTeamId);
-  let powerContext: ReturnerPowerContext | undefined;
-  let combinedUsed = false;
-  if (merged.model_type === "returner") {
-    const { data: internal } = await supabase
-      .from("player_prediction_internals")
-      .select("avg_power_rating, obp_power_rating, slg_power_rating")
-      .eq("prediction_id", predictionId)
-      .maybeSingle();
-    const manual = MANUAL_INTERNAL_OVERRIDES[predictionId];
-    powerContext = {
-      baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? null,
-      obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
-      isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
-    };
-    // Look up the player's current-season Hitter Master row to check if
-    // combined stats were applied (low-PA player). If yes, the projection
-    // engine will bump power weight 0.7 → 0.9 to lean harder on scouting.
-    if (merged.player_id) {
-      const { data: playerRow } = await supabase
-        .from("players")
-        .select("source_player_id")
-        .eq("id", merged.player_id)
-        .maybeSingle();
-      const sourceId = (playerRow as any)?.source_player_id;
-      if (sourceId) {
-        const { data: hm } = await supabase
-          .from("Hitter Master")
-          .select("combined_used")
-          .eq("source_player_id", sourceId)
-          .eq("Season", PRIOR_SEASON)
-          .maybeSingle();
-        combinedUsed = !!(hm as any)?.combined_used;
-      }
-    }
-  }
-  const result = merged.model_type === "returner"
-    ? recalcReturner(merged, config.returner, powerContext, updates, combinedUsed)
-    : recalcTransfer(merged, config.transfer);
-
-  const { error: unlockErr } = await supabase
-    .from("player_predictions")
-    .update({ locked: false })
-    .eq("id", predictionId);
-  if (unlockErr) throw unlockErr;
-
-  // If the coach explicitly updated class_transition, mark it as manually
-  // overridden so the auto-infer batch job won't reset it later.
-  const extraFields: Record<string, any> = {};
-  if (updates.class_transition !== undefined) {
-    extraFields.class_transition_overridden = true;
-  }
-  // Derive stored o_war + market_value so dev_agg / class / depth changes
-  // reflect in profile/dashboard without re-running the precompute scripts.
-  const hitterMeta = await fetchPlayerMetaForDerived(merged.player_id);
-  const hitterDerived = deriveHitterStored((result as any).p_wrc_plus, hitterMeta);
-  const { error: updateErr } = await supabase
-    .from("player_predictions")
-    .update({ ...updates, ...result, ...hitterDerived, ...extraFields, locked: true })
-    .eq("id", predictionId);
-  if (updateErr) throw updateErr;
-
-  return { success: true, prediction: result };
-}
-
-export async function bulkRecalculatePredictionsLocal(season: number = PROJECTION_SEASON) {
-  const config = await loadEngineConfig();
-  const allPreds = await fetchAllPredictionsForReturnerMode(season);
-  // A prediction row qualifies for the hitter pass when it has any hitter
-  // from_* stat populated, and for the pitcher pass when it has from_era.
-  // Two-way players (rows with BOTH) appear in both passes; the hitter loop
-  // writes the hitter-side columns and the pitcher loop writes the pitcher-side
-  // columns, so each half lands on the same row without stomping the other.
-  const hasHitterStats = (p: PredictionRow) =>
-    p.from_avg != null || p.from_obp != null || p.from_slg != null;
-  const hitterPreds = allPreds.filter(hasHitterStats);
-  const pitcherPreds = allPreds.filter((p) => isPitcherPred(p));
-  const preds = hitterPreds; // keep original var name for the existing hitter loop below
-
-  // Pre-fetch power ratings keyed by players.id (the FK predictions use), so the
-  // fallback lookup actually finds anything. We resolve the join via Hitter Master
-  // -> source_player_id -> players.id.
-  const powerByPlayerId = new Map<string, { contact: number | null; lineDrive: number | null; avgExitVelo: number | null; popUp: number | null; bb: number | null; chase: number | null; barrel: number | null; ev90: number | null; pull: number | null; la10_30: number | null; gb: number | null }>();
-  // 1) source_player_id -> players.id
-  const sourceToPlayerId = new Map<string, string>();
-  let plFrom = 0;
-  while (true) {
-    const { data } = await supabase.from("players").select("id, source_player_id").not("source_player_id", "is", null).range(plFrom, plFrom + 999);
-    for (const r of data || []) {
-      if ((r as any).source_player_id) sourceToPlayerId.set((r as any).source_player_id, (r as any).id);
-    }
-    if (!data || data.length < 1000) break;
-    plFrom += 1000;
-  }
-  // 2) Hitter Master scouting -> bucket under players.id
-  // Use CURRENT_SEASON for the Master lookup (the just-imported season's
-  // actuals). The `season` arg drives which prediction rows we recalc
-  // (PROJECTION_SEASON), but Master data is always CURRENT_SEASON.
-  let pfrom = 0;
-  while (true) {
-    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", CURRENT_SEASON).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
-    for (const r of data || []) {
-      const playerId = r.source_player_id ? sourceToPlayerId.get(r.source_player_id) : null;
-      if (!playerId) continue;
-      powerByPlayerId.set(playerId, { contact: r.contact, lineDrive: r.line_drive, avgExitVelo: r.avg_exit_velo, popUp: r.pop_up, bb: r.bb, chase: r.chase, barrel: r.barrel, ev90: r.ev90, pull: r.pull, la10_30: r.la_10_30, gb: r.gb });
-    }
-    if (!data || data.length < 1000) break;
-    pfrom += 1000;
-  }
-
-  // Inline power derivation for fallback
-  const normalCdf = (x: number) => { const sign = x < 0 ? -1 : 1; const ax = Math.abs(x) / Math.sqrt(2); const t = 1 / (1 + 0.3275911 * ax); const erf = sign * (1 - (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) * Math.exp(-ax * ax)); return 0.5 * (1 + erf); };
-  const scoreN = (v: number | null, avg: number, sd: number, lib = false) => { if (v == null || sd <= 0) return null; const p = normalCdf((v - avg) / sd) * 100; return lib ? 100 - p : p; };
-  const derivePower = (r: typeof powerByPlayerId extends Map<string, infer V> ? V : never) => {
-    const cs = scoreN(r.contact, 77.1, 6.6);
-    const ld = scoreN(r.lineDrive, 20.9, 4.31);
-    const ev = scoreN(r.avgExitVelo, 86.2, 4.28);
-    const pu = scoreN(r.popUp, 7.9, 3.37, true);
-    const bb = scoreN(r.bb, 11.4, 3.57);
-    const ch = scoreN(r.chase, 23.1, 5.58, true);
-    const ba = scoreN(r.barrel, 17.3, 7.89);
-    const e9 = scoreN(r.ev90, 103.1, 3.97);
-    const pl = scoreN(r.pull, 36.5, 8.03);
-    const la = scoreN(r.la10_30, 29, 6.81);
-    const gb = scoreN(r.gb, 43.2, 8.0, true);
-    const baPower = cs != null && ld != null && ev != null && pu != null ? (0.4*cs + 0.25*ld + 0.2*ev + 0.15*pu) : null;
-    const obpPower = cs != null && ld != null && ev != null && pu != null && bb != null && ch != null ? (0.35*cs + 0.2*ld + 0.15*ev + 0.1*pu + 0.15*bb + 0.05*ch) : null;
-    const isoPower = ba != null && e9 != null && pl != null && la != null && gb != null ? (0.3*ba + 0.25*e9 + 0.2*pl + 0.15*la + 0.1*gb) : null;
-    const baPR = baPower != null ? baPower / 50 * 100 : null;
-    const obpPR = obpPower != null ? obpPower / 50 * 100 : null;
-    const isoPR = isoPower != null ? isoPower / 50 * 100 : null;
-    return { baPlus: baPR, obpPlus: obpPR, isoPlus: isoPR };
-  };
-
-  // Pre-fetch player meta for both hitter + pitcher loops. Needed by
-  // deriveHitterStored/derivePitcherStored to compute o_war / p_war /
-  // market_value with depth-role-derived tier PA (the same math the per-team
-  // precompute and display overlays use).
-  const allPlayerIds = Array.from(
-    new Set([...hitterPreds, ...pitcherPreds].map((p) => p.player_id).filter((v): v is string => !!v)),
-  );
-  const metaByPlayerId = new Map<string, { conference: string | null; team: string | null; position: string | null; pa: number | null; ip: number | null; is_twp: boolean; division: string | null }>();
-  for (let i = 0; i < allPlayerIds.length; i += 100) {
-    const chunk = allPlayerIds.slice(i, i + 100);
-    const { data } = await supabase
-      .from("players")
-      .select("id, conference, team, position, pa, ip, is_twp, division")
-      .in("id", chunk);
-    for (const r of (data || []) as any[]) {
-      metaByPlayerId.set(r.id, { conference: r.conference, team: r.team, position: r.position, pa: r.pa, ip: r.ip, is_twp: !!r.is_twp, division: r.division ?? null });
-    }
-  }
-
-  // Pitcher equation weights — needed by derivePitcherStored.
-  const pitchingEqForDerive = readPitchingWeights();
-
-  let updated = 0;
-  let errors = 0;
-  let updatedReturner = 0;
-  let updatedTransfer = 0;
-  const BATCH = 25;
-
-  for (let i = 0; i < preds.length; i += BATCH) {
-    const batch = preds.slice(i, i + BATCH);
-    const batchIds = batch.map((p) => p.id);
-    const { data: internals } = await supabase
-      .from("player_prediction_internals")
-      .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
-      .in("prediction_id", batchIds);
-    const internalByPredictionId = new Map<string, { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null }>();
-    for (const row of (internals || [])) {
-      internalByPredictionId.set(row.prediction_id, row as { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null });
-    }
-
-    await Promise.all(
-      batch.map(async (pred) => {
-        try {
-          let result: ReturnType<typeof recalcReturner> | ReturnType<typeof recalcTransfer>;
-          if (pred.model_type === "transfer") {
-            result = recalcTransfer(pred, config.transfer);
-          } else {
-            const internal = internalByPredictionId.get(pred.id);
-            const manual = MANUAL_INTERNAL_OVERRIDES[pred.id];
-            // No fallback: if internals are missing, we leave projections null
-            // rather than computing from hardcoded baselines which drift from
-            // the canonical Hitter Master scores. The 80-some players with
-            // missing internals need their internals backfilled properly.
-            const powerContext: ReturnerPowerContext = {
-              baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? null,
-              obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
-              isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
-            };
-            result = recalcReturner(pred, config.returner, powerContext);
-          }
-          // Derive stored o_war / market_value / projected_pa / hitter_depth_role
-          // so the regular variant row carries the same authoritative values that
-          // the per-team precompute writes to its rows. Without this, regular rows
-          // stay NULL and reads fall back to overlay-on-stale math.
-          // SAFETY: only spread derived fields when recalc produced a real
-          // p_wrc_plus — otherwise we'd write NULL on top of populated values
-          // for rows where the recalc fell through (missing inputs, etc.).
-          const hitterMetaForDerive = (pred.player_id ? metaByPlayerId.get(pred.player_id) : null)
-            ?? { conference: null, team: null, position: null, pa: null, is_twp: false };
-          const hitterDerived = (result as any).p_wrc_plus != null
-            ? deriveHitterStored((result as any).p_wrc_plus, hitterMetaForDerive)
-            : {};
-
-          // The protect_locked_predictions trigger blocks updates when locked=true,
-          // so we MUST unlock before writing the recalculated fields, then re-lock.
-          let lastErr: any = null;
-          let success = false;
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const { error: unlockErr } = await supabase
-                .from("player_predictions")
-                .update({ locked: false })
-                .eq("id", pred.id);
-              if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
-              const { error: e } = await supabase
-                .from("player_predictions")
-                .update({ ...result, ...hitterDerived, locked: true })
-                .eq("id", pred.id);
-              if (!e) { success = true; break; }
-              lastErr = e;
-            } catch (e) {
-              lastErr = e;
-            }
-            await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
-          }
-          const error = success ? null : lastErr;
-
-          if (error) {
-            errors += 1;
-            return;
-          }
-
-          updated += 1;
-          if (pred.model_type === "transfer") updatedTransfer += 1;
-          else updatedReturner += 1;
-        } catch {
-          errors += 1;
-        }
-      }),
-    );
-  }
-
-  // ─── Pitcher bulk path ─────────────────────────────────────────────
-  // Preload everything we need so each batch is DB-round-trip-light.
-  let updatedPitcher = 0;
-  if (pitcherPreds.length > 0) {
-    const pitchingEq = readPitchingWeights();
-    const [pitchingPowerEq, parkMap] = await Promise.all([
-      loadPitchingPowerEq(season),
-      fetchParkFactorsMap(season),
-    ]);
-
-    // player_id -> { team, teamId, conference, source_player_id }
-    // NOTE: chunk size capped at 100 to avoid Supabase .in() URL-length
-    // overflow — 1000 UUIDs per .in() silently truncates results at ~8KB.
-    const playerCtxById = new Map<string, { team: string | null; teamId: string | null; conference: string | null; sourceId: string | null }>();
-    const pitcherPlayerIds = Array.from(new Set(pitcherPreds.map((p) => p.player_id).filter((v): v is string => !!v)));
-    for (let i = 0; i < pitcherPlayerIds.length; i += 100) {
-      const chunk = pitcherPlayerIds.slice(i, i + 100);
-      const { data } = await supabase
-        .from("players")
-        .select("id, source_player_id, team, team_id, conference")
-        .in("id", chunk);
-      for (const r of (data || []) as any[]) {
-        playerCtxById.set(r.id, {
-          team: r.team ?? null,
-          teamId: r.team_id ?? null,
-          conference: r.conference ?? null,
-          sourceId: r.source_player_id ?? null,
-        });
-      }
-    }
-
-    // Coach role overrides from pitcher_role_overrides table, keyed by player_id.
-    // Deliberately NOT using pred.pitcher_role (which is the engine's own
-    // previous output — treating it as an override creates a feedback loop).
-    const coachRoleByPlayerId = new Map<string, "SP" | "RP" | "SM">();
-    if (pitcherPlayerIds.length > 0) {
-      for (let i = 0; i < pitcherPlayerIds.length; i += 100) {
-        const chunk = pitcherPlayerIds.slice(i, i + 100);
-        const { data } = await supabase
-          .from("pitcher_role_overrides")
-          .select("player_id, role")
-          .in("player_id", chunk);
-        for (const r of (data || []) as any[]) {
-          const normalized = normalizeRole(r.role);
-          if (normalized && r.player_id) coachRoleByPlayerId.set(r.player_id, normalized);
-        }
-      }
-    }
-
-    // source_player_id -> Pitching Master scouting row (Season-scoped)
-    const scoutingBySourceId = new Map<string, PitcherScoutingRow>();
-    const pitcherSourceIds = Array.from(
-      new Set(
-        Array.from(playerCtxById.values())
-          .map((v) => v.sourceId)
-          .filter((v): v is string => !!v),
-      ),
-    );
-    for (let i = 0; i < pitcherSourceIds.length; i += 100) {
-      const chunk = pitcherSourceIds.slice(i, i + 100);
-      const { data } = await supabase
-        .from("Pitching Master")
-        .select(PITCHER_SCOUTING_SELECT)
-        .eq("Season", CURRENT_SEASON)
-        .in("source_player_id", chunk);
-      for (const r of (data || []) as any[]) {
-        if (r.source_player_id) scoutingBySourceId.set(r.source_player_id, mapPitchingMasterRow(r));
-      }
-    }
-
-    const PITCHER_BATCH = 25;
-    for (let i = 0; i < pitcherPreds.length; i += PITCHER_BATCH) {
-      const batch = pitcherPreds.slice(i, i + PITCHER_BATCH);
-
-      await Promise.all(
-        batch.map(async (pred) => {
-          try {
-            const ctx = pred.player_id ? playerCtxById.get(pred.player_id) : null;
-            const scouting = ctx?.sourceId ? scoutingBySourceId.get(ctx.sourceId) ?? null : null;
-            const player = {
-              team: ctx?.team ?? null,
-              teamId: ctx?.teamId ?? null,
-              conference: ctx?.conference ?? null,
-            };
-            // Pitching Master is the canonical source for all six rate PR+
-            // values. Do NOT fall back to internals — see the comment in
-            // fetchPitcherContext for why: internals stores raw
-            // `*_power_rating`, which equals PR+ only for ERA/FIP/WHIP
-            // (NCAA avg = 100); for K9/BB9/HR9 it's a different scale and
-            // using it as `prPlus` produces silently wrong projections.
-            const storedPrPlus: StoredPitcherPrPlus = {
-              era: scouting?.era_pr_plus ?? null,
-              fip: scouting?.fip_pr_plus ?? null,
-              whip: scouting?.whip_pr_plus ?? null,
-              k9: scouting?.k9_pr_plus ?? null,
-              bb9: scouting?.bb9_pr_plus ?? null,
-              hr9: scouting?.hr9_pr_plus ?? null,
-            };
-            const coachRoleOverride = pred.player_id ? coachRoleByPlayerId.get(pred.player_id) ?? null : null;
-            const pitcherMeta = pred.player_id ? metaByPlayerId.get(pred.player_id) : null;
-
-            // ── JUCO branch ──────────────────────────────────────────────
-            // JUCO returner pitcher regular rows DO NOT go through recalcPitcher.
-            // Mirrors the hitter JUCO branch in scripts/backfill-2027-hitter-returners.ts:
-            // verbatim passthrough of 2026 actuals → 2027 projection columns.
-            // Without this branch, JUCO arms get D1 NCAA-baseline regression
-            // applied (e.g. Blais's 2.45 ERA gets pulled to ~4.20).
-            const isJucoPitcher = pitcherMeta?.division === "NJCAA_D1";
-            let predictionUpdate: any;
-            let internalsUpdate: any = {};
-            if (isJucoPitcher) {
-              const result = projectJucoReturnerPitcher({
-                from_era:  pred.from_era,
-                from_fip:  pred.from_fip,
-                from_whip: pred.from_whip,
-                from_k9:   pred.from_k9,
-                from_bb9:  pred.from_bb9,
-                from_hr9:  pred.from_hr9,
-                actualIp:  pitcherMeta?.ip ?? null,
-                inferredRole: scouting?.Role ?? null,
-                games:        scouting?.G ?? null,
-                gamesStarted: scouting?.GS ?? null,
-                conference:   pitcherMeta?.conference ?? null,
-                team:         pitcherMeta?.team ?? null,
-                eq: pitchingEqForDerive,
-              });
-              predictionUpdate = {
-                p_era: result.p_era, p_fip: result.p_fip, p_whip: result.p_whip,
-                p_k9: result.p_k9, p_bb9: result.p_bb9, p_hr9: result.p_hr9,
-                p_rv_plus: result.p_rv_plus,
-                pitcher_role: result.pitcher_role,
-                pitcher_depth_role: result.pitcher_depth_role,
-                p_war: result.p_war,
-                market_value: result.market_value,
-                projected_ip: result.projected_ip,
-              };
-            } else {
-              const r = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride);
-              predictionUpdate = r.predictionUpdate;
-              internalsUpdate = r.internalsUpdate;
-            }
-
-            // Derive stored p_war / market_value / projected_ip the same way
-            // the per-team precompute does, so the regular variant row carries
-            // authoritative values instead of staying NULL.
-            // SAFETY: only spread derived fields when recalc produced a real
-            // p_rv_plus — otherwise we'd write NULL on top of populated values
-            // for rows where the recalc fell through (e.g. returner pitcher with
-            // missing scouting inputs).
-            const pitcherRole = ((predictionUpdate as any).pitcher_role ?? pred.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
-            const pitcherIsTwp = pitcherMeta?.is_twp ?? false;
-            const pitcherIp = pitcherMeta?.ip ?? null;
-            // JUCO already supplied p_war / market_value / projected_ip via
-            // projectJucoReturnerPitcher — skipping derive avoids the D1
-            // conference/park factor re-introduction that would defeat the
-            // verbatim passthrough.
-            const pitcherDerived = isJucoPitcher
-              ? {}
-              : (predictionUpdate as any).p_rv_plus != null
-              ? derivePitcherStored(
-                  (predictionUpdate as any).p_rv_plus,
-                  pitcherRole,
-                  { conference: ctx?.conference ?? null, team: ctx?.team ?? null, is_twp: pitcherIsTwp, ip: pitcherIp },
-                  pitchingEqForDerive,
-                )
-              : {};
-
-            // Unlock → update → re-lock (same pattern as hitter loop).
-            let lastErr: any = null;
-            let success = false;
-            for (let attempt = 0; attempt < 3; attempt++) {
-              try {
-                const { error: unlockErr } = await supabase
-                  .from("player_predictions")
-                  .update({ locked: false })
-                  .eq("id", pred.id);
-                if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
-                const { error: e } = await supabase
-                  .from("player_predictions")
-                  .update({ ...predictionUpdate, ...pitcherDerived, locked: true })
-                  .eq("id", pred.id);
-                if (!e) { success = true; break; }
-                lastErr = e;
-              } catch (e) {
-                lastErr = e;
-              }
-              await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
-            }
-            if (!success) {
-              errors += 1;
-              return;
-            }
-
-            // Non-fatal internals upsert.
-            await supabase
-              .from("player_prediction_internals")
-              .upsert({ prediction_id: pred.id, ...internalsUpdate }, { onConflict: "prediction_id" });
-
-            updated += 1;
-            updatedPitcher += 1;
-          } catch {
-            errors += 1;
-          }
-        }),
-      );
-    }
-
-  }
-
   return {
     success: true,
-    updated,
-    updated_returner: updatedReturner,
-    updated_transfer: updatedTransfer,
-    updated_pitcher: updatedPitcher,
-    errors,
-    total: allPreds.length,
+    updated: result.updated ?? 0,
+    updated_returner: result.updated_returner ?? 0,
+    updated_transfer: result.updated_transfer ?? 0,
+    errors: result.errors ?? 0,
+    total: result.total ?? 0,
   };
 }

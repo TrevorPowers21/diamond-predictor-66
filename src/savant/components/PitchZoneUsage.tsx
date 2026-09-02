@@ -12,8 +12,9 @@
  */
 import { useMemo, useState } from "react";
 import type { PitchLocationRow } from "@/savant/hooks/usePitchLogPitchLocation";
+import { NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_BORDER = "#1f2d52";
+
 
 type Zone13 = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | "UL" | "UR" | "LL" | "LR";
 
@@ -84,7 +85,6 @@ function cornerCellColor(pct: number | null): string {
   return `rgba(30, 79, 216, ${alpha.toFixed(2)})`;
 }
 
-const GOLD = "#D4AF37";
 
 function StatBlock({ label, value }: { label: string; value: string }) {
   return (

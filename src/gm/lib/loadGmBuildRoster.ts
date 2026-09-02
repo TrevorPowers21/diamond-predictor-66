@@ -1,7 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { parseBuildPlayerMeta, projectedEligibilityClass } from "@/pages/team-builder/helpers";
-import { effectivePitcherWar, effectiveHitterWar, effectiveMarket, pitcherSessionRole } from "@/lib/effectiveProjection";
+import { pitcherSessionRole } from "@/lib/effectiveProjection";
+import { pickHitterWar } from "@/lib/twpMarketValue";
 import type { GmRow } from "@/gm/hooks/useGmRoster";
 
 export const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
@@ -29,18 +30,23 @@ export function deriveGmRows(
     const pitcher = isPitcherPos(r.position_slot) || isPitcherPos(p?.position) || isPitcherPos(local?.position);
     const f = finByBp.get(r.id) || {};
     const vend = (r.player_id ? vendorByPlayer.get(String(r.player_id)) : null) ?? { nil: 0, other: 0 };
-    const mv = snap.market_value ?? snap.twp_hitter_market_value ?? snap.twp_pitcher_market_value ?? null;
-    const storedWar = pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null);
+    // TWP-aware, SIDE-aware market: a two-way player's shared market_value is NULL — read the side's
+    // twp field (pitcher → twp_pitcher_market_value, hitter → twp_hitter_market_value). Matches the
+    // pickHitter/PitcherMarketValue helper + useGmTargetBoard; storedWar is already side-aware.
+    const mv = pitcher
+      ? (snap.market_value ?? snap.twp_pitcher_market_value ?? null)
+      : (snap.market_value ?? snap.twp_hitter_market_value ?? null);
+    const storedWar = pitcher ? (snap.p_war ?? null) : pickHitterWar(snap); // hitter headline = total_hitter_war (o_war fallback pre-rebake)
 
     const devAgg = Number.isFinite(Number(meta?.devAggressiveness)) ? Number(meta.devAggressiveness) : 0;
     const classTransition = meta?.classTransition ?? "SJ";
     const sessionDepthRole = pitcher
       ? (meta?.depthRole ?? (snap.pitcher_role === "SP" ? "weekend_starter" : snap.pitcher_role === "SM" ? "weekday_starter" : undefined))
       : (meta?.depthRole ?? snap.hitter_depth_role);
-    const effWar = pitcher
-      ? effectivePitcherWar(snap, sessionDepthRole, devAgg, classTransition, eq)
-      : effectiveHitterWar(snap.o_war, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
-    const effMarket = effectiveMarket(mv, storedWar, effWar);
+    // Phase B: GM reads the snapshot ONLY. The snapshot already holds
+    // f(neutral, toggles) — re-applying the production_notes overlay here would
+    // double it. war/market come straight from the stored snapshot values below.
+    void classTransition;
 
     const displayPosition = isLocal
       ? (r.position_slot ?? local?.position ?? null)
@@ -55,8 +61,8 @@ export function deriveGmRows(
       position: displayPosition,
       class_year: p?.class_year ?? null,
       is_pitcher: pitcher,
-      war: effWar ?? storedWar,
-      market_value: effMarket ?? mv,
+      war: storedWar,
+      market_value: mv,
       dev_aggressiveness: devAgg,
       depth_role: sessionDepthRole ?? null,
       nil_value: r.nil_value ?? null,

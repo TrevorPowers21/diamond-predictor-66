@@ -174,7 +174,7 @@ export default function RosterTab({
                 <TableHead className="text-center">Market Value ($)</TableHead>
                 <TableHead className="text-center">Projected Value ($)</TableHead>
                 <TableHead className="text-center">Actual Value ($)</TableHead>
-                <TableHead className="text-center">oWAR</TableHead>
+                <TableHead className="text-center">WAR</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>

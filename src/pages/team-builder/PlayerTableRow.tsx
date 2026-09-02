@@ -66,7 +66,7 @@ export interface PlayerTableRowSharedProps {
   hitterMasterPaMap: Map<string, number>;
   exitPositions: Record<string, string>;
   totalBudget: number;
-  fallbackRosterTotalPlayerScore: number;
+  nilAvgAllocation: number;
   selectedTeam: string | null;
   returnTo: string;
   playerProjection: (p: BuildPlayer, side: "hitter" | "pitcher") => {
@@ -129,7 +129,7 @@ function PlayerTableRow({
   hitterMasterPaMap,
   exitPositions,
   totalBudget,
-  fallbackRosterTotalPlayerScore,
+  nilAvgAllocation,
   returnTo,
   playerProjection,
   simulateTransferProjection,
@@ -163,15 +163,19 @@ function PlayerTableRow({
   const pmRole = sourceId ? pitchingSourceMap.get(sourceId)?.role : null;
   const currentPitcherRole = effectivePitcherRoleForBuild(p, pmRole);
   const pitcherDepthRole = normalizePitcherDepthRole(p.depth_role, currentPitcherRole);
-  const sim = isTarget ? simulateTransferProjection(p, side) : null;
+  // Targets read their SNAPSHOT via playerProjection (rostered → player_snapshot,
+  // else → transfer_snapshot) and projectedNilForPlayer — NOT a live
+  // simulateTransferProjection, which was OVERRIDING the snapshot with a re-computed
+  // line (off a wrong-team transfer wRC+ 113 → oWAR 1.42) even though wRC+ read 115
+  // from the snapshot. This is the "block" that made TB disagree with the Targets tab.
+  const sim: any = null;
+  void simulateTransferProjection;
 
-  const projectedOwar = isTarget ? (sim?.owar ?? null) : (projection.owar ?? null);
+  const projectedOwar = projection.owar ?? null;
   const projectedPwar = isPitcherRow ? projection.pwar : null;
   const projectedNilRaw = isPitcherRow
     ? projectedNilForPlayer(p, "pitcher")
-    : (isTarget
-        ? (sim?.nil_valuation ?? p.transfer_snapshot?.nil_valuation ?? projectedNilForPlayer(p, "hitter"))
-        : projectedNilForPlayer(p, "hitter"));
+    : projectedNilForPlayer(p, "hitter");
   const projectedNil = (() => {
     const n = Number(projectedNilRaw);
     if (Number.isFinite(n)) return n;
@@ -262,7 +266,7 @@ function PlayerTableRow({
             };
             return (
               <span
-                className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${colors[label] || ""}`}
+                className={`inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold border ${colors[label] || ""}`}
               >
                 {label}
               </span>
@@ -536,7 +540,7 @@ function PlayerTableRow({
             <SelectContent>
               {currentPitcherRole === "SP" ? (
                 <>
-                  <SelectItem value="weekend_starter">Weekend Starter (~80 IP)</SelectItem>
+                  <SelectItem value="weekend_starter">Weekend Starter (~85 IP)</SelectItem>
                   <SelectItem value="weekday_starter">Weekday Starter (~50 IP)</SelectItem>
                   <SelectItem value="swing_starter">Swing / Long Relief (~30 IP)</SelectItem>
                 </>
@@ -660,7 +664,7 @@ function PlayerTableRow({
             ? "text-muted-foreground"
             : isPitcherRow
             ? "text-foreground"
-            : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore)
+            : projectedNilTierClass(projectedNil, nilAvgAllocation)
         }`}
       >
         {(p.roster_status || "returner") === "leaving"

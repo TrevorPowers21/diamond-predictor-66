@@ -1,6 +1,8 @@
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { resolveMetricParkFactor, type ParkFactorsMap } from "@/lib/parkFactors";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
+import { projectedIpFromRealIp } from "@/lib/depthRoles";
 
 // Canonical pitcher projection pipeline — mirrors PitcherProfile's
 // projectedPitching useMemo exactly. The sequence is:
@@ -41,6 +43,7 @@ export type PitcherProjectionInput = {
   role: string | null;
   g: number | null;
   gs: number | null;
+  ip: number | null;
   team: string | null;
   teamId: string | null;
   conference: string | null;
@@ -115,7 +118,10 @@ const toPitchingClassAdj = (
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
-export const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
+// ★ 2026-08-31 — `readonly number[]`: these arrays are only READ. Accepting readonly lets callers pass
+//   `as const` fixtures (and any frozen config array) without a cast. Widening the INPUT type is correct;
+//   casting at 16 call sites to satisfy a needlessly-mutable signature would not be.
+export const dampFactorForProjected = (projected: number, thresholds: readonly number[], impacts: readonly number[]) => {
   for (let i = 0; i < thresholds.length; i++) {
     if (projected < thresholds[i]) return impacts[i] ?? 1;
   }
@@ -127,28 +133,60 @@ export const projectPitchingRate = ({
   prPlus,
   ncaaAvg,
   ncaaSd,
+  ncaaSdBad,
   prSd,
+  prCenter,
   classAdjustment,
   devAggressiveness,
   thresholds,
   impacts,
   lowerIsBetter,
   fallbackToLastStat = false,
+  floorAtZero = false,
 }: {
   lastStat: number | null;
   prPlus: number | null;
   ncaaAvg: number;
   ncaaSd: number;
+  /** Bad-side (worse-than-mean) SD for the two-sided/split calibration. Defaults to ncaaSd
+   *  (symmetric) when absent. Stage 5.5 (compute-projection-calibration) supplies both. */
+  ncaaSdBad?: number;
   prSd: number;
+  /**
+   * 🛑 The population mean of THIS stat's PR+ — NOT 100. Read from model_config
+   *    `<stat>_pr_center`, emitted by compute-projection-calibration.ts on the SAME population as
+   *    ncaaAvg/ncaaSd (D1, IP >= 40).
+   *
+   * ★ WHY THIS EXISTS. `rawZ` used to be `(prPlus - 100) / prSd`, which assumes the rating is
+   *   centered where the anchor is. It is not: PR+ was fit on the ALL-DIVISION, IP>=20 population
+   *   (centers 96.3-104.0 there, i.e. ~100) but is APPLIED to D1/IP>=40, where the true centers are
+   *   era 109.73 · fip 108.29 · whip 108.40 · k9 101.69 · bb9 123.16 · hr9 102.04.
+   *   Every qualified D1 pitcher therefore carried a free head start — for ERA,
+   *   ((109.73-100)/27.90) x 1.425 = +0.44 ERA of phantom improvement. That is the "ERAs run ~4% low
+   *   at every percentile, in every class bucket" symptom, and BB9 was the extreme at 123.16.
+   *
+   * ⚠ Defaults to 100 so an un-migrated caller behaves exactly as before rather than silently
+   *   shifting. Once model_config carries the key, PASS IT — leaving the default in place keeps the
+   *   bias.
+   */
+  prCenter?: number;
   classAdjustment: number;
   devAggressiveness: number;
-  thresholds: number[];
-  impacts: number[];
+  /** read-only: accepts `as const` / frozen arrays. See dampFactorForProjected. */
+  thresholds: readonly number[];
+  impacts: readonly number[];
   lowerIsBetter: boolean;
   // When true, returns lastStat instead of null if PR+ inputs are missing
   // (TeamBuilder's previous behavior — carry the season's actual rate
   // forward as the projection rather than dropping the row entirely).
   fallbackToLastStat?: boolean;
+  // When true, clamp the projected rate at 0. HR9 ONLY (Trevor 2026-08-25):
+  // HR9 is the one luck-dominated stat where a thin-sample blend can still dip
+  // a hair below 0 even after the two-sided SD — a physical-floor clamp there is
+  // realistic (like market value at $0). Every OTHER rate is left UNfloored on
+  // purpose: the two-sided SD makes their math correct, so a negative would be a
+  // real bug we want VISIBLE, not silently masked (audit doctrine 2026-08-24).
+  floorAtZero?: boolean;
 }) => {
   // Strict guard on lastStat — without a season number, there's nothing to
   // project even with the fallback flag.
@@ -164,7 +202,14 @@ export const projectPitchingRate = ({
     return fallbackToLastStat ? lastStat : null;
   }
 
-  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
+  // Two-sided (split) SD: pitching rates are right-skewed — the good side is compressed, the bad
+  // side runs wild. A single symmetric SD (inflated by the bad tail) over-projects the good side
+  // through the physical floor (impossible negative HR9). PR+ higher = better talent for every stat,
+  // so a positive rating-z projects toward the GOOD side (use sd_good = ncaaSd); negative toward the
+  // BAD side (use ncaaSdBad). Falls back to symmetric (ncaaSd) when ncaaSdBad is absent.
+  const rawZ = (prPlus - (Number.isFinite(prCenter as number) ? (prCenter as number) : 100)) / prSd;
+  const dirSd = rawZ >= 0 ? ncaaSd : (Number.isFinite(ncaaSdBad as number) ? (ncaaSdBad as number) : ncaaSd);
+  const zShift = rawZ * dirSd;
   const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
   const blended = (lastStat * (1 - PITCHING_POWER_RATING_WEIGHT)) + (powerAdjusted * PITCHING_POWER_RATING_WEIGHT);
   const mult = lowerIsBetter
@@ -185,7 +230,11 @@ export const projectPitchingRate = ({
   // toward NCAA average, pull weak projections DOWN toward NCAA average —
   // i.e. damping fights outliers instead of preserving them.
   void thresholds; void impacts; void dampFactorForProjected;
-  return projected;
+  // HR9-only physical floor (floorAtZero): clamps the thin-sample edge case (≈1-IP arms whose last-year
+  // 0.00 + a class/dev multiplier drive the blend a hair below 0). Applied to HR9 ONLY — every other rate
+  // stays unfloored so a negative (which the two-sided SD should prevent) surfaces as a real bug rather
+  // than being silently masked. See the floorAtZero param doc + audit doctrine (2026-08-24).
+  return floorAtZero ? Math.max(0, projected) : projected;
 };
 
 const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
@@ -379,7 +428,10 @@ export function computePitcherProjection(
     ? ((starts / games) < 0.5 ? "RP" : "SP")
     : null);
   const projectedRole: "SP" | "RP" | "SM" = ctx.roleOverride || baseRole || "SM";
-  const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  // Projected IP from real IP via the DEPTH ROLE (not the coarse SP/RP/SM role) —
+  // falls back to coarse role IP only when real IP is missing. Keeps live overlay
+  // pWAR consistent with the precompute's derivePitcherStored.
+  const projectedIp = projectedIpFromRealIp(input.ip, projectedRole, eq);
 
   // Score each scouting metric against NCAA avg/sd.
   const scoreObj = {
@@ -423,12 +475,12 @@ export function computePitcherProjection(
   const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
 
   // Step 1: raw projected rates from last-stat + PR+ + class/dev.
-  const pEra = projectPitchingRate({ lastStat: input.era, prPlus: prPlus.eraPrPlus, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, prSd: eq.era_pr_sd, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
-  const pFip = projectPitchingRate({ lastStat: input.fip, prPlus: prPlus.fipPrPlus, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, prSd: eq.fip_pr_sd, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
-  const pWhip = projectPitchingRate({ lastStat: input.whip, prPlus: prPlus.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, prSd: eq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
-  const pK9 = projectPitchingRate({ lastStat: input.k9, prPlus: prPlus.k9PrPlus, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, prSd: eq.k9_pr_sd, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
-  const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
-  const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
+  const pEra = projectPitchingRate({ lastStat: input.era, prPlus: prPlus.eraPrPlus, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, ncaaSdBad: eq.era_plus_ncaa_sd_bad, prSd: eq.era_pr_sd, prCenter: eq.era_pr_center, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
+  const pFip = projectPitchingRate({ lastStat: input.fip, prPlus: prPlus.fipPrPlus, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, ncaaSdBad: eq.fip_plus_ncaa_sd_bad, prSd: eq.fip_pr_sd, prCenter: eq.fip_pr_center, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
+  const pWhip = projectPitchingRate({ lastStat: input.whip, prPlus: prPlus.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, ncaaSdBad: eq.whip_plus_ncaa_sd_bad, prSd: eq.whip_pr_sd, prCenter: eq.whip_pr_center, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
+  const pK9 = projectPitchingRate({ lastStat: input.k9, prPlus: prPlus.k9PrPlus, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, ncaaSdBad: eq.k9_plus_ncaa_sd_bad, prSd: eq.k9_pr_sd, prCenter: eq.k9_pr_center, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
+  const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, ncaaSdBad: eq.bb9_plus_ncaa_sd_bad, prSd: eq.bb9_pr_sd, prCenter: eq.bb9_pr_center, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
+  const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, ncaaSdBad: eq.hr9_plus_ncaa_sd_bad, prSd: eq.hr9_pr_sd, prCenter: eq.hr9_pr_center, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true, floorAtZero: true });
 
   // Park factor is intentionally NOT applied to returner projections — the
   // pitcher's lastStat already reflects their home park, and they're staying
@@ -461,15 +513,11 @@ export function computePitcherProjection(
   const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
   const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
 
-  // Step 5: pRvPlus = weighted composite of the six +-stats.
-  const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-    ? (Number(eraPlus) * eq.era_plus_weight) +
-      (Number(fipPlus) * eq.fip_plus_weight) +
-      (Number(whipPlus) * eq.whip_plus_weight) +
-      (Number(k9Plus) * eq.k9_plus_weight) +
-      (Number(bb9Plus) * eq.bb9_plus_weight) +
-      (Number(hr9Plus) * eq.hr9_plus_weight)
-    : null;
+  // Step 5: pRV+ = D1-FIP index from projected K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts).
+  // Rounded to a whole number so the displayed pRV+ and the p_war below run off the same integer.
+  // (+stats above are kept — they are stored/displayed; they no longer feed pRV+.)
+  const prvRaw = computePrvPlus(roleAdjustedK9, roleAdjustedBb9, roleAdjustedHr9);
+  const pRvPlus = prvRaw == null ? null : Math.round(prvRaw);
 
   // Step 6: pWar from pRvPlus + projected IP.
   const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
@@ -477,17 +525,12 @@ export function computePitcherProjection(
     ? null
     : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
-  // Step 7: market value from pWar + conf tier + PVF + eligibility.
-  const pitchingTierMultipliers = {
-    sec: eq.market_tier_sec,
-    p4: eq.market_tier_acc_big12,
-    bigTen: eq.market_tier_big_ten,
-    strongMid: eq.market_tier_strong_mid,
-    lowMajor: eq.market_tier_low_major,
-    juco: 0.35, // mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco; no eq.market_tier_juco yet
-  };
+  // Step 7: market value from pWar + conf tier + eligibility.
+  // 2026-08-21 UNIFICATION: PTM comes from the SINGLE source (DEFAULT_NIL_TIER_MULTIPLIERS /
+  // model_config nil_tier_*), NOT eq.market_tier_* — same source as the hitter + the canonical
+  // computePitcherMarketValue. Omitting the 2nd arg uses the shared defaults.
   const conferenceForMarket = teamMatch?.name ? (input.conference ?? null) : input.conference;
-  const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
+  const ptm = getProgramTierMultiplierByConference(conferenceForMarket);
   const marketEligible = canShowPitchingMarketValue(input.team, conferenceForMarket);
   // Market value floors at $0 — negative WAR shouldn't produce a negative
   // dollar projection. Null stays null (unknown vs zero are different signals).

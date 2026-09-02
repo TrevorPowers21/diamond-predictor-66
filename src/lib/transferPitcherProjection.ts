@@ -1,5 +1,7 @@
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
+import { projectedIpFromRealIp } from "@/lib/depthRoles";
 
 // Canonical transfer-pitcher projection — answers "given a pitcher's stats at
 // from-school, how do they project at to-school?" Used by:
@@ -106,6 +108,20 @@ type RateWork = {
 
 // Lower-is-better rate (ERA, FIP, WHIP, BB9, HR9): apply confTerm subtracted,
 // compTerm added, parkTerm added, optionally damped.
+// Two-sided (split) SD: PR+ > 100 = better talent → project toward the compressed GOOD side (sd_good);
+// PR+ < 100 → the wide BAD side (sd_bad). The caller picks it so projectLower/Higher stay unchanged.
+// Mirrors projectPitchingRate's directional SD (stage 5.5 calibration).
+// 🛑 SPLIT AT THE CENTRE, NOT 100 (2026-09-01, Trevor: "it needs to be split at the stored average").
+//    "Good side" means BETTER THAN THE POPULATION MEAN. PR+ does not centre at 100 on D1/IP>=40 —
+//    era 109.64, bb9 121.68 — so `prPlus >= 100` classified every arm between 100 and the centre as
+//    good-side and handed it sd_good (1.443) when it belonged on sd_bad (1.897), a 31% swing.
+//    `projectPitchingRate` (returner path) already split at prCenter; these transfer copies did not,
+//    which is why the batch and onboarding disagreed BIDIRECTIONALLY on ~24% of pitchers.
+//    Defaults to 100 only so an un-migrated caller is unchanged.
+const dsd = (prPlus: number, sdGood: number, sdBad: number, prCenter = 100): number =>
+  (prPlus >= (Number.isFinite(prCenter) ? prCenter : 100)
+    ? sdGood : (Number.isFinite(sdBad) ? sdBad : sdGood));
+
 const projectLower = (
   last: number,
   prPlus: number,
@@ -123,21 +139,33 @@ const projectLower = (
   fromPark: number | null,
   toPark: number | null,
   dampFactor = 1,
+  // HR9 ONLY (Trevor 2026-08-25): clamp at 0. Mirrors projectPitchingRate.floorAtZero —
+  // HR9 is the lone luck-dominated stat where a thin-sample blend can dip below 0; the
+  // other lower-is-better rates stay unfloored so a negative surfaces as a real bug.
+  floorAtZero = false,
+  /** Population mean of this stat's PR+ (model_config `<stat>_pr_center`). Defaults to 100 so an
+   *  un-migrated caller is unchanged. See the long note on projectPitchingRate. */
+  prCenter = 100,
 ): RateWork => {
   const safePrSd = prSd === 0 ? 1 : prSd;
-  const powerAdj = ncaaAvg - (((prPlus - 100) / safePrSd) * ncaaSd);
+  // 🛑 prCenter, not 100 — see the note on projectPitchingRate in pitcherProjection.ts.
+  //    PR+ is fit on all-division/IP>=20 (~100) but applied to D1/IP>=40 (era 109.73 … bb9 123.16),
+  //    so assuming 100 hands every qualified pitcher a phantom improvement.
+  const safeCenter = Number.isFinite(prCenter as number) ? (prCenter as number) : 100;
+  const powerAdj = ncaaAvg - (((prPlus - safeCenter) / safePrSd) * ncaaSd);
   const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
   const confTerm = confWeight * ((toPlus - fromPlus) / 100);
   const compTerm = compWeight * ((toTalent - fromTalent) / 100);
   const parkTerm = parkWeight != null && fromPark != null && toPark != null ? parkWeight * ((toPark - fromPark) / 100) : 0;
   const mult = 1 - confTerm + compTerm + parkTerm;
   const adjustedMult = 1 + ((mult - 1) * dampFactor);
+  const rawProjected = blended * adjustedMult;
   return {
     last,
     powerAdj: round3(powerAdj),
     blended: round3(blended),
     mult: round3(adjustedMult),
-    projected: round3(blended * adjustedMult),
+    projected: round3(floorAtZero ? Math.max(0, rawProjected) : rawProjected),
     confTerm: round3(confTerm),
     compTerm: round3(compTerm),
     parkTerm: round3(parkTerm),
@@ -162,9 +190,13 @@ const projectHigher = (
   compWeight: number,
   fromTalent: number,
   toTalent: number,
+  /** Population mean of this stat's PR+ (model_config `<stat>_pr_center`); defaults to 100. */
+  prCenter = 100,
 ): RateWork => {
   const safePrSd = prSd === 0 ? 1 : prSd;
-  const powerAdj = ncaaAvg + (((prPlus - 100) / safePrSd) * ncaaSd);
+  // 🛑 prCenter, not 100 — higher-is-better twin of the lower-is-better site above.
+  const safeCenterHi = Number.isFinite(prCenter as number) ? (prCenter as number) : 100;
+  const powerAdj = ncaaAvg + (((prPlus - safeCenterHi) / safePrSd) * ncaaSd);
   const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
   const confTerm = confWeight * ((toPlus - fromPlus) / 100);
   const compTerm = compWeight * ((toTalent - fromTalent) / 100);
@@ -174,6 +206,8 @@ const projectHigher = (
     powerAdj: round3(powerAdj),
     blended: round3(blended),
     mult: round3(mult),
+    // K9 (higher-is-better) is NOT floored — HR9 is the only floored rate. K9 can't
+    // realistically go negative anyway; leaving it unfloored keeps a real bug visible.
     projected: round3(blended * mult),
     confTerm: round3(confTerm),
     compTerm: round3(compTerm),
@@ -184,11 +218,6 @@ const projectHigher = (
     ncaaAvg,
   };
 };
-
-const getPitchingPvfForRole = (
-  role: "SP" | "RP" | "SM",
-  eq: ReturnType<typeof readPitchingWeights>,
-) => (role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp);
 
 const canShowPitchingMarketValue = (team: string | null | undefined, conference: string | null | undefined) => {
   const conf = String(conference || "").trim().toLowerCase();
@@ -220,6 +249,8 @@ export type TransferPitcherInput = {
   };
   // Base role (from PM Role column, or G/GS-derived). Used for role-transition.
   baseRole: "SP" | "RP" | "SM" | null;
+  // Real (last-season) IP — drives the DEPTH ROLE → projected IP for pWAR.
+  ip: number | null;
   // Pre-resolved conference + plus stats for from + to schools
   fromEraPlus: number | null;
   toEraPlus: number | null;
@@ -326,7 +357,8 @@ export function computeTransferPitcherProjection(
   const { eq } = ctx;
   const baseRole = toPitchingRole(input.baseRole);
   const projectedRole: "SP" | "RP" | "SM" = ctx.roleOverride || baseRole || "SM";
-  const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  // Projected IP from real IP via the DEPTH ROLE, coarse-role fallback when IP missing.
+  const projectedIp = projectedIpFromRealIp(input.ip, projectedRole, eq);
 
   // Validate every required input. If any missing, return blocked result so
   // callers can fall back to base projection or surface the gap explicitly.
@@ -374,12 +406,12 @@ export function computeTransferPitcherProjection(
 
   // Project each rate at the to-school. WHIP uses damp 0.75 (matches existing
   // TransferPortal behavior); BB9 has no park term.
-  const eraWork = projectLower(era!, eraPr!, eq.era_plus_ncaa_avg, eq.era_pr_sd, eq.era_plus_ncaa_sd, eq.transfer_era_power_weight, eq.transfer_era_conference_weight, fromEraPlus!, toEraPlus!, eq.transfer_era_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_era_park_weight, fromRg, toRg);
-  const fipWork = projectLower(fip!, fipPr!, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, eq.fip_plus_ncaa_sd, eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, fromFipPlus!, toFipPlus!, eq.transfer_fip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_fip_park_weight, fromRg, toRg);
-  const whipWork = projectLower(whip!, whipPr!, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, eq.whip_plus_ncaa_sd, eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, fromWhipPlus!, toWhipPlus!, eq.transfer_whip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
-  const k9Work = projectHigher(k9!, k9Pr!, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, eq.k9_plus_ncaa_sd, eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, fromK9Plus!, toK9Plus!, eq.transfer_k9_competition_weight, fromHitterTalent!, toHitterTalent!);
-  const bb9Work = projectLower(bb9!, bb9Pr!, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, eq.bb9_plus_ncaa_sd, eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, fromBb9Plus!, toBb9Plus!, eq.transfer_bb9_competition_weight, fromHitterTalent!, toHitterTalent!, null, null, null);
-  const hr9Work = projectLower(hr9!, hr9Pr!, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, eq.hr9_plus_ncaa_sd, eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, fromHr9Plus!, toHr9Plus!, eq.transfer_hr9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf);
+  const eraWork = projectLower(era!, eraPr!, eq.era_plus_ncaa_avg, eq.era_pr_sd, dsd(eraPr!, eq.era_plus_ncaa_sd, eq.era_plus_ncaa_sd_bad, eq.era_pr_center), eq.transfer_era_power_weight, eq.transfer_era_conference_weight, fromEraPlus!, toEraPlus!, eq.transfer_era_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_era_park_weight, fromRg, toRg, 1, false, eq.era_pr_center);
+  const fipWork = projectLower(fip!, fipPr!, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, dsd(fipPr!, eq.fip_plus_ncaa_sd, eq.fip_plus_ncaa_sd_bad, eq.fip_pr_center), eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, fromFipPlus!, toFipPlus!, eq.transfer_fip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_fip_park_weight, fromRg, toRg, 1, false, eq.fip_pr_center);
+  const whipWork = projectLower(whip!, whipPr!, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, dsd(whipPr!, eq.whip_plus_ncaa_sd, eq.whip_plus_ncaa_sd_bad, eq.whip_pr_center), eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, fromWhipPlus!, toWhipPlus!, eq.transfer_whip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75, false, eq.whip_pr_center);
+  const k9Work = projectHigher(k9!, k9Pr!, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, dsd(k9Pr!, eq.k9_plus_ncaa_sd, eq.k9_plus_ncaa_sd_bad, eq.k9_pr_center), eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, fromK9Plus!, toK9Plus!, eq.transfer_k9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.k9_pr_center);
+  const bb9Work = projectLower(bb9!, bb9Pr!, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, dsd(bb9Pr!, eq.bb9_plus_ncaa_sd, eq.bb9_plus_ncaa_sd_bad, eq.bb9_pr_center), eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, fromBb9Plus!, toBb9Plus!, eq.transfer_bb9_competition_weight, fromHitterTalent!, toHitterTalent!, null, null, null, 1, false, eq.bb9_pr_center);
+  const hr9Work = projectLower(hr9!, hr9Pr!, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, dsd(hr9Pr!, eq.hr9_plus_ncaa_sd, eq.hr9_plus_ncaa_sd_bad, eq.hr9_pr_center), eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, fromHr9Plus!, toHr9Plus!, eq.transfer_hr9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf, 1, true, eq.hr9_pr_center);
   const pEra = eraWork.projected;
   const pFip = fipWork.projected;
   const pWhip = whipWork.projected;
@@ -410,35 +442,23 @@ export function computeTransferPitcherProjection(
   const k9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
   const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
   const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-  const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-    ? round3(
-        (eq.era_plus_weight * Number(eraPlus)) +
-        (eq.fip_plus_weight * Number(fipPlus)) +
-        (eq.whip_plus_weight * Number(whipPlus)) +
-        (eq.k9_plus_weight * Number(k9Plus)) +
-        (eq.bb9_plus_weight * Number(bb9Plus)) +
-        (eq.hr9_plus_weight * Number(hr9Plus))
-      )
-    : null;
+  // pRV+ = D1-FIP index from projected K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). +stats kept for storage.
+  const prvRaw = computePrvPlus(roleAdjustedK9, roleAdjustedBb9, roleAdjustedHr9);
+  const pRvPlus = prvRaw == null ? null : Math.round(prvRaw);
 
   const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
   const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
     ? null
     : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
-  const pitchingTierMultipliers = {
-    sec: eq.market_tier_sec,
-    p4: eq.market_tier_acc_big12,
-    bigTen: eq.market_tier_big_ten,
-    strongMid: eq.market_tier_strong_mid,
-    lowMajor: eq.market_tier_low_major,
-    juco: 0.35, // mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco; no eq.market_tier_juco yet
-  };
-  const ptm = getProgramTierMultiplierByConference(input.toConference, pitchingTierMultipliers);
-  const pvm = getPitchingPvfForRole(projectedRole, eq);
+  // 2026-08-21 UNIFICATION: PTM from the SINGLE source (DEFAULT_NIL_TIER_MULTIPLIERS /
+  // model_config nil_tier_*), not eq.market_tier_*. Omitting the 2nd arg uses shared defaults.
+  const ptm = getProgramTierMultiplierByConference(input.toConference);
   const marketEligible = canShowPitchingMarketValue(input.toTeam, input.toConference);
-  // Market value floors at $0 — negative WAR shouldn't produce a negative dollar projection.
-  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+  // Market value floors at $0 — negative WAR shouldn't produce a negative dollar
+  // projection. PVF dropped — role value is already in WAR via IP (see
+  // computePitcherMarketValue); market = pWAR × $/WAR × tier.
+  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm;
   const marketValue = marketValueRaw == null ? null : Math.max(0, marketValueRaw);
 
   const showWork: TransferPitcherShowWork = {

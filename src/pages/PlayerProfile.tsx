@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveActiveBuildId } from "@/lib/activeBuild";
+import { computeWrcPlus, computeWrcRaw } from "@/lib/wrc";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -22,7 +24,6 @@ import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { usePitchLog2026HitterRates } from "@/hooks/usePitchLog2026HitterRates";
 import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
 import { percentileRank } from "@/savant/lib/percentile";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
@@ -52,6 +53,7 @@ import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
 import {
   paForHitterDepthRole,
   defaultHitterDepthRoleFromActualPa,
+  computeHitterMarketValue,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
 import { useNilValuation } from "@/hooks/useNilValuation";
@@ -68,13 +70,10 @@ const pctFormat = (v: number | null | undefined) => {
 };
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
-  const ncaaAvgWrc = 0.364;
   const ops = obp != null && slg != null ? obp + slg : null;
   const iso = slg != null && avg != null ? slg - avg : null;
-  const wrc = avg != null && obp != null && slg != null && iso != null
-    ? (0.45 * obp) + (0.3 * slg) + (0.15 * avg) + (0.1 * iso)
-    : null;
-  const wrcPlus = wrc != null && ncaaAvgWrc !== 0 ? (wrc / ncaaAvgWrc) * 100 : null;
+  const wrc = computeWrcRaw(avg, obp, slg, iso);          // canonical C1 (src/lib/wrc.ts)
+  const wrcPlus = computeWrcPlus(avg, obp, slg, iso);
   return { ops, iso, wrc, wrcPlus };
 };
 
@@ -469,24 +468,6 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
 
   const { data: nilValuation } = useNilValuation(id);
 
-  // Admin-only: fetch internal power ratings
-  const { data: internalRatings } = useQuery({
-    queryKey: ["player-internal-ratings", id],
-    queryFn: async () => {
-      const predIds = predictions.map((p) => p.id);
-      if (predIds.length === 0) return null;
-      const { data, error } = await supabase
-        .from("player_prediction_internals" as any)
-        .select("*")
-        .in("prediction_id", predIds)
-        .limit(1)
-        .maybeSingle();
-      if (error) return null;
-      return data as unknown as { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null } | null;
-    },
-    enabled: !!id && isAdmin && predictions.length > 0,
-  });
-
   // MLB Draft slot value (most recent draft cycle for this player).
   // Returns null when the player isn't in player_slot_values — surface hides
   // itself in that case.
@@ -558,9 +539,9 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
           .update(updates)
           .eq("id", predId);
         if (error) throw error;
-        await recalculatePredictionById(predId, {
-          dev_aggressiveness: updates.dev_aggressiveness,
-        });
+        // COLLAPSE (2026-08-12): recalculatePredictionById removed (retired dead path).
+        // This mutation chain (savePredEdit/updatePrediction) is itself dead — never wired
+        // into JSX; sweep the shell in the app-wide dead-code audit.
         // Re-lock
         await supabase.from("player_predictions").update({ locked: true }).eq("id", predId);
       }
@@ -624,6 +605,51 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
     }
     return predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
   })();
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // 🛑 ROSTERED/BOARD PLAYERS READ THE SAVED SNAPSHOT — NO LIVE COMPUTE (Trevor, 2026-09-01)
+  //   "for player profiles on roster or target board it just needs to read the saved
+  //    player/transfer snapshot across all the sites. No live compute."
+  //
+  // This page was the ONLY surface not wired to the active build. GM Roster, GM Targets,
+  // TeamBuilder and TargetBoardSubtab all resolve it; PlayerProfile read `player_predictions` and
+  // multiplied by `devAggScale` AT RENDER — that multiplication IS the live compute, and it is why
+  // the profile disagreed with the Team Builder row (measured on Arkansas: snapshot ÷ team-scoped
+  // row was exactly 1.02941 / 1.05882 = a build saved at dev_aggressiveness 0.5 / 1.0 while the
+  // stored prediction is dev-neutral at 0).
+  //
+  // ⛔ The build snapshot is ALREADY dev-adjusted — it baked the slider in at save time. Do NOT
+  //    apply devAggScale/depthScale on top of it or the adjustment compounds.
+  // Mirrors TargetBoardSubtab.tsx:351-381 exactly, including the TWP `${pid}|hitter` /
+  // `${pid}|pitcher` keying so each side reads its OWN slot's snapshot rather than a merge.
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  const { data: buildSnap = null } = useQuery({
+    queryKey: ["profile-active-build-snapshot", id, effectiveTeamId ?? null],
+    enabled: !!id && !!effectiveTeamId,
+    queryFn: async () => {
+      const { data: blds } = await (supabase as any)
+        .from("team_builds")
+        .select("id, is_active, is_default, team, academic_year, updated_at, created_at")
+        .eq("customer_team_id", effectiveTeamId);
+      const activeId = resolveActiveBuildId(blds);
+      if (!activeId) return null;
+      const { data: bps } = await (supabase as any)
+        .from("team_build_players")
+        .select("player_id, position_slot, included_in_roster, player_snapshot")
+        .eq("build_id", activeId)
+        .eq("included_in_roster", true)
+        .eq("player_id", id);
+      const rows = (bps || []).filter((r: any) => r.player_snapshot);
+      if (rows.length === 0) return null;
+      const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+      // This profile block renders the HITTER line. A TWP has two rows — take the hitter slot.
+      const hitterRow = rows.length === 1 ? rows[0] : rows.find((r: any) => !isPit(r.position_slot));
+      if (!hitterRow || isPit(hitterRow.position_slot)) return null;
+      return hitterRow.player_snapshot as any;
+    },
+  });
+  /** True when this player is on the active build's roster/board ⇒ pure-read, no session overlays. */
+  const isSnapshotBacked = !!buildSnap;
+
   const { isTransferPortal, isReturner, fromTeamData } = useTransferPortalContext(
     player, predictions, effectiveTeamId,
   );
@@ -849,6 +875,8 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
     pull: seedPowerRow.pull,
     la10_30: seedPowerRow.la10_30,
     gb: seedPowerRow.gb,
+    // ★ 2026-08-31 — seedPowerRow carries no pull_air; powerRatings falls back to raw pull%.
+    pullAir: null,
   }) : null;
 
   // Season-aware scouting grades + power ratings from Hitter Master
@@ -904,32 +932,25 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const plPower = effectiveSeason === 2026 ? pitchLogPowerDerived : null;
   const plRates = effectiveSeason === 2026 && pitchLogRates?.hasData ? pitchLogRates : null;
   const activeSeasonScoutingGrades = activeSeasonRow ? {
-    // Priority chain per metric:
-    //   pitch_log percentile rank (matches Season Stats bars exactly)
-    //   → pitch_log normal-dist score (only when pop is still loading)
-    //   → stored Hitter Master.X_score (computeAndStoreScores output)
-    //   → seedPowerDerived (2025 carry-forward).
-    barrelScore: pitchLogPercentileGrades?.barrelScore ?? pitchLogPowerDerived?.barrelScore ?? activeSeasonRow.barrel_score ?? null,
-    avgEVScore: pitchLogPercentileGrades?.avgEVScore ?? pitchLogPowerDerived?.avgEVScore ?? activeSeasonRow.avg_ev_score ?? null,
-    contactScore: pitchLogPercentileGrades?.contactScore ?? pitchLogPowerDerived?.contactScore ?? activeSeasonRow.contact_score ?? null,
-    chaseScore: pitchLogPercentileGrades?.chaseScore ?? pitchLogPowerDerived?.chaseScore ?? activeSeasonRow.chase_score ?? null,
-    bbScore: pitchLogPercentileGrades?.bbScore ?? pitchLogPowerDerived?.bbScore ?? activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
-    lineDriveScore: pitchLogPercentileGrades?.lineDriveScore ?? pitchLogPowerDerived?.lineDriveScore ?? activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
-    popUpScore: pitchLogPercentileGrades?.popUpScore ?? pitchLogPowerDerived?.popUpScore ?? activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
-    // ev90 + pull now derive from pitch_log (ev_90 + directional pull
-    // columns added 2026-06-26) — pitch_log first, stored HM fallback.
-    ev90Score: plPower?.ev90Score ?? activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
-    pullScore: plPower?.pullScore ?? activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
-    laScore: pitchLogPercentileGrades?.laScore ?? pitchLogPowerDerived?.laScore ?? activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
-    gbScore: pitchLogPercentileGrades?.gbScore ?? pitchLogPowerDerived?.gbScore ?? activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
-    // Overall PR+ roll-ups: pitch_log FIRST for the DISPLAY (mirrors the
-    // pitcher profile). This is display-only — the pWAR / market-value
-    // projection path reads projectionSourceRow.overall_power_rating
-    // (stored) separately, so stored values stay untouched until July.
-    baPlus: plPower?.baPlus ?? activeSeasonRow.ba_power_rating ?? seedPowerDerived?.baPlus ?? null,
-    obpPlus: plPower?.obpPlus ?? activeSeasonRow.obp_power_rating ?? seedPowerDerived?.obpPlus ?? null,
-    isoPlus: plPower?.isoPlus ?? activeSeasonRow.iso_power_rating ?? seedPowerDerived?.isoPlus ?? null,
-    overallPlus: plPower?.overallPlus ?? activeSeasonRow.overall_power_rating ?? seedPowerDerived?.overallPlus ?? null,
+    // STORED-FIRST (2026-08-23): read the STORED Hitter Master / prediction `*_score` and
+    // `*_power_rating` columns FIRST (computeAndStoreScores output). Live pitch_log percentile
+    // (pitchLogPercentileGrades / plPower) is only a FALLBACK when the stored value is null;
+    // 2025 seed last. (Was pitch_log-first — recomputed grades on every render.)
+    barrelScore: activeSeasonRow.barrel_score ?? pitchLogPercentileGrades?.barrelScore ?? pitchLogPowerDerived?.barrelScore ?? null,
+    avgEVScore: activeSeasonRow.avg_ev_score ?? pitchLogPercentileGrades?.avgEVScore ?? pitchLogPowerDerived?.avgEVScore ?? null,
+    contactScore: activeSeasonRow.contact_score ?? pitchLogPercentileGrades?.contactScore ?? pitchLogPowerDerived?.contactScore ?? null,
+    chaseScore: activeSeasonRow.chase_score ?? pitchLogPercentileGrades?.chaseScore ?? pitchLogPowerDerived?.chaseScore ?? null,
+    bbScore: activeSeasonRow.bb_score ?? pitchLogPercentileGrades?.bbScore ?? pitchLogPowerDerived?.bbScore ?? seedPowerDerived?.bbScore ?? null,
+    lineDriveScore: activeSeasonRow.line_drive_score ?? pitchLogPercentileGrades?.lineDriveScore ?? pitchLogPowerDerived?.lineDriveScore ?? seedPowerDerived?.lineDriveScore ?? null,
+    popUpScore: activeSeasonRow.pop_up_score ?? pitchLogPercentileGrades?.popUpScore ?? pitchLogPowerDerived?.popUpScore ?? seedPowerDerived?.popUpScore ?? null,
+    ev90Score: activeSeasonRow.ev90_score ?? plPower?.ev90Score ?? seedPowerDerived?.ev90Score ?? null,
+    pullScore: activeSeasonRow.pull_score ?? plPower?.pullScore ?? seedPowerDerived?.pullScore ?? null,
+    laScore: activeSeasonRow.la_score ?? pitchLogPercentileGrades?.laScore ?? pitchLogPowerDerived?.laScore ?? seedPowerDerived?.laScore ?? null,
+    gbScore: activeSeasonRow.gb_score ?? pitchLogPercentileGrades?.gbScore ?? pitchLogPowerDerived?.gbScore ?? seedPowerDerived?.gbScore ?? null,
+    baPlus: activeSeasonRow.ba_power_rating ?? plPower?.baPlus ?? seedPowerDerived?.baPlus ?? null,
+    obpPlus: activeSeasonRow.obp_power_rating ?? plPower?.obpPlus ?? seedPowerDerived?.obpPlus ?? null,
+    isoPlus: activeSeasonRow.iso_power_rating ?? plPower?.isoPlus ?? seedPowerDerived?.isoPlus ?? null,
+    overallPlus: activeSeasonRow.overall_power_rating ?? plPower?.overallPlus ?? seedPowerDerived?.overallPlus ?? null,
   } : seedPowerDerived;
   // Carry 2025 PA forward as expected 2026 PA so projected WAR scales with
   // actual playing-time history. A fringe starter with 100 PA last year
@@ -957,7 +978,12 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const sessionDevAggNum = Number(sessionDevAgg);
   const _storedMult = 1 + devAggClassAdj + (storedDevAgg * 0.06);
   const _sessionMult = 1 + devAggClassAdj + (sessionDevAggNum * 0.06);
-  const devAggScale = _storedMult > 0 ? _sessionMult / _storedMult : 1;
+  // 🛑 SNAPSHOT-BACKED ⇒ SCALE IS FORCED TO 1. A rostered/board player's snapshot already has the
+  //    coach's dev setting baked in; scaling it again compounds the adjustment.
+  //    For a NON-rostered player this stays live ON PURPOSE — Trevor 2026-09-01: "for player
+  //    profiles not on target board or on roster they still need a local live compute that then
+  //    resets on refresh and doesn't save anywhere." It is display-only and never persisted.
+  const devAggScale = isSnapshotBacked ? 1 : (_storedMult > 0 ? _sessionMult / _storedMult : 1);
   const applyDevScale = (v: number | null | undefined) =>
     v == null || !Number.isFinite(Number(v)) ? null : Number(v) * devAggScale;
 
@@ -979,13 +1005,55 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const storedPa = paForHitterDepthRole(storedHitterDepthRole);
   const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
   const overlayScale = depthScale * (devAggScale ?? 1);
-  const projectedOWar = storedOWar != null ? storedOWar * overlayScale : null;
-  const computedOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
-  const computedNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
+  // oWAR is REBUILT from the dev-adjusted wRC+ over the session depth PA
+  // (computeOWar), not scaled from stored oWAR — oWAR is affine in wRC+ so
+  // scaling broke ordering (Souza/Traeger inversion). Matches TB + the precompute.
+  void storedOWar;
+  const _adjWrc = (regularPred as any)?.p_wrc_plus != null
+    ? Math.round(Number((regularPred as any).p_wrc_plus) * (devAggScale ?? 1)) : null;
+  const projectedOWar = _adjWrc != null ? computeOWarFromWrcPlus(_adjWrc, sessionPa) : null;
+  const _histAdjWrc = seedDerived?.wrcPlus != null
+    ? Math.round(Number(seedDerived.wrcPlus) * (devAggScale ?? 1)) : null;
+  const computedOWar = projectedOWar ?? (_histAdjWrc != null ? computeOWarFromWrcPlus(_histAdjWrc, sessionPa) : null);
+  void historicalOWar;
+  // Market is COMPUTED (not scaled) from oWAR at the DESTINATION conference (the
+  // logged-in program = effectiveTeamId) + the current position — so a transfer
+  // is valued at the viewing program, never his old school, a position toggle
+  // flows through posMult, and it stays consistent with Team Builder. For a
+  // returner effectiveTeam == his team, so this equals the old value.
+  const destinationConference = (() => {
+    if (effectiveTeamId) {
+      const t = (teamsForConference as Array<{ id: string | null; conference: string | null }>).find((tt) => tt.id === effectiveTeamId);
+      if (t?.conference) return t.conference;
+    }
+    return resolvedConference || (player as any)?.conference || null;
+  })();
+  // Market rides TOTAL hitter WAR (o+d+bsr). Derive the fixed d+bsr from the stored prediction so a
+  // toggle PREVIEW recomputes market OFF WAR: new wRC+ → new oWAR → new total → new market — never by
+  // scaling the market $ directly (which would drift returners vs transfers). No toggle change → the
+  // STORED market value (total-based). Toggle moved oWAR → recompute from the new total.
+  const storedTotalHitterWar = (regularPred as any)?.total_hitter_war as number | null | undefined;
+  const dBsrConstant = (storedTotalHitterWar != null && storedOWar != null) ? Number(storedTotalHitterWar) - Number(storedOWar) : 0;
+  const computedTotalHitterWar = computedOWar != null ? computedOWar + dBsrConstant : null;
+  const recomputedMarketFromTotal = computeHitterMarketValue(
+    computedTotalHitterWar,
+    { conference: destinationConference, position: effectivePosition },
+  );
+  const toggleMovedWar = computedOWar != null && storedOWar != null && Math.abs(computedOWar - Number(storedOWar)) > 1e-6;
+  const computedNilValuation = toggleMovedWar
+    ? recomputedMarketFromTotal
+    : (storedMarketValue != null ? Number(storedMarketValue) : recomputedMarketFromTotal);
+  void overlayScale;
   // In the program hub, WAR + market come from the LIVE build (effectiveProjection
   // on its snapshot + production_notes) so Projections matches the roster and Team
   // Builder. `undefined` = standalone scouting route → use the computed value.
-  const displayOWar = warOverride !== undefined ? warOverride : computedOWar;
+  // Headline WAR = TOTAL hitter WAR (o+d+bsr). Mirrors the market pattern above: no toggle → stored
+  // total_hitter_war; toggle moved oWAR → recomputed total (computedOWar + stored d+bsr); hub → warOverride.
+  const displayHitterWar = warOverride !== undefined
+    ? warOverride
+    : (toggleMovedWar
+        ? computedTotalHitterWar
+        : (storedTotalHitterWar != null ? Number(storedTotalHitterWar) : computedTotalHitterWar));
   const displayNilValuation = marketOverride !== undefined ? marketOverride : computedNilValuation;
   // Build-pinned = rendered inside the program hub (WAR/market come from the live
   // build). There the depth-role / dev-agg controls are read-only labels — they
@@ -994,12 +1062,19 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
-  const projectedAvg = applyDevScale(regularPred?.p_avg);
-  const projectedObp = applyDevScale(regularPred?.p_obp);
-  const projectedSlg = applyDevScale(regularPred?.p_slg);
+  // 🛑 PURE READ when the player is on the active build: take the SAVED snapshot verbatim.
+  //    Otherwise read the stored NEUTRAL precompute (player_predictions is dev-neutral —
+  //    dev_aggressiveness measured 0.000 across all 7,062 projected rows on prod) and let the
+  //    session toggle scale it for display only.
+  const projectedAvg = isSnapshotBacked ? (buildSnap.p_avg ?? null) : applyDevScale(regularPred?.p_avg);
+  const projectedObp = isSnapshotBacked ? (buildSnap.p_obp ?? null) : applyDevScale(regularPred?.p_obp);
+  const projectedSlg = isSnapshotBacked ? (buildSnap.p_slg ?? null) : applyDevScale(regularPred?.p_slg);
   const fromDerived = computeDerived(predFromAvg, predFromObp, predFromSlg);
   const projectedDerived = computeDerived(projectedAvg, projectedObp, projectedSlg);
-  const projectedWrcPlus = applyDevScale(regularPred?.p_wrc_plus);
+  // Same rule as AVG/OBP/SLG above: snapshot verbatim when rostered, neutral+session otherwise.
+  const projectedWrcPlus = isSnapshotBacked
+    ? (buildSnap.p_wrc_plus ?? null)
+    : applyDevScale(regularPred?.p_wrc_plus);
 
   // Always use 2025 row for determining if player has data — don't bail on historical year with no AB
   const activeMasterRow = currentHitterRow;
@@ -1137,7 +1212,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                       p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                       p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
                       p_wrc_plus: projectedWrcPlus,
-                      owar: displayOWar,
+                      owar: displayHitterWar,
                       nil_value: displayNilValuation,
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       // Stored Hitter Master scores only; no client-side derivation
@@ -1234,7 +1309,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                       conference: resolvedConference || player.conference,
                       p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                       p_wrc_plus: projectedWrcPlus,
-                      owar: displayOWar,
+                      owar: displayHitterWar,
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       coach_notes: notes,
                     };
@@ -1306,7 +1381,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                     p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                     p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
                     p_wrc_plus: projectedWrcPlus,
-                    owar: displayOWar,
+                    owar: displayHitterWar,
                     // Valuation
                     nil_value: displayNilValuation,
                     power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
@@ -1718,8 +1793,8 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
           <div className="lg:col-span-2 space-y-4">
             <div className="grid gap-3 grid-cols-3">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">oWAR{isThinSample ? "*" : ""}</div>
-                <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayOWar)}`}>{displayOWar != null ? displayOWar.toFixed(2) : "—"}</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">WAR{isThinSample ? "*" : ""}</div>
+                <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayHitterWar)}`}>{displayHitterWar != null ? displayHitterWar.toFixed(2) : "—"}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Market Value</div>
@@ -2027,9 +2102,7 @@ function HistoricalHitterView({
   const fmt = (v: number | null | undefined, d = 3) => v == null ? "—" : Number(v).toFixed(d);
   const ops = row.OBP != null && row.SLG != null ? row.OBP + row.SLG : null;
   const wrcPlus = (() => {
-    if (row.AVG == null || row.OBP == null || row.SLG == null || row.ISO == null || ncaaWrc == null || ncaaWrc <= 0) return null;
-    const wrc = (0.45 * row.OBP) + (0.30 * row.SLG) + (0.15 * row.AVG) + (0.10 * row.ISO);
-    return Math.round((wrc / ncaaWrc) * 100);
+    return computeWrcPlus(row.AVG, row.OBP, row.SLG, row.ISO, ncaaWrc ?? undefined);
   })();
 
   return (

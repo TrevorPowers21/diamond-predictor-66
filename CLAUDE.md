@@ -174,10 +174,10 @@ The Team Builder Analytics tab includes:
 
 ### Formulas (mirror src/savant/lib/war.ts)
 ```
-wRC+ = ((0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO) / 0.364) · 100
-oWAR = ((((wRC+ − 100) / 100) · PA · 0.13) + (PA / 600 · 25)) / 10
-pRV+ = 0.30·FIP⁺ + 0.25·ERA⁺ + 0.15·WHIP⁺ + 0.15·K9⁺ + 0.10·BB9⁺ + 0.05·HR9⁺
-pWAR = (((pRV+ − 100) / 100) · (IP/9) · 5.5 + (IP/9 · 2.5)) / 10
+wRC+ = ((0.011 + 0.691·OBP + 0.235·SLG) / 0.3782) · 100          (C1, 2026-08-11; AVG/ISO redundant → 0; rounds to int)
+oWAR = ((((wRC+ − 100) / 100) · PA · 0.3994) + (PA / 600 · 21.22)) / 13.1
+pRV+ = 100 + 100·(6.913 − projRA9)/6.913,  projRA9 = (3.847 − 0.231·K/9 + 0.509·BB/9 + 1.486·HR/9) · 1.137   (D1-FIP index; canonical src/lib/pitcherQuality.ts)
+pWAR = (((pRV+ − 100) / 100) · (IP/9) · 6.915 + (IP/9 · 1.92)) / 13.1
 ```
 
 ### 56-game proration
@@ -307,7 +307,7 @@ Both blocks are deeply coupled — need 15-20 params each to extract cleanly:
 
 ### Watch Out For
 - `depthAssignments`/`depthPlaceholders` state stays in TeamBuilder — passed as props to DepthTab, NOT moved there (persisted to Supabase)
-- tsc: use `./node_modules/.bin/tsc --noEmit` (not `npx tsc`)
+- tsc: **`./node_modules/.bin/tsc --noEmit` is a NO-OP** — the root tsconfig.json has `files:[]` + project references, and plain `tsc --noEmit` does not traverse references, so it type-checks ZERO files and always "passes." It will NOT catch a real error (undefined identifier, bad type) in a page/component — those only surface by loading the page. The REAL check is `./node_modules/.bin/tsc -p tsconfig.app.json --noEmit`, but the app currently has ~198 pre-existing errors, so you can't gate on "zero." To check a file you edited: `tsc -p tsconfig.app.json --noEmit 2>&1 | grep '<File>.tsx'` and confirm no NEW error lines vs the base branch. `vite build` uses esbuild (transpile-only, no type errors) and `npm test` only runs unit tests — neither catches component reference errors either. **For any page/component change: load it locally before calling it verified.**
 - Merging staging → refactor always conflicts on TeamBuilder.tsx — cherry-pick individual commits instead
 - New staging commits since our last sync: cherry-pick order was `b2beb17 33f3fb6 ada1fd0 99d2050 c1af893 0cd3a5f`
 

@@ -388,7 +388,7 @@ async function main() {
         // get multiplied by transfer_*_power_weight=0 so they have NO effect
         // on the projected line. When Logan's real TrackMan/Stuff+ data is
         // eventually ingested through the Stuff+ rollup pipeline
-        // (src/savant/lib/rollupStuffPlusToMaster.ts), these columns are
+        // (src/savant/lib/legacy_rollupStuffPlusToMaster.ts), these columns are
         // overwritten with the computed power-rating-plus values.
         era_pr_plus:  100,
         fip_pr_plus:  100,

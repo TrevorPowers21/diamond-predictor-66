@@ -6,7 +6,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { applyTeamScopeFilter, dedupePreferredPerPlayer } from "@/lib/teamScopedPredictions";
 import { isPitcherPos } from "@/gm/lib/loadGmBuildRoster";
+import { pickHitterWar } from "@/lib/twpMarketValue";
 import { logGmActivity } from "@/gm/lib/logGmActivity";
+import { resolveActiveBuildId } from "@/lib/activeBuild";
 
 /** One authored, dated note on a target. */
 export interface GmTargetNote {
@@ -19,6 +21,9 @@ export interface GmTargetNote {
 
 /** A target board player with their team-scoped projection resolved. */
 export interface GmTarget {
+  id: string;            // target_board ROW id — unique per side (a TWP has two)
+  position_slot: string | null;
+  is_twp: boolean;
   player_id: string;
   name: string;
   first_name: string;
@@ -58,16 +63,60 @@ export function useGmTargetBoard() {
     enabled: !!user?.id && !!effectiveTeamId && playerIds.length > 0,
     queryFn: async () => {
       const map = new Map<string, any>();
-      for (let i = 0; i < playerIds.length; i += 200) {
-        let q = (supabase as any)
-          .from("player_predictions")
-          .select("player_id, variant, customer_team_id, o_war, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, hitter_depth_role")
-          .in("player_id", playerIds.slice(i, i + 200));
-        q = applyTeamScopeFilter(q, effectiveTeamId);
-        const { data } = await q;
-        for (const p of dedupePreferredPerPlayer(data || [], effectiveTeamId)) map.set(p.player_id, p);
+      // Batch of 100 players × ~16 preds each = ~1,600 rows > the 1,000-row cap,
+      // so paginate WITHIN each batch and order by a stable key — without the
+      // .order(), .range() page 2 overlaps page 1 and silently drops whole players.
+      for (let i = 0; i < playerIds.length; i += 100) {
+        const batch = playerIds.slice(i, i + 100);
+        let all: any[] = [];
+        let from = 0;
+        for (;;) {
+          let q = (supabase as any)
+            .from("player_predictions")
+            .select("id, player_id, variant, customer_team_id, o_war, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, hitter_depth_role")
+            .eq("season", 2027)
+            .in("player_id", batch)
+            .order("id", { ascending: true })
+            .range(from, from + 999);
+          q = applyTeamScopeFilter(q, effectiveTeamId);
+          const { data } = await q;
+          all = all.concat(data || []);
+          if (!data || data.length < 1000) break;
+          from += 1000;
+        }
+        for (const p of dedupePreferredPerPlayer(all, effectiveTeamId)) map.set(p.player_id, p);
       }
       return map;
+    },
+  });
+
+  // Active build player_snapshots — rostered targets read these, not the board line.
+  const { data: rosterSnapByPid = new Map<string, any>() } = useQuery({
+    queryKey: ["gm-target-roster-snaps", effectiveTeamId ?? null],
+    enabled: !!user?.id && !!effectiveTeamId,
+    queryFn: async () => {
+      const m = new Map<string, any>();
+      const { data: blds } = await (supabase as any).from("team_builds").select("id, is_active, is_default, team, academic_year, updated_at, created_at").eq("customer_team_id", effectiveTeamId);
+      const activeId = resolveActiveBuildId(blds);
+      if (!activeId) return m;
+      const { data: bps } = await (supabase as any).from("team_build_players").select("player_id, position_slot, included_in_roster, player_snapshot").eq("build_id", activeId).eq("included_in_roster", true);
+      const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+      const byPid = new Map<string, any[]>();
+      for (const bp of (bps || [])) { if (!(bp as any).player_snapshot) continue; (byPid.get((bp as any).player_id) ?? byPid.set((bp as any).player_id, []).get((bp as any).player_id)!).push(bp); }
+      // per-side keys (pid|hitter / pid|pitcher) so a TWP's two board rows each read
+      // their own slot's roster snapshot; one-way = single side key.
+      for (const [pid, list] of byPid) {
+        if (list.length === 1) {
+          const only = list[0];
+          m.set(`${pid}|${isPit(only.position_slot) ? "pitcher" : "hitter"}`, only.player_snapshot);
+          continue;
+        }
+        const h = list.find((r) => !isPit(r.position_slot));
+        const p = list.find((r) => isPit(r.position_slot));
+        if (h) m.set(`${pid}|hitter`, h.player_snapshot);
+        if (p) m.set(`${pid}|pitcher`, p.player_snapshot);
+      }
+      return m;
     },
   });
 
@@ -106,11 +155,31 @@ export function useGmTargetBoard() {
     () =>
       board.map((r) => {
         const pred = predByPlayer.get(r.player_id);
-        const pitcher = isPitcherPos(r.position);
-        const war = pitcher ? (pred?.p_war ?? null) : (pred?.o_war ?? null);
-        const market = pred?.market_value ?? pred?.twp_hitter_market_value ?? pred?.twp_pitcher_market_value ?? null;
+        // A TWP has two rows — classify by the ROW's slot; one-way falls back to the
+        // player's position.
+        const pitcher = r.position_slot
+          ? /^(SP|RP|CL|P|LHP|RHP)/i.test(String(r.position_slot).trim())
+          : isPitcherPos(r.position);
+        // The DISPLAY line: rostered → build player_snapshot; else → the saved
+        // transfer_snapshot (normalized owar→o_war, nil_valuation→market_value);
+        // fall back to the live prediction. So GM matches every other surface.
+        const roster = rosterSnapByPid.get(`${r.player_id}|${pitcher ? "pitcher" : "hitter"}`);
+        const ts: any = (r as any).transfer_snapshot;
+        const snap = roster
+          ? roster
+          : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, total_hitter_war: ts.total_hitter_war ?? ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
+        const line: any = snap ?? pred;
+        const war = pitcher ? (line?.p_war ?? null) : pickHitterWar(line); // hitter headline = total_hitter_war (o_war fallback pre-rebake)
+        // Side-aware TWP market: a pitcher target reads twp_pitcher, a hitter
+        // reads twp_hitter (raw market_value is NULL for TWPs). Matches the roster.
+        const market = pitcher
+          ? (line?.market_value ?? line?.twp_pitcher_market_value ?? null)
+          : (line?.market_value ?? line?.twp_hitter_market_value ?? null);
         const deal = offerByPlayer.get(r.player_id);
         return {
+          id: r.id,
+          position_slot: r.position_slot ?? null,
+          is_twp: !!r.is_twp,
           player_id: r.player_id,
           name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "—",
           first_name: r.first_name ?? "",
@@ -129,7 +198,7 @@ export function useGmTargetBoard() {
           snapshot: pred ?? null,
         };
       }),
-    [board, predByPlayer, offerByPlayer, notesByPlayer],
+    [board, predByPlayer, rosterSnapByPid, offerByPlayer, notesByPlayer],
   );
 
   // One upsert for either deal field — pass the column being edited.

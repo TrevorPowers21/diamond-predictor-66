@@ -56,17 +56,29 @@ export function usePlayerHubPreview(
   // (same hooks + percentileRank), so both the values AND the tile colors match.
   const plRates = usePitchLog2026PitcherRates(sourcePlayerId ?? null).data;
   const plPop = usePitchLog2026PitcherPop().data ?? [];
+  // STORED-FIRST (2026-08-23): read the stored Pitching Master scores so the chips don't recompute
+  // percentiles on every load (was live-only, no stored fallback). Live rank is only the fallback.
+  const { data: pitcherStored = null } = useQuery({
+    queryKey: ["hub-pitcher-stored", sourcePlayerId ?? null],
+    enabled: !!sourcePlayerId,
+    queryFn: async () => {
+      const { data } = await (supabase as any).from("Pitching Master")
+        .select("stuff_score, whiff_score, bb_score, barrel_score, stuff_plus, blended_stuff_plus")
+        .eq("source_player_id", sourcePlayerId).eq("Season", CURRENT_SEASON).limit(1);
+      return data?.[0] ?? null;
+    },
+  });
   const pitcherAdvanced: HubPitcherAdvanced | null = useMemo(() => {
-    if (!plRates?.hasData) return null;
+    if (!plRates?.hasData && !pitcherStored) return null;
     const rank = (v: number | null, key: "stuffPlus" | "whiff" | "bb" | "barrel", invert?: boolean) =>
       plPop.length > 0 ? percentileRank(v, plPop.map((p) => (p as any)[key] as number | null), invert ? { invert: true } : undefined) : null;
     return {
-      stuff_plus: plRates.stuffPlus, stuff_score: rank(plRates.stuffPlus, "stuffPlus"),
-      whiff: plRates.whiff, whiff_score: rank(plRates.whiff, "whiff"),
-      bb_pct: plRates.bb, bb_score: rank(plRates.bb, "bb", true),
-      barrel_pct: plRates.barrel, barrel_score: rank(plRates.barrel, "barrel", true),
+      stuff_plus: plRates?.stuffPlus ?? pitcherStored?.stuff_plus ?? null, stuff_score: pitcherStored?.stuff_score ?? rank(plRates?.stuffPlus ?? null, "stuffPlus"),
+      whiff: plRates?.whiff ?? null, whiff_score: pitcherStored?.whiff_score ?? rank(plRates?.whiff ?? null, "whiff"),
+      bb_pct: plRates?.bb ?? null, bb_score: pitcherStored?.bb_score ?? rank(plRates?.bb ?? null, "bb", true),
+      barrel_pct: plRates?.barrel ?? null, barrel_score: pitcherStored?.barrel_score ?? rank(plRates?.barrel ?? null, "barrel", true),
     };
-  }, [plRates, plPop]);
+  }, [plRates, plPop, pitcherStored]);
 
   // Barrel% / Exit Velo / Contact% / Chase% from Hitter Master (blended-aware).
   const { data: hitterAdvanced = null } = useQuery({

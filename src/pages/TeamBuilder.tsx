@@ -3,7 +3,6 @@ import AnalyticsTab from "./team-builder/tabs/AnalyticsTab";
 import RosterTab from "./team-builder/tabs/RosterTab";
 import TargetBoardTab from "./team-builder/tabs/TargetBoardTab";
 import DepthTab from "./team-builder/tabs/DepthTab";
-import CompareTab from "./team-builder/tabs/CompareTab";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -30,17 +29,16 @@ import {
   teamMatchesSelectedTeam, splitFullNameExport as splitFullName, isPitcher,
 } from "./team-builder/helpers";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { useNilAllocationMode } from "@/gm/hooks/useNilAllocationMode";
 import {
   calcPlayerScore,
-  DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
   DEFAULT_NIL_TIER_MULTIPLIERS,
 } from "@/lib/nilProgramSpecific";
-import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
@@ -74,8 +72,17 @@ type TransferSnapshot = {
   p_hr9?: number | null;
   p_rv_plus?: number | null;
   p_war?: number | null;
+  /** oWAR COMPONENT. ⚠ For a position player the HEADLINE is `total_hitter_war` (o+d+bsr). */
   owar: number | null;
+  /** Canonical spelling written alongside `owar`; either may be populated. */
+  o_war?: number | null;
+  d_war?: number | null;
+  bsr_war?: number | null;
+  /** TOTAL hitter WAR = o_war + d_war + bsr_war. The position-player headline. */
+  total_hitter_war?: number | null;
   nil_valuation: number | null;
+  twp_hitter_market_value?: number | null;
+  twp_pitcher_market_value?: number | null;
   from_team: string | null;
   from_conference: string | null;
 };
@@ -97,6 +104,9 @@ type BuildPlayer = {
   dev_aggressiveness_overridden?: boolean;
   // Target board "shopping list" gate. See types.ts BuildPlayer for full docs.
   included_in_roster?: boolean;
+  // Phase B: neutral base (dev_agg=0) for recompute; transient dirty flag. See types.ts.
+  neutralPrediction?: Record<string, any> | null;
+  _dirty?: boolean;
   // joined
   player?: {
     first_name: string;
@@ -396,27 +406,9 @@ const selectTransferPortalPreferredPrediction = (predictions: any[] | null | und
 
 
 
-const projectedNilTierClass = (
-  value: number | null | undefined,
-  totalBudget: number,
-  rosterScoreBaseline: number,
-) => {
-  if (value == null) return "text-muted-foreground";
-
-  const budget = Number(totalBudget) || 0;
-  const baseline = Math.max(Number(rosterScoreBaseline) || 0, 1);
-  if (budget <= 0) return "text-muted-foreground";
-
-  // Budget-aware tiers: compare each player's projected NIL to a baseline share of budget.
-  // Baseline share is budget / roster score baseline (default 68).
-  const baselineShare = budget / baseline;
-  const averageCut = baselineShare * 0.8;
-  const goodCut = baselineShare * 1.2;
-
-  if (value >= goodCut) return "text-[hsl(var(--success))]";
-  if (value >= averageCut) return "text-[hsl(var(--warning))]";
-  return "text-destructive";
-};
+// projectedNilTierClass removed here — was a dead duplicate of the canonical
+// helper in team-builder/helpers.ts (never called from this file). PlayerTableRow
+// imports the shared one, which now colors off the average paid allocation.
 
 // Hitter depth-role multipliers scale oWAR off the 260-PA everyday-starter
 // baseline. Five tiers (quality-anchored — cornerstone gate uses overall_plus,
@@ -461,7 +453,7 @@ const pitcherExpectedIp = (
 ): number => {
   switch (depthRole) {
     // Starters
-    case "weekend_starter":     return pitchingEq.pwar_ip_sp;  // ~80 IP — Fri/Sat/Sun rotation
+    case "weekend_starter":     return pitchingEq.pwar_ip_sp;  // ~85 IP — Fri/Sat/Sun rotation
     case "weekday_starter":     return pitchingEq.pwar_ip_sm;  // ~50 IP — midweek SP
     case "swing_starter":       return 30;                     // long relief / spot start
     // Relievers — graduated by leverage + workload
@@ -759,6 +751,9 @@ export default function TeamBuilder() {
     remoteEquationValues, allPlayersForSearch, hitterMasterPaMap,
     seasonUsage, builds, buildsLoading, returners, returnersUpdatedAt,
   } = useTeamBuilderData({ effectiveTeamId, selectedTeam });
+  // Team's shared Balanced/Top-Heavy NIL setting (from gm_budget) — same value
+  // the GM toggle writes, so TB's projected values mirror the GM's choice.
+  const nilAllocationMode = useNilAllocationMode(effectiveTeamId);
   const thinSampleMap = seasonUsage.thinSample;
 
   const isAdmin = hasRole("admin");
@@ -815,26 +810,21 @@ export default function TeamBuilder() {
   // Derive pitching conference plus-stats lookup from Supabase conference stats
   const pitchingConfLookup = useMemo(() => {
     const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-    const eq = pitchingEq;
     const map = new Map<string, { conference: string; era_plus: number; fip_plus: number; whip_plus: number; k9_plus: number; bb9_plus: number; hr9_plus: number; hitter_talent_plus: number }>();
     for (const cs of newConfStats) {
-      const toPlus = (value: number | null, ncaaAvg: number, ncaaSd: number, scale: number, higherIsBetter: boolean): number | null => {
-        if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
-        const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
-        const raw = 100 + (core * scale);
-        return Number.isFinite(raw) ? raw : null;
-      };
-      const eraPlus = toPlus(cs.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-      const fipPlus = toPlus(cs.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-      const whipPlus = toPlus(cs.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-      const k9Plus = toPlus(cs.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-      const bb9Plus = toPlus(cs.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-      const hr9Plus = toPlus(cs.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+      // 1d (2026-08-21): conference env+ = STORED value only (ratio scale). NO live
+      // compute, NO fallback. JUCO districts have NULL stored env+ (separate equation)
+      // → resolve null and are skipped (naturally blocked from the D1 ratio path).
+      const eraPlus = cs.era_plus != null ? Number(cs.era_plus) : null;
+      const fipPlus = cs.fip_plus != null ? Number(cs.fip_plus) : null;
+      const whipPlus = cs.whip_plus != null ? Number(cs.whip_plus) : null;
+      const k9Plus = cs.k9_plus != null ? Number(cs.k9_plus) : null;
+      const bb9Plus = cs.bb9_plus != null ? Number(cs.bb9_plus) : null;
+      const hr9Plus = cs.hr9_plus != null ? Number(cs.hr9_plus) : null;
       if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
-      const stuffPlus = cs.stuff_plus ?? 100;
-      const wrcPlus = cs.wrc_plus ?? 100;
-      const overallPowerRating = cs.overall_power_rating ?? 100;
-      const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
+      // 2026-08-21: HTP = STORED canonical value (park swap), no live compute.
+      const hitterTalentPlus = cs.hitter_talent_plus != null ? Number(cs.hitter_talent_plus) : null;
+      if (hitterTalentPlus == null) continue;
       const entry = {
         conference: cs.conference,
         era_plus: Math.round(eraPlus),
@@ -865,7 +855,6 @@ export default function TeamBuilder() {
   const [showNewBuildDialog, setShowNewBuildDialog] = useState(false);
   const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
   const [programTierConference, setProgramTierConference] = useState<string>("");
-  const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
   const [depthAssignments, setDepthAssignments] = useState<Record<string, number>>({});
   const [depthPlaceholders, setDepthPlaceholders] = useState<Record<string, "freshman" | "transfer">>({});
   // True after the coach's first successful save — subsequent dirty navigations
@@ -894,6 +883,14 @@ export default function TeamBuilder() {
   const skipAutoSeedOnceRef = useRef(false);
   const autoSeededTeamRef = useRef<string>("");
   // Prevents duplicate default-build seeding for the same team while builds === 0.
+  // ⚠ The auto-load effect has `exhaustive-deps` disabled, so anything it closes over is STALE —
+  //   reading `rosterPlayers` there captured an old array and the dirty-guard never fired. A ref is
+  //   always current regardless of the dep array.
+  const dirtyRowsRef = useRef(false);
+  useEffect(() => {
+    dirtyRowsRef.current = rosterPlayers.some((rp: any) => rp?._dirty);
+  }, [rosterPlayers]);
+
   const defaultBuildCreatingForTeamRef = useRef<string | null>(null);
   // Prevents the auto-load effect from overriding a just-called newBuild().
   const newBuildPendingRef = useRef(false);
@@ -1373,7 +1370,7 @@ export default function TeamBuilder() {
     computePitcherPwar, computeReturnerPitchingProjection,
     playerProjection,
     projectedPlayerScore, projectedNilForPlayer, effectiveNilForPlayer,
-    isProjectedStatus, projectedBudgetValue,
+    isProjectedStatus, projectedBudgetValue, nilAvgAllocation,
     calcTotals,
     rosterTableTotals, positionTableTotals, pitcherTableTotals,
     targetPositionTableTotals, targetPitcherTableTotals,
@@ -1386,7 +1383,7 @@ export default function TeamBuilder() {
     hitterStats, teamParkComponents, remoteEquationValues,
     pitchingEq, pitchingConfLookup, pitchingStatsByNameTeam,
     selectedTeam, effectiveTeamId,
-    rosterPlayers, totalBudget, fallbackRosterTotalPlayerScore,
+    rosterPlayers, totalBudget, nilAllocationMode,
     programTierMultiplier,
     powerLookup,
   });
@@ -1819,6 +1816,15 @@ export default function TeamBuilder() {
     const currentYearCoachBuilds = coachBuilds.filter((b: any) => b.academic_year === PROJECTION_SEASON);
     const toLoad = (activeBuild ?? currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
     if (!toLoad) return;
+    // ★★★ 2026-09-01 — NEVER CLOBBER UNSAVED WORK. ★★★
+    // This effect re-runs whenever `buildsLoading` flips, which happens on ANY React Query refetch —
+    // window focus being the usual trigger. loadBuild() rebuilds rosterPlayers from the DB, which
+    // wipes `_dirty` and the in-session toggle. Symptom: toggle dev aggressiveness, the value scales
+    // correctly, then a refetch lands, the row is rebuilt CLEAN, the display falls back to the stored
+    // (neutral) line, and the toggle is lost before the save can fire — "went up properly then went
+    // backwards to neutral and never reached the database".
+    // ⇒ A row mid-toggle is unsaved work. Reloading over it is data loss, not a refresh.
+    if (dirtyRowsRef.current) return;
     setHasSavedOnce(!toLoad.is_default);
     loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1925,7 +1931,81 @@ export default function TeamBuilder() {
           // Only newly added targets land as false; the "+" toggle on the
           // target board flips this to true.
           included_in_roster: rp.included_in_roster ?? true,
-          player_snapshot: rp.prediction ?? null,
+          // Phase B: persist the DISPLAYED (adjusted) line = f(neutral, toggles).
+          // playerProjection returns the stored snapshot for clean rows and the
+          // recompute-from-neutral for dirty rows, so this captures the correct
+          // value either way. Safe now that the read path reads the snapshot
+          // directly for clean rows (no re-overlay → no double dev-agg on reload).
+          player_snapshot: (() => {
+            // ★★★ 2026-09-01 — SAVE BAKES **NEUTRAL x THE TOGGLE**, ALWAYS. ★★★
+            // Trevor: "we arent using the player projections, we are using the neutral into player
+            // snapshots."
+            // playerProjection() returns the STORED snapshot verbatim for a CLEAN row. If the row
+            // has already been marked clean by the time we serialize, the save writes the UNSCALED
+            // line back — which is exactly what happened: production_notes recorded
+            // devAggressiveness 1 while player_snapshot held .3172 / wRC+ 122 / dev_aggressiveness 0.
+            // The intent persisted and the effect did not, so every reload showed neutral again.
+            // Forcing `_dirty` here makes the projection take the DIRTY path: base = neutral
+            // (dev_agg=0) scaled ONCE by the session toggle. That is the same derivation
+            // scripts/rebake-player-snapshot-toggles.ts performs offline, so a saved row and a
+            // re-baked row agree by construction.
+            const proj = playerProjection({ ...rp, _dirty: true } as any);
+            if (!proj) return rp.prediction ?? null;
+            const base: any = rp.prediction ? { ...rp.prediction } : (rp.neutralPrediction ? { ...rp.neutralPrediction } : {});
+            const shown: any = proj.shown ?? {};
+            const isTwp = !!(rp.player as any)?.is_twp;
+            if (proj.pwar != null) {
+              base.p_era = shown.p_era ?? base.p_era ?? null;
+              base.p_fip = shown.p_fip ?? base.p_fip ?? null;
+              base.p_whip = shown.p_whip ?? base.p_whip ?? null;
+              base.p_k9 = shown.p_k9 ?? base.p_k9 ?? null;
+              base.p_bb9 = shown.p_bb9 ?? base.p_bb9 ?? null;
+              base.p_hr9 = shown.p_hr9 ?? base.p_hr9 ?? null;
+              base.p_rv_plus = proj.shownWrc ?? shown.p_rv_plus ?? base.p_rv_plus ?? null;
+              base.p_war = proj.pwar ?? null;
+              base.pitcher_depth_role = rp.depth_role ?? base.pitcher_depth_role ?? null;
+              // TWP pitcher slot is OWN-SIDE ONLY — never carry the hitter side.
+              if (isTwp) { base.o_war = null; base.total_hitter_war = null; base.d_war = null; base.bsr_war = null;
+                base.p_avg = null; base.p_obp = null; base.p_slg = null; base.p_wrc_plus = null; base.hitter_depth_role = null; base.twp_hitter_market_value = null; }
+              // ⛔ total_hitter_war / d_war / bsr_war MUST be nulled with o_war on a TWP pitcher slot.
+              //    pickHitterWar prefers total_hitter_war, so a leftover value would resurface as this
+              //    slot's hitter WAR even though the hitter side was deliberately cleared.
+            } else {
+              base.p_avg = shown.p_avg ?? base.p_avg ?? null;
+              base.p_obp = shown.p_obp ?? base.p_obp ?? null;
+              base.p_slg = shown.p_slg ?? base.p_slg ?? null;
+              base.p_wrc_plus = proj.shownWrc ?? shown.p_wrc_plus ?? base.p_wrc_plus ?? null;
+              // 🛑 SECOND WRITE SITE — the explicit "Save build" (delete-all + re-insert at :1868/:1984).
+              //    It had the SAME defect as the target/roster save: it wrote `o_war` and never
+              //    `total_hitter_war`, while `base` is spread from `rp.prediction` — so the STALE
+              //    total came along for the ride and won on the next read (`pickHitterWar` prefers
+              //    total_hitter_war). Symptom: a toggle held correctly, then pressing Save reverted it.
+              // ⛔ `proj.owar` is the HEADLINE TOTAL — do not write it into `o_war`.
+              //    oWAR scales; dWAR/bsrWAR carry through unscaled; total = the sum.
+              const oWarOnlySave = (proj as any).oWarOnly ?? proj.owar ?? null;
+              const dWarSave = (proj as any).dWar ?? base.d_war ?? null;
+              const bsrWarSave = (proj as any).bsrWar ?? base.bsr_war ?? null;
+              base.o_war = oWarOnlySave;
+              if (dWarSave != null && Number.isFinite(Number(dWarSave))) base.d_war = Number(dWarSave);
+              if (bsrWarSave != null && Number.isFinite(Number(bsrWarSave))) base.bsr_war = Number(bsrWarSave);
+              base.total_hitter_war = proj.owar ?? (oWarOnlySave != null
+                ? Number(oWarOnlySave) + Number(dWarSave ?? 0) + Number(bsrWarSave ?? 0)
+                : null);
+              base.hitter_depth_role = rp.depth_role ?? base.hitter_depth_role ?? null;
+              // TWP hitter slot is OWN-SIDE ONLY — never carry the pitcher side.
+              if (isTwp) { base.p_era = null; base.p_fip = null; base.p_whip = null; base.p_k9 = null; base.p_bb9 = null; base.p_hr9 = null; base.p_rv_plus = null; base.p_war = null; base.pitcher_depth_role = null; base.twp_pitcher_market_value = null; }
+            }
+            const mkt = projectedNilForPlayer(rp);
+            if (isTwp) {
+              // TWP market lives in the side split; the shared market_value stays null.
+              if (proj.pwar != null) base.twp_pitcher_market_value = mkt ?? null;
+              else base.twp_hitter_market_value = mkt ?? null;
+              base.market_value = null;
+            } else if (mkt != null) {
+              base.market_value = mkt;
+            }
+            return base;
+          })(),
           production_notes: serializeBuildPlayerMeta(
             rp.production_notes,
             rp.team_metrics ?? null,
@@ -1950,9 +2030,51 @@ export default function TeamBuilder() {
             rp.projection_tier ?? null,
             rp.nil_value_overridden ?? false,
           ),
+          // Persist the NEUTRAL base so a re-save never wipes it (this insert
+          // replaces the build's rows). It's the immutable dev_agg=0 line the toggle
+          // recompute reads; keeping it on the row means it can't go null and compound.
+          neutral_snapshot: ((rp as any).neutralPrediction ?? (rp as any).neutral_snapshot ?? null) as any,
         }));
         const { error } = await supabase.from("team_build_players").insert(rows);
         if (error) throw error;
+
+        // Keep the universal target board's RECIPE in lockstep with the roster: a
+        // rostered target's target_board.production_notes must match the roster's,
+        // so the board shows the same toggle state the coach set on the roster.
+        // (The snapshot is kept 1:1 by saveTargetToggle + the rostered-consistency
+        // backfill; this closes the bulk-save gap that left board notes NULL.)
+        // One-way only — a TWP is two roster rows → one merged board row today, so
+        // its notes ride the per-side toggle lockstep, not this bulk mirror (which
+        // would clobber the other side). TWP two-row board is a separate step.
+        //
+        // GATE: only the ACTIVE build's roster drives the universal target board
+        // (GM rule — a non-active scenario build must never write board notes). If
+        // this save isn't the active build, skip. Fail-safe: no flag → no mirror.
+        const { data: activeRow } = await (supabase as any).from("team_builds")
+          .select("id").eq("customer_team_id", effectiveTeamId ?? "").eq("is_active", true).maybeSingle();
+        const isActiveBuild = !!activeRow && (activeRow as any).id === buildId;
+        if (effectiveTeamId && isActiveBuild) {
+          const rosteredTargets = persistableRoster.filter(
+            (rp) => (rp.roster_status ?? "returner") === "target"
+              && (rp as any).included_in_roster !== false
+              && !((rp.player as any)?.is_twp)
+              && rp.player_id,
+          );
+          for (const rp of rosteredTargets) {
+            const notes = serializeBuildPlayerMeta(
+              rp.production_notes, rp.team_metrics ?? null, rp.team_power_plus ?? null,
+              rp.roster_status ?? null, rp.depth_role ?? null, rp.class_transition ?? null,
+              rp.dev_aggressiveness ?? null, rp.class_transition_overridden ?? false,
+              rp.dev_aggressiveness_overridden ?? false, rp.transfer_snapshot ?? null,
+              rp.player ? { first_name: rp.player.first_name || "", last_name: rp.player.last_name || "", position: rp.player.position ?? null, team: rp.player.team ?? null, from_team: rp.player.from_team ?? null, conference: rp.player.conference ?? null } : null,
+              (rp as any).projection_tier ?? null, (rp as any).nil_value_overridden ?? false,
+            );
+            // production_notes column exists on target_board (staging migration); the
+            // generated types lag, so cast the payload like the other board writes.
+            await supabase.from("target_board").update({ production_notes: notes } as any)
+              .eq("customer_team_id", effectiveTeamId).eq("player_id", rp.player_id!);
+          }
+        }
       }
 
       setSelectedBuildId(buildId);
@@ -1964,6 +2086,11 @@ export default function TeamBuilder() {
       setHasSavedOnce(true);
       toast({ title: result?.saveAs ? `Build saved as "${result.targetName}"` : "Build saved" });
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
+      // Phase B: reload the saved build so every row comes back CLEAN — the
+      // persisted adjusted snapshots load into p.prediction with no _dirty, so the
+      // build returns to pure snapshot reads (zero live compute). The clean-read
+      // is synchronous, so this reload has no flicker.
+      if (result?.buildId) loadBuild(result.buildId);
     },
     onError: (e: any) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
@@ -2167,36 +2294,195 @@ export default function TeamBuilder() {
     }
   }, [rosterPlayers, removeFromSupabaseBoard]);
 
+  // ── Phase B for TARGETS — auto-save a target toggle to the universal board ──
+  // A board target has no saved build; any toggle on its TB row auto-persists to
+  // target_board (transfer_snapshot + production_notes), mirroring the roster's
+  // Phase B save. If the target is also on THIS build's roster (included_in_roster),
+  // the same toggle also writes the roster's player_snapshot + production_notes so
+  // board and roster stay in lockstep. The row then reads snapshot-only again.
+  // Neutral stays player_predictions (the sim recomputes a dirty target from the
+  // live neutral), so this can't compound.
+  const rosterPlayersRef = useRef<BuildPlayer[]>(rosterPlayers);
+  useEffect(() => { rosterPlayersRef.current = rosterPlayers; }, [rosterPlayers]);
+  const targetSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const saveTargetToggle = useCallback(async (player: BuildPlayer) => {
+    if (!effectiveTeamId || !player.player_id) return;
+    const pid = player.player_id;
+    const isTwp = !!(player.player as any)?.is_twp;
+    const treatAsPitcher = isPitcher(player);
+    const proj = playerProjection(player);
+    if (!proj) return;
+    // NEVER persist a neutral line. If the recompute didn't yield an adjusted value
+    // (e.g. the live neutral wasn't loaded when the debounce fired), abort — leave
+    // the row dirty (still showing the live-adjusted value) instead of writing/
+    // reverting to neutral. This is what caused "toggle → reverts to neutral".
+    const projValid = treatAsPitcher
+      ? (proj.pwar != null && Number.isFinite(Number(proj.pwar)))
+      : (proj.owar != null && Number.isFinite(Number(proj.owar)));
+    if (!projValid) return;
+    const shown: any = proj.shown ?? {};
+    // Merge onto the existing snapshot so a TWP's OTHER side (its own rosterPlayers
+    // row, same player_id) is preserved when only this side's toggle moved.
+    // TWP now has TWO board rows (one per slot) — fetch/write only the matching
+    // side, else maybeSingle() sees two rows. One-way = a single row (no filter).
+    const twpPitSlots = ["SP", "RP", "CL", "P", "LHP", "RHP"];
+    const twpPitCsv = "(SP,RP,CL,P,LHP,RHP)";
+    const withTwpSide = (q: any) => isTwp ? (treatAsPitcher ? q.in("position_slot", twpPitSlots) : q.not("position_slot", "in", twpPitCsv)) : q;
+    const { data: existing } = await withTwpSide(
+      supabase.from("target_board").select("transfer_snapshot")
+        .eq("customer_team_id", effectiveTeamId).eq("player_id", pid),
+    ).maybeSingle();
+    const t: any = { ...(((existing as any)?.transfer_snapshot) ?? player.transfer_snapshot ?? {}) };
+    const bp: any = { ...t }; // roster player_snapshot mirror (o_war / market_value field names)
+    t.is_twp = isTwp; bp.is_twp = isTwp;
+    const mkt = projectedNilForPlayer(player, treatAsPitcher ? "pitcher" : "hitter");
+    if (treatAsPitcher) {
+      const f = { p_era: shown.p_era ?? t.p_era ?? null, p_fip: shown.p_fip ?? t.p_fip ?? null, p_whip: shown.p_whip ?? t.p_whip ?? null, p_k9: shown.p_k9 ?? t.p_k9 ?? null, p_bb9: shown.p_bb9 ?? t.p_bb9 ?? null, p_hr9: shown.p_hr9 ?? t.p_hr9 ?? null, p_rv_plus: proj.shownWrc ?? shown.p_rv_plus ?? t.p_rv_plus ?? null, p_war: proj.pwar ?? null, pitcher_depth_role: player.depth_role ?? t.pitcher_depth_role ?? null };
+      Object.assign(t, f); Object.assign(bp, f);
+      if (isTwp) { t.twp_pitcher_market_value = mkt; bp.twp_pitcher_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
+      else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
+    } else {
+      const f = { p_avg: shown.p_avg ?? t.p_avg ?? null, p_obp: shown.p_obp ?? t.p_obp ?? null, p_slg: shown.p_slg ?? t.p_slg ?? null, p_wrc_plus: proj.shownWrc ?? shown.p_wrc_plus ?? t.p_wrc_plus ?? null, hitter_depth_role: player.depth_role ?? t.hitter_depth_role ?? null };
+      Object.assign(t, f); Object.assign(bp, f);
+      // 🛑 PERSIST ALL FOUR WAR FIELDS, NOT JUST oWAR (Trevor, 2026-09-01).
+      //    The live compute is a BRIDGE: instant feedback on toggle, then the row saves and every
+      //    later read comes from the snapshot — "it needs to transition back to stored snapshot then
+      //    never live compute again on any load unless changed."
+      //    That handoff only works if what we save equals what we just showed.
+      //
+      // ★ THE BUG THIS FIXES. This line used to write `o_war`/`owar` and NEVER `total_hitter_war`.
+      //    `pickHitterWar` reads `total_hitter_war ?? o_war ?? owar`, so the STALE total kept winning
+      //    on reload: the coach toggled, watched WAR move, and it snapped straight back to the old
+      //    number the moment the snapshot took over (Farner 1.86, Traeger 1.44).
+      // ⛔ `proj.owar` is the HEADLINE TOTAL — never write it into `o_war`. Use the components:
+      //    oWAR scales with the toggle; dWAR and bsrWAR are destination-invariant and carry through
+      //    unscaled (Trevor: "only scaling oWAR ... total hitter war is scaled oWAR + dWAR + bsrWAR").
+      const oWarOnly = (proj as any).oWarOnly ?? proj.owar ?? null;
+      const dWarOut = (proj as any).dWar ?? Number((shown as any)?.d_war) ?? null;
+      const bsrWarOut = (proj as any).bsrWar ?? Number((shown as any)?.bsr_war) ?? null;
+      const totalOut = proj.owar ?? (oWarOnly != null ? Number(oWarOnly) + Number(dWarOut ?? 0) + Number(bsrWarOut ?? 0) : null);
+      t.owar = oWarOnly; t.o_war = oWarOnly; bp.o_war = oWarOnly;
+      if (dWarOut != null && Number.isFinite(Number(dWarOut))) { t.d_war = Number(dWarOut); bp.d_war = Number(dWarOut); }
+      if (bsrWarOut != null && Number.isFinite(Number(bsrWarOut))) { t.bsr_war = Number(bsrWarOut); bp.bsr_war = Number(bsrWarOut); }
+      t.total_hitter_war = totalOut; bp.total_hitter_war = totalOut;
+      if (isTwp) { t.twp_hitter_market_value = mkt; bp.twp_hitter_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
+      else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
+    }
+    // Both the board line (t) and the roster mirror (bp) are OWN-SIDE ONLY for a
+    // TWP — each is written to the matching slot's row only, so a slot's snapshot
+    // never carries the other side's data.
+    if (isTwp) {
+      if (treatAsPitcher) {
+        bp.o_war = null; bp.total_hitter_war = null; bp.d_war = null; bp.bsr_war = null; bp.p_avg = null; bp.p_obp = null; bp.p_slg = null; bp.p_wrc_plus = null; bp.hitter_depth_role = null; bp.twp_hitter_market_value = null;
+        t.owar = null; t.o_war = null; t.total_hitter_war = null; t.d_war = null; t.bsr_war = null; t.p_avg = null; t.p_obp = null; t.p_slg = null; t.p_wrc_plus = null; t.hitter_depth_role = null; t.twp_hitter_market_value = null;
+      } else {
+        bp.p_era = null; bp.p_fip = null; bp.p_whip = null; bp.p_k9 = null; bp.p_bb9 = null; bp.p_hr9 = null; bp.p_rv_plus = null; bp.p_war = null; bp.pitcher_depth_role = null; bp.twp_pitcher_market_value = null;
+        t.p_era = null; t.p_fip = null; t.p_whip = null; t.p_k9 = null; t.p_bb9 = null; t.p_hr9 = null; t.p_rv_plus = null; t.p_war = null; t.pitcher_depth_role = null; t.twp_pitcher_market_value = null;
+      }
+    }
+    const playerMeta = player.player
+      ? { first_name: player.player.first_name || "", last_name: player.player.last_name || "", position: player.player.position ?? null, team: player.player.team ?? null, from_team: player.player.from_team ?? null, conference: player.player.conference ?? null }
+      : null;
+    const notes = serializeBuildPlayerMeta(
+      player.production_notes, player.team_metrics ?? null, player.team_power_plus ?? null,
+      player.roster_status ?? null, player.depth_role ?? null, player.class_transition ?? null,
+      player.dev_aggressiveness ?? null, player.class_transition_overridden ?? false,
+      player.dev_aggressiveness_overridden ?? false, t, playerMeta,
+      (player as any).projection_tier ?? null, (player as any).nil_value_overridden ?? false,
+    );
+    // 1) Universal target board — always. TWP: only the matching side's row.
+    const { error: tbErr } = await withTwpSide(
+      supabase.from("target_board")
+        .update({ transfer_snapshot: t, production_notes: notes })
+        .eq("customer_team_id", effectiveTeamId).eq("player_id", pid),
+    );
+    if (tbErr) { toast({ title: "Target save failed", description: tbErr.message, variant: "destructive" }); return; }
+    // 2) Roster lockstep — if this target is on the loaded build's roster, mirror
+    //    the exact same line into team_build_players.
+    if ((player as any).included_in_roster && selectedBuildId) {
+      let q = supabase.from("team_build_players")
+        .update({ player_snapshot: bp, production_notes: notes })
+        .eq("build_id", selectedBuildId).eq("player_id", pid);
+      // A TWP has two slot rows — write only the matching side's slot so the other
+      // slot keeps its own-side snapshot.
+      if (isTwp) {
+        const pitSlots = "(SP,RP,CL,P,LHP,RHP)";
+        q = treatAsPitcher ? q.in("position_slot", ["SP", "RP", "CL", "P", "LHP", "RHP"]) : q.not("position_slot", "in", pitSlots);
+      }
+      await q;
+    }
+    // Local: adopt the saved snapshot + clear dirty for the TOGGLED side. Force
+    // prediction=null so the clean-read (p.prediction ?? p.transfer_snapshot) uses
+    // the just-saved adjusted transfer_snapshot, not a shadowing neutral prediction.
+    // A TWP has two rows — settle only the toggled side, since `t` is now own-side;
+    // the other side keeps its own snapshot untouched.
+    setRosterPlayers((prev) => prev.map((p) =>
+      p.player_id === pid && (p.roster_status || "returner") === "target" && (!isTwp || isPitcher(p) === treatAsPitcher)
+        // ★ 2026-09-01 — MUST also refresh `player_snapshot`. Display reads
+        //   `player_snapshot ?? transfer_snapshot`, so updating only transfer_snapshot left the row
+        //   falling back to the STALE player_snapshot the moment _dirty cleared — the flash back
+        //   down right after a toggle. Both copies settle to the just-saved line together.
+        ? { ...p, prediction: null, player_snapshot: t, transfer_snapshot: t, _dirty: false } : p));
+  }, [effectiveTeamId, playerProjection, projectedNilForPlayer, selectedBuildId]);
+  const saveTargetToggleRef = useRef(saveTargetToggle);
+  useEffect(() => { saveTargetToggleRef.current = saveTargetToggle; }, [saveTargetToggle]);
+
   const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
-    setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
+    // Phase B: a value-affecting toggle marks the row DIRTY so the sim recomputes
+    // it from neutral this session (instead of reading the stored snapshot). Save
+    // clears it. included_in_roster / roster_status are NOT toggles — the player's
+    // numbers don't change — so they don't dirty the row.
+    const markDirty = (["depth_role", "dev_aggressiveness", "position_slot", "class_transition"] as const)
+      .some((k) => k in updates);
+    const withDirty = (p: BuildPlayer): BuildPlayer =>
+      markDirty ? ({ ...p, ...updates, _dirty: true }) : ({ ...p, ...updates });
+    setRosterPlayers((prev) => {
+      const target = prev[idx];
+      // Two-way players occupy BOTH sides (one hitter row + one pitcher row,
+      // same player_id). ASYMMETRIC by design:
+      //   ADD (included_in_roster -> true) brings in BOTH sides — you're
+      //     evaluating the whole player, so clicking "+" on either side puts
+      //     him on the roster as both hitter and pitcher.
+      //   REMOVE (-> false) drops ONLY the clicked side, so a coach can keep
+      //     just the bat or just the arm ("he'll hit for us but not pitch").
+      // Everything else (depth role, dev agg, position slot) stays per-side.
+      if (target && (updates as any).included_in_roster === true && (target.player as any)?.is_twp && target.player_id) {
+        const pid = target.player_id;
+        return prev.map((p, i) => {
+          if (i === idx) return withDirty(p);
+          if (p.player_id === pid && (p.roster_status || "returner") === "target") {
+            return { ...p, included_in_roster: true };
+          }
+          return p;
+        });
+      }
+      return prev.map((p, i) => (i === idx ? withDirty(p) : p));
+    });
     setDirty(true);
+    // Phase B for targets: a toggle on a board target auto-saves (debounced) to
+    // the universal target_board — and to the roster too if it's rostered. Uses
+    // the ref so this []-dep callback always calls the latest saver / sim state.
+    if (markDirty) {
+      const cur = rosterPlayersRef.current[idx];
+      if (cur && (cur.roster_status || "returner") === "target" && cur.player_id) {
+        const updated: BuildPlayer = { ...cur, ...updates, _dirty: true };
+        const pid = cur.player_id;
+        const timers = targetSaveTimers.current;
+        if (timers.has(pid)) clearTimeout(timers.get(pid)!);
+        timers.set(pid, setTimeout(() => { timers.delete(pid); saveTargetToggleRef.current(updated); }, 500));
+      }
+    }
   }, []);
 
   const updatePlayerWithRecalc = useCallback(async (idx: number, updates: Partial<BuildPlayer>) => {
     const current = rosterPlayers[idx];
     setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
     setDirty(true);
-    if (!current || (current.roster_status || "returner") === "target") return;
-    const predictionId = current.prediction?.id;
-    if (!predictionId) return;
-    const classTransition = (updates.class_transition ?? current.class_transition ?? null) as string | null;
-    const devAgg = Number(updates.dev_aggressiveness ?? current.dev_aggressiveness ?? 0);
-    try {
-      const res = await recalculatePredictionById(predictionId, {
-        class_transition: classTransition ?? undefined,
-        dev_aggressiveness: Number.isFinite(devAgg) ? devAgg : undefined,
-      });
-      setRosterPlayers((prev) =>
-        prev.map((p, i) =>
-          i === idx
-            ? { ...p, prediction: p.prediction ? { ...p.prediction, ...(res?.prediction || {}) } : p.prediction }
-            : p,
-        ),
-      );
-    } catch (e: any) {
-      toast({ title: "Recalc failed", description: e?.message || "Could not recalculate player outputs.", variant: "destructive" });
-    }
-  }, [rosterPlayers, toast]);
+    // COLLAPSE (2026-08-12): recalculatePredictionById removed (retired dead path). Class-transition /
+    // dev-aggressiveness are session-only now (no DB recalc round trip). This callback is itself
+    // never invoked (passed to PlayerTableRow but never called) — sweep the shell in the dead-code audit.
+  }, [rosterPlayers]);
 
   const markPlayerLeaving = useCallback((idx: number, name: string) => {
     setRosterPlayers((prev) => prev.filter((_, i) => i !== idx));
@@ -2339,108 +2625,18 @@ export default function TeamBuilder() {
         team_metrics: null,
         team_power_plus: null,
       };
-      if (selectedTeam && row.__seedPowerPlus?.baPlus != null && row.__seedPowerPlus?.obpPlus != null && row.__seedPowerPlus?.isoPlus != null) {
-        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
-        const fromTeamRow = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
-        const fromConference = fromTeamRow?.conference || row.conference || null;
-        const fromConfStats = resolveConferenceStats(fromConference, fromTeamRow?.conference_id ?? null);
-        const toConfStats = resolveConferenceStats(toTeamRow?.conference || null, toTeamRow?.conference_id ?? null);
-        const lastAvg = row.__seedStats?.avg ?? null;
-        const lastObp = row.__seedStats?.obp ?? null;
-        const lastSlg = row.__seedStats?.slg ?? null;
-        if (
-          toTeamRow && fromConfStats && toConfStats &&
-          lastAvg != null && lastObp != null && lastSlg != null &&
-          fromConfStats.avg_plus != null && toConfStats.avg_plus != null &&
-          fromConfStats.obp_plus != null && toConfStats.obp_plus != null &&
-          fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
-          fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
-        ) {
-          const targetSeedHand = batsHandToHandedness((row as any).bats_hand);
-          const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
-          const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
-          const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
-          const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
-          const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
-          const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
-          if (
-            fromParkAvgRaw != null && toParkAvgRaw != null &&
-            fromParkObpRaw != null && toParkObpRaw != null &&
-            fromParkIsoRaw != null && toParkIsoRaw != null
-          ) {
-            const projected = computeTransferProjection({
-              lastAvg, lastObp, lastSlg,
-              baPR: Number(row.__seedPowerPlus.baPlus),
-              obpPR: Number(row.__seedPowerPlus.obpPlus),
-              isoPR: Number(row.__seedPowerPlus.isoPlus),
-              fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
-              fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
-              fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
-              fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
-              fromPark: normalizeParkToIndex(fromParkAvgRaw), toPark: normalizeParkToIndex(toParkAvgRaw),
-              fromObpPark: normalizeParkToIndex(fromParkObpRaw), toObpPark: normalizeParkToIndex(toParkObpRaw),
-              fromIsoPark: normalizeParkToIndex(fromParkIsoRaw), toIsoPark: normalizeParkToIndex(toParkIsoRaw),
-              ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
-              ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
-              ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
-              ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
-              baStdPower: eqNum("t_ba_std_pr", 31.297),
-              baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
-              obpStdPower: eqNum("t_obp_std_pr", 28.889),
-              obpStdNcaa: toRate(eqNum("t_obp_std_ncaa", 0.046781)),
-              baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
-              obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
-              baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight)),
-              obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight)),
-              isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight)),
-              baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight)),
-              obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight)),
-              isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight)),
-              baParkWeight: toWeight(eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight)),
-              obpParkWeight: toWeight(eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight)),
-              isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
-              isoStdPower: eqNum("t_iso_std_power", 45.423),
-              isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
-              wObp: toRate(eqNum("r_w_obp", 0.45)),
-              wSlg: toRate(eqNum("r_w_slg", 0.30)),
-              wAvg: toRate(eqNum("r_w_avg", 0.15)),
-              wIso: toRate(eqNum("r_w_iso", 0.10)),
-            });
-            const classKey = "SJ";
-            const classAdj = classKey === "SJ" ? 0.02 : 0.02;
-            const devAgg = 0;
-            const transferMult = 1 + classAdj + (devAgg * 0.06);
-            const pAvgAdj = projected.pAvg * transferMult;
-            const pObpAdj = projected.pObp * transferMult;
-            const pIsoAdj = projected.pIso * transferMult;
-            const pSlgAdj = pAvgAdj + pIsoAdj;
-            const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
-            const wObp = toRate(eqNum("r_w_obp", 0.45));
-            const wSlg = toRate(eqNum("r_w_slg", 0.30));
-            const wAvg = toRate(eqNum("r_w_avg", 0.15));
-            const wIso = toRate(eqNum("r_w_iso", 0.10));
-            const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
-            const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
-            const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
-            const pa = 260;
-            const runsPerPa = 0.13;
-            const replacementRuns = (pa / 600) * 25;
-            const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
-            const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
-            const owarAdj = rarAdj == null ? null : rarAdj / 10;
-            const basePerOwar = eqNum("nil_base_per_owar", 25000);
-            const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
-            const pvm = getPositionValueMultiplier(row.position);
-            const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
-            const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
-            newP.transfer_snapshot = {
-              p_avg: pAvgAdj, p_obp: pObpAdj, p_slg: pSlgAdj,
-              p_wrc_plus: pWrcPlusAdj, owar: owarAdj, nil_valuation: nilValuation,
-              from_team: row.team || null, from_conference: fromConference,
-            };
-          }
-        }
-      }
+      // ⛔ LIVE TRANSFER PROJECTION REMOVED 2026-09-01 (Trevor). This was the manual-seed
+      //    fallback: a seeded hitter with no `player_predictions` row got its p_avg/p_obp/p_slg/
+      //    wRC+/oWAR/NIL computed here via computeTransferProjection(). It was the LAST live
+      //    compute on the add path — the normal add is stored-first (see the JIT-fetch above,
+      //    which exists precisely so a resolvable seed row reads its STORED prediction).
+      // WHY IT WENT: a second projection implementation drifts from the precompute and CONFLICTS
+      //    with the stored value — the add would show one number and save would write another.
+      //    (It also still centred the z-shift at 100 after the 2026-09-01 centre fix, so it would
+      //    have disagreed with every recomputed row.) One source of truth: the stored snapshot.
+      // ⇒ A manually-seeded hitter with NO stored prediction now lands with the seed rates only
+      //    (`transfer_snapshot` above: p_avg/p_obp/p_slg from __seedStats, wRC+/oWAR/NIL null)
+      //    until a precompute gives it a real row. Blank is correct; invented-and-conflicting is not.
       setRosterPlayers((prev) => [...prev, newP]);
       setDirty(true);
       setTargetPlayerSearchQuery("");
@@ -2648,7 +2844,7 @@ export default function TeamBuilder() {
     const [{ data: storedRows }, { data: playerRow }] = await Promise.all([
       supabase
         .from("player_predictions")
-        .select("customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip, class_transition, dev_aggressiveness")
+        .select("customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip, class_transition, dev_aggressiveness")
         .eq("player_id", row.id)
         .eq("season", PROJECTION_SEASON)
         .in("status", ["active", "departed"]),
@@ -2722,8 +2918,20 @@ export default function TeamBuilder() {
           p_obp: stored?.p_obp ?? null,
           p_slg: stored?.p_slg ?? null,
           p_wrc_plus: stored?.p_wrc_plus ?? null,
+          // ★ 2026-09-01 — the OPTIMISTIC row rendered on add. It must already carry the TOTAL,
+          //   or the coach sees the oWAR component and watches it jump when the DB row lands
+          //   (Ryder Helfrick: 2.5 → 5.02). Same class as the target-board bug: a column that is
+          //   not in the SELECT at :2807 cannot be written here.
           owar: stored?.o_war ?? null,
+          o_war: stored?.o_war ?? null,
+          d_war: stored?.d_war ?? null,
+          bsr_war: stored?.bsr_war ?? null,
+          total_hitter_war: stored?.total_hitter_war ?? null,
           nil_valuation: isTwp ? (stored?.twp_hitter_market_value ?? null) : (stored?.market_value ?? null),
+          // Carry BOTH side market values so pickHitter/PitcherMarketValue can
+          // resolve a TWP's per-side market from either row's snapshot.
+          twp_hitter_market_value: stored?.twp_hitter_market_value ?? null,
+          twp_pitcher_market_value: stored?.twp_pitcher_market_value ?? null,
           from_team: fromTeamName,
           from_conference: fromConference,
         },
@@ -2754,6 +2962,10 @@ export default function TeamBuilder() {
           p_war: stored?.p_war ?? null,
           owar: stored?.p_war ?? null,
           nil_valuation: isTwp ? (stored?.twp_pitcher_market_value ?? null) : (stored?.market_value ?? null),
+          // Carry BOTH side market values so pickHitter/PitcherMarketValue can
+          // resolve a TWP's per-side market from either row's snapshot.
+          twp_hitter_market_value: stored?.twp_hitter_market_value ?? null,
+          twp_pitcher_market_value: stored?.twp_pitcher_market_value ?? null,
           from_team: fromTeamName,
           from_conference: fromConference,
         },
@@ -2831,6 +3043,102 @@ export default function TeamBuilder() {
     if (targetBoardLoading) return;
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
+    // Phase B for targets — overlay each loaded target's SAVED transfer_snapshot +
+    // toggle state (target_board.transfer_snapshot / production_notes) onto its row,
+    // so a persisted toggle survives refresh instead of the rebuilt-neutral line the
+    // add path produces. Idempotent (skips rows already equal); never touches a DIRTY
+    // row (an in-session edge mid-save).
+    const overlaySavedTargets = () => {
+      const savedByPid = new Map<string, any>();
+      for (const sbRow of supabaseTargetBoard) if ((sbRow as any).transfer_snapshot) savedByPid.set(sbRow.player_id, sbRow);
+      if (savedByPid.size === 0) return;
+      setRosterPlayers((prev) => {
+        let changed = false;
+        const next = prev.map((p) => {
+          if ((p.roster_status || "returner") !== "target" || !p.player_id || (p as any)._dirty) return p;
+          const saved = savedByPid.get(p.player_id);
+          const s: any = saved?.transfer_snapshot;
+          if (!s) return p;
+          // ON roster reads its build player_snapshot (p.prediction); OFF roster reads
+          // transfer_snapshot. transfer_snapshot is kept 1:1 with player_snapshot by the
+          // lockstep + consistency backfill, so a ROSTERED target SELF-HEALS its
+          // (possibly stale) in-memory prediction from the fresh 1:1 transfer_snapshot —
+          // no manual build reload needed. Each TWP row reads its own side from the line.
+          if ((p as any).included_in_roster === true) {
+            const norm: any = { ...s, o_war: s.o_war ?? s.owar, market_value: s.market_value ?? s.nil_valuation };
+            const cur: any = p.prediction;
+            const same = cur && cur.o_war === norm.o_war && cur.p_war === norm.p_war && cur.p_wrc_plus === norm.p_wrc_plus
+              && cur.p_rv_plus === norm.p_rv_plus && cur.twp_hitter_market_value === norm.twp_hitter_market_value && cur.twp_pitcher_market_value === norm.twp_pitcher_market_value;
+            // ★ HOLD THE LIVE VALUE UNTIL THE DB CATCHES UP (2026-09-01).
+            // `same` means the saved row does NOT yet carry the toggle we just applied. Clearing
+            // _dirty here would flip the row clean against the OLD snapshot — the visible flash
+            // down before the write lands. Stay dirty so the live value keeps showing.
+            if (same) return p;
+            changed = true;
+            return { ...p, prediction: norm, _dirty: false };
+          }
+          const cur: any = p.transfer_snapshot;
+          const same = cur && cur.owar === s.owar && cur.p_war === s.p_war && cur.p_wrc_plus === s.p_wrc_plus
+            && cur.p_rv_plus === s.p_rv_plus && cur.nil_valuation === s.nil_valuation
+            && cur.twp_hitter_market_value === s.twp_hitter_market_value && cur.twp_pitcher_market_value === s.twp_pitcher_market_value;
+          // ★ same rule on the target path — hold the live value until the saved row reflects it.
+          if (same) return p;
+          changed = true;
+          const meta = parseBuildPlayerMeta(saved.production_notes);
+          return {
+            ...p, transfer_snapshot: s, prediction: null, _dirty: false,
+            depth_role: meta?.depthRole ?? p.depth_role,
+            dev_aggressiveness: meta?.devAggressiveness ?? p.dev_aggressiveness,
+            class_transition: meta?.classTransition ?? p.class_transition,
+            dev_aggressiveness_overridden: meta?.devAggressivenessOverridden ?? p.dev_aggressiveness_overridden,
+            class_transition_overridden: meta?.classTransitionOverridden ?? p.class_transition_overridden,
+          };
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    // Build target rows SYNCHRONOUSLY from the board data (transfer_snapshot +
+    // production_notes) — no per-player player_predictions fetch. Replaces the
+    // addPlayerFromTargetSearch await-loop that made targets trickle in one at a
+    // time (the flicker). A TWP spawns two rows (hitter / pitcher), each with a
+    // VALIDATED per-side depth role, so a hitter row can never hold a pitcher role.
+    const VALID_HIT = ["cornerstone", "everyday_starter", "platoon_starter", "utility", "bench"];
+    const VALID_PIT = ["weekend_starter", "weekday_starter", "swing_starter", "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"];
+    const buildTargetRowsFromBoard = (sbRow: any): BuildPlayer[] => {
+      const ts: any = sbRow.transfer_snapshot ?? {};
+      const meta = parseBuildPlayerMeta(sbRow.production_notes);
+      const isTwp = !!ts.is_twp;
+      const dbPos = sbRow.position ?? null;
+      const isPitPos = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(dbPos || ""));
+      const pitcherRole: "SP" | "RP" = /weekend|weekday|swing|_starter$/.test(String(ts.pitcher_depth_role || "")) ? "SP" : "RP";
+      const hitDepth = VALID_HIT.includes(ts.hitter_depth_role) ? ts.hitter_depth_role : (VALID_HIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "everyday_starter");
+      const pitDepth = VALID_PIT.includes(ts.pitcher_depth_role) ? ts.pitcher_depth_role : (VALID_PIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "high_leverage_reliever");
+      // is_twp MUST ride along: updatePlayer's "add both sides" branch gates on
+      // player.is_twp, so a board-loaded TWP target without it adds only the clicked
+      // side (Overbeek: adding the hitter didn't bring the pitcher). Rendering splits
+      // on position_slot so the two rows showed regardless — only add-both was broken.
+      const pMeta = { first_name: sbRow.first_name || "", last_name: sbRow.last_name || "", class_year: sbRow.class_year ?? null, bats_hand: sbRow.bats_hand ?? null, team: sbRow.team ?? null, from_team: sbRow.team ?? null, conference: sbRow.conference ?? null, is_twp: isTwp };
+      const base: any = {
+        player_id: sbRow.player_id, source: "portal", custom_name: `${sbRow.first_name || ""} ${sbRow.last_name || ""}`.trim() || null,
+        depth_order: 1, nil_value: 0, production_notes: sbRow.production_notes ?? null,
+        roster_status: "target", included_in_roster: false, prediction: null,
+        class_transition: meta?.classTransition ?? classTransitionFromYearOrDefault(sbRow.class_year),
+        dev_aggressiveness: meta?.devAggressiveness ?? 0,
+        class_transition_overridden: meta?.classTransitionOverridden ?? false,
+        dev_aggressiveness_overridden: meta?.devAggressivenessOverridden ?? false,
+        team_metrics: null, team_power_plus: null, nilVal: null, nil_owar: null,
+        transfer_snapshot: ts,
+      };
+      if (isTwp) {
+        return [
+          { ...base, position_slot: (isPitPos ? null : dbPos), depth_role: hitDepth, player: { ...pMeta, position: (isPitPos ? null : dbPos) } },
+          { ...base, position_slot: pitcherRole, depth_role: pitDepth, player: { ...pMeta, position: pitcherRole } },
+        ];
+      }
+      return [{ ...base, position_slot: isPitPos ? pitcherRole : dbPos, depth_role: isPitPos ? pitDepth : hitDepth, player: { ...pMeta, position: dbPos } }];
+    };
+
     // Push roster targets → Supabase (deduped against in-session push history)
     const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
     for (const p of rosterTargets) {
@@ -2871,30 +3179,28 @@ export default function TeamBuilder() {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
       if (newFromSupabase.length > 0) {
-        (async () => {
-          for (const sb of newFromSupabase) {
-            await addPlayerFromTargetSearch({
-              id: sb.player_id,
-              first_name: sb.first_name,
-              last_name: sb.last_name,
-              position: sb.position,
-              class_year: sb.class_year ?? null,
-              bats_hand: (sb as any).bats_hand ?? null,
-              team: sb.team,
-              from_team: sb.team,
-              conference: sb.conference ?? null,
-              source_player_id: (sb as any).source_player_id ?? null,
-              // __sync flag suppresses the "Added to targets" toast inside
-              // addPlayerFromTargetSearch — the originating surface (Profile /
-              // Dashboard / Portal) already showed its own "Added to Target
-              // Board" toast, so a second one fires for every cross-surface
-              // pull. Cross-surface pulls also shouldn't mark the build dirty.
-              __sync: true,
+        // Every board row carries a transfer_snapshot (created at add-time) → build
+        // ALL rows in ONE synchronous batch: every name/stat/toggle at once, no async,
+        // no trickle-in flicker. (A row missing a snapshot — legacy — is skipped here
+        // and picked up by overlaySavedTargets / the next add.)
+        const sideKey = (slot: any, pos: any) => `${/^(SP|RP|CL|P|LHP|RHP)/i.test(String(slot || pos || "")) ? "P" : "H"}`;
+        const rows = newFromSupabase.filter((sb) => (sb as any).transfer_snapshot).flatMap((sb) => buildTargetRowsFromBoard(sb));
+        if (rows.length > 0) {
+          setRosterPlayers((prev) => {
+            const seen = new Set(prev.map((p) => `${p.player_id}|${sideKey(p.position_slot, p.player?.position)}`));
+            const toAdd = rows.filter((r) => {
+              const k = `${r.player_id}|${sideKey(r.position_slot, r.player?.position)}`;
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
             });
-          }
-        })();
+            return toAdd.length ? [...prev, ...toAdd] : prev;
+          });
+        }
       }
     }
+    // Already-loaded targets (saved-build load, or no new pulls): overlay now too.
+    overlaySavedTargets();
 
     // Reverse-direction sync: when target_board entries get deleted on
     // another surface (Targets page trash icon, Player Profile remove, etc.),
@@ -3285,7 +3591,7 @@ export default function TeamBuilder() {
     hitterMasterPaMap,
     exitPositions,
     totalBudget,
-    fallbackRosterTotalPlayerScore,
+    nilAvgAllocation,
     selectedTeam,
     returnTo: `${location.pathname}${location.search}${location.hash}`,
     playerProjection,
@@ -3310,7 +3616,7 @@ export default function TeamBuilder() {
     hitterMasterPaMap,
     exitPositions,
     totalBudget,
-    fallbackRosterTotalPlayerScore,
+    nilAvgAllocation,
     selectedTeam,
     location,
     playerProjection,
@@ -3768,19 +4074,6 @@ export default function TeamBuilder() {
               targetPositionTableTotals={targetPositionTableTotals}
               targetPitcherTableTotals={targetPitcherTableTotals}
               totalBudget={totalBudget}
-            />
-          </TabsContent>
-
-          <TabsContent value="compare-hidden" className="hidden">
-            <CompareTab
-              allPlayersForSearch={allPlayersForSearch}
-              teams={teams}
-              allPlayersById={allPlayersById}
-              resolveConferenceStats={resolveConferenceStats}
-              teamByKey={teamByKey}
-              teamParkComponents={teamParkComponents}
-              eqNum={eqNum}
-              seedByName={seedByName}
             />
           </TabsContent>
 

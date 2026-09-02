@@ -14,7 +14,7 @@ import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { ArrowUpDown, Check, ChevronDown, ChevronRight, GripVertical, Plus, Search, StickyNote, Target as TargetIcon, Trash2 } from "lucide-react";
 import { portalStatusMeta } from "@/components/PortalStatus";
 import { cn } from "@/lib/utils";
-import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { allocateNil } from "@/lib/nilAllocation";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -54,7 +54,7 @@ const saveOrder = (teamId: string | null, scope: string, order: string[]) => {
 const applyOrder = (rows: GmTarget[], order: string[]): GmTarget[] => {
   if (order.length === 0) return rows;
   const idx = new Map<string, number>(); order.forEach((id, i) => idx.set(id, i));
-  return [...rows].sort((a, b) => (idx.has(a.player_id) ? idx.get(a.player_id)! : Infinity) - (idx.has(b.player_id) ? idx.get(b.player_id)! : Infinity));
+  return [...rows].sort((a, b) => (idx.has(a.id) ? idx.get(a.id)! : Infinity) - (idx.has(b.id) ? idx.get(b.id)! : Infinity));
 };
 
 /** Live-formatting currency input; saves the raw number on blur. */
@@ -118,15 +118,25 @@ export default function GMTargets() {
   // Projected Value = the target's roster budget-share (position-weighted WAR /
   // roster total × budget) — mirrors the player hub. Falls back to the stored
   // market value for targets not on the roster or when there's no budget set.
-  const posWeightedWar = (war: number | null, position: string | null) => Number(war ?? 0) * getPositionValueMultiplier(position);
-  const rosterById = useMemo(() => new Map([...gm.hitters, ...gm.pitchers].filter((r) => r.player_id).map((r) => [r.player_id as string, r])), [gm.hitters, gm.pitchers]);
-  const rosterScore = useMemo(() => [...gm.hitters, ...gm.pitchers].reduce((s, r) => s + posWeightedWar(r.war, r.position), 0), [gm.hitters, gm.pitchers]);
+  // Projected Value via the NIL allocation curve (allocateNil) over the roster's
+  // WAR — PVM out of the score (spec §1), PTM cancels within a roster. A target
+  // only has a projected value if it's on the roster; otherwise → market fallback.
   const gmBudget = gm.coachTotalBudget ?? 0;
+  const nilAllocByPlayerId = useMemo(() => {
+    const rows = [...gm.hitters, ...gm.pitchers];
+    const dollars = allocateNil(rows.map((r) => Number(r.war ?? 0)), gmBudget, gm.budget?.nil_allocation_mode ?? "balanced");
+    const m = new Map<string, number>();
+    rows.forEach((r, i) => { if (r.player_id) m.set(r.player_id as string, dollars[i]); });
+    return m;
+  }, [gm.hitters, gm.pitchers, gmBudget, gm.budget?.nil_allocation_mode]);
   const projectedValue = (t: GmTarget): number | null => {
-    const row = rosterById.get(t.player_id);
-    if (!row || gmBudget <= 0) return null;
-    return Math.max(0, (posWeightedWar(row.war, row.position) / Math.max(rosterScore, 33)) * gmBudget);
+    if (gmBudget <= 0) return null;
+    return nilAllocByPlayerId.get(t.player_id) ?? null;
   };
+  // NOTE: the positional NEED premium (spec §4, src/lib/positionNeed.ts) is NOT
+  // wired here yet — deferred to the total_hitter_war pass (after Step 6b + 7c).
+  // The need check must use TOTAL projected WAR (o+d+bsr) so defensive value is
+  // credited; GmTarget.war is o_war only, which would over-flag defensive spots.
   const displayValue = (t: GmTarget): number | null => projectedValue(t) ?? t.market_value ?? null;
 
   const toggleSort = (sk: SortKey) => {
@@ -147,9 +157,9 @@ export default function GMTargets() {
   const onDragEnd = (sorted: GmTarget[], scope: ScopeKey) => (e: DragEndEvent) => {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    const oldI = sorted.findIndex((r) => r.player_id === active.id), newI = sorted.findIndex((r) => r.player_id === over.id);
+    const oldI = sorted.findIndex((r) => r.id === active.id), newI = sorted.findIndex((r) => r.id === over.id);
     if (oldI === -1 || newI === -1) return;
-    const next = arrayMove(sorted, oldI, newI).map((r) => r.player_id);
+    const next = arrayMove(sorted, oldI, newI).map((r) => r.id);
     setOrders((prev) => ({ ...prev, [scope]: next }));
     saveOrder(effectiveTeamId, scope, next);
     setSortKey("manual");
@@ -188,7 +198,7 @@ export default function GMTargets() {
               {sorted.map((t, i) => {
                 const onRoster = gm.onBuildPlayerIds.has(t.player_id);
                 return (
-                  <SortableRow key={t.player_id} id={t.player_id}>
+                  <SortableRow key={t.id} id={t.id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
                         <TableCell className="w-[28px] p-0 text-center align-middle">

@@ -67,6 +67,7 @@ const FIELD_TO_HEADER = {
   probSL: "probSL",
   count: "count",
   gameVenueId: "gameVenueId",
+  gameString: "gameString",
   level: "level",
   home: "home",
   teamId: "teamId",
@@ -91,6 +92,7 @@ const FIELD_TO_HEADER = {
   spin: "Spin",
   relHeight: "RelHeight",
   relSide: "RelSide",
+  vaa: "VertApprAngle",
   exitVel: "ExitVel",
   launchAng: "LaunchAng",
   // NEW 2026-06-24 fields (only present in re-exported CSVs)
@@ -189,6 +191,19 @@ function boolOrNull(s: string): boolean | null {
   return null;
 }
 
+/** gameString = `cs-<parkCode><date(8)><game#(1)>` (e.g. `cs-air01202604120`).
+ *  The parkCode (`air01`, `haw01`, `st-jo01`) is the STABLE physical-stadium id —
+ *  unlike gameVenueId, which fragments per weekend series. Strip the trailing 9
+ *  digits (date + game#) and the `cs-` prefix. All park codes map 1:1 to one home
+ *  team (no neutral-site fragmentation), so this is the reliable park key for park
+ *  factors. NOTE: batting_team_id/pitching_team_id are CORRUPT in the source
+ *  (1 id → many teams); the clean ids are team_id (batting) / opponent_id (pitching). */
+function parkCodeFromGameString(s: string): string | null {
+  const t = textOrNull(s);
+  if (t == null) return null;
+  return t.replace(/\d{9}$/, "").replace(/^cs-/, "") || null;
+}
+
 function handOrNull(s: string): "L" | "R" | null {
   const t = textOrNull(s);
   if (t == null) return null;
@@ -216,6 +231,8 @@ interface PitchLogRow {
   season: number;
   date: string;
   game_venue_id: string | null;
+  game_string: string | null;
+  park_code: string | null;
   level: string | null;
   home: boolean | null;
   inn: string | null;
@@ -247,6 +264,7 @@ interface PitchLogRow {
   spin: number | null;
   rel_height: number | null;
   rel_side: number | null;
+  vaa: number | null;
   x_loc: number | null;
   y_loc: number | null;
   total_runs: number | null;
@@ -275,6 +293,12 @@ function get(row: string[], cols: ColPositions, field: FieldName): string {
   return pos == null ? "" : cell(row, pos);
 }
 
+// pitcher_id (source_player_id) → real "First Last" from the players table, loaded
+// once in main(). Used to set pitcher_full_name RELIABLY at ingest time — the CSV
+// `fullName` column is source-dependent (some exports put the batter there), so we
+// resolve from the stable pitcher_id and fall back to fullName only when unmapped.
+const pitcherNameMap = new Map<string, string>();
+
 function buildRecord(row: string[], cols: ColPositions, csvSource: string): PitchLogRow | { skip: string } {
   const uniqId = textOrNull(get(row, cols, "uniqPitchId"));
   if (!uniqId) return { skip: "missing uniq_pitch_id" };
@@ -298,6 +322,8 @@ function buildRecord(row: string[], cols: ColPositions, csvSource: string): Pitc
     season: dateInfo.season,
     date: dateInfo.iso,
     game_venue_id: textOrNull(get(row, cols, "gameVenueId")),
+    game_string: textOrNull(get(row, cols, "gameString")),
+    park_code: parkCodeFromGameString(get(row, cols, "gameString")),
     level: textOrNull(get(row, cols, "level")),
     home: boolOrNull(get(row, cols, "home")),
     inn: textOrNull(get(row, cols, "inn")),
@@ -305,7 +331,7 @@ function buildRecord(row: string[], cols: ColPositions, csvSource: string): Pitc
     pitcher_id: pitcherId,
     batter_id: batterId,
     catcher_id: textOrNull(get(row, cols, "catcherId")),
-    pitcher_full_name: textOrNull(get(row, cols, "fullName")),
+    pitcher_full_name: pitcherNameMap.get(pitcherId) ?? textOrNull(get(row, cols, "fullName")),
     pitcher_abbrev_name: textOrNull(get(row, cols, "pitcherAbbrevName")),
     batter_abbrev_name: textOrNull(get(row, cols, "batterAbbrevName")),
     catcher_abbrev_name: textOrNull(get(row, cols, "catcherAbbrevName")),
@@ -329,6 +355,7 @@ function buildRecord(row: string[], cols: ColPositions, csvSource: string): Pitc
     spin: numOrNull(get(row, cols, "spin")),
     rel_height: numOrNull(get(row, cols, "relHeight")),
     rel_side: numOrNull(get(row, cols, "relSide")),
+    vaa: numOrNull(get(row, cols, "vaa")),
     x_loc: numOrNull(get(row, cols, "x")),
     y_loc: numOrNull(get(row, cols, "y")),
     total_runs: intOrNull(get(row, cols, "totalRuns")),
@@ -371,6 +398,28 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  // ─── Load pitcher name map (source_player_id → "First Last") ──────────────
+  // Resolves pitcher_full_name reliably from the stable pitcher_id, independent of
+  // the CSV `fullName` column's source-dependent meaning.
+  {
+    let from = 0;
+    for (;;) {
+      const { data, error } = await (supabase as any)
+        .from("players")
+        .select("source_player_id, first_name, last_name")
+        .not("source_player_id", "is", null)
+        .range(from, from + 999);
+      if (error) { console.warn(`  players name-map load warning: ${error.message}`); break; }
+      for (const p of data ?? []) {
+        const full = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
+        if (full) pitcherNameMap.set(String(p.source_player_id), full);
+      }
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
+    console.log(`Pitcher name-map: ${pitcherNameMap.size} players`);
+  }
 
   // ─── Read + parse ────────────────────────────────────────────────────────
   const csvSource = basename(csvPath);

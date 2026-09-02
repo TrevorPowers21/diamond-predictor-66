@@ -22,12 +22,14 @@ import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors";
 import { fetchConferenceStats } from "@/lib/supabaseQueries";
 import { computeTransferProjection } from "@/lib/transferProjection";
+import { resolveClassTransition } from "@/lib/classTransitionUtils";
 import {
   buildHitterTransferInputs,
   applyTransferPostprocess,
   type ConferenceHittingStats,
 } from "@/lib/buildTransferProjectionInputs";
 import { computeHitterOWar, computeHitterMarketValue, defaultHitterDepthRoleFromActualPa, paForHitterDepthRole } from "@/lib/depthRoles";
+import { resolveNilTiersFromConfig, resolveNilBasePerWar } from "@/lib/nilProgramSpecific";
 import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
@@ -44,7 +46,9 @@ async function loadAllPaged<T>(builder: () => any): Promise<T[]> {
   let out: T[] = [];
   let from = 0;
   while (true) {
-    const { data, error } = await builder().range(from, from + PAGE - 1);
+    // .order("id") = unique tiebreaker; without it range() pages have no guaranteed order and silently
+    // overlap/skip, dropping whole players (and their fallbacks) from the precompute.
+    const { data, error } = await builder().order("id", { ascending: true }).range(from, from + PAGE - 1);
     if (error) throw error;
     out = out.concat(data || []);
     if (!data || data.length < PAGE) break;
@@ -55,6 +59,26 @@ async function loadAllPaged<T>(builder: () => any): Promise<T[]> {
 
 function normalizeKey(s: string | null | undefined): string {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+
+// ─── DRY-RUN DELTA REPORT (2026-09-01, step 6) — read-only, gate is ACROSS THE RANGE ──────────────
+const _pctl = (xs: number[], q: number): number => {
+  if (!xs.length) return NaN;
+  const s = [...xs].sort((a, b) => a - b);
+  const i = (s.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (i - lo);
+};
+const _fmt = (n: number, d = 3) => (Number.isFinite(n) ? n.toFixed(d) : "  —  ");
+function _rangeReport(label: string, pairs: Array<{ before: number | null; after: number | null }>, d = 3) {
+  const both = pairs.filter((p) => p.before != null && p.after != null && Number.isFinite(p.before as number) && Number.isFinite(p.after as number));
+  if (!both.length) { console.log(`   ${label.padEnd(12)} (no comparable rows)`); return; }
+  const B = both.map((p) => p.before as number), A = both.map((p) => p.after as number);
+  const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const sB = _pctl(B, 0.9) - _pctl(B, 0.05), sA = _pctl(A, 0.9) - _pctl(A, 0.05);
+  console.log(`   ${label.padEnd(12)} n=${String(both.length).padStart(5)}  mean ${_fmt(mean(B), d)}→${_fmt(mean(A), d)} (${mean(A) - mean(B) >= 0 ? "+" : ""}${_fmt(mean(A) - mean(B), d)})  ` +
+    `p05 ${_fmt(_pctl(B, 0.05), d)}→${_fmt(_pctl(A, 0.05), d)}  p50 ${_fmt(_pctl(B, 0.5), d)}→${_fmt(_pctl(A, 0.5), d)}  ` +
+    `p90 ${_fmt(_pctl(B, 0.9), d)}→${_fmt(_pctl(A, 0.9), d)}  spread ${_fmt(sB, d)}→${_fmt(sA, d)} (${sB !== 0 ? ((sA - sB) / sB * 100 >= 0 ? "+" : "") + _fmt((sA - sB) / sB * 100, 1) + "%" : "—"})`);
 }
 
 async function main() {
@@ -113,7 +137,7 @@ async function main() {
     console.error(`${C.red}✗ no Teams Table row for source_id ${ct.school_team_id} season ${CURRENT_SEASON}${C.reset}`);
     process.exit(1);
   }
-  const toTeam = { id: toTeamRow.id as string, name: (toTeamRow.full_name || toTeamRow.abbreviation) as string };
+  const toTeam = { id: toTeamRow.id as string, name: (toTeamRow.full_name || toTeamRow.abbreviation) as string, source_id: (toTeamRow.source_id as string | null) ?? null };
   const toConference = toTeamRow.conference as string | null;
   const toConferenceId = (toTeamRow.conference_id as string | null) ?? null;
   const toSourceId = (toTeamRow.source_id as string | null) ?? null;
@@ -137,6 +161,9 @@ async function main() {
     .eq("customer_team_id", teamId)
     .in("model_type", ["transfer", "global", "admin_ui"]);
   for (const r of overrides || []) remoteEquationValues[r.config_key] = Number(r.config_value);
+  // 2026-08-21: PTM tiers + $/WAR from model_config `nil_tier_<code>` / `nil_base_per_owar` (single source).
+  const nilTiers = resolveNilTiersFromConfig(remoteEquationValues);
+  const nilBase = resolveNilBasePerWar(remoteEquationValues);
   console.log(`  ${remoteEquationValues && Object.keys(remoteEquationValues).length} equation keys (${(overrides || []).length} per-team overrides applied)`);
 
   // 2b. Conference hitting stats (quoted "Conference Stats" table)
@@ -144,14 +171,15 @@ async function main() {
   const confByKey = new Map<string, ConferenceHittingStats>();
   const confById = new Map<string, ConferenceHittingStats>();
   for (const r of confRows) {
-    const avg = (r as any).AVG;
-    const obp = (r as any).OBP;
-    const iso = (r as any).ISO;
+    // 2026-08-21: conference env+ = STORED value only (Conference Stats ba_plus/
+    // obp_plus/iso_plus, ratio scale). NO live compute, NO fallback (matches the
+    // pitcher era_plus…hr9_plus pattern). JUCO districts with NULL stored env+
+    // resolve null → blocked from the D1 ratio path.
     const stuff = (r as any).Stuff_plus;
     const row: ConferenceHittingStats = {
-      avg_plus: avg != null ? Math.round((Number(avg) / 0.280) * 100) : null,
-      obp_plus: obp != null ? Math.round((Number(obp) / 0.385) * 100) : null,
-      iso_plus: iso != null ? Math.round((Number(iso) / 0.162) * 100) : null,
+      avg_plus: (r as any).ba_plus != null ? Number((r as any).ba_plus) : null,
+      obp_plus: (r as any).obp_plus != null ? Number((r as any).obp_plus) : null,
+      iso_plus: (r as any).iso_plus != null ? Number((r as any).iso_plus) : null,
       stuff_plus: stuff != null ? Number(stuff) : null,
     };
     const confName = (r as any)["conference abbreviation"] as string | null;
@@ -181,14 +209,17 @@ async function main() {
     teamName: string | null | undefined,
     metric: "avg" | "obp" | "iso",
     handedness: string | null,
-  ) => resolveMetricParkFactor(teamIdArg as any, metric as any, parkMap, teamName as any, undefined, undefined, handedness as any);
+    sourceTeamId?: string | null, // 2026-08-21 (GAP 5): stable-program park path (preferred)
+  ) => resolveMetricParkFactor(teamIdArg as any, metric as any, parkMap, teamName as any, undefined, sourceTeamId as any, handedness as any);
 
   // 2d. Teams Table — for resolving each player's from_team
   const allTeams = await loadAllPaged<any>(() =>
     (supabase as any).from("Teams Table").select("id, full_name, abbreviation, source_id, conference, conference_id, Season").eq("Season", CURRENT_SEASON),
   );
-  type TeamRow = { id: string; name: string; conference: string | null; conference_id: string | null };
+  type TeamRow = { id: string; name: string; conference: string | null; conference_id: string | null; source_id: string | null };
   const teamByName = new Map<string, TeamRow>();
+  const teamById = new Map<string, TeamRow>();       // 2026-08-21: id-first resolution (Teams Table.id)
+  const teamBySourceId = new Map<string, TeamRow>(); // stable program id (Teams Table.source_id)
   for (const t of allTeams) {
     const name = (t.full_name || t.abbreviation || "") as string;
     const row: TeamRow = {
@@ -196,7 +227,10 @@ async function main() {
       name,
       conference: (t.conference as string | null) ?? null,
       conference_id: (t.conference_id as string | null) ?? null,
+      source_id: (t.source_id as string | null) ?? null,
     };
+    if (t.id) teamById.set(String(t.id), row);
+    if (t.source_id) teamBySourceId.set(String(t.source_id), row);
     for (const k of [t.full_name, t.abbreviation, t.source_id]) {
       const nk = normalizeKey(k);
       if (nk) teamByName.set(nk, row);
@@ -204,13 +238,22 @@ async function main() {
   }
   console.log(`  ${allTeams.length} Teams Table rows`);
 
+  // 2026-08-21: schedule-FACED Stuff+ for INDEPENDENT from-programs (team_season_stats.faced_stuff_plus by source_id).
+  const facedStuffBySourceId = new Map<string, number>();
+  {
+    const { data: facedRows } = await (supabase as any)
+      .from("team_season_stats").select("source_id, faced_stuff_plus").eq("season", CURRENT_SEASON);
+    for (const fr of (facedRows || [])) if (fr.source_id != null && fr.faced_stuff_plus != null) facedStuffBySourceId.set(String(fr.source_id), Number(fr.faced_stuff_plus));
+    console.log(`  ${facedStuffBySourceId.size} team_season_stats faced_stuff_plus rows`);
+  }
+
   // 2e. Players — ALL hitters, excluding the customer team's own roster
   // (transfer math doesn't make sense for a player staying put; their
   // returner projection comes from the canonical global "regular" row).
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa"),
+      .select("id, source_player_id, first_name, last_name, position, team, from_team, conference, division, bats_hand, team_id, source_team_id, portal_status, is_twp, pa, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
@@ -248,7 +291,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("player_predictions")
-        .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, dev_aggressiveness")
+        .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, class_transition_overridden, dev_aggressiveness")
         .in("player_id", idsChunk)
         .in("model_type", ["returner", "transfer"])
         .is("customer_team_id", null)
@@ -269,21 +312,24 @@ async function main() {
     if (!existing || rank(row) > rank(existing)) bestPredByPlayer.set(k, row);
   }
 
-  // 2g. Internals for the chosen predictions (batched same as predictions)
-  const predIds = Array.from(bestPredByPlayer.values()).map((r) => r.id);
-  const internalsRows: any[] = [];
-  for (let i = 0; i < predIds.length; i += PRED_ID_BATCH) {
-    const idsChunk = predIds.slice(i, i + PRED_ID_BATCH);
+  // 2g. COLLAPSE (2026-08-12): power ratings from Hitter Master by source_player_id
+  // (single source, fresh), NOT player_prediction_internals (retired copy). For the
+  // live JUCO path these are null anyway (JUCO PRs nulled) → identical no-op.
+  const hitterSourceIds = Array.from(new Set(hitters.map((p) => (p as any).source_player_id).filter(Boolean)));
+  const masterPRRows: any[] = [];
+  for (let i = 0; i < hitterSourceIds.length; i += PRED_ID_BATCH) {
+    const idsChunk = hitterSourceIds.slice(i, i + PRED_ID_BATCH);
     const chunk = await loadAllPaged<any>(() =>
       supabase
-        .from("player_prediction_internals")
-        .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
-        .in("prediction_id", idsChunk),
+        .from("Hitter Master")
+        .select("source_player_id, ba_power_rating, obp_power_rating, iso_power_rating, d_war, bsr_war, regular_season_pa, pa")
+        .eq("Season", CURRENT_SEASON)
+        .in("source_player_id", idsChunk),
     );
-    internalsRows.push(...chunk);
+    masterPRRows.push(...chunk);
   }
-  const internalsByPredId = new Map<string, any>();
-  for (const r of internalsRows) internalsByPredId.set(r.prediction_id, r);
+  const masterPRBySourceId = new Map<string, any>();
+  for (const r of masterPRRows) masterPRBySourceId.set(String(r.source_player_id), r);
 
   // 3. Compute
   console.log(`${C.cyan}→${C.reset} computing projections...`);
@@ -316,10 +362,17 @@ async function main() {
 
   for (const p of hitters) {
     const pred = bestPredByPlayer.get(p.id);
-    const internals = pred ? internalsByPredId.get(pred.id) : null;
+    const resolvedCt = resolveClassTransition((p as any).class_year, pred); // class_year-authoritative (see eligibility-and-class.md)
+    const masterPR = (p as any).source_player_id ? (masterPRBySourceId.get(String((p as any).source_player_id)) ?? null) : null;
 
-    const fromTeamName = (p.from_team || p.team || "") as string;
-    const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
+    // 2026-08-21: resolve from-team by ID first (Teams Table.id via players.team_id,
+    // then source_team_id), name only as last resort. Team data is by ID, not name.
+    const fromTeamName = (p.from_team || p.team || "") as string; // display / last-resort key
+    const fromTeamRow =
+      ((p as any).team_id && teamById.get(String((p as any).team_id))) ||
+      ((p as any).source_team_id && teamBySourceId.get(String((p as any).source_team_id))) ||
+      teamByName.get(normalizeKey((p.from_team || p.team || "") as string)) ||
+      null;
     const fromConference = fromTeamRow?.conference ?? (p.conference as string | null) ?? null;
     const fromConferenceId = fromTeamRow?.conference_id ?? null;
 
@@ -330,19 +383,21 @@ async function main() {
         position: p.position,
         bats_hand: p.bats_hand,
         division: p.division,
-        class_transition: pred?.class_transition ?? null,
+        class_transition: resolvedCt,
         dev_aggressiveness: Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : null,
         from_avg: pred?.from_avg ?? null,
         from_obp: pred?.from_obp ?? null,
         from_slg: pred?.from_slg ?? null,
       },
-      fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name } : { id: null, name: fromTeamName },
+      fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name, source_id: fromTeamRow.source_id } : { id: null, name: fromTeamName, source_id: null },
+      // faced Stuff+ for independents (by the from-team's stable source_id)
+      fromFacedStuff: fromTeamRow?.source_id ? (facedStuffBySourceId.get(String(fromTeamRow.source_id)) ?? null) : null,
       toTeam,
       fromConference,
       fromConferenceId,
       toConference,
       toConferenceId,
-      internals,
+      masterPR,
       resolveConferenceHitting,
       resolveParkFactor,
       remoteEquationValues,
@@ -371,14 +426,26 @@ async function main() {
     // auto-assigned from last year's PA bucket; projected_pa stored is the
     // tier value (cornerstone=245, everyday=215, etc.) — NOT raw PA — so
     // within-tier players don't get jarring WAR gaps.
-    const rawPa = (p as any).pa ?? null;
+    // ★ 2026-08-31 — DEPTH ROLE READS THE MASTER'S REGULAR-SEASON PA, not `players.pa`.
+    // Same defect fixed the same day in scripts/backfill-2027-hitter-returners.ts:286. `players.pa` is a stat on the
+    // IDENTITY table that nothing keeps in sync with the Masters; after the Masters fill, prod's `players.pa` (120.4)
+    // diverged from `"Hitter Master".pa` (127.7) and hitters silently dropped a depth tier.
+    // ⚠ The TRANSFER PITCHER path (precompute-pitchers.ts:362,:535) was ALREADY correct — it reads
+    //   `regular_season_ip ?? IP`. Only this hitter path was wrong.
+    // Fallback chain: Master reg → Master full → players.pa (last resort, for rows with no Master).
+    const rawPa = masterPR?.regular_season_pa ?? masterPR?.pa ?? (p as any).pa ?? null;
     const hitterDepthRole = defaultHitterDepthRoleFromActualPa(rawPa);
     const projectedPa = paForHitterDepthRole(hitterDepthRole);
     const oWar = computeHitterOWar(final.pWrcPlus, null, hitterDepthRole);
-    const marketValue = computeHitterMarketValue(oWar, {
+    // STEP 7 (2026-08-13): market rides TOTAL hitter WAR (oWAR + dWAR + bsrWAR). d/bsr destination-invariant
+    // (Master by source_player_id; null for JUCO -> total = oWAR, unchanged). Mirrors the returner backfill.
+    const dWar = masterPR?.d_war != null ? Number(masterPR.d_war) : 0;
+    const bsrWar = masterPR?.bsr_war != null ? Number(masterPR.bsr_war) : 0;
+    const totalHitterWar = oWar != null ? oWar + dWar + bsrWar : null;
+    const marketValue = totalHitterWar != null ? computeHitterMarketValue(totalHitterWar, {
       conference: toConference,
       position: p.position,
-    });
+    }, { tiers: nilTiers, dollarsPerWar: nilBase }) : null;
 
     upserts.push({
       player_id: p.id,
@@ -390,7 +457,7 @@ async function main() {
       from_avg: pred?.from_avg ?? null,
       from_obp: pred?.from_obp ?? null,
       from_slg: pred?.from_slg ?? null,
-      class_transition: pred?.class_transition ?? null,
+      class_transition: resolvedCt,
       dev_aggressiveness: pred?.dev_aggressiveness ?? null,
       p_avg: final.pAvg,
       p_obp: final.pObp,
@@ -400,7 +467,23 @@ async function main() {
       p_wrc: final.pWrc,
       p_wrc_plus: final.pWrcPlus,
       o_war: oWar,
-      market_value: marketValue,
+      // 2026-08-23: STORE total_hitter_war DIRECTLY (o_war + d_war + bsr_war) so it's ALWAYS fresh +
+      // consistent with o_war — no dependency on the separate refresh_composite_war() job that lagged.
+      // total_hitter_war is the position-player HEADLINE/source; o_war stays as the offensive component.
+      total_hitter_war: totalHitterWar,
+      // ★ 2026-08-31 — TWP ROUTING ADDED. TWPs keep the hitter market in `twp_hitter_market_value` and NULL the
+      //   shared `market_value`, because the display layer (`pickHitterMarketValue`, src/lib/twpMarketValue.ts:25)
+      //   reads `twp_hitter_market_value` whenever `players.is_twp` is true and IGNORES `market_value` entirely.
+      //   🚨 THIS ENGINE WAS THE ONLY ONE OF FOUR MISSING IT — returner hitter (backfill-2027-hitter-returners:327),
+      //   returner pitcher and transfer pitcher (both via predictionEngine.ts:57-61) all already routed correctly.
+      //   The result: 2,119 transfer + 110 returner TWP hitter rows had the dollars sitting in the wrong column and
+      //   rendered BLANK to coaches. The returner file's comment claiming this was "the same convention as the
+      //   transfer precompute" was aspirational — the transfer side never implemented it.
+      //   ⛔ Do NOT "fix" this downstream by re-pricing (that was F41b's mistake): the value computed HERE is the
+      //   only one priced at the DESTINATION program's conference (`toConference` above). Re-deriving it later from
+      //   the player's own conference under-prices by the full PTM ratio (measured: SEC 4.0 vs Patriot ~1.36 = 2.9x).
+      market_value: (p as any).is_twp ? null : marketValue,
+      ...((p as any).is_twp ? { twp_hitter_market_value: marketValue } : {}),
       projected_pa: projectedPa,
       hitter_depth_role: hitterDepthRole,
       // Keep precompute rows unlocked so subsequent runs can refresh them.
@@ -432,8 +515,38 @@ async function main() {
   }
 
   if (dryRun) {
-    console.log(`${C.yellow}[DRY RUN]${C.reset} would upsert ${upserts.length} rows. Sample:`);
-    console.log(JSON.stringify(upserts.slice(0, 2), null, 2));
+    console.log(`${C.yellow}[DRY RUN]${C.reset} would upsert ${upserts.length} rows — diffing vs stored (no writes)...`);
+    const ids = upserts.map((u: any) => u.player_id);
+    const stored = new Map<string, any>();
+    const meta = new Map<string, { name: string; div: string | null }>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const { data: sd, error: se } = await (supabase as any).from("player_predictions")
+        .select("player_id, p_avg, p_obp, p_slg, p_wrc_plus, o_war, total_hitter_war, market_value, projected_pa, p_era, p_fip, p_bb9, p_war, projected_ip")
+        .eq("model_type", "transfer").eq("variant", "precomputed")
+        .eq("customer_team_id", upserts[0].customer_team_id).in("player_id", chunk);
+      if (se) throw new Error(`stored lookup failed: ${se.message}`);
+      for (const r of (sd || [])) stored.set(r.player_id, r);
+      const { data: pd, error: pe } = await (supabase as any).from("players")
+        .select("id, first_name, last_name, division").in("id", chunk);
+      if (pe) throw new Error(`players lookup failed: ${pe.message}`);
+      for (const r of (pd || [])) meta.set(r.id, { name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(), div: r.division });
+    }
+    const rows = upserts.map((u: any) => ({ u, s: stored.get(u.player_id), m: meta.get(u.player_id) }))
+      .filter((r: any) => r.s && r.m?.div === "D1");
+    const H = rows.filter((r: any) => Number(r.u.projected_pa ?? r.s.projected_pa) >= 100 && r.u.p_wrc_plus != null);
+    const P = rows.filter((r: any) => Number(r.u.projected_ip ?? r.s.projected_ip) >= 40 && r.u.p_era != null);
+    console.log(`\n${C.bold}D1 comparable: ${rows.length} · HITTERS pa>=100: ${H.length} · PITCHERS ip>=40: ${P.length}${C.reset}`);
+    if (H.length) {
+      console.log(`${C.bold}TRANSFER HITTERS:${C.reset}`);
+      for (const [l, c, d] of [["p_avg","p_avg",3],["p_obp","p_obp",3],["p_slg","p_slg",3],["p_wrc_plus","p_wrc_plus",1],["o_war","o_war",3],["market","market_value",0]] as Array<[string,string,number]>)
+        _rangeReport(l, H.map((r: any) => ({ before: r.s[c] == null ? null : Number(r.s[c]), after: r.u[c] == null ? null : Number(r.u[c]) })), d);
+    }
+    if (P.length) {
+      console.log(`${C.bold}TRANSFER PITCHERS:${C.reset}`);
+      for (const [l, c, d] of [["p_era","p_era",3],["p_fip","p_fip",3],["p_bb9","p_bb9",3],["p_war","p_war",3],["market","market_value",0]] as Array<[string,string,number]>)
+        _rangeReport(l, P.map((r: any) => ({ before: r.s[c] == null ? null : Number(r.s[c]), after: r.u[c] == null ? null : Number(r.u[c]) })), d);
+    }
     return;
   }
 

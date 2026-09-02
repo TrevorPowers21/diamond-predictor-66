@@ -950,17 +950,48 @@ ON CONFLICT (batter_id, season, dimension_key) DO UPDATE SET
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
+  const onlyKeysArg = process.argv.find((a) => a.startsWith("--only="));
+  const onlyKeys = new Set(onlyKeysArg ? onlyKeysArg.slice("--only=".length).split(",") : []);
   const skipKeysArg = process.argv.find((a) => a.startsWith("--skip="));
   const skipKeys = new Set(skipKeysArg ? skipKeysArg.slice("--skip=".length).split(",") : []);
   const emitSqlDirArg = process.argv.find((a) => a.startsWith("--emit-sql="));
   const emitSqlDir = emitSqlDirArg ? emitSqlDirArg.slice("--emit-sql=".length) : null;
-  const url = process.env.VITE_SUPABASE_URL;
+  // ★ STAGE-0 FIX (2026-08-29): had NO prod path (VITE_SUPABASE_URL only) — step 4 of the chain could not run
+  // on prod. Adds the SUPABASE_URL fallback plus the standard double-keyed --prod guard.
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    console.error("Missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    console.error("Missing SUPABASE_URL / VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
     process.exit(1);
   }
+  const isProdUrl = /trbvxuoliwrfowibatkm/.test(url);
+  const prodFlag = process.argv.includes("--prod");
+  if (isProdUrl && !prodFlag) { console.error("✗ URL is PROD but --prod was not passed — refusing to run."); process.exit(1); }
+  if (!isProdUrl && prodFlag) { console.error("✗ --prod passed but URL is not prod — refusing to run."); process.exit(1); }
+  console.log(`[env] ${isProdUrl ? "PROD" : "STAGING/other"} ${url.replace(/https:\/\/([^.]+).*/, "$1")}`);
   const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  // ★ STAGE-0 --direct (2026-08-30): every aggregation below normally runs through `exec_sql` over the HTTP
+  // gateway, which cuts at ~125s. `vs_top_hitters` DETERMINISTICALLY exceeds that (reproduced twice at 125.3s)
+  // even with the pre-resolved literal IN list, because the scan over ~2M pitches is simply too long.
+  // --direct routes execution over the PGURI session instead (no gateway, no 125s ceiling).
+  // ⚠ On PROD use --direct FROM THE START: smaller compute tier, worse throttling, and prod's exec_sql has
+  // already been observed timing out on lighter queries than these.
+  const USE_DIRECT = process.argv.includes("--direct");
+  let pgClient: any = null;
+  if (USE_DIRECT) {
+    const pgUri = process.env.PGURI;
+    if (!pgUri) { console.error("✗ --direct requires PGURI"); process.exit(1); }
+    const expectRef = isProdUrl ? "trbvxuoliwrfowibatkm" : "slrxowawbijbjrkozqlj";
+    if (!pgUri.includes(expectRef)) { console.error(`✗ PGURI does not match the target env (${expectRef}) — refusing.`); process.exit(1); }
+    const pgMod = await import("pg");
+    pgClient = new pgMod.default.Client({ connectionString: pgUri, keepAlive: true, query_timeout: 3600000 });
+    await pgClient.connect();
+    await pgClient.query("set statement_timeout = 0");
+    console.log(`[exec] DIRECT pg session (${isProdUrl ? "PROD" : "STAGING"}) — no gateway timeout`);
+  } else {
+    console.log("[exec] exec_sql over HTTP gateway (~125s ceiling)");
+  }
 
   // Pre-resolve the heavy IN-subquery for vs_top_hitters. The Hitter Master
   // subquery inflates statement time past the gateway 125s timeout. Pulling
@@ -1019,13 +1050,18 @@ async function main(): Promise<void> {
   const startTotal = process.hrtime.bigint();
   for (let i = 0; i < tasks.length; i++) {
     const { label, sql, key } = tasks[i];
+    if (onlyKeys.size > 0 && !onlyKeys.has(key)) {
+      continue;
+    }
     if (skipKeys.has(key)) {
       console.log(`\n[${i + 1}/${tasks.length}] ${label}  SKIPPED (via --skip)`);
       continue;
     }
     console.log(`\n[${i + 1}/${tasks.length}] ${label}`);
     const start = process.hrtime.bigint();
-    const { error } = await (supabase as any).rpc("exec_sql", { sql });
+    let error: any = null;
+    if (USE_DIRECT) { try { await pgClient.query(sql); } catch (e: any) { error = { message: e.message }; } }
+    else { ({ error } = await (supabase as any).rpc("exec_sql", { sql })); }
     const sec = Number(process.hrtime.bigint() - start) / 1e9;
     if (error) {
       console.error(`  FAILED after ${sec.toFixed(1)}s: ${error.message}`);
@@ -1042,6 +1078,16 @@ async function main(): Promise<void> {
   }
   const totalSec = Number(process.hrtime.bigint() - startTotal) / 1e9;
   console.log(`\nAll ${tasks.length} aggregations done in ${(totalSec / 60).toFixed(1)} min.`);
+
+  // Descriptive hitter run values (batting/defensive/baserunning) + national z-scores
+  // on the 'all' rows. Runs AFTER the aggregations so the batting_rv counts are fresh;
+  // reads player_season_defense/baserunning for the DRS + wSB components. Same SQL fn
+  // the process-precompute-jobs edge fn calls, so batch + on-upload stay in lockstep.
+  console.log(`\n[run values] populate_hitter_run_values(2026)...`);
+  const rvStart = process.hrtime.bigint();
+  const { error: rvErr } = await (supabase as any).rpc("exec_sql", { sql: "select public.populate_hitter_run_values(2026);" });
+  if (rvErr) { console.error(`  FAILED: ${rvErr.message}`); process.exit(1); }
+  console.log(`  ok (${(Number(process.hrtime.bigint() - rvStart) / 1e9).toFixed(1)}s)`);
 }
 
 main().catch((e) => {

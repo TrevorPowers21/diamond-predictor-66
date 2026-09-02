@@ -9,9 +9,9 @@
 import { useMemo, useState } from "react";
 import { PITCH_TYPE_COLOR } from "@/savant/lib/pitchLocationHelpers";
 import type { PitchTypeBreakdown } from "@/savant/lib/pitchLogRates";
+import { NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
+
 
 interface PitchUsagePieProps {
   breakdowns: PitchTypeBreakdown[];

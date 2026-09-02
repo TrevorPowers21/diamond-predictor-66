@@ -10,18 +10,19 @@ export const normalizeKey = (value: string | null | undefined) =>
 export const getPlayerName = (p: BuildPlayer): string =>
   p.player ? `${p.player.first_name} ${p.player.last_name}` : p.custom_name || "TBD";
 
+// Colors a projected NIL value by whether it's above/below an average paid
+// roster spot. avgAllocation = budget / paid-player count (exposed by the sim).
+// Green ≥ 1.2× avg, yellow ≥ 0.8× avg, red below. Budget-scale-invariant — no
+// magic benchmark (replaced the old 68-based baseline).
 export const projectedNilTierClass = (
   value: number | null | undefined,
-  totalBudget: number,
-  rosterScoreBaseline: number,
+  avgAllocation: number,
 ): string => {
   if (value == null) return "text-muted-foreground";
-  const budget = Number(totalBudget) || 0;
-  const baseline = Math.max(Number(rosterScoreBaseline) || 0, 1);
-  if (budget <= 0) return "text-muted-foreground";
-  const baselineShare = budget / baseline;
-  if (value >= baselineShare * 1.2) return "text-[hsl(var(--success))]";
-  if (value >= baselineShare * 0.8) return "text-[hsl(var(--warning))]";
+  const avg = Number(avgAllocation) || 0;
+  if (avg <= 0) return "text-muted-foreground";
+  if (value >= avg * 1.2) return "text-[hsl(var(--success))]";
+  if (value >= avg * 0.8) return "text-[hsl(var(--warning))]";
   return "text-destructive";
 };
 
@@ -181,10 +182,17 @@ export const projectedEligibilityClass = (
   classYear: string | null | undefined,
   classTransition: string | null | undefined,
 ): string => {
-  const ct = String(classTransition || "").toUpperCase();
-  if (TRANSITION_TO_CLASS[ct]) return TRANSITION_TO_CLASS[ct];
+  // class_year is the SOURCE OF TRUTH — advance it one season for the
+  // projection-season class. class_transition is only a fallback for players
+  // with no class_year (e.g. some JUCO). Previously the transition was checked
+  // FIRST, so a stale default ("SJ") overrode a correct class_year — the
+  // grad-year inconsistency (Cole Johnson: roster JR vs projections SO, 2026-07).
+  // Explicit coach overrides are applied upstream (GM `eligibility_class`);
+  // a future per-player eligibility override belongs there too, not here.
   const cy = String(classYear || "").toUpperCase().replace(/^R-/, "");
   if (CLASS_ADVANCE[cy]) return CLASS_ADVANCE[cy];
+  const ct = String(classTransition || "").toUpperCase();
+  if (TRANSITION_TO_CLASS[ct]) return TRANSITION_TO_CLASS[ct];
   return "FR";
 };
 

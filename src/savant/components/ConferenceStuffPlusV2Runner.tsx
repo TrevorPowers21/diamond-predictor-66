@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { calculateConferenceStuffPlusV2, type ConferenceStuffPlusV2Report } from "@/savant/lib/conferenceStuffPlusV2";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
+
 
 const PITCH_ORDER = ["4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "Sweeper", "Curveball", "Change-up", "Splitter"];
 const PITCH_SHORT: Record<string, string> = {

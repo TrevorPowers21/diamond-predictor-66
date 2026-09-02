@@ -14,9 +14,9 @@ import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
-import { rollupStuffPlusToMaster } from "@/savant/lib/rollupStuffPlusToMaster";
+import { rollupStuffPlusToMaster } from "@/savant/lib/legacy_rollupStuffPlusToMaster";
 import { runVeloDiffPipeline } from "@/savant/lib/veloDiffPipeline";
-import { runBreakingBallReclassification } from "@/savant/lib/breakingBallReclassification";
+import { runBreakingBallReclassification } from "@/savant/lib/legacy_breakingBallReclassification";
 import { runStuffPlusPipeline } from "@/savant/lib/stuffPlusEngine";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -422,6 +422,19 @@ export async function runImports(
       }
     }
 
+    // ★★★ STAGE-0 LEGACY STUFF+ GATE (2026-08-29) ★★★
+    // These three stages are the LEGACY (PSP-I) Stuff+ lane: runBreakingBallReclassification ->
+    // runStuffPlusPipeline -> legacy_rollupStuffPlusToMaster. Since commit e5dec2f the shared equations expect
+    // armHB, but pitcher_stuff_plus_inputs stores RAW hb, so this lane scores LEFT-HANDERS BACKWARDS.
+    // This runner is `npm run import:prod`, which goes DIRECT TO PROD — a routine TruMedia import would silently
+    // corrupt LHP Stuff+. For 2026 the LIVE lane is pitch_log (see docs/STUFF_PLUS_SOURCE_OF_TRUTH.md).
+    // Legacy lane is retained ONLY for <=2025 seasons and the JUCO CSV path. Opt in with --legacy-stuff.
+    const LEGACY_STUFF_OK = season <= 2025 || process.argv.includes("--legacy-stuff");
+    if (!LEGACY_STUFF_OK) {
+      step(`Stuff+ (legacy PSP-I lane) — SKIPPED for season ${season}`);
+      ok(`skipped: 2026+ Stuff+ is produced by the pitch_log lane (reclassify -> compute_pitch_log_stuff_plus ->`
+        + ` aggregate_pitch_log_dimensions -> derive_masters_from_pitchlog). Pass --legacy-stuff to force.`);
+    } else {
     step(`Reclassify breaking balls (Gyro Slider / Slider / Sweeper / Curveball)`);
     {
       const startMs = Date.now();
@@ -447,6 +460,7 @@ export async function runImports(
         err(`Stuff+ engine threw: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    } // end LEGACY_STUFF_OK
   }
 
   // Rollup Pitching Master.stuff_plus — runs whenever either Stuff+ Inputs OR
@@ -454,8 +468,8 @@ export async function runImports(
   // computed per-pitch scores. After Pitching Master alone: restores the
   // column from the unchanged pitcher_stuff_plus_inputs table (master CSV's
   // delete-and-insert wipes stuff_plus on every import).
-  if (stuffInputsImported || pitcherImported) {
-    step("Rollup Stuff+ to Pitching Master.stuff_plus");
+  if ((stuffInputsImported || pitcherImported) && (season <= 2025 || process.argv.includes("--legacy-stuff"))) {
+    step("Rollup Stuff+ to Pitching Master.stuff_plus (LEGACY lane — <=2025 / --legacy-stuff only)");
     const startMs = Date.now();
     try {
       const { report, errors } = await rollupStuffPlusToMaster(season);

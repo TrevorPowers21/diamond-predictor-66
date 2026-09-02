@@ -11,6 +11,7 @@
 // master / power-rating rows for the player.
 
 import type { PitchingEquationWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import {
   JUCO_PITCHING_TRANSFER_WEIGHTS,
   JUCO_DISTRICT_HTP_OVERRIDE,
@@ -48,6 +49,7 @@ export type PitcherTeamRow = {
   name: string;
   conference?: string | null;
   conference_id?: string | null;
+  source_id?: string | null; // 2026-08-21 (GAP 5): stable-program park path
 };
 
 // Stats expected from Pitching Master (post-blend per usePitchingSeedData)
@@ -95,6 +97,10 @@ export type BuildPitcherInputsArgs = {
   fromConferenceId?: string | null;
   toConference: string | null;
   toConferenceId?: string | null;
+  // 2026-08-21: schedule-FACED competition (team_season_stats.faced_htp) for INDEPENDENT
+  // from-programs (Oregon State: 0 conf games → its own conf HTP is wrong). When the
+  // from-program is independent, use this instead of the conference HTP. Null otherwise.
+  fromFacedHtp?: number | null;
 
   pitchingStats: PitcherStatsRow | null;
   pitcherPowerRatings: PitcherPowerRow;
@@ -106,6 +112,7 @@ export type BuildPitcherInputsArgs = {
     teamId: string | null | undefined,
     names: Array<string | null | undefined>,
     metric: "era" | "whip" | "hr9",
+    sourceTeamId?: string | null, // 2026-08-21 (GAP 5): stable-program park path (preferred)
   ) => number | null;
 
   pitchingEq: PitchingEquationWeights;
@@ -194,9 +201,14 @@ export function buildTransferPitcherInputs(args: BuildPitcherInputsArgs): BuildP
   const jucoDistrict = isJucoSource
     ? (fromConference ?? "").replace(/^NJCAA D1 /, "").replace(/ District$/, "")
     : null;
+  // 2026-08-21: INDEPENDENT from-program → use schedule-FACED HTP (its own conference
+  // HTP reflects its own hitters, not who its pitchers faced). Falls back to conf HTP.
+  const isIndependentFrom = /independ/i.test(fromConference ?? "");
   const effFromHitterTalent = isJucoSource
     ? (JUCO_DISTRICT_HTP_OVERRIDE[jucoDistrict ?? ""] ?? null)
-    : (fromPC.hitter_talent_plus ?? null);
+    : (isIndependentFrom && args.fromFacedHtp != null
+        ? Number(args.fromFacedHtp)
+        : (fromPC.hitter_talent_plus ?? null));
 
   const input: TransferPitcherInput = {
     era: pitchingStats.era ?? null,
@@ -214,6 +226,9 @@ export function buildTransferPitcherInputs(args: BuildPitcherInputsArgs): BuildP
       hr9: pitcherPowerRatings?.hr9PrPlus ?? null,
     },
     baseRole,
+    // input.ip drives only the FIRST (discarded) pWAR; the stored pWAR comes from the
+    // canonical rewrite (regular_season_ip → depth role). null = current behavior. 2026-08-21.
+    ip: (pitchingStats as any)?.ip ?? null,
     fromEraPlus: fromPC.era_plus ?? null,
     toEraPlus: toPC.era_plus ?? null,
     fromFipPlus: fromPC.fip_plus ?? null,
@@ -228,12 +243,12 @@ export function buildTransferPitcherInputs(args: BuildPitcherInputsArgs): BuildP
     toHr9Plus: toPC.hr9_plus ?? null,
     fromHitterTalent: effFromHitterTalent,
     toHitterTalent: toPC.hitter_talent_plus ?? null,
-    fromEraParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "era"),
-    toEraParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "era"),
-    fromWhipParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "whip"),
-    toWhipParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "whip"),
-    fromHr9ParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "hr9"),
-    toHr9ParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "hr9"),
+    fromEraParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "era", fromTeam?.source_id),
+    toEraParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "era", toTeam.source_id),
+    fromWhipParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "whip", fromTeam?.source_id),
+    toWhipParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "whip", toTeam.source_id),
+    fromHr9ParkRaw: resolveParkFactor(fromTeam?.id, [player.team, fromTeam?.name], "hr9", fromTeam?.source_id),
+    toHr9ParkRaw: resolveParkFactor(toTeam.id, [toTeam.name], "hr9", toTeam.source_id),
     toTeam: toTeam.name,
     toConference,
   };
@@ -340,14 +355,10 @@ export function applyTransferPitcherPostprocess(
   const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
   const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
 
-  const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
-    ? (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
-      (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
-      (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
-      (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
-      (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
-      (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
-    : result.p_rv_plus;
+  // pRV+ = D1-FIP index from overlay-adjusted K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts).
+  // +stats kept for storage; falls back to the base result's pRV+ when rates are null.
+  const prvAdjRaw = computePrvPlus(adjK9, adjBb9, adjHr9);
+  const pRvPlusAdj = prvAdjRaw == null ? result.p_rv_plus : Math.round(prvAdjRaw);
 
   // pRV+ drives pWAR; pWAR drives market value. Re-derive both from the
   // postprocessed pRV+ so the stored (p_rv_plus, p_war, market_value) triple
@@ -364,7 +375,7 @@ export function applyTransferPitcherPostprocess(
     ? computePitcherMarketValue(
         recomputedPWar,
         { conference: args.toConference, role: result.projected_role, team: args.toTeam },
-        pitchingEq,
+        { dollarsPerWar: pitchingEq.market_dollars_per_war },
       )
     : result.market_value;
 

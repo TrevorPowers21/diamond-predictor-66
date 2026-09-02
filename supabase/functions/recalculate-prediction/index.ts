@@ -6,16 +6,22 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Defaults – overridden by model_config rows when available
-const DEFAULT_CLASS_BASES: Record<string, { avg: number; obp: number; slg: number }> = {
-  FS: { avg: 0.03, obp: 0.045, slg: 0.06 },
-  SJ: { avg: 0.02, obp: 0.03, slg: 0.035 },
-  JS: { avg: 0.015, obp: 0.02, slg: 0.02 },
-  GR: { avg: 0.01, obp: 0.01, slg: 0.01 },
+// Returner defaults – mirror src/lib/predictionEngine.ts ReturnerConfig defaults.
+// Overridden by model_config `admin_ui` r_* rows when available. Class bases are
+// keyed avg/obp/iso (ISO, not SLG) to match the SD-blend returner engine.
+const DEFAULT_CLASS_BASES: Record<string, { avg: number; obp: number; iso: number }> = {
+  FS: { avg: 0.03, obp: 0.03, iso: 0.045 },
+  SJ: { avg: 0.02, obp: 0.02, iso: 0.03 },
+  JS: { avg: 0.015, obp: 0.015, iso: 0.02 },
+  GR: { avg: 0.01, obp: 0.01, iso: 0.01 },
 };
-const DEFAULT_DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
-const DEFAULT_DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
-const DEFAULT_WRC_WEIGHTS = { obp: 0.45, slg: 0.3, avg: 0.15, iso: 0.1 };
+const DEFAULT_DEV_COEFFS = { avg: 0.06, obp: 0.06, iso: 0.08 };
+const DEFAULT_WRC_WEIGHTS = { intercept: 0.011, obp: 0.691, slg: 0.235, avg: 0, iso: 0 }; // C1 canonical: src/lib/wrc.ts
+
+// Season whose admin_ui equation the returner engine reads. CURRENT_SEASON (2026)
+// carries the recalibrated returner constants + C1 wRC weights; 2025 is the
+// legacy (pre-C1) set. Keep in sync with src/lib/seasonConstants.ts CURRENT_SEASON.
+const CONFIG_SEASON = 2026;
 
 function round3(val: number): number {
   return Math.round(val * 1000) / 1000;
@@ -24,14 +30,19 @@ function round3(val: number): number {
 interface Config {
   ncaaAvg: number;
   ncaaObp: number;
-  ncaaSlg: number;
+  ncaaIso: number;
   ncaaPR: number;
   powerWeight: number;
   ncaaWrc: number;
-  classBases: Record<string, { avg: number; obp: number; slg: number }>;
-  devCoeffs: { avg: number; obp: number; slg: number };
-  dampeningDivisors: { avg: number; obp: number; slg: number };
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  baStdPower: number;
+  baStdNcaa: number;
+  obpStdPower: number;
+  obpStdNcaa: number;
+  isoStdNcaa: number;
+  isoStdPower: number;
+  classBases: Record<string, { avg: number; obp: number; iso: number }>;
+  devCoeffs: { avg: number; obp: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   defaultDevAgg: number;
 }
 interface TransferConfig {
@@ -51,13 +62,30 @@ interface TransferConfig {
   isoParkWeight: number;
   isoStdNcaa: number;
   isoStdPower: number;
-  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
+  wrcWeights: { intercept: number; obp: number; slg: number; avg: number; iso: number };
   ncaaWrc: number;
 }
 
 function toRate(v: number): number {
   // Support either decimal inputs (0.045) or percent-style inputs (4.5)
   return Math.abs(v) > 1 ? v / 100 : v;
+}
+
+// Parity helpers ported from src/lib/predictionEngine.ts so the SD-blend math
+// behaves identically to the canonical returner engine.
+function normalizeRateInput(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  // Guardrail: some imported rows store rates as whole-number percent (34.4 → 0.344)
+  return Math.abs(v) > 1 ? v / 100 : v;
+}
+function normalizeProjectedRate(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  // Defensive post-calc guardrail against writing scaled percentages as raw rates.
+  return Math.abs(v) > 2 ? v / 100 : v;
+}
+function readSpecificPlus(v: number | null | undefined): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function normalizeClassTransition(raw?: string | null): string {
@@ -77,40 +105,62 @@ function normalizeClassTransition(raw?: string | null): string {
   return "SJ";
 }
 
+// Returner-hitter recompute — SD-blend, ported verbatim from
+// src/lib/predictionEngine.ts `recalcReturner`. Per-stat scouting ratings come
+// from the prediction row's from_avg_plus / from_obp_plus / from_slg_plus
+// (populated in Step 3), NOT the overall power_rating_plus. Growth term is the
+// class base + dev_aggressiveness·devCoeff. NO divisor damp, NO multiplicative
+// power_rating adjustment.
 function recalc(pred: any, config: Config, overrides?: { dev_aggressiveness?: number; class_transition?: string }) {
   const ct = normalizeClassTransition(overrides?.class_transition || pred.class_transition || "SJ");
   const rawDevAgg = overrides?.dev_aggressiveness ?? pred.dev_aggressiveness ?? config.defaultDevAgg;
   const devAgg = Number.isFinite(Number(rawDevAgg)) ? Number(rawDevAgg) : config.defaultDevAgg;
-  const bases = config.classBases[ct] || config.classBases.GR || DEFAULT_CLASS_BASES.GR;
-  const fromAvg = Number(pred.from_avg) || 0;
-  const fromObp = Number(pred.from_obp) || 0;
-  const fromSlg = Number(pred.from_slg) || 0;
-  const prPlus = Number(pred.power_rating_plus) || 100;
+  const bases = config.classBases[ct] || config.classBases.GR || { avg: 0.01, obp: 0.01, iso: 0.01 };
+  const powerWeight = config.powerWeight;
+  const fromAvg = normalizeRateInput(Number(pred.from_avg));
+  const fromObp = normalizeRateInput(Number(pred.from_obp));
+  const fromSlg = normalizeRateInput(Number(pred.from_slg));
+  const baPlus = readSpecificPlus(pred.from_avg_plus);
+  const obpPlus = readSpecificPlus(pred.from_obp_plus);
+  const isoPlus = readSpecificPlus(pred.from_slg_plus);
   const dc = config.devCoeffs;
-  const dd = config.dampeningDivisors;
   const ww = config.wrcWeights;
 
-  function dampeningWithPR(stat: number, ncaaBase: number, divisor: number): number {
-    const prFactor = prPlus >= config.ncaaPR ? 1 : 1.1 - prPlus / config.ncaaPR;
-    return 1 - Math.min(0.75, Math.max(0, (stat - ncaaBase) / divisor) * prFactor);
-  }
-  function dampeningNoPR(stat: number, ncaaBase: number, divisor: number): number {
-    return 1 - Math.min(0.75, Math.max(0, (stat - ncaaBase) / divisor));
-  }
-  function calcStat(fromStat: number, classBase: number, devCoeff: number, ncaaBase: number, divisor: number, usePR: boolean): number {
-    const d = usePR ? dampeningWithPR(fromStat, ncaaBase, divisor) : dampeningNoPR(fromStat, ncaaBase, divisor);
-    const growthAdj = 1 + (classBase + devAgg * devCoeff) * d;
-    const powerAdj = 1 + config.powerWeight * ((prPlus - 100) / 100) * d;
-    return fromStat * growthAdj * powerAdj;
-  }
+  const pAvg = baPlus == null
+    ? null
+    : (() => {
+      const safeBaStdPower = config.baStdPower === 0 ? 1 : config.baStdPower;
+      const scaledBa = config.ncaaAvg + (((baPlus - config.ncaaPR) / safeBaStdPower) * config.baStdNcaa);
+      const baBlended = (fromAvg * (1 - powerWeight)) + (scaledBa * powerWeight);
+      const baProjected = baBlended * (1 + bases.avg + (devAgg * dc.avg));
+      return round3(normalizeProjectedRate(baProjected));
+    })();
 
-  const pAvg = round3(calcStat(fromAvg, bases.avg, dc.avg, config.ncaaAvg, dd.avg, true));
-  const pObp = round3(calcStat(fromObp, bases.obp, dc.obp, config.ncaaObp, dd.obp, false));
-  const pSlg = round3(calcStat(fromSlg, bases.slg, dc.slg, config.ncaaSlg, dd.slg, true));
-  const pOps = round3(pObp + pSlg);
-  const pIso = round3(pSlg - pAvg);
-  const pWrc = round3((ww.obp * pObp) + (ww.slg * pSlg) + (ww.avg * pAvg) + (ww.iso * pIso));
-  const pWrcPlus = Math.round((pWrc / config.ncaaWrc) * 100);
+  const pObp = obpPlus == null
+    ? null
+    : (() => {
+      const safeObpStdPower = config.obpStdPower === 0 ? 1 : config.obpStdPower;
+      const scaledObp = config.ncaaObp + (((obpPlus - config.ncaaPR) / safeObpStdPower) * config.obpStdNcaa);
+      const obpBlended = (fromObp * (1 - powerWeight)) + (scaledObp * powerWeight);
+      const obpProjected = obpBlended * (1 + bases.obp + (devAgg * dc.obp));
+      return round3(normalizeProjectedRate(obpProjected));
+    })();
+
+  const pIso = isoPlus == null
+    ? null
+    : (() => {
+      const lastIso = fromSlg - fromAvg;
+      const scaledIso = config.ncaaIso + (((isoPlus - config.ncaaPR) / config.isoStdPower) * config.isoStdNcaa);
+      const blendedIso = (lastIso * (1 - powerWeight)) + (scaledIso * powerWeight);
+      return round3(normalizeProjectedRate(blendedIso * (1 + bases.iso + (devAgg * dc.iso))));
+    })();
+
+  const pSlg = pAvg == null || pIso == null ? null : round3(normalizeProjectedRate(pAvg + pIso));
+  const pOps = pObp == null || pSlg == null ? null : round3(normalizeProjectedRate(pObp + pSlg));
+  const pWrc = pObp == null || pSlg == null || pAvg == null || pIso == null
+    ? null
+    : round3((ww.intercept) + (ww.obp * pObp) + (ww.slg * pSlg) + (ww.avg * pAvg) + (ww.iso * pIso));
+  const pWrcPlus = pWrc == null ? null : Math.round((pWrc / config.ncaaWrc) * 100);
 
   return { p_avg: pAvg, p_obp: pObp, p_slg: pSlg, p_ops: pOps, p_iso: pIso, p_wrc: pWrc, p_wrc_plus: pWrcPlus, class_transition: ct, dev_aggressiveness: devAgg };
 }
@@ -181,7 +231,7 @@ function recalcTransfer(pred: any, config: TransferConfig) {
 
   const pSlg = round3(pAvg + pIso);
   const pOps = round3(pObp + pSlg);
-  const pWrc = round3((config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
+  const pWrc = round3(config.wrcWeights.intercept + (config.wrcWeights.obp * pObp) + (config.wrcWeights.slg * pSlg) + (config.wrcWeights.avg * pAvg) + (config.wrcWeights.iso * pIso));
   const pWrcPlus = config.ncaaWrc === 0 ? null : Math.round((pWrc / config.ncaaWrc) * 100);
 
   return { p_avg: pAvg, p_obp: pObp, p_slg: pSlg, p_ops: pOps, p_iso: pIso, p_wrc: pWrc, p_wrc_plus: pWrcPlus };
@@ -200,58 +250,77 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { prediction_id, dev_aggressiveness, class_transition, action } = body;
 
-    // Fetch all config for returner model
+    // Fetch returner equation from the admin_ui model_config rows (the r_* keys).
+    // The legacy filter model_type='returner' matched ZERO rows (all equation
+    // rows live under model_type='admin_ui'), so the engine silently ran on
+    // hardcoded defaults. Filter by CONFIG_SEASON so the 2025 (legacy) and 2026
+    // (recalibrated) copies of every r_* key don't collide.
     const { data: configRows } = await supabase
       .from("model_config")
       .select("config_key, config_value")
-      .eq("model_type", "returner");
+      .eq("model_type", "admin_ui")
+      .eq("season", CONFIG_SEASON);
     const { data: transferConfigRows } = await supabase
       .from("model_config")
       .select("config_key, config_value")
       .eq("model_type", "transfer");
 
-  const config: Config = {
-      ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364,
-      classBases: { ...DEFAULT_CLASS_BASES },
+  // Defaults mirror src/lib/predictionEngine.ts ReturnerConfig. ncaaPR + powerWeight
+    // are locked (no r_* key); dev coeffs + defaultDevAgg have no admin_ui key today
+    // and fall through to these defaults, matching predictionEngine.
+    const config: Config = {
+      ncaaAvg: 0.28,
+      ncaaObp: 0.385,
+      ncaaIso: 0.162,
+      ncaaPR: 100,
+      powerWeight: 0.7,
+      ncaaWrc: 0.3782,
+      baStdPower: 31.297,
+      baStdNcaa: 0.043455,
+      obpStdPower: 28.889,
+      obpStdNcaa: 0.046781,
+      isoStdNcaa: 0.07849797197,
+      isoStdPower: 45.423,
+      classBases: JSON.parse(JSON.stringify(DEFAULT_CLASS_BASES)),
       devCoeffs: { ...DEFAULT_DEV_COEFFS },
-      dampeningDivisors: { ...DEFAULT_DAMPENING_DIVISORS },
       wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
-      defaultDevAgg: 0.5,
+      defaultDevAgg: 0,
     };
+    // Build a key→value map so r_* keys read explicitly (avoids ordering issues
+    // and lets t_iso_std_power fill in when the r_ variant is absent).
+    const cv = new Map<string, number>();
     for (const row of configRows || []) {
-      const k = row.config_key;
-      const v = Number(row.config_value);
-      if (k === "ncaa_avg") config.ncaaAvg = v;
-      else if (k === "ncaa_obp") config.ncaaObp = v;
-      else if (k === "ncaa_slg") config.ncaaSlg = v;
-      else if (k === "ncaa_power_rating") config.ncaaPR = v;
-      else if (k === "power_rating_weight") config.powerWeight = v;
-      else if (k === "park_weight_slg") config.powerWeight = v;
-      else if (k === "ncaa_wrc") config.ncaaWrc = v;
-      else if (k === "dev_aggressiveness_expected") config.defaultDevAgg = v;
-      // Class bases
-      else if (k.startsWith("class_base_")) {
-        const parts = k.replace("class_base_", "").split("_"); // e.g. ["fs","avg"]
-        const cls = parts[0].toUpperCase();
-        const stat = parts[1] as "avg" | "obp" | "slg";
-        if (!config.classBases[cls]) config.classBases[cls] = { avg: 0.01, obp: 0.01, slg: 0.01 };
-        config.classBases[cls][stat] = toRate(v);
-      }
-      // Dev coefficients
-      else if (k.startsWith("dev_coeff_")) {
-        const stat = k.replace("dev_coeff_", "") as "avg" | "obp" | "slg";
-        config.devCoeffs[stat] = toRate(v);
-      }
-      // Dampening divisors
-      else if (k.startsWith("dampening_divisor_")) {
-        const stat = k.replace("dampening_divisor_", "") as "avg" | "obp" | "slg";
-        config.dampeningDivisors[stat] = v;
-      }
-      // wRC weights
-      else if (k.startsWith("wrc_weight_")) {
-        const stat = k.replace("wrc_weight_", "") as "obp" | "slg" | "avg" | "iso";
-        config.wrcWeights[stat] = v;
-      }
+      const n = Number(row.config_value);
+      if (Number.isFinite(n)) cv.set(row.config_key, n);
+    }
+    const applyR = (key: string, set: (v: number) => void) => {
+      if (cv.has(key)) set(cv.get(key)!);
+    };
+    applyR("r_ncaa_avg_ba", (v) => { config.ncaaAvg = toRate(v); });
+    applyR("r_ncaa_avg_obp", (v) => { config.ncaaObp = toRate(v); });
+    applyR("r_ncaa_avg_iso", (v) => { config.ncaaIso = toRate(v); });
+    applyR("r_ncaa_avg_wrc", (v) => { config.ncaaWrc = toRate(v); });
+    applyR("r_ba_std_pr", (v) => { config.baStdPower = v; });   // raw (>1) — not a rate
+    applyR("r_ba_std_ncaa", (v) => { config.baStdNcaa = toRate(v); });
+    applyR("r_obp_std_pr", (v) => { config.obpStdPower = v; });
+    applyR("r_obp_std_ncaa", (v) => { config.obpStdNcaa = toRate(v); });
+    applyR("r_iso_std_ncaa", (v) => { config.isoStdNcaa = toRate(v); });
+    // isoStdPower: prefer r_iso_std_power, else t_iso_std_power (transfer key). Raw.
+    if (cv.has("r_iso_std_power")) config.isoStdPower = cv.get("r_iso_std_power")!;
+    else if (cv.has("t_iso_std_power")) config.isoStdPower = cv.get("t_iso_std_power")!;
+    applyR("r_w_intercept", (v) => { config.wrcWeights.intercept = v; });
+    applyR("r_w_obp", (v) => { config.wrcWeights.obp = v; });
+    applyR("r_w_slg", (v) => { config.wrcWeights.slg = v; });
+    applyR("r_w_avg", (v) => { config.wrcWeights.avg = v; });
+    applyR("r_w_iso", (v) => { config.wrcWeights.iso = v; });
+    // Class bases: r_{ba|obp|iso}_class_{fs|sj|js|gr}. Stored in PERCENT for whole
+    // values (3 → 0.03) but as rates for tiny ones (0.01 → 0.01); toRate handles both.
+    for (const cls of ["fs", "sj", "js", "gr"] as const) {
+      const CLS = cls.toUpperCase();
+      if (!config.classBases[CLS]) config.classBases[CLS] = { avg: 0.01, obp: 0.01, iso: 0.01 };
+      applyR(`r_ba_class_${cls}`, (v) => { config.classBases[CLS].avg = toRate(v); });
+      applyR(`r_obp_class_${cls}`, (v) => { config.classBases[CLS].obp = toRate(v); });
+      applyR(`r_iso_class_${cls}`, (v) => { config.classBases[CLS].iso = toRate(v); });
     }
     const transferConfig: TransferConfig = {
       baNcaaAvg: 0.28,
@@ -271,7 +340,7 @@ Deno.serve(async (req) => {
       isoStdNcaa: 0.07849797197,
       isoStdPower: 45.423,
       wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
-      ncaaWrc: 0.364,
+      ncaaWrc: 0.3782,
     };
     for (const row of transferConfigRows || []) {
       const k = row.config_key;

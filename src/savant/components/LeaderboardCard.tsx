@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
+import { NAVY_CARD, GOLD } from "@/savant/lib/theme";
 
-const NAVY_CARD = "#0a1428";
+
 const NAVY_DEEP = "#040810";
 const NAVY_BORDER = "#162241";
-const GOLD = "#D4AF37";
 const GOLD_DIM = "#A08820";
 
 export interface LeaderboardEntry {

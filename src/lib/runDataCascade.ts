@@ -1,4 +1,9 @@
 /**
+ * 🛑 LEGACY CASCADE — last touched 2026-05-19. Do not use for the 2026 push or Track B.
+ * Still imports `bulkRecalculatePredictionsLocal`, which is a STUB (src/lib/predictionEngine.ts:875) and is the
+ * open gate blocking Phase-H step 48. The current sequence is docs/PLAN_finish_prod_push_2026_08_31.md.
+ */
+/**
  * Data cascade — the canonical post-import recompute that keeps ncaa_averages,
  * scoring, predictions, conference rollups, and env-rates in sync with the
  * current Hitter Master / Pitching Master state.

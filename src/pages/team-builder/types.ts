@@ -11,8 +11,18 @@ export type TransferSnapshot = {
   p_hr9?: number | null;
   p_rv_plus?: number | null;
   p_war?: number | null;
+  /** oWAR COMPONENT (offense only). ⚠ For a position player the HEADLINE is
+   *  `total_hitter_war` (o+d+bsr) — read that first and fall back to this. */
   owar: number | null;
+  /** Canonical spelling written alongside `owar` by useTargetBoard; either may be populated. */
+  o_war?: number | null;
+  d_war?: number | null;
+  bsr_war?: number | null;
+  /** TOTAL hitter WAR = o_war + d_war + bsr_war. The position-player headline. */
+  total_hitter_war?: number | null;
   nil_valuation: number | null;
+  twp_hitter_market_value?: number | null;
+  twp_pitcher_market_value?: number | null;
   from_team: string | null;
   from_conference: string | null;
 };
@@ -105,6 +115,14 @@ export type BuildPlayer = {
     model_type: "returner" | "transfer" | string | null;
     status: string | null;
   } | null;
+  // Phase B: the NEUTRAL base (dev_agg=0 precompute line) the toggle handler
+  // recomputes from — kept separate from `prediction`, which holds the adjusted
+  // snapshot once Slice 1 lands. Loose shape; read like `prediction`.
+  neutralPrediction?: Record<string, any> | null;
+  // Phase B (transient, never persisted): true when a toggle moved this session,
+  // so the sim recomputes this row from neutral instead of reading its snapshot.
+  // Cleared on save. Clean rows read the stored adjusted snapshot (no flicker).
+  _dirty?: boolean;
   nilVal?: number | null;
   nil_owar?: number | null;
   team_metrics?: TeamMetricInputs | null;

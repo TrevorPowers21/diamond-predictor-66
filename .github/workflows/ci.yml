@@ -1,0 +1,164 @@
+name: CI
+
+# Two gates on every PR:
+#   1. tests  — the vitest suite (and, once it exists, the anchor suite)
+#   2. types  — tsc against tsconfig.app.json, compared delta-vs-base
+#
+# Why delta-vs-base rather than "zero errors": the app carries a large
+# pre-existing tsc error baseline. Gating on zero would fail every PR forever;
+# gating on the delta fails only PRs that ADD errors, which is the thing worth
+# blocking. See CLAUDE.md "Watch Out For" for why `tsc --noEmit` alone is a
+# no-op here (root tsconfig has files:[] + project references).
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests (vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # setup-node's `cache: npm` caches the npm download cache (~/.npm), which
+      # still leaves `npm ci` doing the full install work. Caching node_modules
+      # itself, keyed on the lockfile, lets us skip the install entirely on a
+      # hit — the common case, since the lockfile changes far less often than
+      # the source.
+      - name: Cache node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test
+
+  types:
+    name: types (tsc delta-vs-base)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need both sides of the comparison, so no shallow clone.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Same cache and key as the `tests` job — they share the entry, so
+      # whichever job runs first populates it for the other.
+      - name: Cache node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Type-check HEAD
+        id: head
+        run: |
+          set +e
+          ./node_modules/.bin/tsc -p tsconfig.app.json --noEmit > /tmp/head.raw 2>&1
+          set -e
+          # Normalise to file|code|message — line/col are stripped so that
+          # unrelated line shifts don't register as new errors.
+          grep -E "error TS[0-9]+" /tmp/head.raw \
+            | sed -E 's/\(([0-9]+),([0-9]+)\)//' \
+            | sed -E 's/^(.*): error (TS[0-9]+): (.*)$/\1|\2|\3/' \
+            | sort > /tmp/head.errors || true
+          echo "count=$(wc -l < /tmp/head.errors | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Type-check base
+        id: base
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA=$(git rev-parse origin/staging)
+          fi
+          echo "Base commit: $BASE_SHA"
+
+          git worktree add /tmp/base "$BASE_SHA"
+          # Reuse the installed deps rather than a second npm ci. Type errors
+          # come from the source tree, and a duplicate install would roughly
+          # double the job's runtime.
+          ln -s "$PWD/node_modules" /tmp/base/node_modules
+
+          cd /tmp/base
+          set +e
+          "$GITHUB_WORKSPACE/node_modules/.bin/tsc" -p tsconfig.app.json --noEmit > /tmp/base.raw 2>&1
+          set -e
+          grep -E "error TS[0-9]+" /tmp/base.raw \
+            | sed -E 's/\(([0-9]+),([0-9]+)\)//' \
+            | sed -E 's/^(.*): error (TS[0-9]+): (.*)$/\1|\2|\3/' \
+            | sort > /tmp/base.errors || true
+          echo "count=$(wc -l < /tmp/base.errors | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Compare
+        run: |
+          BASE_N="${{ steps.base.outputs.count }}"
+          HEAD_N="${{ steps.head.outputs.count }}"
+
+          # Set difference, not just a count comparison — a PR that fixes one
+          # error and introduces another leaves the count unchanged.
+          comm -13 /tmp/base.errors /tmp/head.errors > /tmp/new.errors || true
+          NEW_N=$(wc -l < /tmp/new.errors | tr -d ' ')
+
+          comm -23 /tmp/base.errors /tmp/head.errors > /tmp/fixed.errors || true
+          FIXED_N=$(wc -l < /tmp/fixed.errors | tr -d ' ')
+
+          {
+            echo "### tsc delta-vs-base"
+            echo ""
+            echo "| | count |"
+            echo "|---|---|"
+            echo "| base ($BASE_N) | \`$BASE_N\` |"
+            echo "| head | \`$HEAD_N\` |"
+            echo "| **new** | **\`$NEW_N\`** |"
+            echo "| fixed | \`$FIXED_N\` |"
+            echo ""
+            if [ "$FIXED_N" -gt 0 ]; then
+              echo "<details><summary>Fixed ($FIXED_N)</summary>"
+              echo ""
+              echo '```'
+              cat /tmp/fixed.errors
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+            if [ "$NEW_N" -gt 0 ]; then
+              echo "**New type errors introduced by this PR:**"
+              echo ""
+              echo '```'
+              cat /tmp/new.errors
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$NEW_N" -gt 0 ]; then
+            echo "::error::$NEW_N new type error(s) introduced by this PR"
+            cat /tmp/new.errors
+            exit 1
+          fi
+
+          echo "No new type errors. Baseline: $BASE_N, head: $HEAD_N, fixed: $FIXED_N."

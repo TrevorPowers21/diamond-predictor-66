@@ -5,6 +5,7 @@ import { ArrowLeft, Download, Target, TrendingUp, Star } from "lucide-react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveActiveBuildId } from "@/lib/activeBuild";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePrvPlus as computePrvPlusFip } from "@/lib/pitcherQuality";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -40,23 +42,18 @@ import { JucoPitcherRiskCard } from "@/components/JucoRiskCards";
 import { isThinSamplePitcher } from "@/lib/combinedStats";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
-import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { PortalTeamCards } from "@/components/PortalTeamCards";
 import {
-  computePitcherWar,
   computePitcherMarketValue,
-  pitcherExpectedIp,
   pitcherRoleFromDepthRole,
-  getPitchingPvfForRole,
   type PitcherDepthRole,
 } from "@/lib/depthRoles";
 import { defaultPitcherDepthRoleFromIp } from "@/pages/team-builder/helpers";
-import { pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { projectEffectivePitcher } from "@/lib/effectiveProjection";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1020,10 +1017,10 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
       la1030: parseNum(powerRatingsRow[29]),
     };
     const scores = {
-      // Stuff+ has no dedicated stored score column in Pitching Master — always
-      // compute from raw stuff+. Guarded on equation constants so a misconfigured
-      // model_config row can't accidentally leak the raw value through.
-      stuff: (() => {
+      // STORED-FIRST (2026-08-23): read the stored stuff score (Pitching Master.stuff_score,
+      // powerRatingsRow[16]) first — same as every other metric here. Fall back to a live compute
+      // (guarded on equation constants) only when the stored score is null.
+      stuff: storedScores.stuff ?? (() => {
         const avg = Number.isFinite(pitchingEq.p_ncaa_avg_stuff_plus) ? pitchingEq.p_ncaa_avg_stuff_plus : 100;
         const sd = Number.isFinite(pitchingEq.p_sd_stuff_plus) && pitchingEq.p_sd_stuff_plus > 0 ? pitchingEq.p_sd_stuff_plus : 3.97;
         return scoreFromMetric(metrics.stuff, avg, sd);
@@ -1215,6 +1212,18 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     // Fall back to player conference, team conference, or any master row
     return player?.conference || masterRow?.conference || (anyPitcherMasterRow as any)?.Conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
   })();
+  // MARKET conference = the DESTINATION (logged-in program = effectiveTeamId), not
+  // the player's own team. A transfer is valued at the program viewing him (SEC $,
+  // not his old Big Ten school). For a returner, effectiveTeam == his team, so this
+  // equals displayConference. Falls back to the player's conference when there's no
+  // program context (standalone scouting).
+  const destinationConference = (() => {
+    if (effectiveTeamId) {
+      const t = (teamDirectory as Array<{ id: string | null; conference: string | null }>).find((tt) => tt.id === effectiveTeamId);
+      if (t?.conference) return t.conference;
+    }
+    return displayConference;
+  })();
   const displayHandedness = player?.handedness || masterRow?.throwHand || (anyPitcherMasterRow as any)?.ThrowHand || storageRow?.[2] || "—";
   const confStatsRow = (() => {
     const confName = displayConference !== "—" ? displayConference : null;
@@ -1310,7 +1319,47 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     const raw = (activePrediction as any)?.pitcher_role;
     return raw === "SP" || raw === "RP" || raw === "SM" ? (raw as "SP" | "RP" | "SM") : null;
   })();
-  const initialProjectedRole = supabaseRole || storedPredictionRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
+  // Active build's PITCHER-slot snapshot for this player. Mirrors PlayerProfile (hitter side) and
+  // TargetBoardSubtab.tsx:351-381, including the TWP two-row case — a two-way player has a hitter
+  // row and a pitcher row, and this page must read the PITCHER slot, never a merge.
+  const { data: buildPitcherSnap = null } = useQuery({
+    queryKey: ["pitcher-profile-active-build-snapshot", id, effectiveTeamId ?? null],
+    enabled: !!id && !!effectiveTeamId,
+    queryFn: async () => {
+      const { data: blds } = await (supabase as any)
+        .from("team_builds")
+        .select("id, is_active, is_default, team, academic_year, updated_at, created_at")
+        .eq("customer_team_id", effectiveTeamId);
+      const activeId = resolveActiveBuildId(blds);
+      if (!activeId) return null;
+      const { data: bps } = await (supabase as any)
+        .from("team_build_players")
+        .select("player_id, position_slot, included_in_roster, player_snapshot")
+        .eq("build_id", activeId)
+        .eq("included_in_roster", true)
+        .eq("player_id", id);
+      const isPit = (s: string) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+      const row = (bps || []).find((r: any) => r.player_snapshot && isPit(r.position_slot));
+      // Guard on p_era: a hitter-slot snapshot has no pitching fields, and spreading one over the
+      // prediction row would overwrite the pitching line with undefined.
+      return row?.player_snapshot?.p_era != null ? (row.player_snapshot as any) : null;
+    },
+  });
+
+  // 🛑 SNAPSHOT ROLE WINS. The DEPTH ROLE is the dominant driver of a rostered pitcher's line —
+  //    bigger than dev aggressiveness — because it sets projected IP, which pWAR scales with, and a
+  //    depth change also re-derives pRV+ through the SP↔RP regression.
+  //    Measured on the active Arkansas build (snapshot vs neutral prediction):
+  //      Neiswonger  weekend_starter vs swing_starter        pWAR 1.157 → 3.677
+  //      Krenzel     workhorse_reliever vs mid_leverage_rel. pWAR 0.537 → 1.547
+  //      Henson      swing_starter vs weekday_starter        pWAR 0.004 → 0.788  (pRV+ 79 → 117)
+  //      Hering      specialist_reliever vs weekday_starter  pWAR −1.181 → 0.003 (pRV+ 49 → 73)
+  //    pRV+ moves by dev where the depth role matches (118→125, 92→97, 138→146 are all ×1.0588),
+  //    but Henson/Hering move far more than dev can explain — that is the role regression.
+  // ⛔ Seed the dropdowns from the SNAPSHOT, not the neutral prediction. Otherwise the controls show
+  //    the neutral role while the numbers show the snapshot's — the page contradicts itself.
+  const snapRole = ((r: any) => (r === "SP" || r === "RP" || r === "SM" ? r : null))((buildPitcherSnap as any)?.pitcher_role);
+  const initialProjectedRole = snapRole || supabaseRole || storedPredictionRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
   const effectiveRoleDisplay = supabaseRole || derivedRole;
   // Class transition is now auto-derived from class_year in createPredictionsFromMaster,
   // so the stored row is the source of truth. No UI editor — read it from the
@@ -1341,12 +1390,18 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
   // pitcher_role + sample IP for older rows. Drives the displayed pWAR +
   // market_value via the depthRoles helpers.
   const initialDepthRole: PitcherDepthRole = (() => {
-    const stored = (activePrediction as any)?.pitcher_depth_role;
     const validDepths: PitcherDepthRole[] = [
       "weekend_starter", "weekday_starter", "swing_starter",
       "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
       "low_impact_reliever", "specialist_reliever",
     ];
+    // ⛔ SNAPSHOT FIRST — see the note on initialProjectedRole above. The build's depth role is the
+    //    coach's decision and the dominant driver of projected IP → pWAR. Reading the neutral
+    //    prediction here would show e.g. `mid_leverage_reliever` in the dropdown while the numbers
+    //    on screen are `workhorse_reliever`'s (Krenzel, active Arkansas build).
+    const snapDepth = (buildPitcherSnap as any)?.pitcher_depth_role;
+    if (validDepths.includes(snapDepth)) return snapDepth as PitcherDepthRole;
+    const stored = (activePrediction as any)?.pitcher_depth_role;
     if (validDepths.includes(stored)) return stored as PitcherDepthRole;
     return defaultPitcherDepthRoleFromIp(
       storageIp,
@@ -1354,6 +1409,14 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     );
   })();
   const [depthRole, setDepthRole] = useState<PitcherDepthRole>(initialDepthRole);
+  // 🛑 Did the COACH move a control this session? Distinct from "the computed line differs from the
+  //    stored value", which is NOT a reliable toggle signal once a build snapshot is in play: the
+  //    session dev seeds from the PREDICTION row (dev-neutral, 0) while the snapshot has the build's
+  //    dev baked in (0.5 / 1.0 on Arkansas). Without this flag a snapshot-backed pitcher looks
+  //    "toggled" on first paint and the page would show a recomputed line instead of the saved
+  //    snapshot — silently undoing the pure-read fix.
+  //    Set ONLY from real user interactions; the reset effect below must clear it.
+  const [userToggled, setUserToggled] = useState(false);
   useEffect(() => {
     // Program hub: seed dev-agg + depth role from the LIVE build so the profile
     // reflects the build; otherwise use the prediction's stored values.
@@ -1369,6 +1432,9 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     // role, so a weekday_starter projects as SP and the role transition fires.
     // Standalone scouting keeps the prediction's stored pitcher_role.
     setProjectedRole(roleOverride ? pitcherRoleFromDepthRole(effDepthRole) : (initialProjectedRole as "SP" | "RP" | "SM"));
+    // This effect RESETS from stored/overrides (player nav, impersonation switch, build change) —
+    // it is not a coach action, so the toggle flag must go back to false.
+    setUserToggled(false);
   }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole, devAggOverride, roleOverride]);
   // Session-only display overlay. Profile dropdowns (depth role, dev agg,
   // pitcher role) are NEVER persisted — the coach can preview "what if this
@@ -1376,19 +1442,13 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
   // touching stored values. To make any of these stick, the coach uses Team
   // Builder + target board.
   const updateProjectedInputs = async (updates: { pitcher_role?: "SP" | "RP" | "SM"; dev_aggressiveness?: number }) => {
+    setUserToggled(true);
     if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
     if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
   };
+
   const projectedPitching = useMemo(() => {
     const eq = readPitchingWeights();
-    const roleCurve = {
-      tier1Max: eq.rp_to_sp_low_better_tier1_max,
-      tier2Max: eq.rp_to_sp_low_better_tier2_max,
-      tier3Max: eq.rp_to_sp_low_better_tier3_max,
-      tier1Mult: eq.rp_to_sp_low_better_tier1_mult,
-      tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
-      tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
-    };
 
     // Stored-first: prefer the team-scoped precomputed row whenever the
     // active customer team has one — that's the projection coaches want to see
@@ -1398,92 +1458,77 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
       ? (predictions as any[]).find((p) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed")
       : null;
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
-    const stored = storedTeamRow ?? storedReturnerRow ?? null;
+    const predRow = storedTeamRow ?? storedReturnerRow ?? null;
 
-    const overlayIp = pitcherExpectedIp(depthRole, eq);
-    const storedDevAgg = Number.isFinite(Number((stored as any)?.dev_aggressiveness)) ? Number((stored as any).dev_aggressiveness) : 0;
+    // 🛑 ON THE ACTIVE BUILD ⇒ THE SAVED SNAPSHOT WINS (Trevor, 2026-09-01):
+    //   "for player profiles on roster or target board it just needs to read the saved
+    //    player/transfer snapshot across all the sites. No live compute."
+    // The prediction row is DEV-NEUTRAL (dev_aggressiveness measured 0.000 across all 7,062
+    // projected rows); the build snapshot has the coach's dev slider BAKED IN at save time. Reading
+    // the prediction here is what made this page disagree with the Team Builder row — the same
+    // defect fixed on PlayerProfile (hitter side), where snapshot ÷ neutral was exactly
+    // 1.02941 / 1.05882 = dev 0.5 / 1.0.
+    //
+    // ⛔ OVERLAY, DO NOT SWAP. The snapshot carries ONLY the projection line
+    //    (p_era/p_fip/p_whip/p_k9/p_bb9/p_hr9/p_rv_plus/p_war/pitcher_role/market_value).
+    //    `pitcher_whiff_score` / `pitcher_bb_score` / `pitcher_barrel_score` exist only on the
+    //    prediction row and feed the PDF + scouting-report export (:1455-1457 below). A wholesale
+    //    swap would silently blank all three in the exported report.
+    const stored: any = buildPitcherSnap ? { ...(predRow ?? {}), ...buildPitcherSnap } : predRow;
+
+    // Canonical toggle-adjusted line — the SAME projectEffectivePitcher that Team
+    // Builder + GM use, so pRV+ / WAR / rates match on every surface. dev_agg +
+    // SP↔RP role change both flow into pRV+ (dev scales the rate; role change
+    // re-derives it from the regressed rates); WAR = computePitcherWar(pRV+, depth
+    // IP) — exactly the hitter pattern (dev → wRC+ → oWAR). Replaces the old
+    // role-then-additive-dev overlay that diverged from TB under toggles.
     const sessionDevAggNum = Number.isFinite(Number(projectedDevAggressiveness)) ? Number(projectedDevAggressiveness) : 0;
-    const devAggDelta = (sessionDevAggNum - storedDevAgg) * 0.06;
-    const devAggUnchanged = sessionDevAggNum === storedDevAgg;
-
-    // Base role for transition math: prefer stored pitcher_role, fall back to
-    // derivedRole (Pitching Master Role + G/GS heuristic) so the transition
-    // fires even when the precompute didn't write pitcher_role.
     const validRole = (r: any): "SP" | "RP" | "SM" | null =>
       r === "SP" || r === "RP" || r === "SM" ? r : null;
+    // Base role: prefer stored pitcher_role, fall back to derivedRole so the
+    // transition fires even when the precompute didn't write pitcher_role.
     const storedRole = validRole((stored as any)?.pitcher_role) ?? validRole(derivedRole) ?? null;
     const sessionRole = validRole(projectedRole) ?? "RP";
-    const roleChanged = storedRole != null && storedRole !== sessionRole;
-    // Apply role transition first (mirrors transferPitcherProjection.ts lines 399-404)
-    const rtEra = roleChanged ? applyRoleTransitionAdjustment(stored?.p_era ?? null, eq.sp_to_rp_reg_era_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_era ?? null);
-    const rtFip = roleChanged ? applyRoleTransitionAdjustment(stored?.p_fip ?? null, eq.sp_to_rp_reg_fip_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_fip ?? null);
-    const rtWhip = roleChanged ? applyRoleTransitionAdjustment(stored?.p_whip ?? null, eq.sp_to_rp_reg_whip_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_whip ?? null);
-    const rtK9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_k9 ?? null, eq.sp_to_rp_reg_k9_pct, storedRole, sessionRole, false, roleCurve) : (stored?.p_k9 ?? null);
-    const rtBb9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_bb9 ?? null, eq.sp_to_rp_reg_bb9_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_bb9 ?? null);
-    const rtHr9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_hr9 ?? null, eq.sp_to_rp_reg_hr9_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_hr9 ?? null);
-
-    // Re-derive pRV+ from role-adjusted rates (only when role changed; otherwise use stored)
-    const rolePRvPlus = roleChanged && [rtEra, rtFip, rtWhip, rtK9, rtBb9, rtHr9].every((v) => v != null)
-      ? (() => {
-          const eraPlusRA = calcPitchingPlus(rtEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-          const fipPlusRA = calcPitchingPlus(rtFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-          const whipPlusRA = calcPitchingPlus(rtWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-          const k9PlusRA = calcPitchingPlus(rtK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-          const bb9PlusRA = calcPitchingPlus(rtBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-          const hr9PlusRA = calcPitchingPlus(rtHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-          if ([eraPlusRA, fipPlusRA, whipPlusRA, k9PlusRA, bb9PlusRA, hr9PlusRA].some((v) => v == null)) return stored?.p_rv_plus ?? null;
-          return (Number(eraPlusRA) * eq.era_plus_weight)
-            + (Number(fipPlusRA) * eq.fip_plus_weight)
-            + (Number(whipPlusRA) * eq.whip_plus_weight)
-            + (Number(k9PlusRA) * eq.k9_plus_weight)
-            + (Number(bb9PlusRA) * eq.bb9_plus_weight)
-            + (Number(hr9PlusRA) * eq.hr9_plus_weight);
-        })()
-      : (stored?.p_rv_plus ?? null);
-
-    const overlayPRvPlus = rolePRvPlus == null
-      ? null
-      : devAggUnchanged
-        ? rolePRvPlus
-        : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
-    // PlayerProfile pattern: stored × overlayScale, no `noOverlay` branch.
-    // overlayScale is a single multiplier built from IP ratio (depth knob) +
-    // devAgg ratio + role-transition PVF ratio. When all knobs match stored,
-    // every ratio defaults to 1, so the displayed values equal stored. As
-    // soon as the coach moves a knob, the corresponding ratio shifts and
-    // the displayed pWAR + market_value update accordingly.
-    const newRoleBucket = pitcherRoleFromDepthRole(depthRole);
-    const storedRoleBucket = (storedRole as "SP" | "RP" | "SM" | null) ?? newRoleBucket;
-    const storedProjectedIp = Number((stored as any)?.projected_ip);
-    const ipScale = Number.isFinite(storedProjectedIp) && storedProjectedIp > 0
-      ? overlayIp / storedProjectedIp
-      : 1;
-    const pvfStored = getPitchingPvfForRole(storedRoleBucket, eq);
-    const pvfNew = getPitchingPvfForRole(newRoleBucket, eq);
-    const pvfRatio = pvfStored > 0 ? pvfNew / pvfStored : 1;
-    const devAggScale = devAggUnchanged ? 1 : (1 + devAggDelta);
-    const overlayScale = ipScale * pvfRatio * devAggScale;
-    const overlayPWar = stored?.p_war != null ? Number(stored.p_war) * overlayScale : null;
-    // TWP-aware: for is_twp=true rows, stored.market_value is NULL by design;
-    // pull from twp_pitcher_market_value via the helper. Non-TWPs unchanged.
-    const storedPitcherMv = pickPitcherMarketValue(stored as any, !!(player as any)?.is_twp);
-    const overlayMarketValue = storedPitcherMv != null ? storedPitcherMv * overlayScale : null;
-    const scaleLow = (v: number | null | undefined) =>
-      v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
-    const scaleHigh = (v: number | null | undefined) =>
-      v == null ? null : devAggUnchanged ? v : v * (1 + devAggDelta);
+    const line = projectEffectivePitcher(
+      {
+        p_era: stored?.p_era ?? null, p_fip: stored?.p_fip ?? null, p_whip: stored?.p_whip ?? null,
+        p_k9: stored?.p_k9 ?? null, p_bb9: stored?.p_bb9 ?? null, p_hr9: stored?.p_hr9 ?? null,
+        p_rv_plus: stored?.p_rv_plus ?? null, pitcher_role: storedRole,
+      },
+      depthRole, sessionDevAggNum, projectedClassTransition, eq,
+    );
+    // Market = pWAR × $/WAR × conference tier (NO PVF — role value is already in
+    // WAR via IP). `role` is passed for call-site parity but no longer affects it.
+    const overlayMarketValue = computePitcherMarketValue(
+      line.pWar, { conference: destinationConference, role: sessionRole, team: displayTeam }, { dollarsPerWar: eq.market_dollars_per_war },
+    );
+    // No toggle change → the STORED market value; a toggle (role/dev) that moved pWAR → recompute
+    // from the new pWAR (WAR-based, mirrors the hitter path). Never scale the market $ directly.
+    const storedPWarVal = (stored as any)?.p_war != null ? Number((stored as any).p_war) : null;
+    // 🛑 SNAPSHOT-BACKED ⇒ the saved line wins until the coach ACTUALLY moves a control.
+    //    The value-difference test alone is not a toggle signal here: the session dev seeds from the
+    //    dev-neutral prediction row while the snapshot carries the build's baked-in dev, so `line`
+    //    differs from the snapshot on FIRST PAINT with no user interaction at all.
+    const pitcherToggled = buildPitcherSnap
+      ? userToggled
+      : (line.pWar != null && storedPWarVal != null && Math.abs(Number(line.pWar) - storedPWarVal) > 1e-6);
+    const storedPitcherMarket = (stored as any)?.twp_pitcher_market_value ?? (stored as any)?.market_value ?? null;
+    const marketValue = pitcherToggled ? overlayMarketValue : (storedPitcherMarket != null ? Number(storedPitcherMarket) : overlayMarketValue);
 
     return {
-      pEra: scaleLow(rtEra),
-      pFip: scaleLow(rtFip),
-      pWhip: scaleLow(rtWhip),
-      pK9: scaleHigh(rtK9),
-      pBb9: scaleLow(rtBb9),
-      pHr9: scaleLow(rtHr9),
-      pRvPlus: overlayPRvPlus,
-      pWar: overlayPWar,
-      marketValue: overlayMarketValue,
-      projectedIp: overlayIp,
+      // STORED-FIRST (2026-08-23): no toggle change → the STORED prediction values; a toggle that
+      // moved pWAR → the recomputed `line`. Guards against a stored non-zero dev_aggressiveness
+      // double-applying on load (the hitter path has the same guard).
+      pEra: pitcherToggled ? line.pEra : ((stored as any)?.p_era ?? line.pEra),
+      pFip: pitcherToggled ? line.pFip : ((stored as any)?.p_fip ?? line.pFip),
+      pWhip: pitcherToggled ? line.pWhip : ((stored as any)?.p_whip ?? line.pWhip),
+      pK9: pitcherToggled ? line.pK9 : ((stored as any)?.p_k9 ?? line.pK9),
+      pBb9: pitcherToggled ? line.pBb9 : ((stored as any)?.p_bb9 ?? line.pBb9),
+      pHr9: pitcherToggled ? line.pHr9 : ((stored as any)?.p_hr9 ?? line.pHr9),
+      pRvPlus: pitcherToggled ? line.pRvPlus : ((stored as any)?.p_rv_plus ?? line.pRvPlus),
+      pWar: pitcherToggled ? line.pWar : ((stored as any)?.p_war ?? line.pWar),
+      marketValue,
+      projectedIp: pitcherToggled ? line.projectedIp : ((stored as any)?.projected_ip ?? line.projectedIp),
       // Stored scouting scores from the picked prediction row — read the
       // domain-scoped pitcher_*_score columns first (canonical source after
       // 2026-06-03 split migration), fall back to legacy columns for rows
@@ -1494,13 +1539,17 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     };
   }, [
     projectedDevAggressiveness,
+    projectedClassTransition,
     depthRole,
     displayConference,
+    destinationConference,
     derivedRole,
     projectedRole,
     predictions,
     effectiveTeamId,
     displayTeam,
+    buildPitcherSnap,
+    userToggled,
   ]);
 
   // In the program hub, WAR + market come from the LIVE build so Projections
@@ -1526,14 +1575,9 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     const k9Plus = calcPitchingPlus(k92025, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
     const bb9Plus = calcPitchingPlus(bb92025, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
     const hr9Plus = calcPitchingPlus(hr92025, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
-    const pRvPlus2025 = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-      ? (Number(eraPlus) * eq.era_plus_weight) +
-        (Number(fipPlus) * eq.fip_plus_weight) +
-        (Number(whipPlus) * eq.whip_plus_weight) +
-        (Number(k9Plus) * eq.k9_plus_weight) +
-        (Number(bb9Plus) * eq.bb9_plus_weight) +
-        (Number(hr9Plus) * eq.hr9_plus_weight)
-      : null;
+    // pRV+ = D1-FIP index from 2025 actual K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts). +stats kept for display.
+    const prv2025Raw = computePrvPlusFip(k92025, bb92025, hr92025);
+    const pRvPlus2025 = prv2025Raw == null ? null : Math.round(prv2025Raw);
     const pWar2025 = pRvPlus2025 == null || storageIp == null || eq.pwar_runs_per_win === 0
       ? null
       : (((((pRvPlus2025 - 100) / 100) * (storageIp / 9) * eq.pwar_r_per_9) + ((storageIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win);
@@ -1790,14 +1834,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                       })(),
                       coach_notes: notes,
                     };
-                    const prvForRisk = computePrvPlus(
-                      (historicalRow as any)?.era_pr_plus ?? null,
-                      (historicalRow as any)?.fip_pr_plus ?? null,
-                      (historicalRow as any)?.whip_pr_plus ?? null,
-                      (historicalRow as any)?.k9_pr_plus ?? null,
-                      (historicalRow as any)?.bb9_pr_plus ?? null,
-                      (historicalRow as any)?.hr9_pr_plus ?? null,
-                    );
+                    const prvForRisk = computePrvPlusFip((historicalRow as any)?.K9 ?? null, (historicalRow as any)?.BB9 ?? null, (historicalRow as any)?.HR9 ?? null);
                     const riskResult = assessPitcherRisk({
                       conference: displayConference !== "—" ? displayConference : undefined,
                       projectedPrvPlus: prvForRisk,
@@ -1977,14 +2014,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                     })(),
                   };
                   // Attach risk assessment
-                  const prvForRisk = computePrvPlus(
-                    (historicalRow as any)?.era_pr_plus ?? null,
-                    (historicalRow as any)?.fip_pr_plus ?? null,
-                    (historicalRow as any)?.whip_pr_plus ?? null,
-                    (historicalRow as any)?.k9_pr_plus ?? null,
-                    (historicalRow as any)?.bb9_pr_plus ?? null,
-                    (historicalRow as any)?.hr9_pr_plus ?? null,
-                  );
+                  const prvForRisk = computePrvPlusFip((historicalRow as any)?.K9 ?? null, (historicalRow as any)?.BB9 ?? null, (historicalRow as any)?.HR9 ?? null);
                   const riskResult = assessPitcherRisk({
                     conference: displayConference !== "—" ? displayConference : undefined,
                     projectedPrvPlus: prvForRisk,
@@ -2238,6 +2268,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                           const rpDepths: PitcherDepthRole[] = ["swing_starter", "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"];
                           const allowed = newRole === "SP" ? spDepths : rpDepths;
                           if (!allowed.includes(depthRole)) {
+                            setUserToggled(true);
                             setDepthRole(newRole === "SP" ? "weekend_starter" : "high_leverage_reliever");
                           }
                         }}>
@@ -2247,7 +2278,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                             <SelectItem value="RP">RP</SelectItem>
                           </SelectContent>
                         </Select>
-                        <Select value={depthRole} onValueChange={(v) => setDepthRole(v as PitcherDepthRole)}>
+                        <Select value={depthRole} onValueChange={(v) => { setUserToggled(true); setDepthRole(v as PitcherDepthRole); }}>
                           <SelectTrigger className="h-7 w-[160px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {projectedRole === "SP" ? (
@@ -2402,14 +2433,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
 
             {/* Risk Assessment */}
             {(() => {
-              const prvForRisk = computePrvPlus(
-                (historicalRow as any)?.era_pr_plus ?? null,
-                (historicalRow as any)?.fip_pr_plus ?? null,
-                (historicalRow as any)?.whip_pr_plus ?? null,
-                (historicalRow as any)?.k9_pr_plus ?? null,
-                (historicalRow as any)?.bb9_pr_plus ?? null,
-                (historicalRow as any)?.hr9_pr_plus ?? null,
-              );
+              const prvForRisk = computePrvPlusFip((historicalRow as any)?.K9 ?? null, (historicalRow as any)?.BB9 ?? null, (historicalRow as any)?.HR9 ?? null);
               const confHTP = confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
                 ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
                 : null;

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RSTR IQ — Phase-B snapshot self-heal sweep
+  Fires daily at 04:15 (low-traffic). Snapshot drift is rare (only a toggle race or
+  a neutral re-precompute causes it), so daily is ample; bump the interval up if you
+  want tighter self-correction. See docs/SELF_HEAL_SWEEP.md.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rstriq.self-heal</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>$HOME/dev-main/diamond-predictor-66/scripts/self_heal_sweep.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/rstr-iq-self-heal.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/rstr-iq-self-heal.err</string>
+</dict>
+</plist>

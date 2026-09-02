@@ -1,3 +1,10 @@
+/**
+ * 🛑 LEGACY — last touched 2026-04-26. SUPERSEDED by `conferenceStuffPlusV2.ts`.
+ * This version reads per-pitcher scores from the LEGACY `pitcher_stuff_plus_inputs` lane (pre-v2 scores, RAW hb).
+ * The canonical producer computes Sigma("Pitching Master".stuff_plus x trackman_pitches) / Sigma(trackman_pitches) —
+ * the pitch_log lane. Using this one silently biases EVERY projection through the competition-translation lever
+ * (it left prod at 101.17 when the correct value is 99.15).
+ */
 import { supabase } from "@/integrations/supabase/client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────

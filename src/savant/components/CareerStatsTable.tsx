@@ -1,5 +1,7 @@
 import type { PlayerCareerRow } from "@/savant/hooks/usePlayerCareer";
 import { computeWrcPlus } from "@/savant/lib/wrcPlus";
+import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
+
 
 const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
 const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
@@ -10,9 +12,6 @@ const opsOf = (r: { OBP: number | null; SLG: number | null }) =>
 const wrcOf = (r: { AVG: number | null; OBP: number | null; SLG: number | null; ISO: number | null }) =>
   computeWrcPlus(r.AVG, r.OBP, r.SLG, r.ISO);
 
-const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#1f2d52";
-const GOLD = "#D4AF37";
 
 interface CareerStatsTableProps {
   rows: PlayerCareerRow[];
