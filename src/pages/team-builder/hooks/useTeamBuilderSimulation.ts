@@ -1615,7 +1615,24 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     //   Jake Hanley  .3172 x 1.0784 = .342 (correct)   x 1.0784 again = .356 (what rendered)
     // And because the async target queries re-run this memo, the doubled value landed last and stuck
     // — the flicker-then-lock.
-    const shownFinal: any = (false && shown != null && devAggScale !== 1) ? {
+    // ★★★ THE LIVE BRIDGE + ITS GUARDRAILS (2026-09-01) ★★★
+    // DIRTY -> scale ONCE, instantly. The row is mid-toggle, its base is NEUTRAL (dev_agg=0), nothing
+    //          is saved yet, and the coach must see the move in the ~20s before the save lands. The
+    //          SAVE then persists what is displayed — so with this gated off, a toggle to 1.0 wrote
+    //          the UNSCALED line (Hanley: notes dev 1, snapshot .3172/122, dev_aggressiveness 0).
+    // CLEAN -> stored snapshot VERBATIM. The toggle is already baked in; scaling again applied it
+    //          TWICE and only to the rates (oWAR is rebuilt from wRC+, not multiplied):
+    //          .3172 x1.0784 = .342 correct, x1.0784 again = .356 — and that got SAVED, corrupting
+    //          18 staging rows.
+    //
+    // 🛡 THREE GUARDRAILS, ALL REQUIRED — removing any one re-opens the compounding:
+    //   1. this `_dirty` gate — a clean row is NEVER scaled, so one toggle = one scale, ever
+    //   2. base = neutralPrediction while dirty — scaling a BAKED snapshot is what compounded
+    //   3. snapshotBacked forces devAggScale = 1 on a clean row (mirrors PlayerProfile.tsx:986)
+    // Sequence: toggle -> dirty -> scale neutral once -> save bakes it -> row goes clean -> stored is
+    // read verbatim and never scaled again.
+    const shownFinal: any
+      = ((p as any)._dirty && shown != null && devAggScale !== 1) ? {
       ...(shown as any),
       p_avg:     (shown as any).p_avg     != null ? Number((shown as any).p_avg)     * devAggScale : null,
       p_obp:     (shown as any).p_obp     != null ? Number((shown as any).p_obp)     * devAggScale : null,
