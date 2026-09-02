@@ -1,5 +1,9 @@
 # Agent learnings — Defensive Runs Engine (dRS) build + reconciliation (2026-08-03)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Captured for the **RSTR IQ dev agent** (memory `project_rstr_dev_agent`). Decisions,
 corrections, and review methodology from the `feature/defensive-runs-engine` session:
 reconciling a chat-authored dRS engine (`drs_engine_v0.1.0.zip`) against its own spec +

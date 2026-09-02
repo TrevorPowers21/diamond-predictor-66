@@ -1,4 +1,10 @@
 
+> ▶️ **CURRENT STATE + ROADMAP: `docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`** — what shipped, what
+> is verified, the 9 open items, and the five queued workstreams (coach agent display · team
+> comparison + 2027 roster upload · JUCO · Track B / agent-as-resource · player development).
+> ⭐ The highest-value refactor is named there: **one save path owning every derived copy.**
+
+
 
 
 
@@ -5226,3 +5232,29 @@ five hard requirements (see "STAGING CATCH-UP — HARD REQUIREMENTS").
 
 
 
+
+## 20260902120000_player_predictions_scope_select_by_team.sql — ⛔ DO NOT APPLY TO PROD
+
+**Prod already has this policy.** Applying it would create a second, redundant SELECT policy next to
+the existing `player_predictions_select_team_scoped`.
+
+**This entry originally said the opposite.** It claimed prod had `SELECT USING (true)` and needed
+scoping. That was wrong:
+
+| | SELECT policy on `player_predictions` |
+|---|---|
+| **PROD** | `player_predictions_select_team_scoped` — already scoped by `is_team_member()` |
+| **STAGING** (before 2026-09-02) | `USING (true)` ← the actual gap |
+
+The RLS analysis was run against its **default target (staging)** and reported as if it described
+prod. Same code, two databases, different config — **Gate B repeating**. Prod was never exposed.
+
+**What the migration now does:** brings STAGING in line with prod, copying prod's policy verbatim
+(same name, same expression, same role) so the two databases match byte for byte. Applied to staging
+2026-09-02; cross-database diff confirms **IDENTICAL**.
+
+**Verified on PROD** with a real non-superadmin coach (Gardner-Webb, `general_user`, no `user_roles`
+row): own team 14,268 rows visible · other team **0** · global 31,369 readable. Prod's boundary
+already holds.
+
+⇒ **Nothing to do on prod for this one.** Kept in the log so the correction is on record.

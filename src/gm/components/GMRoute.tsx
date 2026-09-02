@@ -6,8 +6,12 @@ import RoleGuard from "@/components/RoleGuard";
  * Gate for all /gm/* routes (the General Manager interface).
  *
  * - Must be signed in (ProtectedRoute wraps this upstream).
- * - For now, access = superadmin OR team_admin. A dedicated `gm_user` team role
- *   is a later migration; access assignment is intentionally deferred.
+ * - Access = superadmin OR ANY member of a customer team (team_admin or general_user).
+ *   Widened 2026-09-02 (Trevor): general_user needs Front Office too, for now.
+ *
+ *   This matches what the DATABASE already allowed — all 18 gm_* tables scope by
+ *   `is_team_member(customer_team_id)`, not `is_team_admin_of`. The UI was the only thing
+ *   restricting it, so this removes a gate that existed in two places and nowhere else.
  * - noindex so the area never lands in search engines.
  */
 export default function GMRoute({ children }: { children: React.ReactNode }) {
@@ -24,5 +28,5 @@ export default function GMRoute({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (loading) return null;
-  return <RoleGuard allow={["superadmin", "team_admin"]}>{children}</RoleGuard>;
+  return <RoleGuard allow={["superadmin", "team_admin", "general_user"]}>{children}</RoleGuard>;
 }

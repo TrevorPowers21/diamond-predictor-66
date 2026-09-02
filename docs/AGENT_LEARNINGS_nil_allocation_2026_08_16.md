@@ -1,5 +1,9 @@
 # AGENT LEARNINGS — NIL Allocation + Positional Need (2026-08-16)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Companion to `HANDOFF_NIL_2026_08_16.md`. This is the WHY + the gotchas + the mistakes, so the next agent doesn't
 re-derive or repeat them. Operating principle throughout (Trevor): improvements got built OVER old code without deleting
 it → trace the ACTIVE path, delete dead, one source of truth. Verify, don't guess.

@@ -1,5 +1,9 @@
 # Agent learnings — Team Builder default-build + returners (UCSB bug, 2026-08-07)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Captured for the **RSTR IQ dev agent**. A new customer team (UCSB) was set up, the precompute ran, but
 "start a build" did nothing on both the eval and roster-management sides. Root cause was a **cluster of
 name-vs-ID lookups** plus one **wrong storage mechanism** — all surfaced by UCSB being the first team whose

@@ -97,7 +97,13 @@
     "gen-scouting": "tsx --env-file-if-exists=.env.local scripts/generate-scouting-reports.ts",
     "gen-scouting:prod": "tsx --env-file-if-exists=.env.production.local scripts/generate-scouting-reports.ts --prod",
     "db-migrate": "supabase db query --linked --file",
-    "db-query": "supabase db query --linked --agent=no"
+    "db-query": "supabase db query --linked --agent=no",
+    "test:anchors": "vitest run src/test/anchors/",
+    "anchors:rebuild": "tsx scripts/build-anchor-fixtures.ts",
+    "agent:stat-map": "tsx scripts/agent/stat-surface-map.ts",
+    "agent:rls": "tsx scripts/agent/rls-analysis.ts",
+    "agent:rls:prod": "tsx scripts/agent/rls-analysis.ts --prod",
+    "agent:rls-test-coach": "tsx scripts/agent/create-rls-test-coach.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.99.0",

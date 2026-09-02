@@ -1,5 +1,12 @@
 # AGENT LEARNINGS — executing the war-recalibration PROD push (2026-08-26/27)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+> ⚠ **STATE SUPERSEDED (2026-09-01).** The "paused at Phase C" push no longer exists — it completed.
+> Prod data is live and verified; PR #172 (staging→main) is open. See
+> `docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`.
+
 
 
 

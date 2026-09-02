@@ -1,5 +1,9 @@
 # Agent learnings — Internals collapse + power-rating refits (2026-08-12)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Captured for the **RSTR IQ dev agent**. Session on `feature/war-recalibration`: collapsed
 `player_prediction_internals` (a per-prediction COPY of power ratings) so every reader reads the Masters
 directly, plus the Step 3-5 composite refits. Record shape: **rule — why — what it protects against.**

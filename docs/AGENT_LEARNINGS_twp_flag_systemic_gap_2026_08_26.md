@@ -1,5 +1,9 @@
 # AGENT LEARNINGS — a "stale row" symptom hid a systemic data gap: is_twp was never populated (2026-08-26)
 
+> ⚠ **Read `docs/AGENT_LEARNINGS_INDEX.md` first.** These files were written in sequence during the
+> WAR recalibration and **later ones correct earlier ones** — the index says which are superseded.
+
+
 Status: **DETECTOR APPLIED + PITCHER/HITTER RE-RUN on staging. Re-bake + edge-fn mirror pending.** Dedicated pass; rides the WAR-recalibration prod push as an ordered, logged step.
 
 ## ★★★ THE DOCTRINE LESSON (generalize this) ★★★
