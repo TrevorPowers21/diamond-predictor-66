@@ -1606,7 +1606,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
     // Apply devAgg scale to slash stats — mirrors PlayerProfile.applyDevScale.
     // Depth role only affects PA → oWAR, not the rate stats themselves.
-    const shownFinal: any = (shown != null && devAggScale !== 1) ? {
+    // ★★★ 2026-09-01 — DO NOT RE-SCALE A ROW THAT IS ALREADY FINAL. ★★★
+    // Every source that reaches `shown` has already had the toggle applied exactly once:
+    //   CLEAN  -> the stored snapshot, with the toggle BAKED IN at save time
+    //   DIRTY  -> the target overlay / neutral recompute, which applies devAggScale itself
+    // Multiplying here applied it a SECOND time to the rates only — oWAR is REBUILT from wRC+ rather
+    // than multiplied, which is why WAR and market stayed correct while avg/obp/slg drifted:
+    //   Jake Hanley  .3172 x 1.0784 = .342 (correct)   x 1.0784 again = .356 (what rendered)
+    // And because the async target queries re-run this memo, the doubled value landed last and stuck
+    // — the flicker-then-lock.
+    const shownFinal: any = (false && shown != null && devAggScale !== 1) ? {
       ...(shown as any),
       p_avg:     (shown as any).p_avg     != null ? Number((shown as any).p_avg)     * devAggScale : null,
       p_obp:     (shown as any).p_obp     != null ? Number((shown as any).p_obp)     * devAggScale : null,
