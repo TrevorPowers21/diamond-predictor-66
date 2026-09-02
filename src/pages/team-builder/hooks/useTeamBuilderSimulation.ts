@@ -659,6 +659,29 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
             ?? p.transfer_snapshot.owar ?? p.transfer_snapshot.o_war ?? null,
         }
       : null;
+    // ★★★ 2026-09-01 — CLEAN ROW: STORED IS FINAL, AND NOTHING BELOW RUNS. ★★★
+    // Everything below is legacy LIVE compute for the target/transfer path. It re-derives rates and
+    // oWAR from the live precomputed row, and it returns rates UNSCALED while oWAR is ALREADY scaled
+    // — so `shownFinal` scales the rates a second time (.3172 x 1.0784^2 = .356 vs the correct .342).
+    //
+    // 🛑 THAT IS THE FLICKER AND THE LOCK. `liveTargetPlayerById` / `liveTargetPredictionByPlayerId`
+    //    are in this memo's dep array (:1145), so the FIRST pass renders the stored value correctly
+    //    and the SECOND pass — after those queries resolve — swaps in the doubled one and stays.
+    //    Nothing is racing on merit; the async pass simply lands last.
+    // ⇒ A clean row has its answer on disk. Return it before any of this executes.
+    const storedClean: any = (p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null;
+    if (!(p as any)._dirty && storedClean && storedClean.p_wrc_plus != null) {
+      return {
+        p_avg: storedClean.p_avg ?? null,
+        p_obp: storedClean.p_obp ?? null,
+        p_slg: storedClean.p_slg ?? null,
+        p_ops: storedClean.p_ops ?? ((storedClean.p_obp ?? 0) + (storedClean.p_slg ?? 0)),
+        p_iso: storedClean.p_iso ?? null,
+        p_wrc_plus: storedClean.p_wrc_plus ?? null,
+        owar: pickHitterWar(storedClean) ?? storedClean.o_war ?? storedClean.owar ?? null,
+        nil_valuation: storedClean.nil_valuation ?? storedClean.market_value ?? null,
+      } as any;
+    }
     if (!selectedTeam) return snapshotFallback;
     if (!p.player) return snapshotFallback;
     const livePlayer = (p.player_id ? liveTargetPlayerById.get(p.player_id) : null) || p.player;
