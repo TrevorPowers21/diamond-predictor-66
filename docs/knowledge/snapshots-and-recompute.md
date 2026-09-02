@@ -100,3 +100,104 @@ These are the rules that keep stored == live. Each was a real inconsistency fixe
 - **Why / protecting against:** doing the cascade before the rates, or letting a writer skip a column, or resetting notes — each reintroduces one of this session's bugs (stale depth, unrounded-rv+ WAR, clobbered coach state). The order encodes the dependency chain: data → rates → derived → snapshots.
 - **Origin:** Trevor's #5 spec (2026-07-21) + the eligibility promotion learnings.
 - **Status:** draft — **confirm order + small-sample thresholds before running.** Sequenced after #4.
+
+---
+
+## The READ/WRITE path (fact — verified in code and in the UI, 2026-09-01)
+
+Everything below was learned the expensive way over one night. **One defect class caused every
+symptom: a stored copy nobody recomputes, behind a `??` chain that silently changes which source wins
+once a field becomes populated.** Each fix exposed the next because the chain was the defect.
+
+### p-prediction-is-not-a-snapshot: `p.prediction` degrades to a raw prediction row
+`useLoadBuild:411` is `activePred = snapshot ?? predictionMap[pid|side]`. On a snapshot-lookup miss it
+silently becomes the **prediction row** — so every read written against `p.prediction` was still
+reading a prediction on exactly the rows that were wrong.
+⇒ display reads **`p.player_snapshot ?? p.transfer_snapshot`** (useLoadBuild now exposes
+`player_snapshot`). Never `p.prediction`.
+
+### a-nullish-chain-is-not-a-precedence-decision
+`shown = p.neutralPrediction ?? p.prediction` worked ONLY because `neutral_snapshot` was mostly NULL.
+Backfilling neutral onto 1,254 rows made a dead branch live **for every row at once**, and every
+toggled/depth-adjusted value regressed to the dev_agg=0 line. **Order fallbacks by INTENT, not by what
+happens to be populated.** Filling a field is a behavioural change.
+
+### three-guardrails-or-it-compounds: all required, removing one re-opens double-scaling
+```
+1. the `_dirty` gate on shownFinal — a CLEAN row is NEVER scaled; one toggle = one scale, ever
+2. base = neutralPrediction while DIRTY — scaling a BAKED snapshot is what compounded (.342 -> .356)
+3. snapshotBacked forces devAggScale = 1 on a clean row  (mirrors PlayerProfile.tsx:986)
+```
+`PlayerProfile` never had this bug because of #3. Team Builder computed the ratio unconditionally.
+**Sequence:** toggle → dirty → scale neutral ONCE (the live bridge) → save bakes it → row clean →
+stored read verbatim. ⛔ Gating the bridge off freezes every toggle AND makes the save persist the
+UNSCALED line.
+
+### save-bakes-neutral-times-the-toggle: never a re-read projection
+`playerProjection()` returns the stored snapshot verbatim for a CLEAN row, so if the row is clean at
+serialize time the save writes the UNSCALED line back. Measured: `production_notes.devAggressiveness
+= 1` while `player_snapshot` held `.3172 / wRC+ 122 / dev_aggressiveness 0` — intent saved, effect
+lost, every reload showed neutral. ⇒ the save calls `playerProjection({ ...rp, _dirty: true })`, the
+same derivation `scripts/rebake-player-snapshot-toggles.ts` performs offline, so a saved row and a
+re-baked row agree BY CONSTRUCTION.
+
+### every-local-write-refreshes-every-copy
+`saveTargetToggle` wrote the DB correctly then set `{prediction: null, transfer_snapshot: t,
+_dirty: false}` — but display reads `player_snapshot ?? transfer_snapshot`, so the row fell back to
+the **stale** `player_snapshot` the instant `_dirty` cleared. That is the visible **flash up → back
+down → correct after a DB round-trip**. If a surface reads N copies, a local update must refresh N.
+
+### exhaustive-deps-off-means-stale-closures
+The auto-load effect re-runs whenever `buildsLoading` flips (**any** React Query refetch — window
+focus), calls `loadBuild()`, and rebuilds `rosterPlayers`, **wiping `_dirty` and the unsaved toggle**.
+A guard reading `rosterPlayers` directly there saw a STALE array and never fired. ⇒ guard via a
+**ref**. **A row mid-toggle is unsaved work; reloading over it is data loss, not a refresh.**
+
+### rostered-beats-board: two copies of one player, roster wins
+39 of 462 active-build rows also had a `target_board` row for the same team, and they disagreed
+(Hanley build 2.854/$285,391 vs board 2.331/$233,077). **Players arrive on the board with stored
+values and NO toggles; once rostered, the board reads the roster's snapshot.**
+`scripts/sync-board-from-roster-snapshot.ts`. ⚠ Board rows spell oWAR **`owar`** and market
+**`nil_valuation`**.
+
+### slot-is-authoritative-for-side: never branch on snapshot content
+Kenny Ishikawa's SP row carried a HITTER neutral, so a content-based branch wrote hitter fields onto a
+pitcher slot (wRC+ 118 / oWAR 1.187) competing with his real RF row (2.006) — which is why his
+cornerstone role "never persisted". Branch on `position_slot`; null the opposite side.
+
+### twp-own-side-only: a TWP nulls the SHARED market_value
+`market_value` stays NULL; the value lives in `twp_hitter_market_value` / `twp_pitcher_market_value`,
+**own side only**. A pitcher-slot row carrying `twp_hitter_market_value` makes the display show the
+hitter market on a pitcher row. ⚠ This REFINES `market-owned-by-primary-position-side` above — for a
+TWP there is no single primary side; each slot carries its own.
+
+### market-is-stored-not-derived
+Nothing recomputes `market_value` at read time. Change WAR without rewriting market and the row keeps
+a value from the OLD WAR. Neiswonger: depth-role IP 30 → 85 ⇒ pWAR 1.14 → 3.329, $99k → $332,852.
+
+### verify-types-not-just-values
+`node-postgres` returns `numeric` as a **string**. The build PITCHER neutral is a verbatim copy of the
+prediction row, so a refresh wrote every numeric as a JSON string and **crashed Team Builder**
+(`shownMetric.toFixed is not a function`) — 627 staging / 653 prod rows, values all *correct*.
+Gate: `jsonb_typeof(snap->'p_war') = 'number'`. Set `pg.types.setTypeParser(1700/20, Number)`.
+
+### prove-comparable-before-diffing
+Three false alarms in one night, same root cause — stating a conclusion the evidence did not contain:
+(a) "sub-40-IP pitchers diverge between implementations" — stale local rows vs fresh edge rows, two
+GENERATIONS not two implementations; (b) "local `total_hitter_war` drifts" — exact on 221,318 rows,
+the measurement compared LOCAL components to the EDGE total; (c) "4 board rows wrong" — all one TWP
+whose pitcher rows correctly hold pWAR while `coalesce(o_war, p_war)` pulled his hitter oWAR.
+⇒ **Same generation (`updated_at`), same side (a TWP carries both on ONE row), same field name
+(`market_value` is stored as `nil_valuation`).**
+
+### the-durable-fix-is-one-save-path
+Every failure above is a stored copy nobody recomputed. `rebake-player-snapshot-toggles.ts`,
+`sync-board-from-roster-snapshot.ts` and the neutral backfills are **REPAIRS**. The architecture fix
+is ONE save path owning every derived copy together. Until it exists, each new surface adds another
+copy that can drift.
+
+⚠ **`heal-is-the-snapshot-authority` above is now incomplete.** The 2026-09-01 repairs used
+`rebake-player-snapshot-toggles.ts` + `sync-board-from-roster-snapshot.ts` + the two neutral
+backfills, verified by `scripts/audit-snapshot-consistency.ts` (must print ✅ CLEAN).
+⛔ The two neutral scripts are **NOT interchangeable** — `team_build_players` pitcher neutral is a
+VERBATIM 77-key prediction row, `target_board` is NORMALIZED (13/15 keys). Each owns one table.

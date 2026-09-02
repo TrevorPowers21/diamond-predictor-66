@@ -134,3 +134,51 @@ And the agent flags any *new* code that adds a fresh live-calc of a stored numbe
 - **Issue (Trevor 2026-07-20):** grad/class year is **displayed inconsistently** across the app — the same player's year doesn't read the same everywhere. This is a `same-value-everywhere` violation on an *attribute*, not a stat.
 - **Resolved 2026-07-21** on branch `feature/eligibility-class-consistency` (see `eligibility-and-class.md` for the full model + audit). Root cause: `class_year` is the source of truth but `class_transition` (the projection dev factor, also used for display) was read stale — the pervasive `"SJ"` write-time default. Fix, two parts: (A) `projectedEligibilityClass` now treats `class_year` as authoritative for display; (B) every precompute *writer* derives `class_transition` from `class_year` via the canonical override-safe `resolveClassTransition()` in `src/lib/classTransitionUtils.ts`, so stored dev factors self-correct at the next finalization. Code-only — precomputes not re-run yet (values converge after portal close).
 - **Status:** fixed on branch (awaiting finalization run to rewrite stored values); the `one-authoritative-writer-per-row` rule above was extracted from this fix.
+
+---
+
+## Where the constants live (fact — verified 2026-09-01)
+
+### model-config-is-the-single-source: `model_config` (model_type `admin_ui`, season 2026)
+The legacy `"Equation Weights"` table is renamed **`"Equation Weights_LEGACY_2025"`** on both
+databases. ⛔ Do NOT reintroduce a read of it.
+
+### the-legacy-table-silently-overrode-the-code (Gate B — the most expensive bug found)
+Prod's returner wRC+ ran a **different equation** than the code, because the 2025 table overrode it:
+```
+code    intercept .011 · obp .691 · slg .235 · avg 0   · iso 0   ÷ .3782
+legacy  intercept .011 · obp .450 · slg .300 · avg .15 · iso .10 ÷ .364
+```
+Across 5,122 D1 returner hitters the legacy formula reproduced the STORED value for **5,122 (100%)**;
+canonical for **1,164 (23%)**. **Staging looked correct only because its copy of the table was EMPTY**
+— same code, two databases, different equations, purely because one had rows.
+⇒ **Verify config on BOTH databases, always.**
+
+### ratings-are-not-centred-at-100: use `<stat>_pr_center`
+The z-shift is `(rating − CENTRE) / sd`. True D1/IP≥40 centres: `era 109.73 · fip 108.29 ·
+whip 108.40 · k9 101.69 · **bb9 123.16** · hr9 102.04`; hitters `ba 102.59 · obp 99.98 · iso 103.24`.
+Assuming 100 handed every qualified pitcher a phantom improvement (~4% low ERA). The two-sided SD
+must also split at the **centre**, not 100.
+⚠ Naming is asymmetric: anchors are **unprefixed** (`era_plus_ncaa_avg`), centres/SDs are **`p_`/`h_`
+prefixed** (`p_era_pr_center`). Two different loaders read them; `loadPitchingPowerEq` takes `p_` only.
+
+### a-key-not-in-the-fields-mapping-is-INERT
+Stage 5.5 wrote 41 keys that nothing read, because they were absent from the `fields` mapping in
+`src/lib/pitchingEquations.ts`. Writing a key is not wiring a key.
+
+### calibration-is-D1-only
+`CALIBRATION_DIVISION = "D1"`. Before the filter, 477 JUCO pitchers were 27% of the sample and
+inflated the D1 anchor by 0.229 ERA. Weighting is **per-row** (volume rides in `projected_ip`);
+mixing per-row with IP-weighted recreates the bug in miniature (~0.09 ERA).
+
+### a-column-you-do-not-SELECT-cannot-be-written
+Hit three times in one night. `total_hitter_war`/`d_war`/`bsr_war` were missing from six selects, so
+snapshots carried the oWAR COMPONENT instead of the position-player headline (Ryder Helfrick 2.32 vs
+4.94). `market_value` WAS selected and was always correct — **that asymmetry is what located it.**
+⇒ When adding a field to a written object, widen the SELECT in the same edit.
+
+### 66-constants-still-require-a-deploy
+`DEFAULT_PITCHING_WEIGHTS` has 115 constants: **49 tunable via `model_config`, 66 not** — including
+**9 market/$-per-WAR** and **3 projected-IP-per-depth-role**. Nothing is broken today (all 127
+edge-fn constants resolve), but they are SILENT fallbacks. Loud fallback logging is the shipped
+mitigation. ⛔ Seeding needs a prefix decision first — `market_*` is shared with the hitter path.
