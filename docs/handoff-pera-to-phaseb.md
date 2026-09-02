@@ -197,7 +197,7 @@ everywhere. Current status:
       also on its program's ACTIVE build roster, copy the build `player_snapshot` INTO
       `target_board.transfer_snapshot` (field-mapped) so the two lines are 1:1. Run AFTER the
       transfer_snapshot backfill. Staging: 19 rows reconciled. Lockstep save keeps them 1:1 after.
-- [ ] **Prod: `scripts/clean-twp-sides.ts --apply`** — one-time: make every TWP snapshot
+- [x] ~~**Prod: `scripts/clean-twp-sides.ts --apply`**~~ — 🗑️ **SCRIPT DELETED 2026-08-31 — DO NOT RUN, IT NO LONGER EXISTS.** Superseded by `rebuild-twp-target-rows.ts` (push step F41a). Had no env guard and priced TWP hitters off `o_war` only. Recover with `git show 3316078:scripts/clean-twp-sides.ts`. Original intent: one-time: make every TWP snapshot
       OWN-SIDE ONLY (hitter slot = hitter fields + null pitcher; pitcher slot the reverse),
       rebuild the merged transfer_snapshot from the correct slots, and bake `twp_hitter`/
       `twp_pitcher` markets from the WAR. Run LAST (after all snapshots exist). Supersedes

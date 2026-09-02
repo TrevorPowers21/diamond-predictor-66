@@ -16,7 +16,7 @@ describe("computeOWarFromWrcPlus", () => {
 
   it("defaults PA to 260 when not provided", () => {
     const result = computeOWarFromWrcPlus(100);
-    const expected = ((260 / 600) * 25) / 10;
+    const expected = ((260 / 600) * 21.22) / 13.1;
     expect(result).toBeCloseTo(expected, 6);
   });
 
@@ -27,12 +27,13 @@ describe("computeOWarFromWrcPlus", () => {
     );
   });
 
-  it("league-average hitter (100 wRC+, 600 PA) → 2.5 WAR", () => {
-    expect(computeOWarFromWrcPlus(100, 600)).toBeCloseTo(2.5, 6);
+  it("league-average hitter (100 wRC+, 600 PA) → 1.62 WAR (21.22/13.1)", () => {
+    expect(computeOWarFromWrcPlus(100, 600)).toBeCloseTo(21.22 / 13.1, 6);
   });
 
-  it("above-average hitter (130 wRC+, 600 PA) → 4.84 WAR", () => {
-    expect(computeOWarFromWrcPlus(130, 600)).toBeCloseTo(4.84, 6);
+  it("above-average hitter (130 wRC+, 600 PA) C1", () => {
+    // (0.30*600*0.3994 + 21.22) / 13.1  [C1]
+    expect(computeOWarFromWrcPlus(130, 600)).toBeCloseTo((0.30 * 600 * 0.3994 + 21.22) / 13.1, 6);
   });
 });
 

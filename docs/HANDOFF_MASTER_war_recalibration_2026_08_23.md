@@ -1,0 +1,194 @@
+# MASTER HANDOFF — feature/war-recalibration (2026-08-23)
+> ⚠️ **STUFF+ CONTENT IN THIS FILE IS SUPERSEDED — see `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md` (2026-08-30).**
+> The rest of this document may still be valid; only its Stuff+/reclassification statements are out of date:
+> • **LIVE lane = pitch_log**: `pitch_type_reclassified` → `compute_pitch_log_stuff_plus.ts` → `pitch_log.stuff_plus`
+>   → `aggregate_pitch_log_dimensions.ts` → totals/by_pitch_type. ⛔ `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline`
+>   → `legacy_rollupStuffPlusToMaster` is **LEGACY** (≤2025 + JUCO only) and scores **left-handers BACKWARDS** on 2026.
+> • Classifier = `src/savant/lib/stuffPlusClassifierV2.ts` @ **95.2% per-pitch / 95.3% arsenal-mix**. Any 92.6% / 94.3% /
+>   95.1% / "~85%" figure here is superseded.
+> • `breakingBallReclassification.ts` → renamed **`legacy_breakingBallReclassification.ts`**; `rollupStuffPlusToMaster.ts`
+>   → **`legacy_rollupStuffPlusToMaster.ts`**. DELETED: `reclassify_pitch_log.ts`, `_run_reclassify_{bare,chunked}.ts`,
+>   `_reclass_rollout.ts`, `ReclassificationRunner/StuffPlusRunner/StuffPlusRollupRunner.tsx` (+ npm `reclassify-pitch-log*`,
+>   `recompute-stuff:prod`, `recompute-stuff-scoped:prod`). `reclassify_anchor_prod.ts` never existed — it is `reclassify_prod.ts`.
+> • Step 4 on PROD **must** use `--direct` (gateway cuts at ~125s; `vs_top_hitters` needs 253s).
+
+
+The comprehensive, resumable handoff for the whole branch + the ordered prod push. Detail docs linked per section.
+Standing constraints: **D1 only, JUCO separate**; **staging-first, never feature→main**; prod writes = paste-SQL or Trevor
+drives; log every DB change to `PROD_MIGRATIONS_TODO.md`. ⚠️ `supabase --linked` = **PROD** (`trbvxuoliwrfowibatkm`);
+staging = `slrxowawbijbjrkozqlj` (.env.local). Batch scripts run on staging via `.env.local`.
+
+## What this branch is
+Finish the RSTR IQ transfer-projection equation + the pitch-log→snapshot pipeline, everything STORED + reproducible for a
+clean prod push, folding into ONE unified edge fn (Track B). This session: closed the audit gaps, codified the conf-stats
+producers, cleaned savant, finalized + implemented the market-value re-price, and ran a full stored-first display audit.
+
+---
+## ✅ DONE (code on staging branch; tsc 180 pre-existing, 265 tests pass)
+
+### 1. Audit gaps (5) — all fixed [docs/GAP_FIX_PLAN_2026_08_21.md]
+- GAP 1 faced-competition for independents (Oregon State faced 104.47/100.22 not own-conf) — builders + callers + re-run 17 teams + edge-fn mirror.
+- GAP 2 edge-fn `?? 100` → D1 block guard. GAP 3 raw-rate/WRC+ Bucket-A producer codified + STAGING-VERIFIED (29/29 confs 0.0000). GAP 4 stale HTP display → stored. GAP 5 source_team_id park (both sides, value-neutral).
+
+### 2. Conference Stats producers — all committed [docs/CONFERENCE_STATS_BUILD_PROCESS_2026_08_21.md]
+`conf_stats_bucketA_assembly.sql` (rates/env+/WRC+/ERA-DRS/FIP), `derive_conf_opr_htp.ts` (OPR/run_env/canonical park-swap HTP), `compute_conf_pitcher_env_plus.ts` (pitcher env+). team_season_stats WAR cols migration `20260821010000`. NJCAA-D1 re-tag SQL. OPR = PA-avg Overall_Power_Rating; HTP = OPR+1.25(Stuff+−100)+0.75(100−run_env).
+
+### 3. team_season_stats prod-blocker — fixed [migration 20260821010000]
+10 WAR cols (hitter_war/rotation_pwar/bullpen_pwar/ra9/fip_ra9 _reg/_total) were hand-run ALTERs → committed `ADD COLUMN IF NOT EXISTS` migration (else refresh_team_season_stats DELETE-then-aborts on prod → empty table).
+
+### 4. Savant cleanup [571fa49]
+Deleted the 8 stale `savant/pages/*` + `/savant/*` routes + SavantRoute/SavantLayout. **KEPT `savant/components/`** (`PitchLogSection` powers the live coach `/stats` season-stats display). tsc dropped 198→181.
+
+### 5. Season-stats aggregation → edge-fn plan [docs/PIPELINE_pitch_log_to_projections.md stage 3b]
+`aggregate_pitch_log_dimensions.ts` (dimension splits → pitch_log_*_totals) is an offline producer to absorb into Track B. conf_only/intra-conf per-player split unbuilt.
+
+### 6. MARKET VALUE re-price — implemented [docs/AGENT_LEARNINGS_market_value_reverse_engineer_2026_08_21.md]
+Reverse-engineered PTM from real roster spend. **LINEAR (convex rejected), base $25k/WAR.** **PER-CONFERENCE exact-code**
+resolver (no fuzzy names), SINGLE `model_config nil_tier_<code>` source for BOTH hitter + pitcher + edge fn:
+**SEC 4.0 · ACC 1.5 · Big12 1.2 · BigTen 1.0 · Independent 1.0 · AAC/SunBelt/BigWest/MWC 0.8 · else 0.5 · NJCAA 0.35.**
+Hitter market rides `total_hitter_war`; profiles no-toggle→stored, toggle→recompute-off-WAR. Commits 08c40e2→5fafad9.
+
+### 7. Stored-first display audit + fixes [docs/STORED_FIRST_DISPLAY_AUDIT_2026_08_23.md, 95f22a6]
+Projections stored-first everywhere on load (coverage 99.6-100%, projected-not-prevseason clean). Scouting grades flipped
+to stored-first (4 chip surfaces + usePlayerHubPreview). TWP `loadGmBuildRoster` market side-aware. RLS gap found + migration written.
+
+### 8. RLS tighten — migration written [20260823000000_player_predictions_rls_team_scope.sql]
+`player_predictions` was `USING(true)` (globally readable). New: `customer_team_id IS NULL OR superadmin OR is_team_member`.
+
+---
+## ★ PROD PUSH — ORDERED (staging first, then prod paste; log each to PROD_MIGRATIONS_TODO)
+Authoritative DB-change ledger: `PROD_MIGRATIONS_TODO.md`. Runbook: `docs/PROD_PUSH_RUNBOOK_war_recalibration.md`.
+
+**A. Schema migrations** (apply in timestamp order; all `IF NOT EXISTS`/idempotent):
+- team_season_stats WAR cols `20260821010000`; conf pitcher env+ `20260821000000`; player_predictions RLS `20260823000000`; + all prior branch migrations in the ledger.
+
+**B. Conference Stats producers** (paste; NOT `--linked`=PROD): `conf_stats_bucketA_assembly.sql` → `derive_conf_opr_htp.ts --apply` → `compute_conf_pitcher_env_plus.ts --apply` → NJCAA-D1 re-tag SQL. (Gate: staging diff already 0.0000 for Bucket-A.)
+
+**C. team_season_stats**: `select refresh_team_season_stats(2026);` (after A adds the cols).
+
+**D. MARKET VALUE** (order matters):
+1. `scripts/sql/seed_nil_tiers_model_config.sql` — ⚠ BEFORE re-price (clears old nil_tier_sec=1.5 that overrides 4.0).
+2. Re-price 17 teams: `precompute-transfer-projections` + `precompute-pitchers` per team.
+3. Re-bake snapshots: `resync-build-snapshot-markets.ts` + `resync-target-snapshots.ts`.
+4. Verify roster totals (SEC ~$4.4M / ACC ~$1.7M / Big12 ~$1M / BigTen ~$900k) + TWP + Independent=1.0.
+
+**E. Deploy edge fn** `process-precompute-jobs` (Trevor) — new-team path (has the unified PTM + faced-competition + conf-stats block guard).
+
+**F. Verification gates** (runbook): global NULL-count on pitch_log/Masters; confirm each customer team's precompute ran.
+
+---
+## PHASE 3 — dead-code cleanup ✅ DONE [9933454, 65032a3]
+Deleted dead `deriveHitterStored` (o_war outlier), `platformDefaults.ts` + `usePlatformConfig.ts` (dormant tier layer),
+TransferPortal dead imports, and the broken AdminDashboard 5-bucket `nil_tier` editor. PitcherProfile Stuff+ → stored
+`stuff_score`; pWar/pRV+/rates → no-toggle-stored guard. tsc 180→178, 265 tests pass.
+
+## PHASE 4 — market-value re-price ON STAGING [IN PROGRESS 2026-08-23]
+- ✅ **model_config seeded on staging** — old `nil_tier_sec=1.5` + dead bucket keys cleared; new per-conference set live (SEC 4.0…). Verified before/after. Committed artifact: `scripts/sql/seed_nil_tiers_model_config.sql` (for PROD).
+- ⏳ **Re-pricing 17 teams** running (`_run_step2_all.sh`).
+- NEXT: re-bake snapshots (`resync-build-snapshot-markets.ts --all --apply` + `resync-target-snapshots.ts --all --apply`) → verify roster totals + Independent=1.0 + TWP.
+- **PROD:** run seed → apply RLS migration → re-price → re-bake → verify → deploy edge fn (Trevor). Same order as §D above.
+
+## ★ total_hitter_war STORED FIX + STEP 7b DISPLAY SWAP (2026-08-23) — the "rewire before prod"
+Full detail + WHY + exact steps: **`docs/AGENT_LEARNINGS_total_war_display_2026_08_23.md`**.
+- **WHY:** `total_hitter_war` was computed inline only to price market, never stored — it was filled by a SEPARATE
+  `refresh_composite_war()` job that lagged `o_war`. The re-price rewrote `o_war` → ~84k rows had `total_hitter_war ≠ o+d+bsr`.
+- **FIX (Trevor):** all 3 hitter producers (transfer batch `572bd11`, edge fn `572bd11`, returner backfill `2d20a5f`)
+  now WRITE `total_hitter_war = o_war + d_war + bsr_war` directly → always fresh + consistent, no separate job, no
+  ordering guard. `total_hitter_war` = the POSITION-PLAYER headline source; `o_war` stays the offensive component that
+  feeds it. `refresh_composite_war()` is now REDUNDANT for the projection total (keep for descriptive Master cols only).
+- **Re-run status (staging):** transfer hitters re-run ✅ (total consistent), returner backfill re-running.
+- **STEP 7b display swap — NOT STARTED (the rewire):** build TWP-aware `pickHitterWar`/`pickPitcherWar`; swap every
+  hitter HEADLINE across the 6 choke points to stored `total_hitter_war` (relabel "oWAR"→"WAR"); component o_war stays;
+  snapshots carry total + d/bsr; descriptive+gap on card; verify (TWP = 2 lines). Exact steps in the agent-learnings doc.
+
+## ★ PRE-PROD VERIFICATION PASS (2026-08-24) — audit 🔴 items + config seed + Stuff+ fork
+Ran a read-only verification of the 2026-08-20 audit's 6 🔴 MUST-FIX items + the transfer-lock + the Stuff+ fork.
+- **🔴 items:** #1 orphaned `fetchAllPredictionsForReturnerMode` ✅ FIXED (bulkRecalc retired to edge-fn stub); #4 NaN
+  fallback ✅ FIXED (reads populated `powerEq`, not empty `eq.p_*`); #5 pitcher conf env+ ✅ ratio `(conf/ncaa)×100`;
+  #6 edge pitcher IP ✅ depth-role rewrite before store; #2 `whip_pr_sd` ✅ de-staled (code 37.19844); #3 `obp_std_pr`
+  staging DB correct (31.89504) — see config-seed finding.
+- **★ CONFIG SEED REGEN (real finding):** `scripts/sql/step8_model_config_2026.sql` had drifted **125→201 keys** vs
+  verified staging (80 missing incl. per-conf `nil_tier_<code>` + pitcher `p_*_pr_sd` + `transfer_*` weights + conf/park SDs;
+  26 stale incl. `obp_std_pr` 28.889→31.89504, transfer weights pre-retune; 4 old bucket keys). Staging was hand-tuned,
+  seed never back-ported → prod would've gotten stale. **REGENERATED as a faithful 201-key mirror.** Logged in PROD_MIGRATIONS_TODO B1.
+- **Transfer equation:** LOCKED at the lever (weights/SD/env+ratio/park), stored to model_config, staging-run + dry-run
+  verified (hitter 96%/pitcher 97%). NOT prod-run. Sits cleanly on B-recentered Stuff+ (common-mode, deltas stable).
+- **★ Stuff+ fork RESOLVED = B** (pitch-weighted recenter) — empirically confirmed staging is ALREADY B; matches Trevor's
+  instinct; NO re-score. Curveball sign bug already folded-fixed. **`trackman_pitches` backfilled** (durable data win —
+  scripts/backfill_trackman_pitches_pitching_master.ts, staging applied). **Display gate DEFERRED** — no coach-facing Stuff+
+  leaderboard exists on this branch, so nothing to gate; revisit if one is built.
+
+## ★ PROJECTION CALIBRATION — z-shift over-projects extremes; fix = TWO-SIDED SD (2026-08-24)
+Full detail: **`docs/AGENT_LEARNINGS_projection_calibration_two_sided_sd_2026_08_24.md`**.
+- **Bug:** the projection map (`pitcherProjection.ts:170` + hitter mirror) over-projects the ELITE tier → impossible values
+  (66 pitchers NEGATIVE projected HR9, elite ERA 1.13) → inflated pWAR, mid-major weak-Stuff arms top the board (Yochum).
+- **Cause:** the symmetric-SD z-shift assumes (a) correlation=1 (rating↔stat) and (b) a symmetric stat; pitching rates are
+  right-skewed so the single SD (inflated by the bad tail) over-projects the compressed good side through the physical floor.
+- **Fix (data-proven):** **two-sided/split SD** — `sd_good` (spread below the mean) vs `sd_bad` (above), use the directional
+  one. Lands ERA elite at 2.52, WHIP/BB9/K9/AVG/ISO within ~0.02–0.05 of real elite. NO floor (rejected — "lazy"), NO uniform
+  `r`-shrink (rejected — squashed elite AVG to .318). **"Realistic SD" = qualified pop (min IP/AB) + directional semi-deviation.**
+- **★ BUILT + RE-RUN + VERIFIED on staging (2026-08-25).** Spec locked (all data-driven): qualifier IP≥40/PA≥100 + two-sided
+  (split) SD (`sd_good` toward elite, `sd_bad` toward poor) + HR9 sample-size shrinkage with data-derived K=71 (variance
+  decomposition). Producer `compute-projection-calibration.ts` (stage 5.5) → model_config; `pitcherProjection`/`transferPitcherProjection`
+  use the directional SD. Commits `57e8f12` (code), `3c4e8c8` (returner overlay fix). Full transfer (18 teams) + returner re-run +
+  snapshot re-bake done. **Board fixed** (top-12 pitchers all genuine Stuff+ 99–113; 0 weak-stuff mid-major arms). Yochum
+  0.15→0.61 / pWAR 2.31→2.05. HR9 negatives 66→19 (the 19 = a sub-5-IP qualification gap, not calibration — see agent-learnings).
+  **REMAINING:** edge-fn Deno mirror (Trevor deploys); hitters (symmetric follow-on); the 19-negative qualification fix (Trevor's call).
+- **DOCTRINE (verbatim):** "every audit verified code matches spec and constants match the mean and SD, and both were true.
+  Nothing verified that the model's output matched reality across the range, and a bug calibrated perfectly at the mean is
+  invisible to every mean-based check." → add an across-the-range calibration check to every modeling review.
+
+## OPEN / PENDING (post-Phase-4)
+- **PROD push** — everything committed + staged; run the ordered §A-F push when ready (Trevor drives prod / paste-SQL).
+- **Stuff+ display-only min-pitch qualifier** — DEFERRED (no live leaderboard surface). `trackman_pitches` backfill DONE +
+  committed; the display gate (`>=50`) waits on a real Stuff+ leaderboard being built.
+- **is_position_of_need** (#5) — designed, not built (Phase 1 scope per team_season_stats handoff).
+- **Track B unification** — fold all producers (conf-stats, stage 3b dimension agg, market re-price) into ONE on-upload edge fn.
+- **RLS `nil_valuations`** also `USING(true)` (legacy manual table) — tighten separately if wanted.
+- **Minor stored-first leftovers:** 2 GM readers still hand-roll TWP pick (read-equivalent); season-stats filtered dimensions live (accepted, Trevor OK).
+
+## Detail docs
+GAP_FIX_PLAN_2026_08_21 · CONFERENCE_STATS_BUILD_PROCESS_2026_08_21 · PIPELINE_pitch_log_to_projections · AGENT_LEARNINGS_market_value_reverse_engineer_2026_08_21 · STORED_FIRST_DISPLAY_AUDIT_2026_08_23 · HANDOFF_market_value_2026_08_21 · PROD_PUSH_RUNBOOK_war_recalibration · PROD_MIGRATIONS_TODO.
+
+---
+## ★★★ TRACK B — STUFF+ STAGE, LOCKED SPEC (2026-08-29). Supersedes any earlier Stuff+ description here.
+Track B = ONE function on pitch-log ingest (weekly/biweekly, local folder watch). Master-sheet uploads come LATER as a
+CHECK + to override only what pitch_log cannot produce (e.g. AVG/SB). **pitch_log is the SOURCE OF TRUTH.**
+
+**THE STUFF+ STAGE — exact order. Steps 1→5 MUST complete in ONE run; a label change invalidates every number below it.**
+1. **CLASSIFY** → `pitch_log.pitch_type_reclassified` + `classification_version` + `needs_review`
+   `src/savant/lib/stuffPlusClassifierV2.ts` (v2 — the SINGLE classifier), driven by `scripts/reclassify_prod.ts`.
+2. **RE-DERIVE the pop baseline** → `pitcher_stuff_plus_ncaa` (per pitch_type × hand, **armHB**, D1-only).
+   ⚠ MANDATORY, not optional: the §4.5 gyro fix moves **6-8% of ALL breaking-ball volume** Slider→Gyro Slider, so every
+   mix-dependent artifact (baselines, D1/regional means + SDs, pitch-shape percentiles) is invalid until regenerated.
+3. **SCORE per pitch** → `pitch_log.stuff_plus` — `scripts/compute_pitch_log_stuff_plus.ts`
+   (normalizes hb→armHB itself; recenters each (pitch_type × hand) bucket to mean 100).
+4. **AGGREGATE** → `pitch_log_pitcher_totals` / `pitch_log_hitter_totals` / `*_by_pitch_type`
+   `scripts/aggregate_pitch_log_dimensions.ts` (must also call `populate_hitter_run_values(season)`).
+5. **MARRY ONTO THE MASTERS** → `scripts/derive_masters_from_pitchlog.ts`
+   (⚠ add `.order(PK)` to its `readAll` first — unordered `.range()` over ~2.5M rows silently drops/dupes).
+Then: power ratings → conference baselines → projections → market/NIL.
+
+**⛔ WHAT TRACK B MUST NEVER DO**
+- NEVER route Stuff+ through the LEGACY lane: `pitcher_stuff_plus_inputs` → `runStuffPlusPipeline` →
+  `legacy_rollupStuffPlusToMaster` → `"Pitching Master".stuff_plus`. Nothing reads it for 2026 and it carries the latent
+  raw-HB bug (e5dec2f removed `hbSign`; PSP-I stores RAW hb ⇒ left-handers scored BACKWARDS).
+- NEVER call `legacy_breakingBallReclassification` (v1). It writes `rstr_pitch_class` on PSP-I, has never touched
+  pitch_log, and is NOT the anchor classifier. Conflating the two cost a full day (2026-08-28/29).
+- NEVER rewrite the stored `hb` column to armHB. `hb` is RAW by design (UI displays it; the CSV importer writes it raw).
+  armHB is a COMPUTE convention — normalize in memory only.
+- NEVER leave new labels with stale scores. Steps 1→5 are one transaction-of-work.
+
+**LANE COVERAGE (measured):** `pitch_log` is **D1-only** — 5,303 pitchers. PSP-I covers 7,012; the 1,709 difference is
+**1,627 NJCAA_D1 + 81 D1 + 1 D2**. → **JUCO has no pitch logs and stays CSV-derived** (scored vs D1 baselines). Track B's
+pitch_log chain covers D1 only; do not let it silently drop JUCO. JUCO process is being restarted separately.
+
+**CLASSIFIER STATE FEEDING TRACK B (2026-08-29):** v2 = **94.3% per-pitch** on the full 2,000,674-pitch anchor set
+(arsenal-mix 94.3%, needs_review 8.1%), **→ projected ~95.3-95.4%** with the §4.5 gyro floor. Three shipped fixes:
+offspeed `armHB >= 5` floor · fastball-family MERGE GUARD (>60% of 4S↔Sinker errors) · §4.5 gyro cluster floor `-3`
+applied BEFORE `tiebreak()`. Two logged NEGATIVE results — `rr > -1.7` and the "arsenal rule" confound (loses ~1pp) —
+do NOT rebuild either. Full numbers: `docs/STUFF_PLUS_EXACT_VALUES.md` §11. Lane map: `docs/STUFF_PLUS_SOURCE_OF_TRUTH.md`.
+
+**⚠ AGREEMENT WITH THE ANCHOR IS NOT ACCURACY.** The anchor is the previous classifier's output, not truth. The residual
+~4.7% mixes v2-wrong / **v2-RIGHT-anchor-wrong** / coin-flips — partition with `scripts/v2_coherence_test.ts` before
+treating it as error, and before deciding whether staging's labels should be updated rather than preserved.

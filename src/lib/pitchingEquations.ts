@@ -7,26 +7,43 @@ export type PitchingEquationWeights = {
   hr9_plus_weight: number;
   era_plus_ncaa_avg: number;
   era_plus_ncaa_sd: number;
+  era_plus_ncaa_sd_bad: number;
+  /** Population mean of each stat's PR+ — model_config `<stat>_pr_center`, emitted by
+   *  compute-projection-calibration.ts on the SAME population as the anchors (D1, IP >= 40).
+   *  🛑 NOT 100. Measured 2026-09-01: era 109.73 · fip 108.29 · whip 108.40 · k9 101.69 ·
+   *     bb9 123.16 · hr9 102.04. PR+ was fit on all-division/IP>=20 (~100) and applied to
+   *     D1/IP>=40, handing every qualified pitcher a phantom improvement. */
+  era_pr_center: number;
+  fip_pr_center: number;
+  whip_pr_center: number;
+  k9_pr_center: number;
+  bb9_pr_center: number;
+  hr9_pr_center: number;
   era_pr_sd: number;
   era_plus_scale: number;
   fip_plus_ncaa_avg: number;
   fip_plus_ncaa_sd: number;
+  fip_plus_ncaa_sd_bad: number;
   fip_pr_sd: number;
   fip_plus_scale: number;
   whip_plus_ncaa_avg: number;
   whip_plus_ncaa_sd: number;
+  whip_plus_ncaa_sd_bad: number;
   whip_pr_sd: number;
   whip_plus_scale: number;
   k9_plus_ncaa_avg: number;
   k9_plus_ncaa_sd: number;
+  k9_plus_ncaa_sd_bad: number;
   k9_pr_sd: number;
   k9_plus_scale: number;
   bb9_plus_ncaa_avg: number;
   bb9_plus_ncaa_sd: number;
+  bb9_plus_ncaa_sd_bad: number;
   bb9_pr_sd: number;
   bb9_plus_scale: number;
   hr9_plus_ncaa_avg: number;
   hr9_plus_ncaa_sd: number;
+  hr9_plus_ncaa_sd_bad: number;
   hr9_pr_sd: number;
   hr9_plus_scale: number;
   era_damp_thresholds: number[];
@@ -117,6 +134,7 @@ export type PitchingEquationWeights = {
 };
 
 import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
+import { supabase } from "@/integrations/supabase/client";
 
 export const PITCHING_EQUATIONS_STORAGE_KEY = "admin_pitching_equations_v1";
 
@@ -124,11 +142,47 @@ export const PITCHING_EQUATIONS_STORAGE_KEY = "admin_pitching_equations_v1";
 let _supabaseWeightsCache: Partial<PitchingEquationWeights> | null = null;
 let _supabaseCacheLoading = false;
 
+/**
+ * 🛑 SOURCE CHANGED 2026-09-01 — was `loadEquationWeightsMap(2025)`, i.e. the `"Equation Weights"`
+ *    table at Season 2025. That table is now `"Equation Weights_LEGACY_2025"` on both databases.
+ *
+ * ★ This overlay was ALREADY A NO-OP: of the 40 keys the mapping below asks for, **zero** existed in
+ *   that table on prod, and staging's copy was empty. So the pitching path has always run on
+ *   `DEFAULT_PITCHING_WEIGHTS`. (The scary-looking `pwar_runs_per_win = 10` in the legacy table — vs
+ *   the correct 13.1 — was never read, because it is not in the mapping.)
+ *
+ * ⇒ Now reads `model_config` (model_type='admin_ui', season=2026), the single source of truth, so the
+ *   app and the batch/edge-function paths finally agree on where constants come from.
+ * ⚠ A key only takes effect if it is ALSO listed in the `fields` mapping below. Writing a key to
+ *   model_config is not enough — that is why `<stat>_pr_center` / `<stat>_pr_sd` were inert.
+ */
+const PITCHING_CONFIG_SEASON = 2026;
+
 function _loadSupabasePitchingWeights() {
   if (_supabaseCacheLoading || _supabaseWeightsCache) return;
   _supabaseCacheLoading = true;
-  loadEquationWeightsMap(2025)
-    .then((map) => {
+  // Wrapped in an async IIFE: the Supabase builder is a PromiseLike, so `.then().then().catch()`
+  // does not type-check against it. This keeps the same fire-and-forget shape with real Promise
+  // semantics, and the catch still degrades to code defaults rather than throwing on module import.
+  void (async () => {
+    let map = new Map<string, number>();
+    try {
+      const { data } = await supabase
+        .from("model_config")
+        .select("config_key, config_value")
+        .eq("model_type", "admin_ui")
+        .eq("season", PITCHING_CONFIG_SEASON);
+      for (const row of (data || []) as Array<{ config_key: string | null; config_value: any }>) {
+        const n = Number(row.config_value);
+        if (row.config_key && Number.isFinite(n)) {
+          map.set(row.config_key, n);
+          map.set(String(row.config_key).toLowerCase(), n);
+        }
+      }
+    } catch {
+      map = new Map();
+    }
+    try {
       const partial: Partial<PitchingEquationWeights> = {};
       const get = (key: string) => {
         const v = map.get(key) ?? map.get(key.toLowerCase());
@@ -176,15 +230,36 @@ function _loadSupabasePitchingWeights() {
         ["transfer_hr9_conference_weight", "transfer_hr9_conference_weight"],
         ["transfer_hr9_competition_weight", "transfer_hr9_competition_weight"],
         ["transfer_hr9_park_weight", "transfer_hr9_park_weight"],
+        // 🛑 RATING CENTERS + SDs — added 2026-09-01. WITHOUT THESE LINES THE KEYS ARE INERT:
+        //    writing to model_config is not enough, a key only reaches the app if it is mapped here.
+        //    Emitted by scripts/compute-projection-calibration.ts on the D1 / IP>=40 population,
+        //    the SAME population the `<stat>_plus_ncaa_*` anchors use — that alignment is the fix.
+        //    `p_` = pitching-domain (matches the 54 p_* keys already in model_config, e.g.
+        //    p_era_pr_sd). ⛔ Do not rename to `era_plus_pr_center` — nothing reads that.
+        ["era_pr_center", "p_era_pr_center"],
+        ["fip_pr_center", "p_fip_pr_center"],
+        ["whip_pr_center", "p_whip_pr_center"],
+        ["k9_pr_center", "p_k9_pr_center"],
+        ["bb9_pr_center", "p_bb9_pr_center"],
+        ["hr9_pr_center", "p_hr9_pr_center"],
+        ["era_pr_sd", "p_era_pr_sd"],
+        ["fip_pr_sd", "p_fip_pr_sd"],
+        ["whip_pr_sd", "p_whip_pr_sd"],
+        ["k9_pr_sd", "p_k9_pr_sd"],
+        ["bb9_pr_sd", "p_bb9_pr_sd"],
+        ["hr9_pr_sd", "p_hr9_pr_sd"],
       ];
       for (const [field, key] of fields) {
         const v = get(key);
         if (v !== undefined) (partial as any)[field] = v;
       }
       _supabaseWeightsCache = partial;
-    })
-    .catch(() => { _supabaseWeightsCache = {}; })
-    .finally(() => { _supabaseCacheLoading = false; });
+    } catch {
+      _supabaseWeightsCache = {};
+    } finally {
+      _supabaseCacheLoading = false;
+    }
+  })();
 }
 
 // Kick off the cache load immediately on module import
@@ -199,27 +274,41 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   hr9_plus_weight: 0.05,
   era_plus_ncaa_avg: 6.21,
   era_plus_ncaa_sd: 1.587898316,
-  era_pr_sd: 29.48780404,
+  era_plus_ncaa_sd_bad: 1.587898316,
+  // Rating centers — measured on prod D1/IP>=40, Season 2026. Overridden by model_config
+  // `<stat>_pr_center` at runtime; these are only the offline fallback.
+  era_pr_center: 109.7253,
+  fip_pr_center: 108.2875,
+  whip_pr_center: 108.4028,
+  k9_pr_center: 101.6919,
+  bb9_pr_center: 123.1615,
+  hr9_pr_center: 102.0359,
+  era_pr_sd: 28.11694,       // std_pr on 2026 pitch-log ratings (IP≥40); was 29.48780404
   era_plus_scale: 20,
   fip_plus_ncaa_avg: 5.08,
   fip_plus_ncaa_sd: 1.000197585,
-  fip_pr_sd: 22.20492306,
+  fip_plus_ncaa_sd_bad: 1.000197585,
+  fip_pr_sd: 22.88228,       // std_pr on 2026 pitch-log ratings (IP≥40); was 22.20492306
   fip_plus_scale: 20,
   whip_plus_ncaa_avg: 1.64,
   whip_plus_ncaa_sd: 0.2521159606,
-  whip_pr_sd: 24.58561805,
+  whip_plus_ncaa_sd_bad: 0.2521159606,
+  whip_pr_sd: 37.19844,      // std_pr on 2026 pitch-log ratings (IP≥40); was 24.58561805 (composite refit widened it)
   whip_plus_scale: 20,
   k9_plus_ncaa_avg: 8.21,
   k9_plus_ncaa_sd: 1.990147058,
-  k9_pr_sd: 43.76562188,
+  k9_plus_ncaa_sd_bad: 1.990147058,
+  k9_pr_sd: 45.47741,        // std_pr on 2026 pitch-log ratings (IP≥40); was 43.76562188
   k9_plus_scale: 20,
   bb9_plus_ncaa_avg: 4.82,
   bb9_plus_ncaa_sd: 1.340745984,
-  bb9_pr_sd: 42.89490618,
+  bb9_plus_ncaa_sd_bad: 1.340745984,
+  bb9_pr_sd: 42.91711,       // std_pr on 2026 pitch-log ratings (IP≥40); was 42.89490618
   bb9_plus_scale: 20,
   hr9_plus_ncaa_avg: 1.12,
   hr9_plus_ncaa_sd: 0.4677282102,
-  hr9_pr_sd: 34.13833398,
+  hr9_plus_ncaa_sd_bad: 0.4677282102,
+  hr9_pr_sd: 32.25982,       // std_pr on 2026 pitch-log ratings (IP≥40); was 34.13833398
   hr9_plus_scale: 20,
   era_damp_thresholds: [2.5, 3.5, 4.5, 5.5, 7.0, 8.0, 9.0],
   era_damp_impacts: [0.45, 0.65, 0.8, 0.9, 1.0, 0.9, 0.75, 0.6],
@@ -236,9 +325,9 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   pwar_ip_sp: 85,
   pwar_ip_rp: 35,
   pwar_ip_sm: 50,
-  pwar_r_per_9: 7.11,
-  pwar_replacement_runs_per_9: 1.5,
-  pwar_runs_per_win: 10,
+  pwar_r_per_9: 6.915,              // D1 lgRA9 (locked 2026-08-10; was 7.11) — matches war.ts run env
+  pwar_replacement_runs_per_9: 1.92, // replRA9 8.83 − lgRA9 6.915 (was 1.5)
+  pwar_runs_per_win: 13.1,          // shared RPW with hitters (was 10)
   sp_to_rp_reg_era_pct: 6,
   sp_to_rp_reg_fip_pct: 8,
   sp_to_rp_reg_whip_pct: 5,
@@ -285,27 +374,30 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   class_hr9_js: 1.5,
   class_hr9_gr: 1.0,
   transfer_era_power_weight: 0.7,
-  transfer_era_conference_weight: 0.3,
-  transfer_era_competition_weight: 0.5,
-  transfer_era_park_weight: 0.075,
+  // Transfer lever weights re-tuned 2026-08-21 to target %impact (weight = target ÷ ratio-env+/park SD).
+  // Conference ~1% (background), competition (HTP) the main lever, park metric-weighted. Ratio env+ SDs
+  // (era 9.46/fip 7.28/whip 5.72/k9 8.72/bb9 10.29/hr9 23.38); park SDs (era/fip RG 12.95/whip OBP 4.63/hr9 ISO 17.97).
+  transfer_era_conference_weight: 0.106,   // →1.0%
+  transfer_era_competition_weight: 0.262,  // →3.75% (lowered "average")
+  transfer_era_park_weight: 0.135,         // →1.75% sizeable (RG)
   transfer_fip_power_weight: 0.7,
-  transfer_fip_conference_weight: 0.3,
-  transfer_fip_competition_weight: 0.5,
-  transfer_fip_park_weight: 0.075,
+  transfer_fip_conference_weight: 0.137,   // →1.0%
+  transfer_fip_competition_weight: 0.262,  // →3.75%
+  transfer_fip_park_weight: 0.135,         // →1.75% sizeable (RG)
   transfer_whip_power_weight: 0.7,
-  transfer_whip_conference_weight: 0.3,
-  transfer_whip_competition_weight: 0.5,
-  transfer_whip_park_weight: 0.15,
+  transfer_whip_conference_weight: 0.175,  // →1.0%
+  transfer_whip_competition_weight: 0.238, // →3.4% (= OBP, same stat)
+  transfer_whip_park_weight: 0.324,        // →1.5% (= OBP park)
   transfer_k9_power_weight: 0.7,
-  transfer_k9_conference_weight: 0.4,
-  transfer_k9_competition_weight: 0.5,
+  transfer_k9_conference_weight: 0.115,    // →1.0%
+  transfer_k9_competition_weight: 0.297,   // →4.25% talent-driven
   transfer_bb9_power_weight: 0.7,
-  transfer_bb9_conference_weight: 0.3,
-  transfer_bb9_competition_weight: 0.5,
+  transfer_bb9_conference_weight: 0.097,   // →1.0%
+  transfer_bb9_competition_weight: 0.297,  // →4.25% talent-driven
   transfer_hr9_power_weight: 0.7,
-  transfer_hr9_conference_weight: 0.3,
-  transfer_hr9_competition_weight: 0.5,
-  transfer_hr9_park_weight: 0.05,
+  transfer_hr9_conference_weight: 0.043,   // →1.0%
+  transfer_hr9_competition_weight: 0.297,  // →4.25%
+  transfer_hr9_park_weight: 0.111,         // →2.0% (= ISO park)
 };
 
 export const readPitchingWeights = (): PitchingEquationWeights => {
@@ -332,26 +424,43 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       hr9_plus_weight: Number.isFinite(parsed.hr9_plus_weight) ? Number(parsed.hr9_plus_weight) : base.hr9_plus_weight,
       era_plus_ncaa_avg: Number.isFinite(parsed.era_plus_ncaa_avg) ? Number(parsed.era_plus_ncaa_avg) : base.era_plus_ncaa_avg,
       era_plus_ncaa_sd: Number.isFinite(parsed.era_plus_ncaa_sd) ? Number(parsed.era_plus_ncaa_sd) : base.era_plus_ncaa_sd,
+      era_plus_ncaa_sd_bad: Number.isFinite(parsed.era_plus_ncaa_sd_bad) ? Number(parsed.era_plus_ncaa_sd_bad) : base.era_plus_ncaa_sd_bad,
+      // 🛑 Rating centers are DATA-DERIVED (model_config `<stat>_pr_center`, refreshed by
+      //    compute-projection-calibration.ts each run). They come from `base`, which already has the
+      //    Supabase overlay applied — deliberately NOT read from localStorage, because a coach
+      //    hand-editing a population mean would silently re-introduce the phantom-improvement bias
+      //    this fixes. See the note on PitchingEquationWeights.
+      era_pr_center: base.era_pr_center,
+      fip_pr_center: base.fip_pr_center,
+      whip_pr_center: base.whip_pr_center,
+      k9_pr_center: base.k9_pr_center,
+      bb9_pr_center: base.bb9_pr_center,
+      hr9_pr_center: base.hr9_pr_center,
       era_pr_sd: Number.isFinite(parsed.era_pr_sd) ? Number(parsed.era_pr_sd) : base.era_pr_sd,
       era_plus_scale: Number.isFinite(parsed.era_plus_scale) ? Number(parsed.era_plus_scale) : base.era_plus_scale,
       fip_plus_ncaa_avg: Number.isFinite(parsed.fip_plus_ncaa_avg) ? Number(parsed.fip_plus_ncaa_avg) : base.fip_plus_ncaa_avg,
       fip_plus_ncaa_sd: Number.isFinite(parsed.fip_plus_ncaa_sd) ? Number(parsed.fip_plus_ncaa_sd) : base.fip_plus_ncaa_sd,
+      fip_plus_ncaa_sd_bad: Number.isFinite(parsed.fip_plus_ncaa_sd_bad) ? Number(parsed.fip_plus_ncaa_sd_bad) : base.fip_plus_ncaa_sd_bad,
       fip_pr_sd: Number.isFinite(parsed.fip_pr_sd) ? Number(parsed.fip_pr_sd) : base.fip_pr_sd,
       fip_plus_scale: Number.isFinite(parsed.fip_plus_scale) ? Number(parsed.fip_plus_scale) : base.fip_plus_scale,
       whip_plus_ncaa_avg: Number.isFinite(parsed.whip_plus_ncaa_avg) ? Number(parsed.whip_plus_ncaa_avg) : base.whip_plus_ncaa_avg,
       whip_plus_ncaa_sd: Number.isFinite(parsed.whip_plus_ncaa_sd) ? Number(parsed.whip_plus_ncaa_sd) : base.whip_plus_ncaa_sd,
+      whip_plus_ncaa_sd_bad: Number.isFinite(parsed.whip_plus_ncaa_sd_bad) ? Number(parsed.whip_plus_ncaa_sd_bad) : base.whip_plus_ncaa_sd_bad,
       whip_pr_sd: Number.isFinite(parsed.whip_pr_sd) ? Number(parsed.whip_pr_sd) : base.whip_pr_sd,
       whip_plus_scale: Number.isFinite(parsed.whip_plus_scale) ? Number(parsed.whip_plus_scale) : base.whip_plus_scale,
       k9_plus_ncaa_avg: Number.isFinite(parsed.k9_plus_ncaa_avg) ? Number(parsed.k9_plus_ncaa_avg) : base.k9_plus_ncaa_avg,
       k9_plus_ncaa_sd: Number.isFinite(parsed.k9_plus_ncaa_sd) ? Number(parsed.k9_plus_ncaa_sd) : base.k9_plus_ncaa_sd,
+      k9_plus_ncaa_sd_bad: Number.isFinite(parsed.k9_plus_ncaa_sd_bad) ? Number(parsed.k9_plus_ncaa_sd_bad) : base.k9_plus_ncaa_sd_bad,
       k9_pr_sd: Number.isFinite(parsed.k9_pr_sd) ? Number(parsed.k9_pr_sd) : base.k9_pr_sd,
       k9_plus_scale: Number.isFinite(parsed.k9_plus_scale) ? Number(parsed.k9_plus_scale) : base.k9_plus_scale,
       bb9_plus_ncaa_avg: Number.isFinite(parsed.bb9_plus_ncaa_avg) ? Number(parsed.bb9_plus_ncaa_avg) : base.bb9_plus_ncaa_avg,
       bb9_plus_ncaa_sd: Number.isFinite(parsed.bb9_plus_ncaa_sd) ? Number(parsed.bb9_plus_ncaa_sd) : base.bb9_plus_ncaa_sd,
+      bb9_plus_ncaa_sd_bad: Number.isFinite(parsed.bb9_plus_ncaa_sd_bad) ? Number(parsed.bb9_plus_ncaa_sd_bad) : base.bb9_plus_ncaa_sd_bad,
       bb9_pr_sd: Number.isFinite(parsed.bb9_pr_sd) ? Number(parsed.bb9_pr_sd) : base.bb9_pr_sd,
       bb9_plus_scale: Number.isFinite(parsed.bb9_plus_scale) ? Number(parsed.bb9_plus_scale) : base.bb9_plus_scale,
       hr9_plus_ncaa_avg: Number.isFinite(parsed.hr9_plus_ncaa_avg) ? Number(parsed.hr9_plus_ncaa_avg) : base.hr9_plus_ncaa_avg,
       hr9_plus_ncaa_sd: Number.isFinite(parsed.hr9_plus_ncaa_sd) ? Number(parsed.hr9_plus_ncaa_sd) : base.hr9_plus_ncaa_sd,
+      hr9_plus_ncaa_sd_bad: Number.isFinite(parsed.hr9_plus_ncaa_sd_bad) ? Number(parsed.hr9_plus_ncaa_sd_bad) : base.hr9_plus_ncaa_sd_bad,
       hr9_pr_sd: Number.isFinite(parsed.hr9_pr_sd) ? Number(parsed.hr9_pr_sd) : base.hr9_pr_sd,
       hr9_plus_scale: Number.isFinite(parsed.hr9_plus_scale) ? Number(parsed.hr9_plus_scale) : base.hr9_plus_scale,
       era_damp_thresholds: withFallbackArray(asNumArray(parsed.era_damp_thresholds), base.era_damp_thresholds, base.era_damp_thresholds.length),
@@ -474,10 +583,10 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
     // This prevents stale local edits from drifting projected pK/9, pBB/9, and pHR/9 role transitions.
     merged.k9_plus_ncaa_avg = 8.21;
     merged.k9_plus_ncaa_sd = 1.990147058;
-    merged.k9_pr_sd = 43.76562188;
+    merged.k9_pr_sd = 45.47741;   // std_pr refreshed on 2026 pitch-log ratings (IP≥40); was 43.76562188
     merged.bb9_plus_ncaa_avg = 4.82;
     merged.bb9_plus_ncaa_sd = 1.340745984;
-    merged.bb9_pr_sd = 42.89490618;
+    merged.bb9_pr_sd = 42.91711;  // std_pr refreshed on 2026 pitch-log ratings (IP≥40); was 42.89490618
     merged.sp_to_rp_reg_hr9_pct = 8;
     return merged;
   } catch {

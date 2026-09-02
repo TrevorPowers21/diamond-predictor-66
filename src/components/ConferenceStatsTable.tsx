@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from "react";
+import { computeWrcRaw } from "@/lib/wrc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -58,7 +59,7 @@ function computeDerivedConferenceStats(avg: number | null, obp: number | null, s
   }
   const iso = slg - avg;
   const ops = obp + slg;
-  const wrc = (0.45 * obp) + (0.30 * slg) + (0.15 * avg) + (0.10 * iso);
+  const wrc = computeWrcRaw(avg, obp, slg, iso) ?? 0;
   const round3 = (v: number) => Math.round(v * 1000) / 1000;
   return { ops: round3(ops), iso: round3(iso), wrc: round3(wrc) };
 }
@@ -162,7 +163,7 @@ export default function ConferenceStatsTable() {
         if (avg == null || obp == null || slg == null) continue;
         const iso = slg - avg;
         const ops = obp + slg;
-        const wrc = (0.45 * obp) + (0.30 * slg) + (0.15 * avg) + (0.10 * iso);
+        const wrc = computeWrcRaw(avg, obp, slg, iso) ?? 0;
         records.push({
           conference,
           season: 2025,

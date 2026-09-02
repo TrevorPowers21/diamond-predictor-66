@@ -66,7 +66,7 @@ export interface PlayerTableRowSharedProps {
   hitterMasterPaMap: Map<string, number>;
   exitPositions: Record<string, string>;
   totalBudget: number;
-  fallbackRosterTotalPlayerScore: number;
+  nilAvgAllocation: number;
   selectedTeam: string | null;
   returnTo: string;
   playerProjection: (p: BuildPlayer, side: "hitter" | "pitcher") => {
@@ -129,7 +129,7 @@ function PlayerTableRow({
   hitterMasterPaMap,
   exitPositions,
   totalBudget,
-  fallbackRosterTotalPlayerScore,
+  nilAvgAllocation,
   returnTo,
   playerProjection,
   simulateTransferProjection,
@@ -664,7 +664,7 @@ function PlayerTableRow({
             ? "text-muted-foreground"
             : isPitcherRow
             ? "text-foreground"
-            : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore)
+            : projectedNilTierClass(projectedNil, nilAvgAllocation)
         }`}
       >
         {(p.roster_status || "returner") === "leaving"

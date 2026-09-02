@@ -7,6 +7,7 @@ interface ScoredPitchRow {
   pitch_type: string;
   hand: string;
   conference: string | null;
+  conference_id?: string | null;   // ★ 2026-08-30: carried directly now that rows come from Pitching Master
   pitches: number | null;
   stuff_plus: number | null;
 }
@@ -81,20 +82,38 @@ export async function calculateConferenceStuffPlusV2(
   // ── Pull per-pitcher scored rows. Each row already has a Stuff+ value
   // computed by the Stuff+ engine for that specific (pitcher, pitch_type,
   // hand). We aggregate those individual scores — never a synthetic profile.
+  // ★ LANE FIX (2026-08-30): this used to read per-pitcher scored rows from `pitcher_stuff_plus_inputs` — the
+  // LEGACY CSV lane. The v2 chain writes Stuff+ to `pitch_log.stuff_plus` and rolls it up to
+  // `"Pitching Master".stuff_plus`; it NEVER writes PSP-I, so PSP-I holds PRE-v2 scores. Building Conference Stuff+
+  // from those would feed stale numbers into the competition-translation lever that every projection consumes.
+  // NOW: read the rolled-up per-pitcher value + its pitch count straight from Pitching Master. Both are
+  // pitch_log-sourced for D1 (C25 writes stuff_plus, C24 writes trackman_pitches) and correctly fall back to the
+  // legacy lane for JUCO, so one formula stays right for both divisions without mixing lanes.
+  // Definition is unchanged: Conference Stuff+ = Σ(pitcher Stuff+ × his pitch count) / Σ(pitch count), full season.
   console.time("[ConfStuff+V2] 1. fetch scored rows");
   const allRows = await fetchAll<ScoredPitchRow>(
-    "pitcher_stuff_plus_inputs",
-    "source_player_id, pitch_type, hand, conference, pitches, stuff_plus",
+    "Pitching Master",
+    'source_player_id, conference_id, stuff_plus, trackman_pitches, "Season"',
     (q: any) =>
       q
-        .eq("season", season)
+        .eq("Season", season)
         .not("stuff_plus", "is", null)
-        .gt("pitches", 0),
+        .gt("trackman_pitches", 0),
+  ).then((rows: any[]) =>
+    rows.map((r) => ({
+      source_player_id: r.source_player_id,
+      pitch_type: "ALL",
+      hand: "ALL",
+      conference: null,
+      conference_id: r.conference_id,
+      pitches: Number(r.trackman_pitches) || 0,
+      stuff_plus: Number(r.stuff_plus),
+    })) as ScoredPitchRow[],
   );
   console.timeEnd("[ConfStuff+V2] 1. fetch scored rows");
 
   if (allRows.length === 0) {
-    return { report: { overall: [], written: 0 }, errors: ["No scored pitch data found — run Stuff+ first"] };
+    return { report: { overall: [], written: 0 }, errors: ["No scored pitchers in Pitching Master — run the Stuff+ chain (C25) first"] };
   }
 
   // ── Pull conference_id mapping from Pitching Master ─────────────────────

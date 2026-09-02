@@ -94,22 +94,23 @@ const PITCHING_POWER_DEFAULTS: Record<string, number> = {
   p_ncaa_avg_k9_power_rating: 50,
   p_ncaa_avg_bb9_power_rating: 50,
   p_ncaa_avg_hr9_power_rating: 50,
-  p_era_stuff_plus_weight: 0.21,
-  p_era_whiff_pct_weight: 0.23,
-  p_era_bb_pct_weight: 0.17,
-  p_era_hh_pct_weight: 0.07,
-  p_era_in_zone_whiff_pct_weight: 0.12,
-  p_era_chase_pct_weight: 0.08,
-  p_era_barrel_pct_weight: 0.12,
+  p_era_stuff_plus_weight: 0.20,
+  p_era_whiff_pct_weight: 0.25,
+  p_era_bb_pct_weight: 0.30,          // refit 2026-08-11 (walks = top run-prevention input)
+  p_era_hh_pct_weight: 0.15,
+  p_era_in_zone_whiff_pct_weight: 0,  // dropped — redundant with whiff+Stuff+
+  p_era_chase_pct_weight: 0.05,
+  p_era_barrel_pct_weight: 0.05,
   p_fip_hr9_power_rating_plus_weight: 0.45,
   p_fip_bb9_power_rating_plus_weight: 0.3,
   p_fip_k9_power_rating_plus_weight: 0.25,
-  p_whip_bb_pct_weight: 0.25,
-  p_whip_ld_pct_weight: 0.2,
-  p_whip_avg_ev_weight: 0.15,
-  p_whip_whiff_pct_weight: 0.25,
-  p_whip_gb_pct_weight: 0.1,
-  p_whip_chase_pct_weight: 0.05,
+  p_whip_bb_pct_weight: 0.30,
+  p_whip_whiff_pct_weight: 0.45,
+  p_whip_stuff_plus_weight: 0.25,   // refit 2026-08-11 (WHIP 71/29 hits/walks; hit-suppression via miss-bats)
+  p_whip_ld_pct_weight: 0,
+  p_whip_avg_ev_weight: 0,
+  p_whip_gb_pct_weight: 0,
+  p_whip_chase_pct_weight: 0,
   p_k9_whiff_pct_weight: 0.35,
   p_k9_stuff_plus_weight: 0.3,
   p_k9_in_zone_whiff_pct_weight: 0.25,
@@ -117,11 +118,12 @@ const PITCHING_POWER_DEFAULTS: Record<string, number> = {
   p_bb9_bb_pct_weight: 0.55,
   p_bb9_in_zone_pct_weight: 0.3,
   p_bb9_chase_pct_weight: 0.15,
-  p_hr9_barrel_pct_weight: 0.32,
-  p_hr9_ev90_weight: 0.24,
-  p_hr9_gb_pct_weight: 0.18,
-  p_hr9_pull_pct_weight: 0.14,
-  p_hr9_la_10_30_pct_weight: 0.12,
+  p_hr9_barrel_pct_weight: 0.15,
+  p_hr9_hh_pct_weight: 0.30,          // refit 2026-08-11 (hard_hit added — strong HR9 predictor)
+  p_hr9_gb_pct_weight: 0.30,
+  p_hr9_pull_pct_weight: 0.25,
+  p_hr9_ev90_weight: 0,
+  p_hr9_la_10_30_pct_weight: 0,
 };
 
 type ScoreMetric = {
@@ -282,15 +284,13 @@ const computeScoreColumns = (sourceValues: string[]) => {
         (chaseScore! * eqValues.p_era_chase_pct_weight) +
         (barrelScore! * eqValues.p_era_barrel_pct_weight)
       : null;
+  // whip⁺ refit 2026-08-11: WHIP = hits(71%)+walks(29%). Walks (bb) + hit-suppression via miss-bats (whiff+stuff).
   const whipPower =
-    [bbScore, ldScore, avgEvScore, whiffScore, gbScore, chaseScore].every((v) => v != null)
+    [bbScore, whiffScore, stuffScore].every((v) => v != null)
       ? normalizedWeightedSum([
           { value: bbScore!, weight: eqValues.p_whip_bb_pct_weight },
-          { value: ldScore!, weight: eqValues.p_whip_ld_pct_weight },
-          { value: avgEvScore!, weight: eqValues.p_whip_avg_ev_weight },
           { value: whiffScore!, weight: eqValues.p_whip_whiff_pct_weight },
-          { value: gbScore!, weight: eqValues.p_whip_gb_pct_weight },
-          { value: chaseScore!, weight: eqValues.p_whip_chase_pct_weight },
+          { value: stuffScore!, weight: eqValues.p_whip_stuff_plus_weight },
         ])
       : null;
   const k9Power =
@@ -306,13 +306,13 @@ const computeScoreColumns = (sourceValues: string[]) => {
         (izScore! * eqValues.p_bb9_in_zone_pct_weight) +
         (chaseScore! * eqValues.p_bb9_chase_pct_weight)
       : null;
+  // hr9⁺ refit 2026-08-11: hard contact (barrel + hard_hit) + no lift (gb) + pull. ev90/la dropped (useless/hurt).
   const hr9Power =
-    [barrelScore, ev90Score, gbScore, pullScore, la1030Score].every((v) => v != null)
+    [barrelScore, hhScore, gbScore, pullScore].every((v) => v != null)
       ? (barrelScore! * eqValues.p_hr9_barrel_pct_weight) +
-        (ev90Score! * eqValues.p_hr9_ev90_weight) +
+        (hhScore! * eqValues.p_hr9_hh_pct_weight) +
         (gbScore! * eqValues.p_hr9_gb_pct_weight) +
-        (pullScore! * eqValues.p_hr9_pull_pct_weight) +
-        (la1030Score! * eqValues.p_hr9_la_10_30_pct_weight)
+        (pullScore! * eqValues.p_hr9_pull_pct_weight)
       : null;
 
   const eraPlus = eraPower == null ? null : (eraPower / eqValues.p_era_ncaa_avg_power_rating) * 100;

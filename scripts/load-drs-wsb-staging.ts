@@ -1,20 +1,34 @@
 /**
- * Load dRS + wSB per-season outputs into STAGING (slrxowawbijbjrkozqlj) via .env.local.
- *   npx tsx scripts/load-drs-wsb-staging.ts
+ * Load dRS + wSB per-season outputs into STAGING or PROD.
+ *   npx tsx scripts/load-drs-wsb-staging.ts                 # staging (.env.local)
+ *   npx tsx scripts/load-drs-wsb-staging.ts --dry-run       # staging, no writes
+ *   npx tsx scripts/load-drs-wsb-staging.ts --prod          # PROD (.env.production.local) — explicit go
+ *   npx tsx scripts/load-drs-wsb-staging.ts --prod --dry-run
  *
  * Reads scripts/drs/output/player_season_defense.csv + player_season_baserunning.csv,
  * resolves each row's player to players.id (uuid): source_player_id first (99.985%),
  * then a (team-abbrev, "F. Last") name fallback for the defensive-only residuals.
  * Anything still unresolved is LOGGED, never silently dropped. Upserts keyed on uuid.
- * Prereq: run the migration 20260805_player_season_defense_baserunning.sql on staging first.
+ * The dRS/wSB CSV values are league-wide (computed from the TruMedia Standard export) and
+ * ENV-INDEPENDENT — the same CSVs load into either DB; only the uuid resolution is per-env,
+ * so prod resolves against PROD's players/Teams Table. Prereq: migration
+ * 20260805_player_season_defense_baserunning.sql applied on the target DB first.
  */
 import { createClient } from "@supabase/supabase-js";
 import * as fs from "fs";
 import * as path from "path";
 
-const env = fs.readFileSync(".env.local", "utf8");
+const IS_PROD = process.argv.includes("--prod");
+const DRY_RUN = process.argv.includes("--dry-run");
+const ENV_FILE = IS_PROD ? ".env.production.local" : ".env.local";
+const env = fs.readFileSync(ENV_FILE, "utf8");
 const get = (k: string) => (env.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim();
 const url = get("SUPABASE_URL"), key = get("SUPABASE_SERVICE_ROLE_KEY");
+// Env-detection guard (mirror the precompute batch scripts): refuse to write prod unless --prod
+// is explicit, and refuse --prod against a non-prod URL.
+const looksProd = /trbvxuoliwrfowibatkm/.test(url);
+if (looksProd && !IS_PROD) { console.error("✗ SUPABASE_URL looks like PROD but --prod not passed. Refusing."); process.exit(1); }
+if (IS_PROD && !looksProd) { console.error("✗ --prod passed but SUPABASE_URL is not prod. Refusing."); process.exit(1); }
 const sb = createClient(url, key, { auth: { persistSession: false } });
 const DRS_OUT = "scripts/drs/output";
 
@@ -33,10 +47,13 @@ function readCsv(p: string): Record<string, string>[] {
 const num = (v: string) => (v === "" || v === "None" || v == null ? null : Number(v));
 const int = (v: string) => (v === "" || v === "None" || v == null ? null : parseInt(v, 10));
 
-async function fetchAll(table: string, cols: string): Promise<any[]> {
+// ★ STAGE-0 ordered pagination (2026-08-30): unordered .range() silently drops/duplicates rows across pages
+// (PostgREST gives no stable order without ORDER BY). Over `players` that is ~32 pages on prod (31,467 rows) —
+// dropped rows log as "unresolved" and their d_war / bsr_war stay NULL, which then propagates into projections.
+async function fetchAll(table: string, cols: string, orderCol = "id"): Promise<any[]> {
   const out: any[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await (sb as any).from(table).select(cols).range(from, from + 999);
+    const { data, error } = await (sb as any).from(table).select(cols).order(orderCol, { ascending: true }).range(from, from + 999);
     if (error) throw new Error(`${table}: ${error.message}`);
     out.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -51,7 +68,7 @@ async function upsertChunks(table: string, rows: any[], conflict: string) {
 }
 
 async function main() {
-  console.log("target:", url.match(/https:\/\/([a-z]+)/)?.[1], "(staging=slrxowawbijbjrkozqlj)");
+  console.log(`target: ${url.match(/https:\/\/([a-z]+)/)?.[1]} (${IS_PROD ? "🔴 PROD" : "STAGING"})${DRY_RUN ? " [DRY RUN — no writes]" : ""}`);
 
   // identity maps from players (+ Teams Table for the abbrev fallback)
   const players = await fetchAll("players", "id, first_name, last_name, source_player_id, team_id");
@@ -92,8 +109,8 @@ async function main() {
       constants_version: r.constants_version, engine_version: r.engine_version,
     });
   }
-  await upsertChunks("player_season_defense", defUp, "player_id,position,season");
-  console.log(`player_season_defense: ${defUp.length} upserted, ${defMiss.length} unresolved`);
+  if (!DRY_RUN) await upsertChunks("player_season_defense", defUp, "player_id,position,season");
+  console.log(`player_season_defense: ${defUp.length} ${DRY_RUN ? "would upsert" : "upserted"}, ${defMiss.length} unresolved`);
   if (defMiss.length) console.log("  unresolved defense:", defMiss.slice(0, 20).join("; "));
 
   // ---- baserunning (wSB playerId IS source_player_id) ----
@@ -110,8 +127,8 @@ async function main() {
       constants_version: r.constants_version, engine_version: r.engine_version,
     });
   }
-  await upsertChunks("player_season_baserunning", bsrUp, "player_id,season");
-  console.log(`player_season_baserunning: ${bsrUp.length} upserted, ${bsrMiss.length} unresolved`);
+  if (!DRY_RUN) await upsertChunks("player_season_baserunning", bsrUp, "player_id,season");
+  console.log(`player_season_baserunning: ${bsrUp.length} ${DRY_RUN ? "would upsert" : "upserted"}, ${bsrMiss.length} unresolved`);
   if (bsrMiss.length) console.log("  unresolved bsr:", bsrMiss.slice(0, 20).join("; "));
 }
 main().catch((e) => { console.error(e); process.exit(1); });

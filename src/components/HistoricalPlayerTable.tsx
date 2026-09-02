@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowUpDown, Search, X } from "lucide-react";
+import { computeWrcPlus } from "@/lib/wrc";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { cn } from "@/lib/utils";
 
@@ -37,19 +38,12 @@ const ScoutMiniBox = ({ label, value }: { label: string; value: number | null })
 
 type SortKey = "name" | "team" | "avg" | "obp" | "slg" | "ops" | "iso" | "wrc";
 
-// wRC+ formula: linear weights from the projection engine
-// wRC = (0.45 × OBP) + (0.30 × SLG) + (0.15 × AVG) + (0.10 × ISO)
-const computeWrcPlus = (
-  avg: number | null,
-  obp: number | null,
-  slg: number | null,
-  iso: number | null,
-  ncaaWrc: number | null,
-): number | null => {
-  if (avg == null || obp == null || slg == null || iso == null || ncaaWrc == null || ncaaWrc <= 0) return null;
-  const wrc = (0.45 * obp) + (0.30 * slg) + (0.15 * avg) + (0.10 * iso);
-  return Math.round((wrc / ncaaWrc) * 100);
-};
+// wRC+ formula (C1, canonical src/lib/wrc.ts):
+// est_wOBA = 0.011 + 0.691·OBP + 0.235·SLG (AVG/ISO redundant → 0); wRC+ = est_wOBA / ncaaWrc × 100
+// `ncaaWrc` denom comes from ncaa_averages.wrc (0.3782).
+const wrcPlusFor = (
+  avg: number | null, obp: number | null, slg: number | null, iso: number | null, ncaaWrc: number | null,
+): number | null => computeWrcPlus(avg, obp, slg, iso, ncaaWrc ?? undefined);
 type SortDir = "asc" | "desc";
 
 const HITTER_POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "OF", "IF", "UTIL"];
@@ -139,7 +133,7 @@ export function HistoricalPlayerTable({ season, onPlayerClick }: { season: numbe
   const decorated = useMemo(() => {
     return (rows as any[]).map((r) => {
       const ops = r.OBP != null && r.SLG != null ? r.OBP + r.SLG : null;
-      const wrc = computeWrcPlus(r.AVG, r.OBP, r.SLG, r.ISO, ncaaWrc);
+      const wrc = wrcPlusFor(r.AVG, r.OBP, r.SLG, r.ISO, ncaaWrc);
       return { ...r, _ops: ops, _wrc: wrc };
     });
   }, [rows, ncaaWrc]);

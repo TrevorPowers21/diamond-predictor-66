@@ -10,18 +10,19 @@ export const normalizeKey = (value: string | null | undefined) =>
 export const getPlayerName = (p: BuildPlayer): string =>
   p.player ? `${p.player.first_name} ${p.player.last_name}` : p.custom_name || "TBD";
 
+// Colors a projected NIL value by whether it's above/below an average paid
+// roster spot. avgAllocation = budget / paid-player count (exposed by the sim).
+// Green ≥ 1.2× avg, yellow ≥ 0.8× avg, red below. Budget-scale-invariant — no
+// magic benchmark (replaced the old 68-based baseline).
 export const projectedNilTierClass = (
   value: number | null | undefined,
-  totalBudget: number,
-  rosterScoreBaseline: number,
+  avgAllocation: number,
 ): string => {
   if (value == null) return "text-muted-foreground";
-  const budget = Number(totalBudget) || 0;
-  const baseline = Math.max(Number(rosterScoreBaseline) || 0, 1);
-  if (budget <= 0) return "text-muted-foreground";
-  const baselineShare = budget / baseline;
-  if (value >= baselineShare * 1.2) return "text-[hsl(var(--success))]";
-  if (value >= baselineShare * 0.8) return "text-[hsl(var(--warning))]";
+  const avg = Number(avgAllocation) || 0;
+  if (avg <= 0) return "text-muted-foreground";
+  if (value >= avg * 1.2) return "text-[hsl(var(--success))]";
+  if (value >= avg * 0.8) return "text-[hsl(var(--warning))]";
   return "text-destructive";
 };
 

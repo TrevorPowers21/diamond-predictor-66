@@ -1,0 +1,61 @@
+{
+  "_meta": {
+    "script": "scripts/drs/derive_woba_weights.py",
+    "season": 2026,
+    "derived_at": "2026-08-09",
+    "method": "RE24 linear weights from the pitch log; wOBA scaled to lgOBP; wRAA is scale-independent",
+    "pool": "DRS-log teams (high-TrackMan D1)",
+    "RPW": 13.1,
+    "physics_source": "DRS-log-pool (RE24 run VALUES — event physics)",
+    "centering_population": "all-D1"
+  },
+  "_seam_fix_2026_08_10": "linear_weights_above_avg were RE-CENTERED on all-D1 (out-weight -0.4154 -> -0.3994) to close the derivation seam: derive_woba_weights.py line 152 computed lg_raw with RE24-bucket counts in the numerator but pa_total in the denominator, baking TWO baselines into one fixture (out-weight implied 0.4154, wOBAscale implied 0.3985). The ONE correct all-D1 baseline is lg_raw = 0.3994 (Σ raw-runs / Σ PA over all D1). Physics (woba_weights_above_out_scaled) unchanged. lgwOBA/lgOBP moved pool 0.3774 -> all-D1 0.3782 (on-base-per-PA scale; NOT the standard OBP 0.3824 in ncaa_league_averages_2026.json). After this, pure-RE24 == wOBA-method == wRC+xRPP (see scripts/drs/_recenter_check.mjs). desc_owar on staging is still on 0.3774 pending the Step-6 re-populate to 0.3782 (uniform ~0.016 WAR).",
+  "pa": 682734,
+  "lgOBP": 0.3782,
+  "lgwOBA": 0.3782,
+  "wOBAscale": 0.947,
+  "linear_weights_above_avg": {
+    "out": -0.3994,
+    "1B": 0.6056,
+    "BB": 0.4737,
+    "2B": 0.9083,
+    "HR": 1.4386,
+    "HBP": 0.4933,
+    "3B": 1.2049
+  },
+  "woba_weights_above_out_scaled": {
+    "BB": 0.8268,
+    "HBP": 0.8454,
+    "1B": 0.9517,
+    "2B": 1.2384,
+    "3B": 1.5193,
+    "HR": 1.74
+  },
+  "offense_replacement_wins_per_600pa": 1.62,
+  "RE24_sample": {
+    "000_0out": 0.771,
+    "001_0out": 1.783,
+    "010_0out": 1.544,
+    "011_0out": 2.464,
+    "100_0out": 1.285,
+    "101_0out": 2.335,
+    "110_0out": 2.045,
+    "111_0out": 3.079,
+    "000_1out": 0.403,
+    "001_1out": 1.225,
+    "010_1out": 0.921,
+    "011_1out": 1.747,
+    "100_1out": 0.745,
+    "101_1out": 1.534,
+    "110_1out": 1.274,
+    "111_1out": 2.079,
+    "000_2out": 0.147,
+    "001_2out": 0.491,
+    "010_2out": 0.413,
+    "011_2out": 0.767,
+    "100_2out": 0.327,
+    "101_2out": 0.698,
+    "110_2out": 0.598,
+    "111_2out": 1.037
+  }
+}

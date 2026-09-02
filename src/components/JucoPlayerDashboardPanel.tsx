@@ -15,13 +15,15 @@
  *   - "Conference" is labeled "District" since JUCO conferences are districts
  *
  * wRC+ uses the locked D1 formula (CLAUDE.md):
- *   wRC+ = ((0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO) / 0.364) · 100
+ *   wRC+ = ((0.011 + 0.691·OBP + 0.235·SLG) / 0.3782) · 100  [C1, canonical src/lib/wrc.ts]
  *
  * Qualifier thresholds match the simulator + add-new flows:
  *   - Hitters: PA ≥ 75
  *   - Pitchers: IP ≥ 20
  */
 import { useMemo, useState } from "react";
+import { computeWrcPlus as computeWrcPlusCanonical } from "@/lib/wrc";
+import { computePrvPlus as computePrvPlusCanonical } from "@/lib/pitcherQuality";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -47,37 +49,21 @@ const fmt2 = (v: number | null | undefined) => (v == null || !Number.isFinite(Nu
 const fmt1 = (v: number | null | undefined) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(1));
 const fmtInt = (v: number | null | undefined) => (v == null || !Number.isFinite(Number(v)) ? "—" : String(Math.round(Number(v))));
 
-const computeWrcPlus = (avg: number | null, obp: number | null, slg: number | null, iso: number | null): number | null => {
-  if (avg == null || obp == null || slg == null) return null;
-  const isoVal = iso != null ? iso : (slg - avg);
-  return ((0.45 * obp + 0.30 * slg + 0.15 * avg + 0.10 * isoVal) / 0.364) * 100;
-};
+// canonical C1 (src/lib/wrc.ts)
+const computeWrcPlus = (avg: number | null, obp: number | null, slg: number | null, iso: number | null): number | null =>
+  computeWrcPlusCanonical(avg, obp, slg, iso);
 
-// pRV+ uses the D1 formula weights from CLAUDE.md:
-//   pRV+ = 0.30·FIP⁺ + 0.25·ERA⁺ + 0.15·WHIP⁺ + 0.15·K9⁺ + 0.10·BB9⁺ + 0.05·HR9⁺
-// Each component is a ratio-based env+ (lgValue / pitcherValue × 100 for
-// lower-is-better; pitcherValue / lgValue × 100 for K/9). Uses JUCO 2026
-// league averages so an average JUCO pitcher centers at 100 (rather than
-// scoring below 100 against D1 baseline — that's the simulator's job, not
-// the leaderboard's).
-const JUCO_LG = { era: 7.4, fip: 7.4, whip: 1.8, k9: 9.5, bb9: 5.0, hr9: 1.0 };
+// pRV+ = D1-FIP index from K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts):
+//   projFIP = 3.847 − 0.231·K/9 + 0.509·BB/9 + 1.486·HR/9;  projRA9 = projFIP × 1.137;
+//   pRV+ = 100 + 100·(6.913 − projRA9)/6.913. JUCO outcomes scored on the D1 scale —
+// consistent with JUCO projections using D1 baselines. (Signature kept; era/fip/whip unused.)
 const computePrvPlus = (
-  era: number | null, fip: number | null, whip: number | null,
+  _era: number | null, _fip: number | null, _whip: number | null,
   k9: number | null, bb9: number | null, hr9: number | null,
 ): number | null => {
-  if (era == null || fip == null || whip == null || k9 == null || bb9 == null || hr9 == null) return null;
-  if (era <= 0 || fip <= 0 || whip <= 0 || k9 <= 0 || bb9 <= 0 || hr9 <= 0) return null;
-  // Cap individual components at 250 so a single outlier rate (e.g. tiny HR/9
-  // from a 20-IP reliever) can't dominate the composite. 250 is well above
-  // realistic D1 leader ranges (~200 top end) so it only kicks in for noise.
-  const cap = (v: number) => Math.max(0, Math.min(250, v));
-  const eraPlus = cap((JUCO_LG.era / era) * 100);
-  const fipPlus = cap((JUCO_LG.fip / fip) * 100);
-  const whipPlus = cap((JUCO_LG.whip / whip) * 100);
-  const k9Plus = cap((k9 / JUCO_LG.k9) * 100);
-  const bb9Plus = cap((JUCO_LG.bb9 / bb9) * 100);
-  const hr9Plus = cap((JUCO_LG.hr9 / hr9) * 100);
-  return 0.30 * fipPlus + 0.25 * eraPlus + 0.15 * whipPlus + 0.15 * k9Plus + 0.10 * bb9Plus + 0.05 * hr9Plus;
+  if (k9 == null || bb9 == null || hr9 == null || k9 <= 0 || bb9 <= 0 || hr9 <= 0) return null;
+  const prv = computePrvPlusCanonical(k9, bb9, hr9);
+  return prv == null ? null : Math.round(prv);
 };
 
 const stripDistrictLabel = (conf: string | null): string => {

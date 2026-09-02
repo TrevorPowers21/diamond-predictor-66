@@ -156,11 +156,11 @@ describe("projectPitchingRate — PITCHING_POWER_RATING_WEIGHT", () => {
 // the formula-consistency tests in storedVsLive.test.ts will catch the drift.
 
 describe("pWAR formula pins (via computePWar)", () => {
-  it("role-level IP ranges produce expected WAR bands", () => {
-    // Typical starter (100-130 IP), average pitcher
+  it("role-level IP ranges produce expected WAR bands (D1 scale: RPW 13.1)", () => {
+    // Typical starter (100-130 IP), average pitcher (100 pRV+ → replacement-level ≈ 1.9)
     const starterWar = computePWar(100, 115)!;
-    expect(starterWar).toBeGreaterThan(2.0);
-    expect(starterWar).toBeLessThan(4.0);
+    expect(starterWar).toBeGreaterThan(1.5);
+    expect(starterWar).toBeLessThan(3.0);
 
     // Typical reliever (30-50 IP), above-average pitcher
     const relieverwWar = computePWar(120, 45)!;

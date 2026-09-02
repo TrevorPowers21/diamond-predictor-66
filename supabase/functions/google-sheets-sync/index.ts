@@ -857,7 +857,7 @@ async function importConferenceStats(
   let imported = 0;
   let skipped = 0;
   let confStatsImported = 0;
-  const WRC_WEIGHTS = { obp: 0.45, slg: 0.30, avg: 0.15, iso: 0.10 };
+  const WRC_WEIGHTS = { intercept: 0.011, obp: 0.691, slg: 0.235, avg: 0, iso: 0 }; // C1 canonical: src/lib/wrc.ts
   const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
   for (let i = 1; i < rows.length; i++) {
@@ -873,7 +873,7 @@ async function importConferenceStats(
     const calcOps = hasCoreRates ? (obp + slg) : null;
     const calcWrc = hasCoreRates && calcIso != null
       ? (
-        (WRC_WEIGHTS.obp * obp) +
+        WRC_WEIGHTS.intercept + (WRC_WEIGHTS.obp * obp) +
         (WRC_WEIGHTS.slg * slg) +
         (WRC_WEIGHTS.avg * avg) +
         (WRC_WEIGHTS.iso * calcIso)

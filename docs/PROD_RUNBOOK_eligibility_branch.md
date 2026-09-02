@@ -15,7 +15,7 @@ per-script rationale + staging counts.
   URL before `--apply`.** Scripts known to hardcode `.env.local`: resync-target-snapshots,
   resync-build-snapshot-markets, fix-pitcher-market-pvf, verify-all, audit-georgia,
   set-active-builds, backfill-target-notes-from-roster, backfill-rostered-target-consistency,
-  rebuild-twp-target-rows, fix-returner-twp-hitter-market, clean-twp-sides,
+  rebuild-twp-target-rows, fix-returner-twp-hitter-market, clean-twp-sides 🗑️DELETED-2026-08-31,
   backfill-target-transfer-snapshots — add a `--prod` env swap before running.
 
 ---
@@ -65,7 +65,7 @@ Verify: re-run the 4 column probes → all exist.
 9. `backfill-target-transfer-snapshots.ts --apply` — expect noPrediction=0 (any >0 → STOP, that's the pagination-order bug, not a gap).
 10. `rebuild-twp-target-rows.ts --apply` — 2 own-side rows per TWP on a board (**after** the Phase-0 TWP migration).
 11. `backfill-rostered-target-consistency.ts --apply` — board `transfer_snapshot` ← active roster `player_snapshot` (1:1).
-12. `clean-twp-sides.ts --apply` — **LAST of the TWP set**: every TWP snapshot own-side only + rebake twp_ markets.
+12. `clean-twp-sides.ts 🗑️ DELETED 2026-08-31 --apply` — **LAST of the TWP set**: every TWP snapshot own-side only + rebake twp_ markets.
 
 ## Phase 3 — Active build + notes recipe (handoff §10)
 13. `set-active-builds.ts --apply` — ⚠ **CONFIRM EACH PROGRAM'S LIVE BUILD WITH TREVOR

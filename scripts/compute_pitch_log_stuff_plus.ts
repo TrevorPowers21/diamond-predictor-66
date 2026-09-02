@@ -64,6 +64,8 @@ interface LogRow {
   release_velocity: number | null;
   ivb: number | null;
   hb: number | null;
+  ivb_corrected: number | null;
+  hb_corrected: number | null;
   rel_height: number | null;
   rel_side: number | null;
   extension: number | null;
@@ -86,7 +88,16 @@ async function main(): Promise<void> {
     console.error("Missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
     process.exit(1);
   }
-  const supabase = createClient(url, key, { auth: { persistSession: false } });
+  // ★ STAGE-0 FIX (2026-08-29): the version filter was HARD-CODED to "v1-anchor-2026-08-17" while
+// reclassify_prod.ts stamps "v2-ranges-2026-08-28" — steps 1 and 3 of the chain did not connect, so the
+// scorer matched 0 rows, no-opped, and left NEW LABELS + OLD stuff_plus while appearing to succeed.
+// Now parameterized: --class-version=<v> or CLASS_VERSION env; defaults to the v2 stamp.
+const CLASS_VERSION_FILTER =
+  (process.argv.find((a) => a.startsWith("--class-version=")) || "").split("=")[1]
+  || process.env.CLASS_VERSION
+  || "v2-ranges-2026-08-28";
+
+const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   // ── 1. Load pop constants ─────────────────────────────────────────────
   console.log("Loading pop constants (D1, season 2026)…");
@@ -121,9 +132,22 @@ async function main(): Promise<void> {
   // bucket mean at 100. Only the relative ordering inside the changeup
   // bucket loses a degree of fidelity.
   //
-  // Follow-up: precompute fb_velo_by_pitcher_id via a server-side view
-  // or RPC and join into the score pipeline.
+  // ANCHOR REBUILD: primary-FB velo per pitcher from _reclass_pf (feeds fb_gap
+  // for breaking buckets AND changeup velo_diff). Small (~4.8k rows), paginated.
   const fbVeloByPitcher = new Map<string, number>();
+  {
+    let last = "";
+    while (true) {
+      let q = (supabase as any).from("_reclass_pf").select("pitcher_id, pf_velo").order("pitcher_id", { ascending: true }).limit(5000);
+      if (last) q = q.gt("pitcher_id", last);
+      const { data, error } = await q;
+      if (error) { console.error(`_reclass_pf load: ${error.message}`); process.exit(1); }
+      if (!data || data.length === 0) break;
+      for (const r of data as any[]) fbVeloByPitcher.set(String(r.pitcher_id), Number(r.pf_velo));
+      last = data[data.length - 1].pitcher_id;
+    }
+    console.log(`  primary-FB velo loaded for ${fbVeloByPitcher.size} pitchers`);
+  }
 
   // ── 3. Count pending (best-effort) ────────────────────────────────────
   // The exact count via head:true sometimes returns null on very large
@@ -133,7 +157,7 @@ async function main(): Promise<void> {
   const { count: pendingCount } = await (supabase as any)
     .from("pitch_log")
     .select("uniq_pitch_id", { count: "exact", head: true })
-    .is("stuff_plus", null)
+    .eq("classification_version", CLASS_VERSION_FILTER)
     .eq("is_data", true)
     .not("pitch_type_reclassified", "is", null);
   const pending = pendingCount ?? 0; // 0 just means "unknown" for ratio display
@@ -154,11 +178,11 @@ async function main(): Promise<void> {
 
   while (true) {
     let q = (supabase as any)
-      .from("pitch_log")
+      .from("pitch_log_corrected")
       .select(
-        "uniq_pitch_id, pitcher_id, pitcher_hand, pitch_type_reclassified, release_velocity, ivb, hb, rel_height, rel_side, extension, spin",
+        "uniq_pitch_id, pitcher_id, pitcher_hand, pitch_type_reclassified, release_velocity, ivb, hb, ivb_corrected, hb_corrected, rel_height, rel_side, extension, spin",
       )
-      .is("stuff_plus", null)
+      .eq("classification_version", CLASS_VERSION_FILTER)  // ANCHOR REBUILD: re-score all reclassified (overwrites)
       .eq("is_data", true)
       .not("pitch_type_reclassified", "is", null)
       .order("uniq_pitch_id", { ascending: true })
@@ -179,10 +203,11 @@ async function main(): Promise<void> {
       }
 
       const fbVelo = fbVeloByPitcher.get(r.pitcher_id);
-      const fbChVeloDiff =
-        r.pitch_type_reclassified === "Change-up" && fbVelo != null && r.release_velocity != null
-          ? fbVelo - r.release_velocity
-          : null;
+      // gap = primaryFB velo − this pitch velo, for ALL buckets (fb_gap for
+      // breaking buckets, velo_diff for changeup). Reuses fb_ch_velo_diff.
+      const gap = fbVelo != null && r.release_velocity != null ? fbVelo - r.release_velocity : null;
+      // armHB = arm-side-positive on venue-corrected hb (RHP hb / LHP −hb) — the FOLD
+      const armHb = r.hb_corrected != null ? (r.pitcher_hand === "R" ? r.hb_corrected : -r.hb_corrected) : null;
 
       const pitchRow: PitchRow = {
         id: r.uniq_pitch_id,
@@ -191,13 +216,13 @@ async function main(): Promise<void> {
         hand: r.pitcher_hand,
         pitches: 1,
         velocity: r.release_velocity,
-        ivb: r.ivb,
-        hb: r.hb,
+        ivb: r.ivb_corrected,   // venue-corrected movement
+        hb: armHb,              // armHB (folded)
         rel_height: r.rel_height,
         rel_side: r.rel_side,
         extension: r.extension,
         spin: r.spin,
-        fb_ch_velo_diff: fbChVeloDiff,
+        fb_ch_velo_diff: gap,
         needs_review: null,
       };
 

@@ -37,6 +37,7 @@ const HITTER_DEFAULTS = {
   pull:       { mean: 36.5, sd: 8.03 },
   la10_30:    { mean: 29,   sd: 6.81 },
   gb:         { mean: 43.2, sd: 8.0,  invert: true },
+  pullAir:    { mean: 12.9, sd: 11.9 },   // pulled-in-the-air % (pitch-log derived); isoPlus power skill
 } as const;
 
 export type HitterBaselines = Partial<{
@@ -51,6 +52,7 @@ export type HitterBaselines = Partial<{
   pull:       { mean: number; sd: number };
   la10_30:    { mean: number; sd: number };
   gb:         { mean: number; sd: number };
+  pullAir:    { mean: number; sd: number };
 }>;
 
 export type HitterSubMetrics = {
@@ -65,6 +67,7 @@ export type HitterSubMetrics = {
   pull: number | null;
   la10_30: number | null;
   gb: number | null;
+  pullAir: number | null;
 };
 
 export type HitterScores = {
@@ -79,6 +82,7 @@ export type HitterScores = {
   pullScore: number | null;
   laScore: number | null;
   gbScore: number | null;
+  pullAirScore: number | null;
 };
 
 export type HitterPowerRatings = HitterScores & {
@@ -105,6 +109,7 @@ export function computeHitterPowerRatings(raw: HitterSubMetrics, baselines?: Hit
   const pull = merge("pull");
   const la10_30 = merge("la10_30");
   const gb = merge("gb");
+  const pullAir = merge("pullAir");
 
   const contactScore = scoreFromNormal(raw.contact, contact.mean, contact.sd);
   const lineDriveScore = scoreFromNormal(raw.lineDrive, lineDrive.mean, lineDrive.sd);
@@ -117,13 +122,21 @@ export function computeHitterPowerRatings(raw: HitterSubMetrics, baselines?: Hit
   const pullScore = scoreFromNormal(raw.pull, pull.mean, pull.sd);
   const laScore = scoreFromNormal(raw.la10_30, la10_30.mean, la10_30.sd);
   const gbScore = scoreFromNormal(raw.gb, gb.mean, gb.sd, true);
+  const pullAirScore = scoreFromNormal(raw.pullAir, pullAir.mean, pullAir.sd);
+  // isoPlus uses pulled-in-the-air (the real power skill); fall back to raw pull% when pitch-log pull_air is absent
+  const pullAirEff = pullAirScore ?? pullScore;
 
+  // Hitter composites refit 2026-08-11 (same-season fit on AVG/OBP/ISO, D1 PA>=150, rounded 0.05, rounding-free):
+  //  baPlus  — exit velo matters more for AVG than credited (0.20->0.30).
+  //  obpPlus — built to the measured 57/43 hits/walks split of OBP: AVG-skill ~0.55 + walks 0.40 + chase 0.05.
+  //  isoPlus — la_10_30 DROPPED (redundant with barrel); raw pull -> pulled-in-air (pull_air, the real power skill,
+  //            univariate ISO corr 0.459 vs raw pull 0.372). gb stays the top lift metric (all-field air).
   const baPower = contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null
-    ? null : (0.4 * contactScore) + (0.25 * lineDriveScore) + (0.2 * avgEVScore) + (0.15 * popUpScore);
+    ? null : (0.35 * contactScore) + (0.20 * lineDriveScore) + (0.30 * avgEVScore) + (0.15 * popUpScore);
   const obpPower = contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null || bbScore == null || chaseScore == null
-    ? null : (0.35 * contactScore) + (0.2 * lineDriveScore) + (0.15 * avgEVScore) + (0.1 * popUpScore) + (0.15 * bbScore) + (0.05 * chaseScore);
-  const isoPower = barrelScore == null || ev90Score == null || pullScore == null || laScore == null || gbScore == null
-    ? null : (0.45 * barrelScore) + (0.3 * ev90Score) + (0.15 * pullScore) + (0.05 * laScore) + (0.05 * gbScore);
+    ? null : (0.20 * contactScore) + (0.10 * lineDriveScore) + (0.15 * avgEVScore) + (0.10 * popUpScore) + (0.40 * bbScore) + (0.05 * chaseScore);
+  const isoPower = barrelScore == null || ev90Score == null || pullAirEff == null || gbScore == null
+    ? null : (0.30 * barrelScore) + (0.35 * ev90Score) + (0.10 * pullAirEff) + (0.25 * gbScore);
 
   const toPlus = (v: number | null) => (v == null ? null : (v / 50) * 100);
   const baPlus = toPlus(baPower);
@@ -134,7 +147,7 @@ export function computeHitterPowerRatings(raw: HitterSubMetrics, baselines?: Hit
 
   return {
     contactScore, lineDriveScore, avgEVScore, popUpScore, bbScore, chaseScore,
-    barrelScore, ev90Score, pullScore, laScore, gbScore,
+    barrelScore, ev90Score, pullScore, laScore, gbScore, pullAirScore,
     baPlus, obpPlus, isoPlus, overallPlus,
   };
 }
@@ -243,13 +256,22 @@ export function computePitchingScores(raw: PitchingSubMetrics, baselines?: Pitch
 }
 
 // ─── Pitching power rating weights ────────────────────────────────────
+// Refit 2026-08-11: empirical fit of 2026 ERA on the skill scores (same-season, D1 IP>=40, n=1313).
+// Walks are the single strongest run-prevention input (β −0.303) — matching D1-FIP's repriced walk (0.570 vs
+// MLB 0.33); in-zone-whiff was redundant with whiff+Stuff+ (β≈0) and was DROPPED. Rounded to 0.05 steps with
+// zero accuracy cost (|corr(composite,ERA)| 0.532 rounded vs 0.533 raw). See docs/POWER_RATINGS_SYNOPSIS.md.
 const ERA_WEIGHTS = {
-  whiff: 0.23, bb: 0.17, hh: 0.07, izWhiff: 0.12, chase: 0.08, barrel: 0.12, stuff: 0.21,
+  whiff: 0.25, bb: 0.30, hh: 0.15, chase: 0.05, barrel: 0.05, stuff: 0.20,
 };
-const WHIP_WEIGHTS = { bb: 0.25, ld: 0.2, ev: 0.15, whiff: 0.25, gb: 0.1, chase: 0.05 };
+// WHIP refit 2026-08-11: WHIP = hits/IP + walks/IP, measured 71% hits / 29% walks. Built to that split like obpPlus —
+// walks (bb, the OBP-allowed half) at .30; hit-suppression via MISS-BATS (whiff+stuff, the AVG-allowed half) at .70.
+// Dropped ld/ev/gb/chase (weak: pitcher controls whiffs, not BABIP — contact quality barely predicts hits allowed).
+const WHIP_WEIGHTS = { bb: 0.30, whiff: 0.45, stuff: 0.25 };
 const K9_WEIGHTS = { whiff: 0.35, stuff: 0.3, izWhiff: 0.25, chase: 0.1 };
 const BB9_WEIGHTS = { bb: 0.55, iz: 0.3, chase: 0.15 };
-const HR9_WEIGHTS = { barrel: 0.32, ev90: 0.24, gb: 0.18, pull: 0.14, la: 0.12 };
+// HR9 refit 2026-08-11: barrel (HR-optimal contact) + hard_hit (broader hard contact) + gb (no lift) + pull (direction).
+// Dropped ev90 (corr 0.005, useless) + la (hurt the fit); whiff/ev90/flyball tested + rejected. |corr| 0.44.
+const HR9_WEIGHTS = { barrel: 0.15, hh: 0.30, gb: 0.30, pull: 0.25 };
 const FIP_WEIGHTS = { hr9: 0.45, bb9: 0.3, k9: 0.25 };
 
 export type PitchingPowerRatings = PitchingScores & {
@@ -291,7 +313,6 @@ export function computePitchingPowerRatings(
     { v: s(scores.whiffScore), w: ERA_WEIGHTS.whiff },
     { v: s(scores.bbScore), w: ERA_WEIGHTS.bb },
     { v: s(scores.hhScore), w: ERA_WEIGHTS.hh },
-    { v: s(scores.izWhiffScore), w: ERA_WEIGHTS.izWhiff },
     { v: s(scores.chaseScore), w: ERA_WEIGHTS.chase },
     { v: s(scores.barrelScore), w: ERA_WEIGHTS.barrel },
     { v: stuffScore, w: ERA_WEIGHTS.stuff },
@@ -300,11 +321,8 @@ export function computePitchingPowerRatings(
 
   const whipRaw = nws([
     { v: s(scores.bbScore), w: WHIP_WEIGHTS.bb },
-    { v: s(scores.ldScore), w: WHIP_WEIGHTS.ld },
-    { v: s(scores.evScore), w: WHIP_WEIGHTS.ev },
     { v: s(scores.whiffScore), w: WHIP_WEIGHTS.whiff },
-    { v: s(scores.gbScore), w: WHIP_WEIGHTS.gb },
-    { v: s(scores.chaseScore), w: WHIP_WEIGHTS.chase },
+    { v: stuffScore, w: WHIP_WEIGHTS.stuff },
   ]);
   const whipPrPlus = whipRaw != null ? (whipRaw / 50) * 100 : null;
 
@@ -325,10 +343,9 @@ export function computePitchingPowerRatings(
 
   const hr9Raw = nws([
     { v: s(scores.barrelScore), w: HR9_WEIGHTS.barrel },
-    { v: s(scores.ev90Score), w: HR9_WEIGHTS.ev90 },
+    { v: s(scores.hhScore), w: HR9_WEIGHTS.hh },
     { v: s(scores.gbScore), w: HR9_WEIGHTS.gb },
     { v: s(scores.pullScore), w: HR9_WEIGHTS.pull },
-    { v: s(scores.laScore), w: HR9_WEIGHTS.la },
   ]);
   const hr9PrPlus = hr9Raw != null ? (hr9Raw / 50) * 100 : null;
 

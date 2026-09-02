@@ -11,9 +11,20 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { computeHitterMarketValue } from "../src/lib/depthRoles";
+import { pickHitterWar } from "../src/lib/twpMarketValue";
 
 const APPLY = process.argv.includes("--apply");
-const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+// Double-keyed prod guard (added 2026-08-30). Already env-driven (no literal .env path),
+// but it had NO guard: `--env-file .env.production.local` wrote prod with no opt-in.
+const PROD_REF = "trbvxuoliwrfowibatkm";
+const WANT_PROD = process.argv.includes("--prod");
+const SB_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+const URL_IS_PROD = new RegExp(PROD_REF).test(SB_URL);
+if (!SB_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) { console.error("✗ SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set (use --env-file). Refusing."); process.exit(1); }
+if (URL_IS_PROD && !WANT_PROD) { console.error(`✗ target is PROD (${PROD_REF}) but --prod was NOT passed. Refusing.`); process.exit(1); }
+if (WANT_PROD && !URL_IS_PROD) { console.error(`✗ --prod passed but target is NOT prod: ${SB_URL}. Refusing.`); process.exit(1); }
+console.log(`[target] ${URL_IS_PROD ? "PROD" : "STAGING"} ${SB_URL}`);
+const sb = createClient(SB_URL, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
 const norm = (s: string | null | undefined) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -57,7 +68,8 @@ const norm = (s: string | null | undefined) => String(s || "").toLowerCase().rep
     const batch = pids.slice(i, i + 100);
     for (let f = 0; ; f += 1000) {
       const { data, error } = await sb.from("player_predictions")
-        .select("id, player_id, o_war, market_value, twp_hitter_market_value")
+        // ★ d_war/bsr_war/total_hitter_war added 2026-08-31 so the market prices off the composite, not offense-only.
+        .select("id, player_id, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value")
         .eq("season", 2027).eq("model_type", "returner").eq("variant", "regular")
         .in("player_id", batch).order("id", { ascending: true }).range(f, f + 999);
       if (error) throw error;
@@ -71,12 +83,15 @@ const norm = (s: string | null | undefined) => String(s || "").toLowerCase().rep
   const samples: string[] = [];
   for (const r of rows) {
     const m = meta.get(r.player_id);
-    if (r.o_war == null) { noOwar++; continue; }
+    // ★ 2026-08-31: price off `total_hitter_war` (o+d+bsr, NO p_war) via the shared `pickHitterWar` helper — the
+    //   same one the display layer and F42b use. Was raw `o_war`, which ignored defense + baserunning. REGISTRY #19.
+    const war = pickHitterWar(r);
+    if (war == null) { noOwar++; continue; }
     if (!m?.conference) { noConf++; }
-    const newH = computeHitterMarketValue(Number(r.o_war), { conference: m?.conference ?? null, position: m?.position ?? null });
+    const newH = computeHitterMarketValue(Number(war), { conference: m?.conference ?? null, position: m?.position ?? null });
     updates.push({ id: r.id, patch: { twp_hitter_market_value: newH, market_value: null } });
     toWrite++;
-    if (samples.length < 8) samples.push(`  ${r.player_id.slice(0, 8)} o_war=${Number(r.o_war).toFixed(3)} conf=${m?.conference} pos=${m?.position}  twpH ${r.twp_hitter_market_value == null ? "-" : Math.round(r.twp_hitter_market_value)} -> ${newH == null ? "null" : Math.round(newH)}  mv ${r.market_value == null ? "-" : Math.round(r.market_value)} -> null`);
+    if (samples.length < 8) samples.push(`  ${r.player_id.slice(0, 8)} war=${Number(war).toFixed(3)} (o_war=${r.o_war == null ? "-" : Number(r.o_war).toFixed(3)}) conf=${m?.conference} pos=${m?.position}  twpH ${r.twp_hitter_market_value == null ? "-" : Math.round(r.twp_hitter_market_value)} -> ${newH == null ? "null" : Math.round(newH)}  mv ${r.market_value == null ? "-" : Math.round(r.market_value)} -> null`);
   }
   console.log(`returner-TWP rows=${rows.length}  toWrite=${toWrite}  noConference=${noConf}  noOwar(skipped)=${noOwar}  APPLY=${APPLY}`);
   samples.forEach((s) => console.log(s));

@@ -191,7 +191,7 @@ export function useLoadBuild({
             .from("players")
             .select(`
               id, source_player_id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference,
-              player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip),
+              player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip),
               nil_valuations(estimated_value, component_breakdown)
             `)
             .in("id", playerIds);
@@ -214,7 +214,7 @@ export function useLoadBuild({
                 // already fetches at add-time. Non-destructive — these
                 // columns exist on player_predictions; we just weren't
                 // asking for them on the load path.
-                "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip",
+                "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, d_war, bsr_war, total_hitter_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip",
               )
               .eq("season", PROJECTION_SEASON)
               .in("player_id", idsNeedingPred)
@@ -235,7 +235,7 @@ export function useLoadBuild({
             // For non-TWPs we infer the side from the player's natural position
             // (not from pitcher_role, which can be null even for pitcher players).
             const grouped = new Map<string, any[]>();
-            for (const row of predData || []) {
+            for (const row of ((predData || []) as any[])) {
               const pid = String(row.player_id || "");
               if (!pid) continue;
               const list = grouped.get(pid) || [];
@@ -527,6 +527,15 @@ export function useLoadBuild({
                   projection_tier: meta.projectionTier ?? null,
                   nil_value_overridden: meta.nilValueOverridden,
                   transfer_snapshot: meta.transferSnapshot ?? null,
+                  // ★ 2026-09-01 — mirrors PlayerProfile's `isSnapshotBacked` (PlayerProfile.tsx:651).
+                  // True when this row's values came from a STORED snapshot, which means the toggle
+                  // and depth role are ALREADY BAKED IN and must not be scaled again.
+                  _snapshotBacked: !!rawSnapshot,
+                  // ★ 2026-09-01 — the RAW team_build_players.player_snapshot for this row+side.
+                  // `prediction` is NOT a snapshot: it is `snapshot ?? predictionMap[...]`, so it
+                  // silently becomes the PREDICTION ROW whenever the snapshot lookup misses. Display
+                  // must read this field, never `prediction`.
+                  player_snapshot: rawSnapshot ?? null,
                   player: pd
                     ? {
                         first_name: pd.first_name,

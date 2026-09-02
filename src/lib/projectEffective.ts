@@ -9,6 +9,7 @@
 // depth) differs from the neutral's pitcher_role — pass `sessionRole` for it to
 // fire. Without a sessionRole the transition is skipped (backward compatible).
 import { computeOWarFromWrcPlus } from "./playerCalcs";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { computePitcherWar, paForHitterDepthRole, pitcherExpectedIp } from "./depthRoles";
 import { DEFAULT_PITCHING_WEIGHTS, type PitchingEquationWeights } from "./pitchingEquations";
 import { applyRoleTransitionAdjustment, calcPitchingPlus } from "./transferPitcherProjection";
@@ -62,10 +63,9 @@ function applyRoleTransition(devSource: PitcherRates, from: "SP" | "RP" | "SM", 
   const k9P = calcPitchingPlus(rtK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
   const bb9P = calcPitchingPlus(rtBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
   const hr9P = calcPitchingPlus(rtHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-  const rtRv = [eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)
-    ? Math.round((Number(eraP) * eq.era_plus_weight) + (Number(fipP) * eq.fip_plus_weight) + (Number(whipP) * eq.whip_plus_weight)
-      + (Number(k9P) * eq.k9_plus_weight) + (Number(bb9P) * eq.bb9_plus_weight) + (Number(hr9P) * eq.hr9_plus_weight))
-    : devSource.p_rv_plus;
+  // pRV+ = D1-FIP index from role-adjusted K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts).
+  const rtRvRaw = computePrvPlus(rtK9, rtBb9, rtHr9);
+  const rtRv = rtRvRaw == null ? devSource.p_rv_plus : Math.round(rtRvRaw);
   return { p_era: rtEra, p_fip: rtFip, p_whip: rtWhip, p_k9: rtK9, p_bb9: rtBb9, p_hr9: rtHr9, p_rv_plus: rtRv };
 }
 

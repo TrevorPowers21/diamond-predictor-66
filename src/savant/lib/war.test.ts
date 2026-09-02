@@ -1,25 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { computeWrcRaw, computeWrcPlus, SAVANT_WRC_WEIGHTS, SAVANT_NCAA_WRC } from "./wrcPlus";
+import { computeWrcRaw, computeWrcPlus, SAVANT_WRC_WEIGHTS, SAVANT_NCAA_WRC, SAVANT_WRC_INTERCEPT } from "./wrcPlus";
 import {
-  computeOWar, computeOWarFromStats, computePWar,
+  computeOWar, computeOWarFromStats,
   computeDWar, computeBsrWar, computeTotalWar, computePositionalValue,
-  RUNS_PER_WIN, RUNS_PER_PA, RUNS_PER_9, REPLACEMENT_RUNS_PER_600PA, PITCHER_REPLACEMENT_PER_9IP,
+  RUNS_PER_WIN, RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA,
 } from "./war";
 
 // ── wRC+ ─────────────────────────────────────────────────────────────────────
 
 describe("computeWrcRaw", () => {
-  it("returns null if any input is null", () => {
-    expect(computeWrcRaw(null, 0.380, 0.480, 0.180)).toBeNull();
+  it("returns null only when OBP or SLG is null (AVG/ISO redundant in C1)", () => {
     expect(computeWrcRaw(0.300, null, 0.480, 0.180)).toBeNull();
     expect(computeWrcRaw(0.300, 0.380, null, 0.180)).toBeNull();
-    expect(computeWrcRaw(0.300, 0.380, 0.480, null)).toBeNull();
+    // AVG/ISO carry weight 0 in C1, so a null there is fine:
+    expect(computeWrcRaw(null, 0.380, 0.480, null)).not.toBeNull();
   });
 
-  it("computes weighted sum of slash stats", () => {
-    // raw = 0.45*OBP + 0.30*SLG + 0.15*AVG + 0.10*ISO
+  it("computes the C1 est_wOBA: intercept + weighted OBP/SLG", () => {
+    // est_wOBA = 0.011 + 0.691*OBP + 0.235*SLG (AVG/ISO weight 0)
     const result = computeWrcRaw(0.300, 0.380, 0.480, 0.180);
     const expected =
+      SAVANT_WRC_INTERCEPT +
       SAVANT_WRC_WEIGHTS.obp * 0.380 +
       SAVANT_WRC_WEIGHTS.slg * 0.480 +
       SAVANT_WRC_WEIGHTS.avg * 0.300 +
@@ -27,28 +28,21 @@ describe("computeWrcRaw", () => {
     expect(result).toBeCloseTo(expected, 6);
   });
 
-  it("zero stats produce zero raw", () => {
-    expect(computeWrcRaw(0, 0, 0, 0)).toBe(0);
+  it("zero stats produce the intercept", () => {
+    expect(computeWrcRaw(0, 0, 0, 0)).toBeCloseTo(SAVANT_WRC_INTERCEPT, 6);
   });
 });
 
 describe("computeWrcPlus", () => {
-  it("returns null if any stat is null", () => {
-    expect(computeWrcPlus(null, 0.380, 0.480, 0.180)).toBeNull();
+  it("returns null when OBP or SLG is null", () => {
+    expect(computeWrcPlus(0.300, null, 0.480, 0.180)).toBeNull();
   });
 
-  it("league-average slash line produces wRC+ near 100", () => {
-    // Construct a slash line whose raw equals the NCAA average (0.364)
-    // using average-ish values — the result should round to 100
-    // avg=0.280, obp=0.360, slg=0.430, iso=0.150
-    // raw = 0.45*0.360 + 0.30*0.430 + 0.15*0.280 + 0.10*0.150
-    //     = 0.162 + 0.129 + 0.042 + 0.015 = 0.348  (slightly below 100)
-    // Use exact inverse: any combo where raw = 0.364 should give 100
-    // Simplest: all weights to one slot → obp-only: obp = 0.364/0.45 is messy
-    // Instead use the definition directly:
-    const obp = SAVANT_NCAA_WRC / SAVANT_WRC_WEIGHTS.obp; // 0.364 / 0.45 ≈ 0.809 — unrealistic but math-correct
-    const result = computeWrcPlus(0, obp, 0, 0);
-    expect(result).toBe(100);
+  it("league-average slash line produces wRC+ ~100", () => {
+    // all-D1 average slash → est_wOBA ≈ lgwOBA 0.3782 (SAVANT_NCAA_WRC) → wRC+ ~100
+    const result = computeWrcPlus(0.278, 0.382, 0.437, 0.159);
+    expect(result).toBeGreaterThanOrEqual(99);
+    expect(result).toBeLessThanOrEqual(101);
   });
 
   it("above-average hitter produces wRC+ > 100", () => {
@@ -66,11 +60,10 @@ describe("computeWrcPlus", () => {
     expect(result).toBe(Math.round(result as number));
   });
 
-  it("known value: .300/.380/.480/.180 → 104", () => {
-    // raw = 0.45*0.380 + 0.30*0.480 + 0.15*0.300 + 0.10*0.180
-    //     = 0.171 + 0.144 + 0.045 + 0.018 = 0.378
-    // wRC+ = round(0.378 / 0.364 * 100) = round(103.85) = 104
-    expect(computeWrcPlus(0.300, 0.380, 0.480, 0.180)).toBe(104);
+  it("known value: .300/.380/.480/.180 → 102 (C1)", () => {
+    // est_wOBA = 0.011 + 0.691*0.380 + 0.235*0.480 = 0.38638
+    // wRC+ = round(0.38638 / 0.3782 * 100) = round(102.16) = 102
+    expect(computeWrcPlus(0.300, 0.380, 0.480, 0.180)).toBe(102);
   });
 });
 
@@ -83,7 +76,7 @@ describe("computeOWar", () => {
   });
 
   it("league-average wRC+ (100) at 600 PA → replacement baseline", () => {
-    // offValue = 0 → raa = 0; WAR = replacement / rpw (2.5 at the current scale)
+    // offValue = 0 → raa = 0; WAR = replacement / rpw (= 2.0 wins/600 at D1 scale)
     expect(computeOWar(100, 600)).toBeCloseTo(REPLACEMENT_RUNS_PER_600PA / RUNS_PER_WIN, 6);
   });
 
@@ -147,15 +140,16 @@ describe("WAR buckets (composite)", () => {
 
   it("two-way player sums both offensive and pitching sides", () => {
     const oWar = computeOWar(130, 150);
-    const pWar = computePWar(135, 60);
-    expect(computeTotalWar({ oWar, pWar })).toBeCloseTo((oWar as number) + (pWar as number), 9);
+    const pWar = 1.5; // pitcher WAR comes from the pwar_* path (pitchingEquations), not war.ts
+    expect(computeTotalWar({ oWar, pWar })).toBeCloseTo((oWar as number) + pWar, 9);
   });
 });
 
 describe("computeOWarFromStats", () => {
   it("returns null if any stat is null", () => {
-    expect(computeOWarFromStats(null, 0.380, 0.480, 0.180, 500)).toBeNull();
+    // C1 needs OBP + SLG (AVG/ISO redundant → optional)
     expect(computeOWarFromStats(0.300, null, 0.480, 0.180, 500)).toBeNull();
+    expect(computeOWarFromStats(0.300, 0.380, null, 0.180, 500)).toBeNull();
   });
 
   it("computes wRC+ first then oWAR — consistent with computeWrcPlus + computeOWar chain", () => {
@@ -166,51 +160,6 @@ describe("computeOWarFromStats", () => {
   });
 });
 
-// ── pWAR ─────────────────────────────────────────────────────────────────────
-
-describe("computePWar", () => {
-  it("returns null for null prvPlus", () => {
-    expect(computePWar(null, 100)).toBeNull();
-  });
-
-  it("returns null for null ip", () => {
-    expect(computePWar(110, null)).toBeNull();
-  });
-
-  it("returns null for ip = 0 (avoid divide-by-zero edge)", () => {
-    expect(computePWar(110, 0)).toBeNull();
-  });
-
-  it("league-average pitcher (100 pRV+, 90 IP) → replacement baseline", () => {
-    // pitcherValue=0; rpa=0; WAR = (ip/9)*pitcherRepl / rpw
-    expect(computePWar(100, 90)).toBeCloseTo((90 / 9) * PITCHER_REPLACEMENT_PER_9IP / RUNS_PER_WIN, 6);
-  });
-
-  it("above-average pitcher (120 pRV+, 90 IP) matches the formula", () => {
-    const rpa = 0.20 * (90 / 9) * RUNS_PER_9;
-    const replacementRuns = (90 / 9) * PITCHER_REPLACEMENT_PER_9IP;
-    expect(computePWar(120, 90)).toBeCloseTo((rpa + replacementRuns) / RUNS_PER_WIN, 6);
-  });
-
-  it("elite starter (140 pRV+, 120 IP) matches the formula", () => {
-    const rpa = 0.40 * (120 / 9) * RUNS_PER_9;
-    const replacementRuns = (120 / 9) * PITCHER_REPLACEMENT_PER_9IP;
-    expect(computePWar(140, 120)).toBeCloseTo((rpa + replacementRuns) / RUNS_PER_WIN, 6);
-  });
-
-  it("below-replacement pitcher (70 pRV+, 60 IP)", () => {
-    const rpa = -0.30 * (60 / 9) * RUNS_PER_9;
-    const replacementRuns = (60 / 9) * PITCHER_REPLACEMENT_PER_9IP;
-    expect(computePWar(70, 60)).toBeCloseTo((rpa + replacementRuns) / RUNS_PER_WIN, 6);
-  });
-
-  it("accepts custom rPer9, replacementRunsPer9, runsPerWin", () => {
-    // With rPer9=4.5, replacementRunsPer9=2.0, runsPerWin=9
-    const pitcherValue = 0.20;
-    const ip = 90;
-    const rpa = pitcherValue * (ip / 9) * 4.5;
-    const replacementRuns = (ip / 9) * 2.0;
-    const expected = (rpa + replacementRuns) / 9;
-    expect(computePWar(120, ip, 4.5, 2.0, 9)).toBeCloseTo(expected, 6);
-  });
-});
+// computePWar formula pins live in pitcherProjection.test.ts ("pWAR formula pins"). The
+// main-app projection pitcher WAR runs on the pwar_* equation weights (src/lib/pitchingEquations.ts,
+// D1: 13.1 / 6.915 / 1.92), kept in lockstep with war.ts computePWar (used by TeamProfilePage).

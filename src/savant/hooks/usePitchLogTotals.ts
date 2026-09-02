@@ -109,6 +109,14 @@ export interface PitchLogHitterTotalsRow {
   batted_oppo_ground: number;
   batted_oppo_air: number;
   ev_90: number | null;
+  // Descriptive run values + national z-scores (populated on the 'all' row only by
+  // populate_hitter_run_values). Displayed as the "VALUE" cluster on the hitter banner.
+  batting_rv: number | null;
+  batting_rv_z: number | null;
+  defensive_rv: number | null;
+  defensive_rv_z: number | null;
+  baserunning_rv: number | null;
+  baserunning_rv_z: number | null;
 }
 
 const SHARED_QUERY_OPTS = {

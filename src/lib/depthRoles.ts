@@ -9,6 +9,7 @@
 // Pitcher depth role → expected IP fed into the pWAR formula.
 
 import type { PitchingEquationWeights } from "@/lib/pitchingEquations";
+import { RUNS_PER_PA, REPLACEMENT_RUNS_PER_600PA, RUNS_PER_WIN } from "@/savant/lib/war";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -213,6 +214,7 @@ export function computePitcherWar(
 
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
+  DEFAULT_NIL_BASE_PER_WAR,
   getPositionValueMultiplier,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
@@ -244,27 +246,24 @@ export function computePitcherMarketValue(
     role: ProjectedPitcherRole;
     team: string | null;
   },
-  eq: PitchingEquationWeights,
+  // 2026-08-21 UNIFICATION: pitcher market now reads the SAME PTM source as the hitter
+  // (DEFAULT_NIL_TIER_MULTIPLIERS / model_config `nil_tier_*`), not the old `eq.market_tier_*`.
+  // WRITE paths pass model_config-resolved tiers + $/WAR via `opts` (resolveNilTiersFromConfig);
+  // omitting opts uses the shared code defaults (which carry the correct locked values).
+  opts?: {
+    dollarsPerWar?: number;
+    tiers?: typeof DEFAULT_NIL_TIER_MULTIPLIERS;
+  },
 ): number | null {
   if (pWar == null || !Number.isFinite(pWar)) return null;
   if (!canShowPitchingMarketValue(ctx.team, ctx.conference)) return null;
-  const tiers = {
-    sec: eq.market_tier_sec,
-    p4: eq.market_tier_acc_big12,
-    bigTen: eq.market_tier_big_ten,
-    strongMid: eq.market_tier_strong_mid,
-    lowMajor: eq.market_tier_low_major,
-    // JUCO tier: pitcher equation weights don't have a market_tier_juco field
-    // yet (D1-era schema). Mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco directly so
-    // JUCO pitchers don't fall through to undefined and produce NaN dollars.
-    juco: 0.35,
-  };
-  const ptm = getProgramTierMultiplierByConference(ctx.conference, tiers);
+  const ptm = getProgramTierMultiplierByConference(ctx.conference, opts?.tiers ?? DEFAULT_NIL_TIER_MULTIPLIERS);
+  const dpw = opts?.dollarsPerWar ?? DEFAULT_NIL_BASE_PER_WAR;
   // PVF dropped: a starter's role value is already in WAR through IP (85 vs 35
   // innings), so a PVF premium on top double-counts. Market = pWAR × $/WAR × tier,
   // matching the returner path + Team Builder. `ctx.role` kept for call-site parity.
   void ctx.role;
-  const raw = pWar * eq.market_dollars_per_war * ptm;
+  const raw = pWar * dpw * ptm;
   return Math.max(0, raw);
 }
 
@@ -292,12 +291,12 @@ export function computeHitterOWar(
   const pa = depthRole != null
     ? paForHitterDepthRole(depthRole)
     : (projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 215);
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
+  const runsPerPa = RUNS_PER_PA;
+  const replacementRuns = (pa / 600) * REPLACEMENT_RUNS_PER_600PA;
   const offValue = (wrcPlus - 100) / 100;
   const raa = offValue * pa * runsPerPa;
   const rar = raa + replacementRuns;
-  return rar / 10;
+  return rar / RUNS_PER_WIN;
 }
 
 // ── Hitter market value — single canonical formula ───────────────────────────
@@ -308,7 +307,7 @@ export function computeHitterOWar(
 //
 // Returns null when oWAR is missing so callers can show "—".
 
-const HITTER_DOLLARS_PER_WAR = 25000;
+const HITTER_DOLLARS_PER_WAR = DEFAULT_NIL_BASE_PER_WAR; // shared $/WAR base (model_config nil_base_per_owar)
 
 export function computeHitterMarketValue(
   oWar: number | null | undefined,

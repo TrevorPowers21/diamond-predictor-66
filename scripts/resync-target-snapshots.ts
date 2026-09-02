@@ -17,9 +17,19 @@ import * as fs from "fs";
 import { computeHitterMarketValue, computePitcherMarketValue, computePitcherWar, paForHitterDepthRole, pitcherExpectedIp, pitcherRoleFromDepthRole } from "../src/lib/depthRoles";
 import { computeOWarFromWrcPlus } from "../src/lib/playerCalcs";
 import { DEFAULT_PITCHING_WEIGHTS as EQ } from "../src/lib/pitchingEquations";
-const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.local";
-const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
-const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
+// Env-driven + double-keyed prod guard (added 2026-08-30, matching resync-build-snapshot-markets.ts).
+const PROD_REF = "trbvxuoliwrfowibatkm";
+const WANT_PROD = process.argv.includes("--prod");
+const ENV = WANT_PROD ? ".env.production.local" : ".env.local";
+const rd = (f: string, k: string) => { try { return (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, ""); } catch { return ""; } };
+const SB_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL");
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || rd(ENV, "SUPABASE_SERVICE_ROLE_KEY");
+const URL_IS_PROD = new RegExp(PROD_REF).test(SB_URL || "");
+if (!SB_URL || !SB_KEY) { console.error(`✗ no Supabase URL/key resolved (env vars or ${ENV}). Refusing.`); process.exit(1); }
+if (URL_IS_PROD && !WANT_PROD) { console.error(`✗ target is PROD (${PROD_REF}) but --prod was NOT passed. Refusing.`); process.exit(1); }
+if (WANT_PROD && !URL_IS_PROD) { console.error(`✗ --prod passed but target is NOT prod: ${SB_URL}. Refusing.`); process.exit(1); }
+console.log(`[target] ${URL_IS_PROD ? "PROD" : "STAGING"} ${SB_URL}`);
+const sb = createClient(SB_URL, SB_KEY);
 const APPLY = process.argv.includes("--apply"), ALL = process.argv.includes("--all");
 const GA = "3b1cc0e2-4acd-4a27-a7bc-d345c347f18d";
 const num = (v: any) => v == null ? null : Number(v);
@@ -62,9 +72,12 @@ const derivePitDepth = (pwar: number, rv: number) => PIT_ROLES.map((r) => [r, Ma
     const isTwp = !!s.is_twp;
     const owar = num(s.owar), pwar = num(s.p_war), wrc = num(s.p_wrc_plus), rv = num(s.p_rv_plus);
     const nd = notesDepth(r.production_notes);
+    // Hitter market rides TOTAL hitter WAR (o+d+bsr), not oWAR — matches the precompute + Dashboard.
+    // Fall back to oWAR only if total isn't on the snapshot yet. owar!=null still gates "is a hitter".
+    const totalHit = num(s.total_hitter_war) ?? owar;
 
-    // --- market (exact f(WAR) at program tier) ---
-    const hMkt = owar != null ? computeHitterMarketValue(owar, { conference: conf, position: pos.get(r.player_id) }) : null;
+    // --- market (exact f(total hitter WAR) at program tier) ---
+    const hMkt = owar != null ? computeHitterMarketValue(totalHit, { conference: conf, position: pos.get(r.player_id) }) : null;
     const pMkt = pwar != null ? computePitcherMarketValue(pwar, { conference: conf, role: pitcherRoleFromDepthRole(nd || (pwar != null && rv != null ? derivePitDepth(pwar, rv) : "workhorse_reliever")), team: name.get(r.player_id) ?? null }, EQ) : null;
     if (isTwp) { s.twp_hitter_market_value = hMkt; s.twp_pitcher_market_value = pMkt; s.nil_valuation = null; }
     else { s.nil_valuation = owar != null ? hMkt : pMkt; s.twp_hitter_market_value = null; s.twp_pitcher_market_value = null; }
