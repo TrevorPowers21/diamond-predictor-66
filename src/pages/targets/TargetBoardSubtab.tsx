@@ -24,6 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
+import { pickHitterWar } from "@/lib/twpMarketValue";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import {
   DndContext,
@@ -118,6 +119,9 @@ interface ProjectionRow {
   p_ops: number | null;
   p_wrc_plus: number | null;
   o_war: number | null;
+  total_hitter_war: number | null;
+  d_war: number | null;
+  bsr_war: number | null;
   market_value: number | null;
   p_era: number | null;
   p_fip: number | null;
@@ -320,7 +324,7 @@ export default function TargetBoardSubtab() {
       let q = supabase
         .from("player_predictions")
         .select(
-          "player_id, variant, customer_team_id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, o_war, market_value, p_era, p_fip, p_whip, p_k9, p_bb9, p_rv_plus, p_war, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, barrel_score, hitter_barrel_score, pitcher_barrel_score, ev_score, contact_score, chase_score, stuff_score, whiff_score, bb_score",
+          "player_id, variant, customer_team_id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, o_war, total_hitter_war, d_war, bsr_war, market_value, p_era, p_fip, p_whip, p_k9, p_bb9, p_rv_plus, p_war, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, barrel_score, hitter_barrel_score, pitcher_barrel_score, ev_score, contact_score, chase_score, stuff_score, whiff_score, bb_score",
         )
         .in("player_id", playerIds)
         .eq("season", PROJECTION_SEASON)
@@ -392,7 +396,7 @@ export default function TargetBoardSubtab() {
       const ts: any = (r as any).transfer_snapshot;
       const snap = roster
         ? roster
-        : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
+        : (ts ? { ...ts, o_war: ts.o_war ?? ts.owar, total_hitter_war: ts.total_hitter_war ?? ts.o_war ?? ts.owar, market_value: ts.market_value ?? ts.nil_valuation } : null);
       m.set(r.id, snap ? { ...(live || {}), ...snap } : (live || null));
     }
     return m;
@@ -465,6 +469,12 @@ export default function TargetBoardSubtab() {
             ? (pb?.twp_pitcher_market_value ?? pb?.market_value)
             : (pb?.twp_hitter_market_value ?? pb?.market_value)) ?? -Infinity,
         );
+        return (va - vb) * mul;
+      }
+      if (sk === "o_war") {
+        // hitter WAR column reads the headline total_hitter_war (fallback o_war)
+        const va = Number(pickHitterWar(pa as any) ?? -Infinity);
+        const vb = Number(pickHitterWar(pb as any) ?? -Infinity);
         return (va - vb) * mul;
       }
       const va = Number((pa as any)?.[sk] ?? -Infinity);
@@ -581,7 +591,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="text-right"><HitterSortBtn label="SLG" sk="p_slg" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="OPS" sk="p_ops" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="wRC+" sk="p_wrc_plus" /></TableHead>
-                <TableHead className="text-right"><HitterSortBtn label="oWAR" sk="o_war" /></TableHead>
+                <TableHead className="text-right"><HitterSortBtn label="WAR" sk="o_war" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="Market Value" sk="market_value" /></TableHead>
                 <TableHead className="text-center w-[180px]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span>
@@ -635,18 +645,19 @@ export default function TargetBoardSubtab() {
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_slg)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_ops)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt0(pred?.p_wrc_plus)}</TableCell>
-                        <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.o_war)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pickHitterWar(pred))}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">
                           {fmtMv(pred?.twp_hitter_market_value ?? pred?.market_value)}
                         </TableCell>
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
                             {(() => {
+                              // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                               const live = liveHitterScores(r.source_player_id);
-                              const brl = live?.barrel ?? pred?.hitter_barrel_score ?? pred?.barrel_score ?? null;
-                              const ev = live?.ev ?? pred?.ev_score ?? null;
-                              const con = live?.contact ?? pred?.contact_score ?? null;
-                              const chs = live?.chase ?? pred?.chase_score ?? null;
+                              const brl = pred?.hitter_barrel_score ?? pred?.barrel_score ?? live?.barrel ?? null;
+                              const ev = pred?.ev_score ?? live?.ev ?? null;
+                              const con = pred?.contact_score ?? live?.contact ?? null;
+                              const chs = pred?.chase_score ?? live?.chase ?? null;
                               return (
                                 <>
                                   {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
@@ -765,11 +776,12 @@ export default function TargetBoardSubtab() {
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
                             {(() => {
+                              // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                               const live = livePitcherScores(r.source_player_id);
-                              const stf = live?.stuff ?? pred?.stuff_score ?? null;
-                              const whf = live?.whiff ?? pred?.whiff_score ?? null;
-                              const bb = live?.bb ?? pred?.bb_score ?? null;
-                              const brl = live?.barrel ?? pred?.pitcher_barrel_score ?? pred?.barrel_score ?? null;
+                              const stf = pred?.stuff_score ?? live?.stuff ?? null;
+                              const whf = pred?.whiff_score ?? live?.whiff ?? null;
+                              const bb = pred?.bb_score ?? live?.bb ?? null;
+                              const brl = pred?.pitcher_barrel_score ?? pred?.barrel_score ?? live?.barrel ?? null;
                               return (
                                 <>
                                   {stf != null && <ScoutMiniBox label="Stf+" value={stf} />}

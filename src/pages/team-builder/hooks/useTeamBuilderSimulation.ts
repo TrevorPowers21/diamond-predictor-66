@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { computeWrcRawFromWeights, WRC_C1 } from "@/lib/wrc";
+import { computePrvPlus } from "@/lib/pitcherQuality";
 import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole, computeHitterMarketValue } from "@/lib/depthRoles";
 import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
 import { computeTransferProjection } from "@/lib/transferProjection";
@@ -12,6 +14,7 @@ import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjectio
 import {
   calcPitchingPlus as _calcPitchingPlusFromLib,
   toPitchingClassAdj as _toPitchingClassAdjFromLib,
+  type PitchingEquationWeights,
 } from "@/lib/pitchingEquations";
 import {
   TRANSFER_WEIGHT_DEFAULTS,
@@ -27,6 +30,7 @@ import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
 import { calcPlayerScore, getProgramTierMultiplierByConference, DEFAULT_NIL_TIER_MULTIPLIERS, getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { allocateNil, type NilAllocationMode } from "@/lib/nilAllocation";
 import {
   normalizeName,
   normalizeKey,
@@ -39,7 +43,7 @@ import {
   pitcherRoleFromSlot,
 } from "../helpers";
 import type { BuildPlayer, TeamRow } from "../types";
-import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue, pickHitterWar } from "@/lib/twpMarketValue";
 
 // ── Module-level pure helpers ────────────────────────────────────────────────
 
@@ -229,7 +233,10 @@ interface UseTeamBuilderSimulationParams {
   remoteEquationValues: Record<string, number>;
 
   // local memos that STAY in TeamBuilder (also used elsewhere in TB)
-  pitchingEq: Record<string, number>;
+  // ⛔ Do NOT widen to Record<string, number>. TeamBuilder passes readPitchingWeights(), which IS a
+  //    PitchingEquationWeights; widening it here silently drops all 121 required keys and lets a
+  //    partial/wrong weights object reach the projection helpers with no compiler complaint.
+  pitchingEq: PitchingEquationWeights;
   pitchingConfLookup: Map<string, any>;
   pitchingStatsByNameTeam: {
     byKey: Map<string, any>;
@@ -242,7 +249,8 @@ interface UseTeamBuilderSimulationParams {
   effectiveTeamId: string | null;
   rosterPlayers: any[];
   totalBudget: number;
-  fallbackRosterTotalPlayerScore: number;
+  /** Team's shared Balanced/Top-Heavy NIL allocation setting (from gm_budget). */
+  nilAllocationMode: NilAllocationMode;
   programTierMultiplier: number;
 
   // power lookup (computed in TB from powerRatingsData)
@@ -268,7 +276,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     effectiveTeamId,
     rosterPlayers,
     totalBudget,
-    fallbackRosterTotalPlayerScore,
+    nilAllocationMode,
     programTierMultiplier,
     powerLookup,
   } = params;
@@ -515,7 +523,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     queryFn: async () => {
       let q = supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_rv_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, market_value, projected_pa, p_war, projected_ip, pitcher_role, hitter_depth_role, pitcher_depth_role")
+        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_rv_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, d_war, bsr_war, total_hitter_war, market_value, projected_pa, p_war, projected_ip, pitcher_role, hitter_depth_role, pitcher_depth_role")
         .eq("season", PROJECTION_SEASON)
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
@@ -572,20 +580,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return Array.from(ids);
   }, [targetPredictionIds, liveTargetPredictions]);
 
-  const { data: predictionInternalsRows = EMPTY_INTERNALS } = useQuery({
-    queryKey: ["team-builder-prediction-internals", internalsPredictionIds],
-    enabled: internalsPredictionIds.length > 0,
-    staleTime: 60 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("player_prediction_internals")
-        .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
-        .in("prediction_id", internalsPredictionIds);
-      if (error) throw error;
-      return (data || []) as PredictionInternalsRow[];
-    },
-  });
+  // COLLAPSE (2026-08-12): internals read removed. This feeds only simulateTransferProjection,
+  // which is void'd (stored-first). Kept as an empty constant so the hook's shape + the empty
+  // internalsByPredictionId map are unchanged; the dead sim path + plumbing get swept in the
+  // app-wide dead-code audit. No player_prediction_internals reference remains here.
+  const predictionInternalsRows = EMPTY_INTERNALS;
 
   const internalsByPredictionId = useMemo(() => {
     const map = new Map<string, PredictionInternalsRow>();
@@ -651,13 +650,53 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
           p_rv_plus: p.transfer_snapshot.p_rv_plus ?? null,
           p_war: p.transfer_snapshot.p_war ?? null,
           nil_valuation: p.transfer_snapshot.nil_valuation ?? null,
-          owar: p.transfer_snapshot.owar ?? null,
+          // ★ 2026-09-01 — the `owar` DISPLAY field carries TOTAL hitter WAR (o+d+bsr), the
+          //   position-player headline — same convention as the clean path below
+          //   (`owar: totalHitterWar`). Reading `.owar` alone showed the oWAR COMPONENT only:
+          //   Ryder Helfrick rendered 2.32 instead of 4.94 on a freshly added target row.
+          //   Falls back to the component for snapshots written before total_hitter_war existed.
+          owar: p.transfer_snapshot.total_hitter_war
+            ?? p.transfer_snapshot.owar ?? p.transfer_snapshot.o_war ?? null,
         }
       : null;
+    // ★★★ 2026-09-01 — CLEAN ROW: STORED IS FINAL, AND NOTHING BELOW RUNS. ★★★
+    // Everything below is legacy LIVE compute for the target/transfer path. It re-derives rates and
+    // oWAR from the live precomputed row, and it returns rates UNSCALED while oWAR is ALREADY scaled
+    // — so `shownFinal` scales the rates a second time (.3172 x 1.0784^2 = .356 vs the correct .342).
+    //
+    // 🛑 THAT IS THE FLICKER AND THE LOCK. `liveTargetPlayerById` / `liveTargetPredictionByPlayerId`
+    //    are in this memo's dep array (:1145), so the FIRST pass renders the stored value correctly
+    //    and the SECOND pass — after those queries resolve — swaps in the doubled one and stays.
+    //    Nothing is racing on merit; the async pass simply lands last.
+    // ⇒ A clean row has its answer on disk. Return it before any of this executes.
+    const storedClean: any = (p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null;
+    if (!(p as any)._dirty && storedClean && storedClean.p_wrc_plus != null) {
+      return {
+        p_avg: storedClean.p_avg ?? null,
+        p_obp: storedClean.p_obp ?? null,
+        p_slg: storedClean.p_slg ?? null,
+        p_ops: storedClean.p_ops ?? ((storedClean.p_obp ?? 0) + (storedClean.p_slg ?? 0)),
+        p_iso: storedClean.p_iso ?? null,
+        p_wrc_plus: storedClean.p_wrc_plus ?? null,
+        owar: pickHitterWar(storedClean) ?? storedClean.o_war ?? storedClean.owar ?? null,
+        nil_valuation: storedClean.nil_valuation ?? storedClean.market_value ?? null,
+      } as any;
+    }
     if (!selectedTeam) return snapshotFallback;
     if (!p.player) return snapshotFallback;
     const livePlayer = (p.player_id ? liveTargetPlayerById.get(p.player_id) : null) || p.player;
-    const livePred = (p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null) || p.prediction;
+    // ★ 2026-09-01 — stored snapshot FIRST; the async live precomputed row is only the fallback for
+    // a row that has no snapshot yet. Preferring the live row discarded every saved toggle.
+    // ★ 2026-09-01 — STORED SNAPSHOT ONLY. The async live precomputed row is gone from display.
+    // It resolved AFTER first paint and re-ran this memo, so the page rendered the snapshot (total
+    // WAR 33) and then swapped to the live precomputed line (31.46). That is the flicker: a race
+    // between a stored value and an async query, which the async query always won because it landed
+    // second. There is nothing to race — the snapshot is on disk before the page mounts.
+    // ⛔ REAL snapshots only — `p.prediction` is `snapshot ?? predictionMap[...]` and degrades to
+    //    the raw prediction row on a lookup miss (Stevens: showed the $62,490 neutral/precompute
+    //    instead of his $102,304 saved snapshot).
+    // dirty -> neutral (no compounding); clean -> stored snapshot
+    const livePred = ((p as any)._dirty ? (p.neutralPrediction ?? ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) : (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? p.neutralPrediction)) as any;
     if (!livePred) {
       return snapshotFallback;
     }
@@ -683,7 +722,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const devAggClassAdj = ctRaw === "FS" ? 0.03 : ctRaw === "GR" ? 0.01 : 0.02;
       const storedMult = 1 + devAggClassAdj + storedDevAgg * 0.06;
       const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
-      const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
+      // ★★★ 2026-09-01 — THE GUARDRAIL, COPIED FROM PlayerProfile.tsx:986 ★★★
+      //   const devAggScale = isSnapshotBacked ? 1 : (_storedMult > 0 ? _sessionMult / _storedMult : 1);
+      // A snapshot-backed row ALREADY HAS the toggle and depth role baked in. Scaling it again is a
+      // DOUBLE RECOMPUTE: toggle to 1 scales and the save bakes it; toggle back to 0 then recomputes
+      // off the BAKED line so nothing moves; toggle to 1 again scales the baked value a second time.
+      // That is the target-board bug. PlayerProfile forces the scale to 1 whenever a stored snapshot
+      // exists and has never had this problem — Team Builder computed the ratio unconditionally.
+      // A DIRTY row still scales, because it recomputes from neutral (dev_agg=0) and cannot compound.
+      const snapshotBacked = !!(p as any)._snapshotBacked && !(p as any)._dirty;
+      const devAggScale = snapshotBacked ? 1 : (storedMult > 0 ? sessionMult / storedMult : 1);
       void depthScale; // depth now flows through session PA in computeOWar below
       // oWAR REBUILT from the dev-adjusted wRC+ over the session depth PA
       // (computeOWar) — NOT scaled from stored oWAR. oWAR is affine in wRC+, so
@@ -882,17 +930,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
       const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
 
-      // pRV+ stored/displayed whole (mirrors wRC+) so display and WAR share the integer.
-      const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
-        ? Math.round(
-          (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
-          (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
-          (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
-          (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
-          (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
-          (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
-        )
-        : result.p_rv_plus;
+      // pRV+ = D1-FIP index from adjusted K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts); +stats kept for display.
+      const prvAdjRaw = computePrvPlus(adjK9, adjBb9, adjHr9);
+      const pRvPlusAdj = prvAdjRaw == null ? result.p_rv_plus : Math.round(prvAdjRaw);
 
       return {
         p_avg: null,
@@ -975,6 +1015,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         bb: seed.bb, chase: seed.chase,
         barrel: seed.barrel, ev90: seed.ev90,
         pull: seed.pull, la10_30: seed.la10_30, gb: seed.gb,
+        pullAir: null, // ★ 2026-08-31 — this surface has no pitch-log `pull_air`; powerRatings falls back to raw pull% (`pullAirEff = pullAirScore ?? pullScore`). Explicit null == the previous omission (scoreFromNormal guards `x == null`).
       });
       return computed;
     })();
@@ -1025,7 +1066,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const ncaaAvgBA = toRate(eqNum("t_ba_ncaa_avg", 0.280));
     const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
     const ncaaAvgISO = toRate(eqNum("t_iso_ncaa_avg", 0.162));
-    const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+    const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.3782));
     const baStdPower = eqNum("t_ba_std_pr", 31.297);
     const baStdNcaa = toRate(eqNum("t_ba_std_ncaa", 0.043455));
     const obpStdPower = eqNum("t_obp_std_pr", 28.889);
@@ -1045,10 +1086,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const isoParkWeight = toWeight(jW("t_iso_park_weight", eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)));
     const isoStdPower = eqNum("t_iso_std_power", 45.423);
     const isoStdNcaa = toRate(eqNum("t_iso_std_ncaa", 0.07849797197));
-    const wObp = toRate(eqNum("r_w_obp", 0.45));
-    const wSlg = toRate(eqNum("r_w_slg", 0.30));
-    const wAvg = toRate(eqNum("r_w_avg", 0.15));
-    const wIso = toRate(eqNum("r_w_iso", 0.10));
+    const wObp = toRate(eqNum("r_w_obp", 0.691));
+    const wSlg = toRate(eqNum("r_w_slg", 0.235));
+    const wAvg = toRate(eqNum("r_w_avg", 0));
+    const wIso = toRate(eqNum("r_w_iso", 0));
 
     const projected = computeTransferProjection({
       lastAvg,
@@ -1109,15 +1150,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const pObpAdj = projected.pObp * transferMult;
     const pIsoAdj = projected.pIso * transferMult;
     const pSlgAdj = pAvgAdj + pIsoAdj;
-    const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+    const pWrcAdj = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObpAdj, pSlgAdj, pAvgAdj, pIsoAdj);
     const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
-    const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
-    const pa = 260;
-    const runsPerPa = 0.13;
-    const replacementRuns = (pa / 600) * 25;
-    const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
-    const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
-    const owarAdj = rarAdj == null ? null : rarAdj / 10;
+    const owarAdj = computeOWarFromWrcPlus(pWrcPlusAdj, 260); // centralized (war.ts constants)
     const basePerOwar = eqNum("nil_base_per_owar", 25000);
     const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(livePlayer.position ?? p.player?.position ?? null);
@@ -1139,16 +1174,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // order matters here, otherwise TDZ throws on first TB render.
 
   // ── Block L: pitchingTierMultipliers, pitchingPvfForRole ─────────────────────
-  const pitchingTierMultipliers = useMemo(
-    () => ({
-      sec: pitchingEq.market_tier_sec,
-      p4: pitchingEq.market_tier_acc_big12,
-      bigTen: pitchingEq.market_tier_big_ten,
-      strongMid: pitchingEq.market_tier_strong_mid,
-      lowMajor: pitchingEq.market_tier_low_major,
-    }),
-    [pitchingEq],
-  );
+  // 2026-08-21 UNIFICATION: single PTM source (DEFAULT_NIL_TIER_MULTIPLIERS / model_config
+  // nil_tier_*), same as the hitter side (line ~1103) — not eq.market_tier_*.
+  const pitchingTierMultipliers = DEFAULT_NIL_TIER_MULTIPLIERS;
   const pitchingPvfForRole = useCallback((role: "SP" | "RP") => {
     return role === "SP" ? pitchingEq.market_pvf_weekend_sp : pitchingEq.market_pvf_reliever;
   }, [pitchingEq]);
@@ -1298,6 +1326,40 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block O: playerProjection ────────────────────────────────────────────────
   const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
+    // ★★★ 2026-09-01 — STORED SNAPSHOT ONLY. NO FALLBACKS. (Trevor) ★★★
+    //   "just remove the fallback all together. It needs to be transfer snapshot and player
+    //    snapshot only with the guardrails that is all"
+    // A CLEAN row returns its stored snapshot verbatim and NOTHING below runs — no neutral, no
+    // async live precomputed query, no overlay, no live projection. Those fallbacks are what
+    // produced every symptom today: the un-toggled line on transfers, and total WAR rendering 33
+    // then settling to 31.46 when an async query landed second and re-ran this memo.
+    // ⇒ There is nothing to fall back TO. The snapshot is on disk before the page mounts.
+    // A DIRTY row (toggle moved this session) still falls through to the recompute below, which
+    // scales from neutral — the guardrail that stops a toggle compounding on a baked line.
+    if (!(p as any)._dirty) {
+      // ⛔ NOT `p.prediction` — that is `snapshot ?? predictionMap[...]` and degrades to the raw
+      //    prediction row on a snapshot miss, which is exactly how the un-toggled line kept winning.
+      //    Only the two real snapshots are acceptable here.
+      const stored: any = (p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null;
+      if (stored) {
+        if (treatAsPitcher) {
+          if (stored.p_war != null) {
+            return {
+              sim: null, shown: stored,
+              shownWrc: stored.p_rv_plus != null ? Math.round(Number(stored.p_rv_plus)) : null,
+              owar: Number(stored.p_war), pwar: Number(stored.p_war),
+            };
+          }
+        } else if (stored.p_wrc_plus != null) {
+          const hw = pickHitterWar(stored);
+          return {
+            sim: null, shown: stored,
+            shownWrc: Math.round(Number(stored.p_wrc_plus)),
+            owar: hw != null ? Number(hw) : null, pwar: null,
+          };
+        }
+      }
+    }
     // ── Phase B: CLEAN read ──────────────────────────────────────────────────
     // A CLEAN row (no toggle changed this session) reads its STORED adjusted
     // snapshot directly — synchronous, no async recompute, so no load flicker.
@@ -1325,16 +1387,30 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         if (treatAsPitcher && snap.p_war != null && snap.p_rv_plus != null) {
           return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_rv_plus)), owar: Number(snap.p_war), pwar: Number(snap.p_war) };
         }
-        // transfer_snapshot stores oWAR as `owar`; build snapshot as `o_war`.
-        const hitterWar = snap.o_war ?? snap.owar;
+        // Headline hitter WAR = total_hitter_war (o+d+bsr); pickHitterWar falls back to
+        // o_war/owar until snapshots are re-baked with the total (transfer_snapshot=`owar`, build=`o_war`).
+        const hitterWar = pickHitterWar(snap);
         if (!treatAsPitcher && hitterWar != null && snap.p_wrc_plus != null) {
-          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)), owar: Number(hitterWar), pwar: null };
+          // Same shape as the dirty path below: headline in `owar`, components alongside. A CLEAN row
+          // is what the coach sees after a save persists, so the two must be interchangeable —
+          // otherwise the number moves the instant the live compute hands back to the snapshot.
+          const dW = Number((snap as any).d_war);
+          const bW = Number((snap as any).bsr_war);
+          return {
+            sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)),
+            owar: Number(hitterWar), pwar: null,
+            oWarOnly: Number((snap as any).o_war ?? (snap as any).owar ?? hitterWar),
+            dWar: Number.isFinite(dW) ? dW : 0,
+            bsrWar: Number.isFinite(bW) ? bW : 0,
+          };
         }
       }
     }
-    const storedPrecomputed = p.roster_status === "target" && p.player_id
-      ? liveTargetPredictionByPlayerId.get(p.player_id)
-      : null;
+    // ⛔ 2026-09-01 — NO LONGER USED FOR DISPLAY. Kept only so the surrounding code compiles.
+    // This was the async live precomputed row that won the race against the stored snapshot and
+    // caused total WAR to render 33 then settle to 31.46 on every refresh.
+    const storedPrecomputed = null;
+    void liveTargetPredictionByPlayerId;
     // Stored precomputed row is the only source of truth for target players.
     // Primary source: liveTargetPredictionByPlayerId (fresh query keyed per team).
     // Hitter targets fall back to p.prediction (same precomputed row loaded at
@@ -1360,8 +1436,19 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // (not a wrong-team transfer number, the bug the old snapshot-always guard was papering over).
     const boardOnlyTarget = p.roster_status === "target" && !(p as any).included_in_roster;
     const shown = boardOnlyTarget
-      ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
-      : (treatAsPitcher ? ((p.neutralPrediction ?? p.prediction) ?? computeReturnerPitchingProjection(p)) : (p.neutralPrediction ?? p.prediction));
+      ? (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) as any)
+      // ★ 2026-09-01 — STORED SNAPSHOT ONLY. The neutral fallback is REMOVED.
+      // Neutral is the dev_agg=0 checkpoint the DIRTY recompute scales from — never a display
+      // source. Reading it here is what showed the un-toggled line on every transfer.
+      // ★★★ CLEAN -> STORED SNAPSHOT.  DIRTY -> NEUTRAL. ★★★
+      // A DIRTY row is mid-toggle and the overlay below MULTIPLIES the rates by the dev ratio. If the
+      // base were the stored snapshot — which already has the toggle BAKED IN — the rates would be
+      // scaled twice: Jake Hanley stored .342 rendering .356 at dev 1. (WAR and market hid it, because
+      // oWAR is REBUILT from wRC+ rather than scaled from stored.)
+      // Neutral is the dev_agg=0 checkpoint precisely so the recompute cannot compound.
+      : ((treatAsPitcher
+          ? ((p as any)._dirty ? (p.neutralPrediction ?? ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) : (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? p.neutralPrediction)) ?? computeReturnerPitchingProjection(p)
+          : ((p as any)._dirty ? (p.neutralPrediction ?? ((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null)) : (((p as any).player_snapshot ?? (p as any).transfer_snapshot ?? null) ?? p.neutralPrediction))) as any);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       // Mirror hitter dev_agg pattern: one ratio formula, no target-only gate,
@@ -1424,13 +1511,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         const k9P   = calcPitchingPlus(rtK9,   pitchingEq.k9_plus_ncaa_avg,   pitchingEq.k9_plus_ncaa_sd,   pitchingEq.k9_plus_scale,   true);
         const bb9P  = calcPitchingPlus(rtBb9,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
         const hr9P  = calcPitchingPlus(rtHr9,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
-        const rtPRvPlus = [eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)
-          ? Math.round(
-            (Number(eraP) * pitchingEq.era_plus_weight) + (Number(fipP) * pitchingEq.fip_plus_weight) +
-            (Number(whipP) * pitchingEq.whip_plus_weight) + (Number(k9P) * pitchingEq.k9_plus_weight) +
-            (Number(bb9P) * pitchingEq.bb9_plus_weight) + (Number(hr9P) * pitchingEq.hr9_plus_weight)
-          )
-          : (devSource.p_rv_plus ?? devSource.p_wrc_plus ?? null);
+        // pRV+ = D1-FIP index from role-adjusted K9/BB9/HR9 (canonical src/lib/pitcherQuality.ts).
+        const rtPRvRaw = computePrvPlus(rtK9, rtBb9, rtHr9);
+        const rtPRvPlus = rtPRvRaw == null ? (devSource.p_rv_plus ?? devSource.p_wrc_plus ?? null) : Math.round(rtPRvRaw);
         return {
           ...devSource,
           p_era: rtEra, p_fip: rtFip, p_whip: rtWhip, p_k9: rtK9, p_bb9: rtBb9, p_hr9: rtHr9,
@@ -1484,13 +1567,13 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const pSlg = Number(shown?.p_slg);
       const pIso = Number(shown?.p_iso ?? ((Number.isFinite(pSlg) && Number.isFinite(pAvg)) ? (pSlg - pAvg) : NaN));
       if (![pAvg, pObp, pSlg, pIso].every(Number.isFinite)) return null;
-      const wObp = eqNum("r_w_obp", 0.45);
-      const wSlg = eqNum("r_w_slg", 0.3);
-      const wAvg = eqNum("r_w_avg", 0.15);
-      const wIso = eqNum("r_w_iso", 0.1);
-      const ncaaWrc = eqNum("r_ncaa_avg_wrc", 0.364);
+      const wObp = eqNum("r_w_obp", 0.691);
+      const wSlg = eqNum("r_w_slg", 0.235);
+      const wAvg = eqNum("r_w_avg", 0);
+      const wIso = eqNum("r_w_iso", 0);
+      const ncaaWrc = eqNum("r_ncaa_avg_wrc", 0.3782);
       if (!Number.isFinite(ncaaWrc) || ncaaWrc <= 0) return null;
-      const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
+      const pWrc = computeWrcRawFromWeights({ intercept: WRC_C1.intercept, obp: wObp, slg: wSlg, avg: wAvg, iso: wIso }, pObp, pSlg, pAvg, pIso);
       return Math.round((pWrc / ncaaWrc) * 100);
     })();
     // Stored o_war is the canonical baseline — depth and dev_aggressiveness are
@@ -1523,7 +1606,33 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
     // Apply devAgg scale to slash stats — mirrors PlayerProfile.applyDevScale.
     // Depth role only affects PA → oWAR, not the rate stats themselves.
-    const shownFinal: any = (shown != null && devAggScale !== 1) ? {
+    // ★★★ 2026-09-01 — DO NOT RE-SCALE A ROW THAT IS ALREADY FINAL. ★★★
+    // Every source that reaches `shown` has already had the toggle applied exactly once:
+    //   CLEAN  -> the stored snapshot, with the toggle BAKED IN at save time
+    //   DIRTY  -> the target overlay / neutral recompute, which applies devAggScale itself
+    // Multiplying here applied it a SECOND time to the rates only — oWAR is REBUILT from wRC+ rather
+    // than multiplied, which is why WAR and market stayed correct while avg/obp/slg drifted:
+    //   Jake Hanley  .3172 x 1.0784 = .342 (correct)   x 1.0784 again = .356 (what rendered)
+    // And because the async target queries re-run this memo, the doubled value landed last and stuck
+    // — the flicker-then-lock.
+    // ★★★ THE LIVE BRIDGE + ITS GUARDRAILS (2026-09-01) ★★★
+    // DIRTY -> scale ONCE, instantly. The row is mid-toggle, its base is NEUTRAL (dev_agg=0), nothing
+    //          is saved yet, and the coach must see the move in the ~20s before the save lands. The
+    //          SAVE then persists what is displayed — so with this gated off, a toggle to 1.0 wrote
+    //          the UNSCALED line (Hanley: notes dev 1, snapshot .3172/122, dev_aggressiveness 0).
+    // CLEAN -> stored snapshot VERBATIM. The toggle is already baked in; scaling again applied it
+    //          TWICE and only to the rates (oWAR is rebuilt from wRC+, not multiplied):
+    //          .3172 x1.0784 = .342 correct, x1.0784 again = .356 — and that got SAVED, corrupting
+    //          18 staging rows.
+    //
+    // 🛡 THREE GUARDRAILS, ALL REQUIRED — removing any one re-opens the compounding:
+    //   1. this `_dirty` gate — a clean row is NEVER scaled, so one toggle = one scale, ever
+    //   2. base = neutralPrediction while dirty — scaling a BAKED snapshot is what compounded
+    //   3. snapshotBacked forces devAggScale = 1 on a clean row (mirrors PlayerProfile.tsx:986)
+    // Sequence: toggle -> dirty -> scale neutral once -> save bakes it -> row goes clean -> stored is
+    // read verbatim and never scaled again.
+    const shownFinal: any
+      = ((p as any)._dirty && shown != null && devAggScale !== 1) ? {
       ...(shown as any),
       p_avg:     (shown as any).p_avg     != null ? Number((shown as any).p_avg)     * devAggScale : null,
       p_obp:     (shown as any).p_obp     != null ? Number((shown as any).p_obp)     * devAggScale : null,
@@ -1533,7 +1642,36 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     } : shown;
     const shownWrcFinal = shownFinal?.p_wrc_plus ?? shownWrc;
 
-    return { sim, shown: shownFinal, shownWrc: shownWrcFinal, owar, pwar: null };
+    // 🛑 HEADLINE HITTER WAR = scaled oWAR + dWAR + bsrWAR (Trevor, 2026-09-01):
+    //    "we are still only scaling oWAR with dev aggressiveness and role changes, then
+    //     total hitter war is scaled oWAR + dWAR + bsrWAR."
+    //
+    // ★ THIS WAS THE TRAEGER BUG. The CLEAN path above (:1309) returns `pickHitterWar(snap)`, which
+    //   is `total_hitter_war` (o+d+bsr). This DIRTY path returned bare `owar`. Same field name, two
+    //   different quantities — so a toggle silently DROPPED dWAR + bsrWAR and the number fell, then
+    //   "healed" on reload when the clean path took over again.
+    //   Traeger, measured on prod: o_war 2.0807 / total 2.153 (adjusted), o_war 1.367 / total 1.4398
+    //   (neutral). Trevor watched it flash 2.08 (dirty → oWAR only) and settle at 1.44
+    //   (clean → neutral total). Both were real values; the field just meant different things.
+    //
+    // ⛔ dWAR and bsrWAR are NOT scaled — they are destination-invariant, player-level, and the dev
+    //    toggle has no claim on them. Only oWAR moves. Do not "improve" this by scaling them too.
+    // ⚠ Read them off `shown` (the neutral base), never off an already-adjusted snapshot.
+    const dWarBase = Number((shown as any)?.d_war);
+    const bsrWarBase = Number((shown as any)?.bsr_war);
+    const dWar = Number.isFinite(dWarBase) ? dWarBase : 0;
+    const bsrWar = Number.isFinite(bsrWarBase) ? bsrWarBase : 0;
+    const totalHitterWar = owar != null ? owar + dWar + bsrWar : null;
+
+    // ⚠ `owar` here is the HEADLINE (total) so it matches the clean path at :1309, which returns
+    //    `pickHitterWar(snap)` = total_hitter_war. Display and sorting read this field.
+    // 🛑 The COMPONENTS are returned alongside because the SAVE must persist them separately:
+    //    writing the total into `o_war` would corrupt the stored row. See TeamBuilder.tsx save.
+    return {
+      sim, shown: shownFinal, shownWrc: shownWrcFinal,
+      owar: totalHitterWar, pwar: null,
+      oWarOnly: owar, dWar, bsrWar,
+    };
   }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, liveTargetPredictionByPlayerId, remoteEquationValues]);
 
   // Off-roster target gate: a target row that the coach hasn't toggled "on
@@ -1571,7 +1709,6 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return calcPlayerScore({
       owar,
       programTierMultiplier,
-      position: p.position_slot || p.player?.position,
     });
   }, [playerProjection, programTierMultiplier]);
 
@@ -1645,75 +1782,45 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // budget after overrides). Defined here so effectiveNilForPlayer can use it
   // as the canonical "not overridden" value — coaches think in budget share,
   // not market value, when filling the Actual Value column.
+  // Roster-level NIL allocation (replaces the old proportional share + the
+  // RAW_WAR_BENCHMARK 33 floor). The on-roster projected set is ranked by score
+  // and the budget is distributed via the allocateNil curve (rank-decay +
+  // budget-flex, sums to budget by construction — docs/RSTR_IQ_NIL_Allocation_Spec
+  // §2). PVM is NOT in the score (spec §1); positional value is priced by the
+  // scarcity layer, not the allocation. nilAllocationMode is the team's SHARED
+  // Balanced/Top-Heavy setting (from gm_budget), so TB's projected values match
+  // whatever the GM toggle is set to.
+  const nilAllocation = useMemo(() => {
+    // Overridden players stay in the ranked set BY SCORE (they display their
+    // coach-entered $ below), so entering an actual on one player does not
+    // reshuffle everyone else's projected value — the "stable share" property.
+    const onRoster = rosterPlayers.filter((rp) => isProjectedStatus(rp) && countsTowardRoster(rp));
+    const scores = onRoster.map((rp) => projectedPlayerScore(rp));
+    const dollars = allocateNil(scores, totalBudget, nilAllocationMode);
+    const paid = dollars.filter((d) => d > 0);
+    const avgAllocation = paid.length > 0 ? paid.reduce((a, b) => a + b, 0) / paid.length : 0;
+    const byPlayer = new Map<BuildPlayer, number>();
+    onRoster.forEach((rp, i) => byPlayer.set(rp, dollars[i]));
+    return { byPlayer, scores, avgAllocation };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectedPlayerScore, totalBudget, rosterPlayers, nilAllocationMode]);
+
   const projectedBudgetShareForPlayer = useCallback((p: BuildPlayer): number => {
     if (!isProjectedStatus(p) || totalBudget <= 0) return 0;
     if (p.nil_value_overridden) {
       const v = Number(p.nil_value);
       return Number.isFinite(v) ? Math.max(0, v) : 0;
     }
-    // STABLE share: price every player against the FULL budget and the FULL
-    // roster score (overridden players included in the denominator), so a
-    // player's projected value does NOT move when a coach enters actual pay
-    // on someone else. Entering a value overrides that one player's row only
-    // (handled above). The live "redistribute the remaining budget as pay is
-    // assigned" behavior is deferred to the Situation Room, not Team Builder.
-    // Denominator includes returners + on-roster targets + the target being
-    // computed (so off-roster targets each see their own "what if I were the
-    // next add" share). Other off-roster targets are skipped so they don't
-    // dilute each other's marginal value — each priced as the lone next add.
-    let totalScore = 0;
-    for (const rp of rosterPlayers) {
-      if (!isProjectedStatus(rp)) continue;
-      if (!countsTowardRoster(rp) && rp !== p) continue;
-      totalScore += projectedPlayerScore(rp);
-    }
-    const remainingBudget = totalBudget;
-    if (totalScore <= 0) return 0;
-    const score = projectedPlayerScore(p);
-    // League-wide denominator floor — fixes "shrinking roster inflates
-    // per-player share" bug exposed by the off-roster target toggle.
-    //
-    // The raw share formula divides by the actual roster's score sum.
-    // When coaches toggle most targets off-roster, the denominator
-    // collapses (e.g., 7-WAR roster on a $3.5M budget showed a 2-WAR
-    // player at ~$1M — way above market). The floor caps that
-    // inflation by saying "for budget-share purposes, never use a
-    // denominator smaller than what a typical competitive D1 roster
-    // scores."
-    //
-    // RAW_WAR_BENCHMARK = 33 — calibrated to where the actual NIL
-    // budget money is. Customer base (12 teams, season 2026):
-    //   league p75 = 28.8 (all 309 D1 teams)
-    //   customer median = 28.1
-    //   customer mean = 29.4
-    //   customer p75 = 34.9 (Vanderbilt / Kansas / Arkansas territory)
-    //   customer top-half median ≈ 35 (Arkansas / Kansas)
-    // 33 captures "what a competitive high-budget customer expects
-    // their roster to be" — not the median of every customer (which
-    // would under-floor for the high-budget power-conference programs
-    // where the inflation actually shows up). Floor barely activates
-    // for top customers with full rosters (Georgia, Arizona State,
-    // Arkansas), activates appropriately when their roster collapses
-    // due to off-roster target toggles.
-    //
-    // adjustedBenchmark = RAW_WAR_BENCHMARK × programTierMultiplier
-    // so the floor is on the SAME scale as projectedPlayerScore
-    // (which has tier + position multipliers baked in). The tier
-    // multiplier on both numerator and denominator cancels for the
-    // SAME player, meaning two coaches at different tiers with the
-    // SAME budget see similar values — budget is the dominant signal,
-    // tier doesn't double-count on top of it. Position premium
-    // (1.3x C/SS/CF, 1.0x DH/1B, etc.) survives in the numerator only,
-    // so premium positions still command premium shares.
-    //
-    // When the actual roster score exceeds adjustedBenchmark, the
-    // formula reverts to pure proportional split — bigger rosters
-    // → smaller individual shares, exactly the prior behavior.
-    const RAW_WAR_BENCHMARK = 33;
-    const adjustedBenchmark = RAW_WAR_BENCHMARK * programTierMultiplier;
-    const denominator = Math.max(totalScore, adjustedBenchmark);
-    return (score / denominator) * remainingBudget;
-  }, [projectedPlayerScore, totalBudget, rosterPlayers, programTierMultiplier]);
+    // On-roster player → read the curve slot.
+    const share = nilAllocation.byPlayer.get(p);
+    if (share != null) return Math.max(0, share);
+    // Off-roster target → "the lone next add": run the curve on the on-roster set
+    // PLUS this one target and read its slot, so off-roster targets never dilute
+    // each other's marginal value (each priced as if it were the next addition).
+    const withTarget = [...nilAllocation.scores, projectedPlayerScore(p)];
+    const dollars = allocateNil(withTarget, totalBudget, nilAllocationMode);
+    return Math.max(0, dollars[dollars.length - 1] ?? 0);
+  }, [nilAllocation, projectedPlayerScore, totalBudget, nilAllocationMode]);
 
   const effectiveNilForPlayer = useCallback((p: BuildPlayer, _side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;
@@ -1930,6 +2037,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     effectiveNilForPlayer,
     isProjectedStatus,
     projectedBudgetValue,
+    nilAvgAllocation: nilAllocation.avgAllocation,
     calcTotals,
     rosterTableTotals,
     positionTableTotals,

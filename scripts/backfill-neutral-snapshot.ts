@@ -12,16 +12,33 @@ const ENV = process.argv.includes("--prod") ? ".env.production.local" : ".env.lo
 const rd = (f: string, k: string) => (fs.readFileSync(f, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] || "").trim().replace(/^"|"$/g, "");
 const sb = createClient(rd(ENV, "VITE_SUPABASE_URL") || rd(ENV, "SUPABASE_URL"), rd(ENV, "SUPABASE_SERVICE_ROLE_KEY"));
 const APPLY = process.argv.includes("--apply");
+/**
+ * --target-board-only : write ONLY `target_board`, skip `team_build_players`.
+ *
+ * 🛑 THE TWO TABLES DO NOT SHARE A SNAPSHOT SHAPE. Verified on staging 2026-09-01:
+ *      target_board          neutral = the NORMALIZED object this file's neutralFor() builds
+ *                                      (13 hitter keys / 15 pitcher keys)   ← this script is CORRECT
+ *      team_build_players    PITCHER neutral = a VERBATIM copy of the prediction row (77 keys:
+ *                                      id, player_id, variant, customer_team_id, model_type,
+ *                                      from_ fields, score fields, ...)                          ← this script is WRONG
+ *   `scripts/backfill-neutral-snapshots.ts` (PLURAL) owns team_build_players and carries an explicit
+ *   "⛔ Do NOT normalize the pitcher shape" warning, because TB's readers expect those extra keys.
+ *   Running this file over team_build_players would STRIP them.
+ * ⇒ Use --target-board-only here; use the PLURAL script (with --refresh) for builds.
+ *   The two scripts are NOT interchangeable and neither supersedes the other.
+ */
+const TARGET_BOARD_ONLY = process.argv.includes("--target-board-only");
 console.log(`### DB: ${ENV}  APPLY=${APPLY} ###`);
 const isPit = (s: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
-const page = async (t: string, sel: string, flt: (q: any) => any) => { let f = 0, o: any[] = []; for (;;) { let q = sb.from(t).select(sel); q = flt(q); const { data, error } = await q.range(f, f + 999); if (error) throw error; o = o.concat(data || []); if (!data || data.length < 1000) break; f += 1000; } return o; };
+// .order("id") is REQUIRED — range() pagination without a stable sort silently skips/dupes rows across pages.
+const page = async (t: string, sel: string, flt: (q: any) => any) => { let f = 0, o: any[] = []; for (;;) { let q = sb.from(t).select(sel); q = flt(q); const { data, error } = await q.order("id", { ascending: true }).range(f, f + 999); if (error) throw error; o = o.concat(data || []); if (!data || data.length < 1000) break; f += 1000; } return o; };
 
 // own-side neutral line (mirrors the prediction fields the recompute reads); the OFF
 // side is nulled so a slot row never carries the other side's neutral.
 function neutralFor(pred: any, side: "P" | "H"): any {
   const base: any = { dev_aggressiveness: 0, class_transition: pred.class_transition ?? null };
   if (side === "H") {
-    Object.assign(base, { p_avg: pred.p_avg ?? null, p_obp: pred.p_obp ?? null, p_slg: pred.p_slg ?? null, p_wrc_plus: pred.p_wrc_plus ?? null, o_war: pred.o_war ?? null, hitter_depth_role: pred.hitter_depth_role ?? null, twp_hitter_market_value: pred.twp_hitter_market_value ?? null, market_value: pred.market_value ?? null });
+    Object.assign(base, { p_avg: pred.p_avg ?? null, p_obp: pred.p_obp ?? null, p_slg: pred.p_slg ?? null, p_wrc_plus: pred.p_wrc_plus ?? null, o_war: pred.o_war ?? null, total_hitter_war: pred.total_hitter_war ?? null, d_war: pred.d_war ?? null, bsr_war: pred.bsr_war ?? null, hitter_depth_role: pred.hitter_depth_role ?? null, twp_hitter_market_value: pred.twp_hitter_market_value ?? null, market_value: pred.market_value ?? null });
   } else {
     Object.assign(base, { p_era: pred.p_era ?? null, p_fip: pred.p_fip ?? null, p_whip: pred.p_whip ?? null, p_k9: pred.p_k9 ?? null, p_bb9: pred.p_bb9 ?? null, p_hr9: pred.p_hr9 ?? null, p_rv_plus: pred.p_rv_plus ?? null, p_war: pred.p_war ?? null, pitcher_role: pred.pitcher_role ?? null, pitcher_depth_role: pred.pitcher_depth_role ?? null, market_value: pred.market_value ?? null, twp_pitcher_market_value: pred.twp_pitcher_market_value ?? null, projected_ip: pred.projected_ip ?? null });
   }
@@ -42,7 +59,7 @@ const hasSide = (r: any, side: "P" | "H") => side === "P" ? (r.pitcher_role != n
   for (let i = 0; i < pids.length; i += 200) { const { data } = await sb.from("players").select("id, position").in("id", pids.slice(i, i + 200)); for (const p of (data || [])) pos.set(p.id, p.position); }
 
   // per-player prediction fetch (reliable, no cap)
-  const F = "customer_team_id, variant, model_type, status, p_avg, p_obp, p_slg, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, o_war, pitcher_role, class_transition, hitter_depth_role, pitcher_depth_role, market_value, twp_hitter_market_value, twp_pitcher_market_value, projected_ip";
+  const F = "customer_team_id, variant, model_type, status, p_avg, p_obp, p_slg, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, o_war, total_hitter_war, d_war, bsr_war, pitcher_role, class_transition, hitter_depth_role, pitcher_depth_role, market_value, twp_hitter_market_value, twp_pitcher_market_value, projected_ip";
   const preds = new Map<string, any[]>();
   for (let i = 0; i < pids.length; i++) { const { data } = await sb.from("player_predictions").select(F).eq("season", 2027).eq("player_id", pids[i]).in("variant", ["regular", "precomputed"]).in("status", ["active", "departed"]); if (data?.length) preds.set(pids[i] as string, data); if ((i + 1) % 100 === 0) process.stdout.write(`\r  preds ${i + 1}/${pids.length}`); }
   process.stdout.write("\r");
@@ -62,7 +79,8 @@ const hasSide = (r: any, side: "P" | "H") => side === "P" ? (r.pitcher_role != n
   console.log(`team_build_players: ${bpSet} to set, ${bpMiss} no-neutral (no-AB/local)`);
   console.log(`target_board:       ${tbSet} to set, ${tbMiss} no-neutral`);
   if (!APPLY) { console.log("\nDRY RUN — add --apply."); return; }
-  for (let i = 0; i < bpUp.length; i++) { const { error } = await sb.from("team_build_players").update({ neutral_snapshot: bpUp[i].neutral_snapshot }).eq("id", bpUp[i].id); if (error) console.log("bp err", error.message); if ((i + 1) % 200 === 0) process.stdout.write(`\r  bp ${i + 1}/${bpUp.length}`); }
+  if (TARGET_BOARD_ONLY) console.log("scope: TARGET BOARD ONLY — team_build_players skipped (different shape; use the PLURAL script --refresh)");
+  for (let i = 0; TARGET_BOARD_ONLY ? false : i < bpUp.length; i++) { const { error } = await sb.from("team_build_players").update({ neutral_snapshot: bpUp[i].neutral_snapshot }).eq("id", bpUp[i].id); if (error) console.log("bp err", error.message); if ((i + 1) % 200 === 0) process.stdout.write(`\r  bp ${i + 1}/${bpUp.length}`); }
   for (let i = 0; i < tbUp.length; i++) { const { error } = await sb.from("target_board").update({ neutral_snapshot: tbUp[i].neutral_snapshot }).eq("id", tbUp[i].id); if (error) console.log("tb err", error.message); if ((i + 1) % 200 === 0) process.stdout.write(`\r  tb ${i + 1}/${tbUp.length}`); }
-  console.log(`\n✅ applied bp=${bpUp.length} tb=${tbUp.length}`);
+  console.log(`\n✅ applied bp=${TARGET_BOARD_ONLY ? 0 : bpUp.length} tb=${tbUp.length}`);
 })();

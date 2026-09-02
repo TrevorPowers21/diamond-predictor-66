@@ -54,19 +54,19 @@ export async function createPredictionsFromMaster(
   // ─── Load existing 2025 predictions (returner + transfer), indexed by player_id ───
   console.time("[CreatePreds] 2. load existing predictions");
   // We need the prediction id (to update), not just whether one exists.
-  const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null; from_era: number | null }>();
+  const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null; from_era: number | null; from_obp_plus: number | null }>();
   from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("player_predictions")
-      .select("id, player_id, from_avg, from_era")
+      .select("id, player_id, from_avg, from_era, from_obp_plus")
       .eq("season", season)
       .in("model_type", ["returner", "transfer"])
       .eq("variant", "regular")
       .range(from, from + 999);
     if (error) break;
     for (const r of data || []) {
-      if ((r as any).player_id) existingPredByPlayerId.set((r as any).player_id, { id: (r as any).id, from_avg: (r as any).from_avg ?? null, from_era: (r as any).from_era ?? null });
+      if ((r as any).player_id) existingPredByPlayerId.set((r as any).player_id, { id: (r as any).id, from_avg: (r as any).from_avg ?? null, from_era: (r as any).from_era ?? null, from_obp_plus: (r as any).from_obp_plus ?? null });
     }
     if (!data || data.length < 1000) break;
     from += 1000;
@@ -130,7 +130,10 @@ export async function createPredictionsFromMaster(
   // from_era / from_fip / ... fields into the same row for two-way players
   // (otherwise we'd insert two rows per TWP).
   const pendingInsertByPlayerId = new Map<string, any>();
-  const internalsByPredId = new Map<string, { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null }>();
+  // COLLAPSE (2026-08-12): internals writes REMOVED. player_prediction_internals
+  // was a per-run copy of the Master's power ratings; every live reader now reads
+  // the Hitter/Pitching Master directly by source_player_id (see INTERNALS_COLLAPSE_HANDOFF.md).
+  // The map + its UPSERT below are gone; the table is retired in Track B (DROP after bulkRecalc dies).
   const playerFromTeamUpdates: Array<{ id: string; from_team: string }> = [];
 
   for (const player of allPlayers) {
@@ -173,23 +176,26 @@ export async function createPredictionsFromMaster(
 
       // Update from_avg/from_obp/from_slg if missing OR if blended stats differ from stored.
       // JUCO always refreshes so stale from_* from prior blended runs gets overwritten.
-      const needsStatUpdate = isJuco || existing.from_avg == null || useBlended;
+      // Also fire when from_obp_plus is null so the newly-wired per-stat power
+      // ratings backfill onto existing (non-blended) rows on a re-run.
+      const needsStatUpdate = isJuco || existing.from_avg == null || existing.from_obp_plus == null || useBlended;
       if (needsStatUpdate) {
         const patch: any = {
           from_avg: targetAvg,
           from_obp: targetObp,
           from_slg: targetSlg,
+          // Per-stat power ratings — the returner SD-blend reads these
+          // (from_obp_plus = OBPPowerRating+). ba/obp/iso_power_rating are
+          // already blend-aware (compute_scores uses blended_* for combined
+          // players), so the useBlended path is handled by construction.
+          from_avg_plus: baPlus,
+          from_obp_plus: obpPlus,
+          from_slg_plus: isoPlus,
           power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
           locked: false,
         };
         predsToUpdate.push({ id: existing.id, patch });
       }
-      internalsByPredId.set(existing.id, {
-        ...(internalsByPredId.get(existing.id) ?? {}),
-        avg_power_rating: baPlus,
-        obp_power_rating: obpPlus,
-        slg_power_rating: isoPlus,
-      });
     } else {
       // No prediction at all — insert one as a returner.
       const useBlended = isJuco ? false : !!(hitter as any).combined_used;
@@ -205,6 +211,10 @@ export async function createPredictionsFromMaster(
         from_avg: useBlended ? ((hitter as any).blended_avg ?? hitter.AVG) : hitter.AVG,
         from_obp: useBlended ? ((hitter as any).blended_obp ?? hitter.OBP) : hitter.OBP,
         from_slg: useBlended ? ((hitter as any).blended_slg ?? hitter.SLG) : hitter.SLG,
+        // Per-stat power ratings the returner SD-blend consumes (see update path).
+        from_avg_plus: baPlus,
+        from_obp_plus: obpPlus,
+        from_slg_plus: isoPlus,
         power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
       };
       predsToInsert.push(newPred);
@@ -259,12 +269,6 @@ export async function createPredictionsFromMaster(
         };
         predsToUpdate.push({ id: existing.id, patch });
       }
-      internalsByPredId.set(existing.id, {
-        ...(internalsByPredId.get(existing.id) ?? {}),
-        era_power_rating: eraPrPlus,
-        fip_power_rating: fipPrPlus,
-        whip_power_rating: whipPrPlus,
-      } as any);
     } else {
       const useBlended = !!(pitcher as any).combined_used;
       const pitcherFields: any = {
@@ -327,36 +331,9 @@ export async function createPredictionsFromMaster(
       result.predictionsCreated += (data || []).length;
     }
   }
-  // Map newly-inserted predictions back to player → internals
-  const playerIdToHitter = new Map<string, any>();
-  const playerIdToPitcher = new Map<string, any>();
-  for (const player of allPlayers) {
-    const hitter = player.source_player_id ? hitterBySourceId.get(player.source_player_id) : null;
-    if (hitter) playerIdToHitter.set(player.id, hitter);
-    const pitcher = player.source_player_id ? pitcherBySourceId.get(player.source_player_id) : null;
-    if (pitcher) playerIdToPitcher.set(player.id, pitcher);
-  }
-  for (const pred of insertedPreds) {
-    // Build one merged partial so two-way players get BOTH hitter and pitcher
-    // power-rating columns on the same internals row. Either-or earlier (with
-    // a `continue` after the hitter case) silently left TWPs with no
-    // pitcher-side internals on insert — the mirror of the Map-overwrite bug
-    // above on the update path.
-    const partial: any = {};
-    const hitter = playerIdToHitter.get(pred.player_id);
-    if (hitter) {
-      partial.avg_power_rating = (hitter as any).ba_power_rating ?? null;
-      partial.obp_power_rating = (hitter as any).obp_power_rating ?? null;
-      partial.slg_power_rating = (hitter as any).iso_power_rating ?? null;
-    }
-    const pitcher = playerIdToPitcher.get(pred.player_id);
-    if (pitcher) {
-      partial.era_power_rating = (pitcher as any).era_pr_plus ?? null;
-      partial.fip_power_rating = (pitcher as any).fip_pr_plus ?? null;
-      partial.whip_power_rating = (pitcher as any).whip_pr_plus ?? null;
-    }
-    if (hitter || pitcher) internalsByPredId.set(pred.id, partial);
-  }
+  // COLLAPSE (2026-08-12): the newly-inserted-predictions → internals mapping is
+  // removed with the rest of the internals writes. New rows get their power
+  // ratings from the Master directly at recalc time (backfill step 2 / edge fn).
 
   console.timeEnd("[CreatePreds] 7. INSERT new predictions");
 
@@ -382,26 +359,9 @@ export async function createPredictionsFromMaster(
 
   console.timeEnd("[CreatePreds] 8. UPDATE existing stubs (sequential)");
 
-  // ─── UPSERT internals for everything we touched ──────────────────────
-  console.time("[CreatePreds] 9. UPSERT internals");
-  console.log(`[createPredictions] Upserting ${internalsByPredId.size} internals rows...`);
-  const internalsRows = Array.from(internalsByPredId.entries()).map(([prediction_id, vals]) => ({
-    prediction_id,
-    ...vals,
-  }));
-  for (let i = 0; i < internalsRows.length; i += CHUNK) {
-    const chunk = internalsRows.slice(i, i + CHUNK);
-    const { error } = await supabase
-      .from("player_prediction_internals")
-      .upsert(chunk, { onConflict: "prediction_id" });
-    if (error) {
-      result.errors.push(`Internals chunk ${i}: ${error.message}`);
-    } else {
-      result.internalsCreated += chunk.length;
-    }
-  }
-
-  console.timeEnd("[CreatePreds] 9. UPSERT internals");
+  // ─── (COLLAPSE 2026-08-12) internals UPSERT removed — see note above ─
+  // player_prediction_internals is no longer written. Live readers read the
+  // Master directly by source_player_id. result.internalsCreated stays 0.
 
   // ─── UPDATE player from_team for blended players ─────────────────────
   console.time("[CreatePreds] 10. UPDATE blended player from_team");

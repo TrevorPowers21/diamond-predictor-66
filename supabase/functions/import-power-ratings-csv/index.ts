@@ -73,7 +73,7 @@ function recalcPrediction(pred: any, config: ModelConfig) {
   const pSlg = round3(calcStat(fromSlg, bases.slg, DEV_COEFFS.slg, config.ncaaSlg, DAMPENING_DIVISORS.slg, true));
   const pOps = round3(pObp + pSlg);
   const pIso = round3(pSlg - pAvg);
-  const pWrc = round3((0.45 * pObp) + (0.3 * pSlg) + (0.15 * pAvg) + (0.1 * pIso));
+  const pWrc = round3(0.011 + (0.691 * pObp) + (0.235 * pSlg)) /* C1 canonical: src/lib/wrc.ts */;
   const pWrcPlus = Math.round((pWrc / config.ncaaWrc) * 100);
 
   return { p_avg: pAvg, p_obp: pObp, p_slg: pSlg, p_ops: pOps, p_iso: pIso, p_wrc: pWrc, p_wrc_plus: pWrcPlus };
@@ -127,7 +127,7 @@ Deno.serve(async (req) => {
       .eq("model_type", "returner")
       .in("config_key", ["ncaa_avg", "ncaa_obp", "ncaa_slg", "ncaa_power_rating", "park_weight_slg", "power_rating_weight", "ncaa_wrc", "dev_aggressiveness_expected"]);
 
-    const mConfig: ModelConfig = { ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364, defaultDevAgg: 0.5 };
+    const mConfig: ModelConfig = { ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.3782, defaultDevAgg: 0.5 };
     for (const row of configRows || []) {
       if (row.config_key === "ncaa_avg") mConfig.ncaaAvg = Number(row.config_value);
       if (row.config_key === "ncaa_obp") mConfig.ncaaObp = Number(row.config_value);

@@ -102,15 +102,20 @@ loop was reverted in favor of this.)
 
 Do NOT fold the recalibration into the data push. Prove the additions run on prod first.
 
-1. **PUSH 1 — dRS + wSB additions + composite, at ÷10, additive.** Run every staging step on prod +
-   full data (incl. the more-complete pitch log) + `d_war`/`bsr_war`/`total_hitter_war` columns + the
-   edge-function addition so the precompute PRODUCES the composite (recurring, not a one-shot). oWAR/
-   pWAR UNCHANGED. Migrations needed on PROD: `player_season_defense` / `player_season_baserunning`
-   tables; `player_predictions` add `d_war`/`bsr_war` + rename `total_war`→`total_hitter_war`. Goal:
-   everything updated + running on prod before the big changes. Needs explicit "prod, now?".
-2. **PUSH 2 (branch) — the ONLY change is 10 → 13.1.** Flip the runs-per-win constants (line 519, 901,
-   d/bsr). Everything rescales together (d/bsr share runs-per-win); players move once. + the
-   `o_war → total_hitter_war` display swap so WAR shows the composite.
+1. **PUSH 1 — dRS + wSB additions + composite, at ÷10, additive. ✅ SHIPPED TO PROD (2026-08-07).**
+   Prod has: `player_season_defense`/`baserunning` tables + data (CALCULATED to prod uuids via
+   `load-drs-wsb-prod.ts`, NOT copied — staging/prod uuids differ); `player_predictions` +`d_war`/`bsr_war`/
+   `total_hitter_war` (add-only — prod never had `total_war`); `refresh_composite_war()`; `pitch_log` widened
+   with the full DRS attribution + unique key (matches staging exactly); `total_hitter_war` populated
+   (identity 1000/1000); edge fn deployed (recurring refresh + UCSB build fix). Verified prod ≡ staging
+   per-player (d_war 5,093/5,093, bsr 10,406/10,406 identical). oWAR/pWAR/market_value UNTOUCHED. Code on
+   `main` (#169 feature→staging, #170 staging→main). Precomputes NOT re-run (that's Push 2). Full execution
+   record: `AGENT_LEARNINGS_defensive_runs_engine_2026_08_03.md` "PUSH 1 SHIPPED TO PROD".
+2. **PUSH 2 — 10 → 13.1 recalibration + the `o_war → total_hitter_war` display swap. PLANNED:
+   `docs/PUSH2_RECALIBRATION_PLAN.md`.** Not a one-file flip: centralize the 7 copy-pasted oWAR formulas
+   (+ reconcile the edge-fn vs war.ts pWAR divergence to ONE D1 set), flip the constants + `refresh_composite_war`
+   `/10→/13.1`, the display swap (`pickHitterWar`/`pickPitcherWar`), re-precompute, reseed `team_war_snapshots`,
+   repoint market value at total WAR. Everything rescales together (d/bsr share runs-per-win); players move once.
 3. **PUSH 3 — data-source migration: big-export total lines → PITCH LOG.** Rewire the edge function +
    `powerRatings.ts` (computeHitterPowerRatings / readPitchingWeights) to compute from the pitch log
    (the `pitch_log` table already carries derived cols: stuff_plus, x_avg/x_slg/x_woba, spray_ang,

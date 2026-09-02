@@ -10,9 +10,13 @@ export const TRANSFER_WEIGHT_DEFAULTS = {
   // Conference weights — lowered 2026-05-04 from 0.5/0.5/0.25 to reduce
   // the conference's compounding effect on harsh moves (Big 12 → SEC was
   // double-counting the pitching strength via low conference offense).
-  t_ba_conference_weight: 0.30,
-  t_obp_conference_weight: 0.30,
-  t_iso_conference_weight: 0.15,
+  // Re-tuned 2026-08-21 to target %impact (weight = target ÷ SD). Conference ~1%
+  // (background), competition (Stuff+) the main lever (AVG largest→OBP→ISO maintains),
+  // park raised above conference (ISO highest). Ratio env+ SDs ba 3.91/obp 3.47/iso 12.47;
+  // Stuff+ SD 3.48; park SDs avg 5.56/obp 4.63/iso 17.97.
+  t_ba_conference_weight: 0.256,  // →1.0%
+  t_obp_conference_weight: 0.288, // →1.0%
+  t_iso_conference_weight: 0.080, // →1.0%
 
   // Pitching / competition weights — restored 2026-05-04 to ~3x Conference
   // ratio (the original "Stuff+ should be 3x conference" hypothesis) after
@@ -25,17 +29,17 @@ export const TRANSFER_WEIGHT_DEFAULTS = {
   // History: original 2.0 → 1.5 (apr-27) → 1.0 (may-01) → 1.25 (may-01) →
   //   0.75/0.65/0.55 (may-04 morning) → these values (may-04 afternoon) once
   //   we saw Gomez at .332 vs gut's expected ~.300.
-  t_ba_pitching_weight: 1.00,
-  t_obp_pitching_weight: 0.85,
-  t_iso_pitching_weight: 0.75,
+  t_ba_pitching_weight: 1.15,  // →4.0% (largest lever)
+  t_obp_pitching_weight: 0.98, // →3.4%
+  t_iso_pitching_weight: 0.86, // →3.0% (ISO maintains — raw skill)
 
   // Park factor weights — raised 2026-05-04 to ~1:1 with conference impact.
   // Rationale: half of games are at the home park, so park's per-SD effect
   // should be comparable to overall conference context. Previously at ~1/3
   // of conference, which underweighted park.
-  t_ba_park_weight: 0.24,
-  t_obp_park_weight: 0.26,
-  t_iso_park_weight: 0.11,
+  t_ba_park_weight: 0.270, // →1.5% (raised toward ISO)
+  t_obp_park_weight: 0.324, // →1.5% (raised toward ISO)
+  t_iso_park_weight: 0.111, // →2.0% (highest — kept above AVG/OBP)
 
   // Power-rating blend weights — 0.70 means projected slash = 70% PR-derived
   // scaled rate + 30% last-year actual rate, then env multiplier on top.

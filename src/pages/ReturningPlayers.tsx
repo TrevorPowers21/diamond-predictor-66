@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { computeWrcPlus } from "@/lib/wrc";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
   ArrowUpDown,
@@ -24,7 +25,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
 import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
@@ -56,7 +56,7 @@ import {
 } from "@/components/ScoutingReport";
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { JucoPlayerDashboardPanel } from "@/components/JucoPlayerDashboardPanel";
-import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue, pickHitterWar } from "@/lib/twpMarketValue";
 import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 
 type SortKey =
@@ -485,6 +485,9 @@ interface ReturnerPlayer {
     p_iso: number | null;
     p_wrc_plus: number | null;
     o_war: number | null;
+    total_hitter_war: number | null;
+    d_war: number | null;
+    bsr_war: number | null;
     power_rating_plus: number | null;
     ev_score: number | null;
     barrel_score: number | null;
@@ -808,13 +811,9 @@ const computePitchingPrPlusFromScores = (
 };
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
-  const ncaaAvgWrc = 0.364;
   const ops = obp != null && slg != null ? obp + slg : null;
   const iso = slg != null && avg != null ? slg - avg : null;
-  const wrc = avg != null && obp != null && slg != null && iso != null
-    ? (0.45 * obp) + (0.3 * slg) + (0.15 * avg) + (0.1 * iso)
-    : null;
-  const wrcPlus = wrc != null && ncaaAvgWrc !== 0 ? (wrc / ncaaAvgWrc) * 100 : null;
+  const wrcPlus = computeWrcPlus(avg, obp, slg, iso);      // canonical C1 (src/lib/wrc.ts)
   return { ops, iso, wrcPlus };
 };
 
@@ -1567,6 +1566,9 @@ export default function ReturningPlayers() {
             p_iso: row.p_iso,
             p_wrc_plus: row.p_wrc_plus,
             o_war: row.o_war ?? null,
+            total_hitter_war: row.total_hitter_war ?? null,
+            d_war: row.d_war ?? null,
+            bsr_war: row.bsr_war ?? null,
             power_rating_plus: row.power_rating_plus,
             ev_score: row.hitter_ev_score ?? row.ev_score ?? null,
             barrel_score: row.hitter_barrel_score ?? row.barrel_score ?? null,
@@ -1850,7 +1852,7 @@ export default function ReturningPlayers() {
                 from_avg: null, from_obp: null, from_slg: null,
                 class_transition: null, dev_aggressiveness: null,
                 p_avg: null, p_obp: null, p_slg: null, p_ops: null, p_iso: null,
-                p_wrc_plus: null, o_war: null, power_rating_plus: null,
+                p_wrc_plus: null, o_war: null, total_hitter_war: null, d_war: null, bsr_war: null, power_rating_plus: null,
                 ev_score: null, barrel_score: null, contact_score: null, chase_score: null,
               },
             } as ReturnerPlayer));
@@ -1876,7 +1878,7 @@ export default function ReturningPlayers() {
           if (sortKey === "p_ops") return p.prediction.p_ops ?? -999;
           if (sortKey === "p_iso") return p.prediction.p_iso ?? -999;
           if (sortKey === "p_wrc_plus") return p.prediction.p_wrc_plus ?? -999;
-          if (sortKey === "p_war") return p.prediction.o_war ?? -999;
+          if (sortKey === "p_war") return pickHitterWar(p.prediction) ?? -999; // hitter col: key is "p_war" (legacy), reads total_hitter_war
           if (sortKey === "p_nil") return computeNilFallback({ storedNil: p.nil_value, wrcPlus: p.prediction.p_wrc_plus, conference: p.conference, position: p.position }) ?? -999;
           return -999;
         };
@@ -2187,22 +2189,6 @@ export default function ReturningPlayers() {
     onError: (e) => toast.error(`Bulk save failed: ${e.message}`),
   });
 
-  const updateClassTransition = useMutation({
-    mutationFn: async ({ predictionId, value }: { predictionId: string; value: string }) => {
-      const result = await recalculatePredictionById(predictionId, { class_transition: value });
-      return { predictionId, value, result };
-    },
-    onSuccess: ({ predictionId, value, result }) => {
-      applyPredictionPatchToCache(predictionId, {
-        class_transition: value,
-        ...(result?.prediction || {}),
-      } as Partial<ReturnerPlayer["prediction"]>);
-      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
-      toast.success("Class adjustment updated");
-    },
-    onError: (e) => toast.error(`Class adjustment failed: ${e.message}`),
-  });
-
   const updatePortalStatus = useMutation({
     mutationFn: async ({ playerId, value }: { playerId: string; value: string }) => {
       const { error } = await supabase
@@ -2217,51 +2203,6 @@ export default function ReturningPlayers() {
       toast.success("Portal status updated");
     },
     onError: (e) => toast.error(`Portal status update failed: ${e.message}`),
-  });
-
-  const updateDevAgg = useMutation({
-    mutationFn: async ({ predictionId, value }: { predictionId: string; value: number }) => {
-      const result = await recalculatePredictionById(predictionId, { dev_aggressiveness: value });
-      return { predictionId, value, result };
-    },
-    onSuccess: ({ predictionId, value, result }) => {
-      applyPredictionPatchToCache(predictionId, {
-        dev_aggressiveness: value,
-        ...(result?.prediction || {}),
-      } as Partial<ReturnerPlayer["prediction"]>);
-      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
-      toast.success("Dev aggressiveness updated");
-    },
-    onError: (e) => toast.error(`Dev aggressiveness failed: ${e.message}`),
-  });
-
-  const applyTemplateDefaults = useMutation({
-    mutationFn: async () => {
-      const { data: allReturnerPreds, error } = await supabase
-        .from("player_predictions")
-        .select("id")
-        .eq("season", PROJECTION_SEASON)
-        .eq("model_type", "returner")
-        .eq("variant", "regular")
-        .in("status", ["active", "departed"]);
-      if (error) throw error;
-      const returnerRows = (allReturnerPreds || []).map((r) => ({ prediction_id: r.id }));
-      const BATCH = 40;
-      for (let i = 0; i < returnerRows.length; i += BATCH) {
-        const batch = returnerRows.slice(i, i + BATCH);
-        await Promise.all(
-          batch.map(async (p) => {
-            await recalculatePredictionById(p.prediction_id, { class_transition: "SJ", dev_aggressiveness: 0.0 });
-          }),
-        );
-      }
-      return returnerRows.length;
-    },
-    onSuccess: (count) => {
-      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
-      toast.success(`Applied template to ${count} returner rows`);
-    },
-    onError: (e) => toast.error(`Template apply failed: ${e.message}`),
   });
 
   const handleEditField = (playerId: string, field: "team" | "position", value: string) => {
@@ -3082,7 +3023,7 @@ export default function ReturningPlayers() {
                         <TableHead className="text-right text-xs"><SortButton label="OPS" sortKeyVal="p_ops" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="ISO" sortKeyVal="p_iso" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
-                        <TableHead className="text-right text-xs"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="WAR" sortKeyVal="p_war" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="Value" sortKeyVal="p_nil" /></TableHead>
                         <TableHead className="text-center min-w-[140px] text-xs">Scouting</TableHead>
                         <TableHead className="w-[36px] text-center text-xs p-0"><Target className="h-3.5 w-3.5 mx-auto text-muted-foreground" /></TableHead>
@@ -3189,7 +3130,7 @@ export default function ReturningPlayers() {
                               {pctFormat(pred.p_wrc_plus)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
-                              {statFormat(pred.o_war, 2)}
+                              {statFormat(pickHitterWar(pred), 2)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
                               {moneyFormat(
@@ -3209,11 +3150,12 @@ export default function ReturningPlayers() {
                                   // PlayerProfile scout card). Falls back to
                                   // stored prediction scores when pop or
                                   // pitch_log row is not yet loaded / missing.
+                                  // STORED-FIRST (2026-08-23): stored *_score first; live only as fallback.
                                   const live = livePitchLogHitterScores(p.source_player_id);
-                                  const brl = live?.barrel ?? pred.barrel_score;
-                                  const ev = live?.ev ?? pred.ev_score;
-                                  const con = live?.contact ?? pred.contact_score;
-                                  const chs = live?.chase ?? pred.chase_score;
+                                  const brl = pred.barrel_score ?? live?.barrel;
+                                  const ev = pred.ev_score ?? live?.ev;
+                                  const con = pred.contact_score ?? live?.contact;
+                                  const chs = pred.chase_score ?? live?.chase;
                                   return (
                                     <>
                                       {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
@@ -3549,11 +3491,53 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right text-sm tabular-nums">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
                               {(() => {
-                                const live = livePitchLogPitcherScores((r as any).source_player_id);
-                                const stf = live?.stuff ?? r.stuff_score;
-                                const whf = live?.whiff ?? r.whiff_score;
-                                const bb = live?.bb ?? r.bb_score;
-                                const brl = live?.barrel ?? r.barrel_score;
+                                // ⛔ SAME-SOURCE RULE (2026-08-31, Trevor): this column MUST read the
+                                // SAME source as the PitcherProfile scouting grades, which is the same
+                                // source Season Stats reads on the "all pitches" (full-season) filter:
+                                // the `pitch_log_pitcher_totals` accumulator at dimension_key='all',
+                                // percentile-ranked over the qualified pop (usePitchLog2026PitcherPop).
+                                //
+                                // This REVERSES the stored-first flip from 95f22a6 (2026-08-23) FOR THE
+                                // PITCHER CHIPS ONLY. That flip was fine for the Season Stats FILTERED
+                                // dimension bars (no stored equivalent exists per-dimension); it was NOT
+                                // correct here, because "all pitches" is full-season data that already
+                                // lives in the accumulator.
+                                //
+                                // `player_predictions.*_score` is a DIFFERENT derivation (baseline
+                                // normalization via computeAndStoreScores/pitcherBaselines), not the
+                                // pitch-log percentile — so it is the wrong source, not a stale copy.
+                                // Measured on prod 2026-08-31, agreement within 2 points vs the profile:
+                                //   stuff 571/4585 (12%) · whiff 968/4613 (21%)
+                                //   bb  1427/4613 (31%) · barrel 1219/4553 (27%)
+                                // e.g. Dylan Volantis read 69.58 here vs 76.9 on his profile.
+                                //
+                                // 🛑 PITCH-LOG PERCENTILE **ONLY** — NO FALLBACK (Trevor, 2026-08-31:
+                                //    "The scouting column needs to read the pitch log percentile only").
+                                // Do NOT re-add `?? r.*_score`. Falling back to the stored prediction score
+                                // silently reintroduces the SECOND derivation into the same column, which is
+                                // the exact inconsistency this fix removes — a blank cell is correct, a
+                                // number from the wrong source is not.
+                                // A player with no pitch_log row (under the 100-pitch qualifier in
+                                // usePitchLog2026PitcherPop) simply shows no chips.
+                                // ⚠ The HITTER chips above stay stored-first ON PURPOSE — there the stored
+                                //    score and the pitch-log percentile are the same number, and hitters
+                                //    already agree across all three pages. Do not "fix" them to match.
+                                // 🛑 KEY IS `r.id`, NOT `r.source_player_id`. The PITCHING row type has
+                                //    `id` + `player_id` and NO `source_player_id` field — pitcher rows
+                                //    carry **id = source_player_id** (a numeric TruMedia id, not a UUID;
+                                //    see the DownloadReportBar note below, which resolves them with a
+                                //    uuid regex for exactly this reason). Passing `.source_player_id`
+                                //    here yields `undefined` → `live` is always null → EVERY chip blank.
+                                //    That defect was invisible while the stored score was preferred,
+                                //    because the stored value always won and `live` was never reached.
+                                //    ⛔ Do not "restore" `.source_player_id` here. The hitter chips above
+                                //       DO use `p.source_player_id` — that row type has the field; this
+                                //       one does not. The two row shapes are genuinely different.
+                                const live = livePitchLogPitcherScores((r as any).source_player_id ?? r.id);
+                                const stf = live?.stuff ?? null;
+                                const whf = live?.whiff ?? null;
+                                const bb = live?.bb ?? null;
+                                const brl = live?.barrel ?? null;
                                 const anyValue = stf != null || whf != null || bb != null || brl != null;
                                 return anyValue ? (
                                   <div className="flex gap-1 justify-center flex-wrap">

@@ -746,6 +746,42 @@ function HitterStatsLine({ row }: { row: import("@/savant/hooks/usePitchLogTotal
   );
 }
 
+// Stored z-score → percentile (0-100) via the normal CDF, so the percentile bar
+// reads off the STORED z (pure-read, no live population ranking). Same 0-100 the
+// Statcast bars use. (Abramowitz & Stegun 7.1.26 erf approximation.)
+function zToPercentile(z: number | null | undefined): number | null {
+  if (z == null || Number.isNaN(z)) return null;
+  const t = 1 / (1 + (0.3275911 * Math.abs(z)) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(z * z) / 2);
+  const cdf = z >= 0 ? 0.5 + 0.5 * y : 0.5 - 0.5 * y;
+  return Math.round(Math.min(100, Math.max(0, cdf * 100)));
+}
+
+const fmtRunValue = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)}`;
+
+// Descriptive run-value display — the SAME PercentileBar rows as Batted Ball Data,
+// three of them, pure-read off the stored *_rv (+ *_rv_z for the percentile).
+function HitterRunValueBars({ row }: { row: import("@/savant/hooks/usePitchLogTotals").PitchLogHitterTotalsRow }) {
+  const bars: Array<{ label: string; hint: string; rv: number | null; z: number | null }> = [
+    { label: "Batting", hint: "Batting Run Value", rv: row.batting_rv, z: row.batting_rv_z },
+    { label: "Defensive", hint: "Defensive Run Value", rv: row.defensive_rv, z: row.defensive_rv_z },
+    { label: "Baserunning", hint: "Baserunning Run Value", rv: row.baserunning_rv, z: row.baserunning_rv_z },
+  ];
+  return (
+    <div className="flex h-full flex-col">
+      {bars.map((b, i) => (
+        <div
+          key={b.label}
+          className={`flex flex-1 flex-col justify-center${i > 0 ? " border-t border-white/5" : ""}`}
+        >
+          <PercentileBar label={b.label} hint={b.hint} value={b.rv} percentile={zToPercentile(b.z)} format={fmtRunValue} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 function PitcherStatsLine({
   row,
   pm,
@@ -1231,6 +1267,11 @@ interface PageShellProps {
   sampleCount: number;
   sampleLabel: string;
   topStats: React.ReactNode;
+  /**
+   * Optional element pinned to the RIGHT of the top stats line, in the open
+   * space beside the banner chips (e.g. the hitter run-value "VALUE" cluster).
+   */
+  topRight?: React.ReactNode;
   left: React.ReactNode;
   right: React.ReactNode;
   /**
@@ -1254,6 +1295,7 @@ function PageShell({
   sampleCount,
   sampleLabel,
   topStats,
+  topRight,
   left,
   right,
   visuals,
@@ -1268,61 +1310,72 @@ function PageShell({
     </div>
   );
 
-  return (
-    <div className="space-y-5">
-      {/* Filter + counts row */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3" style={{ borderColor: NAVY_BORDER }}>
-        <div className="flex items-center gap-3">
-          {picker}
-          <div className="text-[11px] uppercase tracking-wider text-white/55">
-            {sampleCount.toLocaleString()} {sampleLabel}
-          </div>
+  const filterRow = (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3" style={{ borderColor: NAVY_BORDER }}>
+      <div className="flex items-center gap-3">
+        {picker}
+        <div className="text-[11px] uppercase tracking-wider text-white/55">
+          {sampleCount.toLocaleString()} {sampleLabel}
         </div>
       </div>
+    </div>
+  );
 
-      {/* Top stats line */}
-      <div>{topStats}</div>
+  // Stats / Visuals selector (only when a Visuals section exists). On the Stats
+  // tab its right half is empty — that's the space the VALUE panel fills down into.
+  const tabStrip = visuals ? (
+    <div className="flex items-end justify-between gap-3 border-b" style={{ borderColor: NAVY_BORDER }}>
+      <div className="flex items-end gap-1">
+        {([
+          { key: "stats" as const, label: "Stats" },
+          { key: "visuals" as const, label: "Visuals" },
+        ]).map((t) => {
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className="cursor-pointer px-5 py-2 font-[Oswald] text-[13px] font-semibold uppercase tracking-[0.14em] transition-colors duration-150"
+              style={{
+                color: active ? GOLD : "rgba(255,255,255,0.55)",
+                borderBottom: active ? `2px solid ${GOLD}` : "2px solid transparent",
+                marginBottom: "-1px",
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+      {tab === "visuals" && tabExtra && <div className="pb-1.5">{tabExtra}</div>}
+    </div>
+  ) : null;
 
-      {visuals ? (
-        <>
-          {/* Stats / Visuals tab strip + inline filter slot (right side) */}
-          <div
-            className="flex items-end justify-between gap-3 border-b"
-            style={{ borderColor: NAVY_BORDER }}
-          >
-            <div className="flex items-end gap-1">
-              {([
-                { key: "stats" as const, label: "Stats" },
-                { key: "visuals" as const, label: "Visuals" },
-              ]).map((t) => {
-                const active = tab === t.key;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setTab(t.key)}
-                    className="cursor-pointer px-5 py-2 font-[Oswald] text-[13px] font-semibold uppercase tracking-[0.14em] transition-colors duration-150"
-                    style={{
-                      color: active ? GOLD : "rgba(255,255,255,0.55)",
-                      borderBottom: active ? `2px solid ${GOLD}` : "2px solid transparent",
-                      marginBottom: "-1px",
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-            {tab === "visuals" && tabExtra && (
-              <div className="pb-1.5">{tabExtra}</div>
-            )}
+  const body = !visuals || tab === "stats" ? statsBody : <div className="space-y-6">{visuals}</div>;
+
+  return (
+    <div className="space-y-5">
+      {topRight ? (
+        // Left column = the header rows (filter + banner + Stats/Visuals selector);
+        // Right column = the VALUE panel, stretched (items-stretch + fill) to the FULL
+        // height of those rows so its bottom sits flush on the line under the selector.
+        <div className="grid grid-cols-1 gap-x-6 gap-y-5 lg:grid-cols-[1.7fr_1fr] lg:items-stretch">
+          <div className="flex flex-col gap-5">
+            {filterRow}
+            <div>{topStats}</div>
+            {tabStrip}
           </div>
-
-          {tab === "stats" ? statsBody : <div className="space-y-6">{visuals}</div>}
-        </>
+          <div>{topRight}</div>
+        </div>
       ) : (
-        statsBody
+        <>
+          {filterRow}
+          <div>{topStats}</div>
+          {tabStrip}
+        </>
       )}
+      {body}
     </div>
   );
 }
@@ -1332,14 +1385,17 @@ function Panel({
   title,
   children,
   headerBadge,
+  fill,
 }: {
   title: string;
   children: React.ReactNode;
   headerBadge?: React.ReactNode;
+  /** Stretch to the parent's full height + let children flex to fill it. */
+  fill?: boolean;
 }) {
   return (
     <section
-      className="border px-5 py-5"
+      className={`border px-5 py-5${fill ? " flex h-full flex-col" : ""}`}
       style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
     >
       <div className="mb-4 flex items-center justify-between gap-2">
@@ -1351,7 +1407,7 @@ function Panel({
         </div>
         {headerBadge}
       </div>
-      {children}
+      {fill ? <div className="flex flex-1 flex-col">{children}</div> : children}
     </section>
   );
 }
@@ -1925,6 +1981,21 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
       sampleCount={row.pa}
       sampleLabel="PA"
       topStats={<HitterStatsLine row={row} />}
+      topRight={
+        // Descriptive run values — SAME RateTable as Batted Ball Data. Only on the
+        // full-season, unfiltered view (rv is stored on the 'all' row) and only when
+        // the player has values. Pure-read of the stored *_rv off the season row.
+        dimension === "all" &&
+        filterPitchTypes.length === 0 && filterVertical.length === 0 &&
+        filterHorizontal.length === 0 && filterBattedTypes.length === 0 &&
+        (row.batting_rv != null || row.defensive_rv != null || row.baserunning_rv != null)
+          ? (
+            <Panel title="Value" fill>
+              <HitterRunValueBars row={row} />
+            </Panel>
+          )
+          : null
+      }
       left={
         <>
           <Panel

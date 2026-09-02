@@ -1,3 +1,16 @@
+/**
+ * 🛑 LEGACY — DO NOT USE FOR THE 2026 PUSH OR TRACK B. Last touched 2026-06-07.
+ *
+ * `refreshPaIpFromMaster()` copies `"Hitter Master".pa` → `players.pa` and `"Pitching Master".IP` → `players.ip`.
+ * That model is SUPERSEDED: as of 2026-08-31 the depth-role derivation reads the MASTER'S `regular_season_pa` /
+ * `regular_season_ip` directly (see scripts/backfill-2027-hitter-returners.ts and
+ * scripts/precompute-returner-pitchers.ts), so `players` is no longer a stat source and there is nothing to sync.
+ * Trevor: "we don't even really need players.pa if we are using regular season pa/ip — just change what column is
+ * read, not filling another column."
+ * ⛔ `syncMasterToPlayers()` WIPES the players table and is excluded from every routine cascade
+ *    (scripts/import-csvs/README.md:89). Never run it against prod.
+ * ✅ Still live and safe: `addMissingPlayers()` — creates missing identity rows only.
+ */
 import { supabase } from "@/integrations/supabase/client";
 
 const CHUNK_SIZE = 200;

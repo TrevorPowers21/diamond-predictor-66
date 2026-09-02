@@ -1,3 +1,8 @@
+/**
+ * 🛑 LEGACY — last touched 2026-04-03. Writes PA/AB onto `players`.
+ * Superseded 2026-08-31: `players.pa` / `players.ip` are no longer read by the depth-role path; the Masters'
+ * `regular_season_pa` / `regular_season_ip` are canonical. Do not use for the 2026 push or Track B.
+ */
 import { supabase } from "@/integrations/supabase/client";
 
 type ImportResult = {

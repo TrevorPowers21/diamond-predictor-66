@@ -6,14 +6,21 @@ Usage: python3 run_drs.py <export_or_dir_or_glob> [more ...]
     reason, so a mixed / date-organized upload folder degrades gracefully.
 Writes: output/player_season_defense.csv, output/exceptions_log.csv,
         fixtures/league_fixtures.json
+  --regular-season : accrue ONLY regular-season games (≤ SEASON_BOUNDS end, is_regular_season),
+    but derive the run-environment fixtures on ALL games so the baseline is identical and the
+    regular-season dRS is a true SUBSET of the full-season dRS (Step-2 desc_*_reg). Writes
+    output/player_season_defense_regseason.csv and skips the audit-fixture writes.
 """
 import sys, csv, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from drs_engine.normalize import load_rows, derive_league_fixtures, load_re24
 from drs_engine.engine import DRSEngine
 from drs_engine import constants as C
+from drs_engine.season_config import is_regular_season
 
 def main(paths):
+    reg_only = "--regular-season" in paths
+    paths = [p for p in paths if p != "--regular-season"]
     skipped = []
     rows = load_rows(paths, skipped=skipped)
     if not rows:
@@ -23,10 +30,22 @@ def main(paths):
         sys.exit(2)
 
     os.makedirs("output", exist_ok=True)
-    fx = derive_league_fixtures(rows, out_path="fixtures/league_fixtures.json")
+    # Baseline (park effects, xOut rates) derived on ALL games so reg = true subset of full.
+    fx = derive_league_fixtures(rows, out_path=None if reg_only else "fixtures/league_fixtures.json")
+    if reg_only:
+        rows = [r for r in rows if is_regular_season(r.get("gameString") or r.get("gameDate") or "")]
+        print(f"regular-season mode: accruing {len(rows)} regular-season pitches "
+              f"(≤ {C.SEASON}-05-18 boundary; fixtures still on all games)")
     eng = DRSEngine(fx, load_re24())
     eng.run(rows)
     res = eng.player_season_rows(season=2026)
+
+    if reg_only:
+        with open("output/player_season_defense_regseason.csv", "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(res[0].keys()))
+            w.writeheader(); w.writerows(res)
+        print(f"wrote output/player_season_defense_regseason.csv ({len(res)} rows, source_player_id emitted)")
+        return
 
     with open("output/player_season_defense.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(res[0].keys()))

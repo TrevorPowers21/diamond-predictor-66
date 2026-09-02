@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
-import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue, pickHitterWar } from "@/lib/twpMarketValue";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -20,13 +20,11 @@ import {
   getPositionValueMultiplier,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
-import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjection";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
-import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
@@ -463,19 +461,8 @@ const resolveTeamRowFromCandidates = (
   return best;
 };
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
-const calcPitchingPlus = (
-  statValue: number | null,
-  ncaaAvg: number,
-  ncaaSd: number,
-  scale: number,
-  higherIsBetter = false,
-) => {
-  if (statValue == null || !Number.isFinite(statValue) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
-  const z = higherIsBetter
-    ? ((statValue - ncaaAvg) / ncaaSd)
-    : ((ncaaAvg - statValue) / ncaaSd);
-  return round3(100 + (z * scale));
-};
+// calcPitchingPlus (conference env+ z×20 live-compute) removed 2026-08-21 —
+// conference env+ is now STORED (Conference Stats era_plus…hr9_plus), read directly.
 
 const toPitchingClassAdj = (
   classTransition: "FS" | "SJ" | "JS" | "GR",
@@ -488,22 +475,8 @@ const toPitchingClassAdj = (
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
-const calcHitterTalentPlusFromConference = (
-  overallHitterPowerRatingPlus: number | null | undefined,
-  stuffPlus: number | null | undefined,
-  wrcPlus: number | null | undefined,
-) => {
-  if (
-    overallHitterPowerRatingPlus == null ||
-    !Number.isFinite(overallHitterPowerRatingPlus) ||
-    stuffPlus == null ||
-    !Number.isFinite(stuffPlus) ||
-    wrcPlus == null ||
-    !Number.isFinite(wrcPlus)
-  ) return null;
-  const value = overallHitterPowerRatingPlus + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
-  return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
-};
+// calcHitterTalentPlusFromConference (live HTP compute) removed 2026-08-21 —
+// HTP is now STORED (Conference Stats hitter_talent_plus, park swap), read directly.
 
 function readLocalNum(key: string, fallback: number, remoteValues?: Record<string, number>): number {
   // 1) Supabase model_config is the authority
@@ -875,7 +848,7 @@ export default function TransferPortal() {
       if (!selectedPlayer?.player_id) return [];
       const { data, error } = await supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, variant, model_type, status, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value")
+        .select("id, player_id, customer_team_id, variant, model_type, status, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, total_hitter_war, d_war, bsr_war, market_value, twp_hitter_market_value, twp_pitcher_market_value")
         .eq("player_id", selectedPlayer.player_id)
         .eq("season", PROJECTION_SEASON)
         .in("status", ["active", "departed"])
@@ -1081,22 +1054,21 @@ export default function TransferPortal() {
     // Also index by conference_id for UUID-based lookups
     const byId = new Map<string, typeof map extends Map<string, infer V> ? V : never>();
     if (newConfStats.length === 0) return map;
-    const eq = readPitchingWeights();
     for (const row of newConfStats) {
       const directKey = normalizeKey(row.conference);
       const canonicalKey = canonicalConferencePitching(row.conference);
       if (!directKey) continue;
-      const eraPlus = calcPitchingPlus(row.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-      const fipPlus = calcPitchingPlus(row.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-      const whipPlus = calcPitchingPlus(row.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-      const k9Plus = calcPitchingPlus(row.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-      const bb9Plus = calcPitchingPlus(row.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-      const hr9Plus = calcPitchingPlus(row.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-      const hitterTalentPlus = calcHitterTalentPlusFromConference(
-        row.overall_power_rating,
-        row.stuff_plus,
-        row.wrc_plus,
-      );
+      // 1d (2026-08-21): conference env+ = STORED value only (ratio scale). NO live
+      // compute, NO fallback. JUCO districts have NULL stored env+ (separate equation)
+      // → resolve null (naturally blocked from the D1 ratio path).
+      const eraPlus = row.era_plus != null ? Number(row.era_plus) : null;
+      const fipPlus = row.fip_plus != null ? Number(row.fip_plus) : null;
+      const whipPlus = row.whip_plus != null ? Number(row.whip_plus) : null;
+      const k9Plus = row.k9_plus != null ? Number(row.k9_plus) : null;
+      const bb9Plus = row.bb9_plus != null ? Number(row.bb9_plus) : null;
+      const hr9Plus = row.hr9_plus != null ? Number(row.hr9_plus) : null;
+      // 2026-08-21: HTP = STORED canonical value (park swap), no live compute.
+      const hitterTalentPlus = row.hitter_talent_plus != null ? Number(row.hitter_talent_plus) : null;
       const entry = {
         conference: row.conference,
         era_plus: eraPlus,
@@ -1315,7 +1287,7 @@ export default function TransferPortal() {
       pIso: row?.p_iso ?? null,
       pWrc: null,
       pWrcPlus: row?.p_wrc_plus ?? null,
-      owar: row?.o_war ?? null,
+      owar: pickHitterWar(row as any), // headline hitter WAR = total_hitter_war (o_war fallback)
       // TWP-aware: raw market_value is NULL for is_twp=true rows by design;
       // pickHitterMarketValue routes to twp_hitter_market_value for them.
       nilValuation: pickHitterMarketValue(row as any, !!(selectedPlayer as any)?.is_twp),
@@ -1581,7 +1553,7 @@ export default function TransferPortal() {
                 <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{simulation ? whole(simulation.pWrcPlus) : "-"}</div>
               </div>
               <div className={`rounded-lg border-2 p-4 text-center ${simulation?.owar != null ? (simulation.owar > 1.5 ? "border-emerald-500 bg-emerald-500/10" : simulation.owar >= 0.5 ? "border-blue-500 bg-blue-500/10" : "border-rose-500 bg-rose-500/10") : "border-border bg-muted/10"}`}>
-                <div className="text-muted-foreground text-xs uppercase tracking-wide">oWAR</div>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">WAR</div>
                 <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{simulation ? stat(simulation.owar, 2) : "-"}</div>
               </div>
               <div className={`rounded-lg border-2 p-4 text-center ${simulation?.nilValuation != null ? (simulation.nilValuation >= 75000 ? "border-emerald-500 bg-emerald-500/10" : simulation.nilValuation >= 25000 ? "border-blue-500 bg-blue-500/10" : "border-amber-500 bg-amber-500/10") : "border-border bg-muted/10"}`}>

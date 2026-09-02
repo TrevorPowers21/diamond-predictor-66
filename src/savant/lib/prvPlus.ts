@@ -1,4 +1,10 @@
 /**
+ * ⚠ LEGACY (2026-08-11): this is the OLD power-rating-composite pRV+ (skill-based, from the
+ * era_pr_plus… scouting power ratings). The main app now uses the D1-FIP pRV+ index
+ * (src/lib/pitcherQuality.ts, from actual/projected K9/BB9/HR9). This Savant copy is left in place
+ * only because the Savant subsystem is slated for a rewrite; replace it with pitcherQuality then.
+ * Do NOT wire new code to this — use src/lib/pitcherQuality.ts.
+ *
  * pRV+ for pitchers — composite "wRC+ equivalent" that scores a pitcher
  * relative to NCAA average (100 = average, higher = better).
  *

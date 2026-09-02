@@ -248,6 +248,9 @@ export default function ScoutingCsvUpload() {
             contact: num(get(row, "Contact%")), lineDrive: num(get(row, "LineDrive%")), avgExitVelo: num(get(row, "AvgExitVelo")),
             popUp: num(get(row, "PopUp%")), bb: num(get(row, "BB%")), chase: num(get(row, "Chase%")), barrel: num(get(row, "Barrel%")),
             ev90: num(get(row, "EV90")), pull: num(get(row, "Pull%")), la10_30: num(get(row, "LA10-30%")), gb: num(get(row, "GB%")),
+            // ★ 2026-08-31 — the scouting CSV has no pull-air column; powerRatings falls back to raw pull%
+            //   (`pullAirEff = pullAirScore ?? pullScore`). Explicit null == the previous omission.
+            pullAir: null,
           });
         } else if (kind === "pitcher") {
           computePitchingPowerRatings({

@@ -37,6 +37,30 @@ export function RosterBudgetSettings() {
         derivedCaps={gm.derivedCaps}
         coachTotal={gm.coachTotalBudget}
       />
+      <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide" style={OSWALD}>NIL Allocation</div>
+          <div className="text-[11px] text-muted-foreground">
+            Balanced pays a floor across contributors; Top-Heavy concentrates on your best (more so as the budget tightens).
+          </div>
+        </div>
+        <div className="flex overflow-hidden rounded-md border border-border/60">
+          {(["balanced", "top_heavy"] as const).map((m) => {
+            const active = (gm.budget?.nil_allocation_mode ?? "balanced") === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => gm.saveBudget({ nil_allocation_mode: m })}
+                className="cursor-pointer px-3 py-1 text-xs transition-colors"
+                style={active ? { backgroundColor: GOLD, color: "#070e1f", ...OSWALD } : OSWALD}
+              >
+                {m === "balanced" ? "Balanced" : "Top-Heavy"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div className="flex justify-end">
         <Button onClick={() => gm.saveBudget(valuesToCaps(vals))} size="sm" style={{ backgroundColor: GOLD, color: "#070e1f", ...OSWALD }} className="uppercase tracking-wide">Save Budget</Button>
       </div>

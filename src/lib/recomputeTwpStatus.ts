@@ -153,6 +153,7 @@ export async function recomputeTwpStatus(
   season = 2026,
   paThreshold = 30,
   ipThreshold = 5,
+  dryRun = false,
 ): Promise<TwpRecomputeReport> {
   console.time("[TWPRecompute] TOTAL");
   const report: TwpRecomputeReport = {
@@ -325,10 +326,11 @@ export async function recomputeTwpStatus(
       // clearing a legacy "TWP" string. Skip the position write when the
       // demotion ladder said "leave position alone" (newPos === oldPos).
       if (u.newPos !== u.oldPos) patch.position = u.newPos;
-      const { error } = await supabase
-        .from("players")
-        .update(patch)
-        .eq("id", u.id);
+      // dryRun: skip the write but still categorize into the report so callers
+      // can preview the exact changes (flag flips + position rewrites) first.
+      const { error } = dryRun
+        ? { error: null as null }
+        : await supabase.from("players").update(patch).eq("id", u.id);
       if (error) {
         report.errors.push(`${u.name} (${u.sid}): ${error.message}`);
         return;

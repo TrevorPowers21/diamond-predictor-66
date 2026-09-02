@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { advanceEligibility, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
 import { isPitcherPos, loadGmBuildRoster } from "@/gm/lib/loadGmBuildRoster";
 import { logGmActivity, deleteGmActivityByRef } from "@/gm/lib/logGmActivity";
+import type { NilAllocationMode } from "@/lib/nilAllocation";
 
 export interface GmBuildOption {
   id: string;
@@ -87,6 +88,8 @@ export interface GmBudget {
   scholarship_mode: ScholarshipMode;
   other_breakdown: GmOtherLine[] | null;
   finalized: boolean;
+  /** NIL allocation philosophy: "balanced" (floor on, default) or "top_heavy" (floor drained up). */
+  nil_allocation_mode: NilAllocationMode;
 }
 
 /**
@@ -187,7 +190,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       // pool typed in Edit Budget. The full NIL/Other cap is ADDITIVE:
       // base + SUM(this build's Funding Sources categories) = base + derivedCaps.
       const budget: GmBudget | null = bud
-        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, scholarship_mode: (bud.scholarship_mode as ScholarshipMode) ?? "pct", other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
+        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, scholarship_mode: (bud.scholarship_mode as ScholarshipMode) ?? "pct", other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized, nil_allocation_mode: (bud.nil_allocation_mode as NilAllocationMode) ?? "balanced" }
         : null;
       return { rows, budget, coachTotalBudget, derivedCaps };
     },

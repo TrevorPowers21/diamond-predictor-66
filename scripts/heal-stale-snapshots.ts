@@ -103,7 +103,16 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
     const conf = r.ctid ? ctConf.get(r.ctid) ?? "" : ""; if (!conf) { noConf++; continue; }
 
     const s: any = { ...r.snap };
-    const isTwp = !!s.is_twp;
+    // ★★ 2026-08-31 — BRANCH ON `players.is_twp`, NOT the snapshot's embedded copy. SILENT-FAILURE REGISTRY #21.
+    //   E35 flipped `players.is_twp` 137→253 and NOTHING back-filled the snapshots, so `s.is_twp` is stale/absent on
+    //   any row written before that. Branching on it sent a TWP's dollars into the SHARED `market_value` — the column
+    //   the display layer never reads for a TWP — while leaving `twp_*_market_value` stale.
+    //   🛑 THIS SCRIPT ALREADY LOADS THE AUTHORITATIVE MAP at `:67` (`twp.set(p.id, !!p.is_twp)`) and uses it at
+    //      `:75` for the role fallback — the market branch simply never used it. The fix is to read the same map.
+    //   ⚠ CAUGHT LIVE: the 2026-08-31 F43b run wrote `market_value = $101,953` onto Gio Colasante's TWP pitcher
+    //      slot (snapshot `is_twp` absent) and left `twp_pitcher_market_value` stale at $130,733.
+    //   ⛔ Do NOT "fix" this by back-filling `is_twp` into snapshots — that just creates another copy to go stale.
+    const isTwp = twp.get(r.pid) === true;
     // stored market for the drift compare (side + TWP aware)
     const storedMkt = side === "P"
       ? (isTwp ? num(s.twp_pitcher_market_value) : num(s[r.mktNonTwp]))
@@ -127,7 +136,12 @@ const HIT_FIELDS = ["p_avg", "p_obp", "p_slg", "p_iso", "p_wrc_plus"];
         if (hitterRates.p_wrc_plus != null) s.p_wrc_plus = hitterRates.p_wrc_plus;
       } else for (const k of HIT_FIELDS) if (r.neu[k] !== undefined) s[k] = r.neu[k];
       s[r.warHitKey] = fWar; if (r.warHitKey !== "o_war" && "o_war" in s) s.o_war = fWar; s.hitter_depth_role = depth;
-      newMkt = computeHitterMarketValue(fWar, { conference: conf, position: pos.get(r.pid) });
+      // Headline total_hitter_war = toggled oWAR + neutral d/bsr (destination/toggle-invariant).
+      // Market rides TOTAL WAR (not o_war), consistent with the precompute + the 7b display swap.
+      const dW = num(r.neu.d_war) ?? 0, bsrW = num(r.neu.bsr_war) ?? 0;
+      const totalHit = fWar + dW + bsrW;
+      s.total_hitter_war = totalHit; s.d_war = dW; s.bsr_war = bsrW;
+      newMkt = computeHitterMarketValue(totalHit, { conference: conf, position: pos.get(r.pid) });
       if (isTwp) { s.twp_hitter_market_value = newMkt; s[r.mktNonTwp] = null; } else { s[r.mktNonTwp] = newMkt; }
     }
     // Heal if WAR drifted OR the market is broken-to-zero. The market-zero case

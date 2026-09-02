@@ -49,7 +49,7 @@ Order:
    almost all tiny ROSTER pRV+ rounding (rv+96.91→97, WAR ±0.02). Preserves all toggles (reads
    production_notes, never writes it). This is the "Phase-1 rounding" fix + fixes the resync damage.
    Trevor explicitly approved touching the ~568 roster rows (tiny, toggle-preserving).
-2. **`clean-twp-sides.ts --apply`** (uses process.env) — own-side TWP snapshots. Dry-run: 26
+2. **`clean-twp-sides.ts 🗑️ DELETED 2026-08-31 --apply`** (uses process.env) — own-side TWP snapshots. Dry-run: 26
    roster + 4 target rows. Nulls OFF-side fields only (no toggle reset). Fixes Kenny §4.
 3. **`verify-all.ts --prod`** — recheck. EXPECT residual, all explainable:
    - RSTR IQ + "undefined" program: 0 active build → INTENTIONAL (Trevor: RSTR IQ skip; undefined
@@ -98,7 +98,7 @@ Root-caused and fixed at the source instead of churning the pipeline:
      board; heal then recomputes the board from the neutral → they diverge; market ends up
      ~10-15% off f(WAR) (Aiden Mouton 43645 vs 48010).
   3. **Kenny Ishikawa (Georgia TWP)** is still broken — pitcher row carries hitter data /
-     missing p_war, roster(1.499 cornerstone) ≠ board(0.887). clean-twp-sides + rebuild-twp
+     missing p_war, roster(1.499 cornerstone) ≠ board(0.887). clean-twp-sides 🗑️DELETED-2026-08-31 + rebuild-twp
      didn't fully resolve him. Needs a manual look.
   4. Role-transition pitchers (Cespedes/Neiswonger) — §2 can't model SP↔RP, always flags. Not real.
 - **These are TARGET-BOARD cosmetic inconsistencies (depth label / ~10% market), NOT

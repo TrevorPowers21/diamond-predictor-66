@@ -17,7 +17,7 @@ import { money, HintLabel, DollarInput } from "@/gm/components/budgetPrimitives"
 import { SeasonBudgetFields, seedValues, valuesToCaps, type SeasonBudgetValues } from "@/gm/components/settings/SeasonBudgetFields";
 import { ActiveRosterPicker } from "@/gm/components/settings/ActiveRosterPicker";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
-import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { allocateNil } from "@/lib/nilAllocation";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -374,18 +374,21 @@ export default function GMRoster() {
   // Used figures reflect the local row drafts, not just the saved DB values.
   const allRows = [...gm.hitters, ...gm.pitchers];
 
-  // Projected Value = Team Builder's budget-share: a player's position-weighted
-  // WAR as a share of the roster's total, times the total budget. (The program-
-  // tier multiplier cancels in numerator/denominator, so it's omitted; the 33
-  // floor matches TB's RAW_WAR_BENCHMARK.) Null when no budget → fall back to
-  // Market Value.
-  const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
-  const rosterScore = allRows.reduce((s, r) => s + posWeightedWar(r), 0);
+  // Projected Value = the NIL allocation curve's share for this player: the roster
+  // ranked by WAR, budget distributed via allocateNil (rank-decay + budget-flex,
+  // sums to budget). PVM is NOT in the score (spec §1) — positional value is priced
+  // by the scarcity layer, not the allocation; PTM cancels within a roster, so raw
+  // WAR is the score. Null when no budget → fall back to Market Value. Mode is
+  // balanced for now; the GM top-heavy toggle threads in when the setting lands.
+  const nilAllocByRow = (() => {
+    const dollars = allocateNil(allRows.map((r) => Number(r.war ?? 0)), coachTotalBudget ?? 0, gm.budget?.nil_allocation_mode ?? "balanced");
+    const m = new Map<GmRow, number>();
+    allRows.forEach((r, i) => m.set(r, dollars[i]));
+    return m;
+  })();
   const projectedValue = (r: GmRow): number | null => {
-    const budget = coachTotalBudget ?? 0;
-    if (budget <= 0) return null;
-    const denom = Math.max(rosterScore, 33);
-    return denom > 0 ? Math.max(0, (posWeightedWar(r) / denom) * budget) : null;
+    if ((coachTotalBudget ?? 0) <= 0) return null;
+    return nilAllocByRow.get(r) ?? null;
   };
   const usedSum = (f: (m: RowMoney) => number | null) => allRows.reduce((s, r) => s + (f(effMoney(r)) ?? 0), 0);
   const revUsed = usedSum((m) => m.rev_share);
