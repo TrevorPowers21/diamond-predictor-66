@@ -883,6 +883,14 @@ export default function TeamBuilder() {
   const skipAutoSeedOnceRef = useRef(false);
   const autoSeededTeamRef = useRef<string>("");
   // Prevents duplicate default-build seeding for the same team while builds === 0.
+  // ⚠ The auto-load effect has `exhaustive-deps` disabled, so anything it closes over is STALE —
+  //   reading `rosterPlayers` there captured an old array and the dirty-guard never fired. A ref is
+  //   always current regardless of the dep array.
+  const dirtyRowsRef = useRef(false);
+  useEffect(() => {
+    dirtyRowsRef.current = rosterPlayers.some((rp: any) => rp?._dirty);
+  }, [rosterPlayers]);
+
   const defaultBuildCreatingForTeamRef = useRef<string | null>(null);
   // Prevents the auto-load effect from overriding a just-called newBuild().
   const newBuildPendingRef = useRef(false);
@@ -1816,7 +1824,7 @@ export default function TeamBuilder() {
     // (neutral) line, and the toggle is lost before the save can fire — "went up properly then went
     // backwards to neutral and never reached the database".
     // ⇒ A row mid-toggle is unsaved work. Reloading over it is data loss, not a refresh.
-    if (rosterPlayers.some((rp: any) => rp?._dirty)) return;
+    if (dirtyRowsRef.current) return;
     setHasSavedOnce(!toLoad.is_default);
     loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
