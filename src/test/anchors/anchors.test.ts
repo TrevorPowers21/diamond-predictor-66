@@ -113,9 +113,15 @@ describe("anchor — every fixture row is FRESH (post-recalibration)", () => {
    * missed kept a NULL role and a stale value, so "null role" and "stale" are the same population
    * viewed two ways.
    *
-   * ⇒ ONE finding, not two: ~743 D1 transfer rows on prod were never re-baked.
-   *   Identify them with: hitter_depth_role IS NULL AND updated_at < '2026-09-01'.
-   *   ⚠ NOT fixed here — a re-bake is a data write and needs to be talked through.
+   * ⇒ CORRECTED AGAIN, later the same day. There is no "never re-baked D1" population either.
+   *   `player_predictions` is keyed on (player_id, customer_team_id, model_type, variant, SEASON),
+   *   enforced by a unique index, and the precompute already UPSERTs on exactly that key. Grouped by
+   *   the real key there are ZERO duplicates. Every "stale D1 row" is a season-2026 row whose only
+   *   twin is the 2027 row — a different SEASON, not an old copy. Every read path filters
+   *   `.eq("season", PROJECTION_SEASON)`, so nothing reads them by accident.
+   *
+   *   What remains genuinely stale is JUCO: ~33.9k season-2027 NJCAA_D1 rows blocked by the
+   *   no_from_conf guard. That is workstream C, and it was already known.
    *
    * This guard exists so a stale row can never be frozen as an anchor again. Freezing one pins
    * PRE-recalibration behaviour as if it were correct — the quietest possible way for a gate to
@@ -238,22 +244,34 @@ describe("anchor — dWAR / bsrWAR convert runs at RUNS_PER_WIN", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe("anchor — D1 TRANSFER oWAR reproduces, when the row is FRESH", () => {
+describe("anchor — D1 TRANSFER oWAR reproduces", () => {
   /**
-   * CORRECTED 2026-09-02. An earlier read of this claimed the transfer path diverged at ~60%. That
-   * number came from an UNFILTERED sample and was wrong twice over:
+   * THE TRUTH, established 2026-09-02 after three wrong turns:
    *
-   *   1. no division filter — JUCO (0.1% reproduce) swamped D1 (97.8%). Cause C1, repeated.
-   *   2. no freshness filter — divergence tracks `updated_at`, not implementation:
-   *        rows updated 2026-08-31 (pre-recalibration):    741 / 743    diverge  99.7%
-   *        rows updated 2026-09-01 (post-recalibration):   319 / 39,257 diverge   0.8%
+   *   `player_predictions` is keyed on (player_id, customer_team_id, model_type, variant, SEASON),
+   *   enforced by a UNIQUE INDEX, and the precompute already UPSERTs on exactly that key.
+   *   Grouped by the real key there are ZERO duplicate rows. D1 transfer oWAR reproduces from
+   *   computeOWar(p_wrc_plus, projected_pa) for the current projection season.
    *
-   * ⇒ There is no transfer-path model divergence. There are STALE ROWS. "Prove both sides are FRESH
-   *   before diffing" exists precisely because stale-vs-fresh is indistinguishable from an
-   *   implementation disagreement — see docs/AGENT_LEARNINGS_INDEX.md.
+   *   Rows carrying an older `updated_at` are SEASON-2026 rows. 2027 is the projection season;
+   *   2026 is last season, is not re-baked, and is never read — every read path filters
+   *   `.eq("season", PROJECTION_SEASON)`.
    *
-   * ⚠ OPEN, for Trevor: ~743 D1 transfer rows on prod still carry pre-recalibration oWAR, plus a
-   *   residual ~0.8% among freshly baked rows. Not fixed here — a re-bake is a data write.
+   *   The one genuinely stale population is JUCO: ~33.9k season-2027 NJCAA_D1 rows blocked by the
+   *   no_from_conf guard. Workstream C, already known.
+   *
+   * ⚠ HOW THIS SUITE GOT IT WRONG THREE TIMES — kept because the pattern matters more than the
+   *   conclusion. Each error was the same shape: an aggregate grouped WITHOUT a key column.
+   *
+   *     grouped without `division`    JUCO reproduces at 0.1% and swamped D1's 97.8%; reported ~60%
+   *                                   and built a "regression to the mean" theory on it. Cause C1,
+   *                                   repeated — the same mistake that made ERAs run 4% low.
+   *     grouped without `updated_at`  stale-looking rows read as an implementation disagreement
+   *     grouped without `season`      2026 and 2027 rows read as duplicates; nearly recommended
+   *                                   DELETING 7,255 legitimate season-2026 rows as "the safe option"
+   *
+   *   Each missing column was one query away. ⇒ READ A TABLE'S UNIQUE CONSTRAINTS BEFORE
+   *   AGGREGATING OVER IT. See docs/PHILOSOPHY.md §17.
    */
   const rows = all().filter(
     (r) => r.division === "D1" && r.model_type === "transfer" && r.o_war != null
