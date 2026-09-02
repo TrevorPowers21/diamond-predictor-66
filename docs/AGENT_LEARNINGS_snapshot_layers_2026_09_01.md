@@ -1,5 +1,11 @@
 # AGENT LEARNINGS — snapshot layers, and why the automated checks all passed while the UI was wrong (2026-09-01)
 
+> ▶️ **CURRENT STATE + ROADMAP: `docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`** — what shipped, what
+> is verified, the 9 open items, and the five queued workstreams (coach agent display · team
+> comparison + 2027 roster upload · JUCO · Track B / agent-as-resource · player development).
+> ⭐ The highest-value refactor is named there: **one save path owning every derived copy.**
+
+
 
 ## 🛑 TEAM BUILDER READ/WRITE PATH — 2026-09-01 (read before touching snapshots)
 
