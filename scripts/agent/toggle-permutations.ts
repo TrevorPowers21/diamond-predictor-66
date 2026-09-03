@@ -279,6 +279,29 @@ async function checkAgainstStored(db: Client, pid: string, tb: Snapshot) {
     }
   } else skip("WAR: no stored value to compare");
 
+  /**
+   * ★ TWO-WAY PLAYERS — both sides live on ONE row, which is why they broke on 09-01.
+   *
+   * The convention: the SHARED `market_value` is NULL by design, and the real numbers live in
+   * `twp_hitter_market_value` / `twp_pitcher_market_value`. A shared value appearing on a TWP
+   * snapshot means the two sides have been collapsed into one, and whichever side the screen picks
+   * is then arbitrary.
+   *
+   * ⚠ SCOPE: snapshots only. Raw `player_predictions` rows legitimately carry a shared
+   * market_value (2,229 on prod) — that is a different population and the rule was never about it.
+   * Measured 2026-09-03: snapshots are clean on BOTH databases (0 of 23 prod, 0 of 9 staging).
+   */
+  if (snap.is_twp === true || snap.twp_hitter_market_value != null || snap.twp_pitcher_market_value != null) {
+    if (snap.market_value == null) ok("TWP: shared market_value is NULL — the two sides stay separate");
+    else {
+      bad(`TWP: shared market_value is SET (${snap.market_value}) — the two sides have collapsed`);
+      warn("Whichever side the screen picks is now arbitrary. This is the 09-01 TWP failure.");
+    }
+    const own = snap.twp_hitter_market_value ?? snap.twp_pitcher_market_value;
+    if (own != null) ok(`TWP: own-side value present (${Number(own).toFixed(0)})`);
+    else warn("TWP: neither twp_hitter_market_value nor twp_pitcher_market_value is set");
+  }
+
   if (shownWrc != null && storedWrc != null) {
     if (Math.abs(shownWrc - Math.round(Number(storedWrc))) < 0.51) ok(`wRC+/pRV+ on screen (${tb.wrcPlus}) matches stored (${Number(storedWrc).toFixed(1)})`);
     else bad(`wRC+/pRV+ on screen (${tb.wrcPlus}) does NOT match stored (${Number(storedWrc).toFixed(1)})`);
@@ -353,13 +376,29 @@ async function checkAgainstStored(db: Client, pid: string, tb: Snapshot) {
       if (isPitcher && usable(war) && pitchers.length < N_PLAYERS && !pitchers.includes(pid)) pitchers.push(pid);
       else if (!isPitcher && usable(wrc) && hitters.length < N_PLAYERS && !hitters.includes(pid)) hitters.push(pid);
     }
-    const subjects = [...hitters, ...pitchers];
+    // ★ Deliberately include a TWO-WAY player if the build has one. They are the shape most likely
+    // to hide a divergence — both sides on ONE row — and a sweep that happens to pick three
+    // ordinary hitters would report green while never touching them.
+    const twps: string[] = [];
+    if (db) {
+      const ids = [...hitters, ...pitchers];
+      const r = await db.query(
+        `select tbp.player_id from team_build_players tbp
+         join players p on p.id = tbp.player_id
+         where p.is_twp = true and tbp.player_snapshot is not null limit 3`);
+      for (const row of r.rows) {
+        const pid = row.player_id as string;
+        if (!ids.includes(pid) && await rowFor(page, pid).count() > 0) twps.push(pid);
+      }
+    }
+    const subjects = [...hitters, ...pitchers, ...twps];
     if (!subjects.length) {
       bad("No row has a player_id and a rendered stat — nothing to assert.");
       warn("An empty build is NOT a pass. Load a build with players and re-run.");
       throw new Error("no usable rows");
     }
-    info(`sweeping ${hitters.length} hitter(s) + ${pitchers.length} pitcher(s)`);
+    info(`sweeping ${hitters.length} hitter(s) + ${pitchers.length} pitcher(s) + ${twps.length} two-way`);
+    if (!twps.length) warn("no two-way player on this build — the TWP own-side check is NOT exercised");
     if (!pitchers.length) warn("no pitcher rows found — the SP/RP path is NOT being exercised");
     console.log("");
 
@@ -401,9 +440,11 @@ async function checkAgainstStored(db: Client, pid: string, tb: Snapshot) {
   console.log("               team_build_players.player_snapshot — the 09-01 defect class, directly.");
   console.log("               Cross-surface wRC+ for HITTERS (Player Profile, Target Board, Returning");
   console.log("               Players), skipping any surface that does not list the player.");
+  console.log("               TWO-WAY PLAYERS: the shared market_value must stay NULL and the own-side");
+  console.log("               value must be present — both sides on one row is why they broke on 09-01.");
   console.log("  NOT COVERED  the UNROSTERED local-session case (a player not on roster or board gets a");
   console.log("               local-only session that must never persist) · Transfer Portal · the");
-  console.log("               GM/Front Office surfaces · two-way players, whose two sides live on one row ·");
+  console.log("               GM/Front Office surfaces ·");
   console.log("               cross-surface comparison for PITCHERS (TB shows pRV+, profiles show PR+).");
   console.log(`  ${C.y}A green run means "no divergence found on the covered path", never "the app agrees".${C.r}`);
 
