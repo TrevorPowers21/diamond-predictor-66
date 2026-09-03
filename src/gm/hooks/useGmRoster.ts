@@ -177,6 +177,23 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   );
 
   const key = ["gm-roster", effectiveTeamId ?? null, activeBuildId, season];
+
+  /**
+   * ★ Tell the COACH's surfaces that something they read has changed.
+   *
+   * The GM side writes straight into Team Builder's tables — `team_build_players.nil_value` on the
+   * per-row checkmark, `team_builds.total_budget` on Finalize & Push. Those writes were correct, but
+   * every mutation only ever invalidated GM query keys (`gm-roster`, `gm-builds`, `gm-activity`…).
+   * Team Builder's cache is keyed `["team-builds", …]` and never heard about it, so the value was
+   * right in the database and stale on screen until a manual reload.
+   *
+   * ⚠ Deliberately NOT called from saveRosterDraft. A draft is staff-only — "visible only to your
+   * staff until you finalize" — so pushing it to the coach would leak unfinalised money.
+   */
+  const invalidateCoachSurfaces = () => {
+    qc.invalidateQueries({ queryKey: ["team-builds"] });
+    qc.invalidateQueries({ queryKey: ["target-board"] });
+  };
   const { data, isLoading } = useQuery({
     queryKey: key,
     enabled: !!user?.id && !!effectiveTeamId && !!activeBuildId,
@@ -397,6 +414,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return { nextFinalized, name: row.name };
     },
     onSuccess: ({ nextFinalized, name }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: key });
       if (nextFinalized) toast.success(`Finalized pay for ${name} — synced to Team Builder`);
     },
@@ -440,6 +458,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return total;
     },
     onSuccess: (total) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });
       toast.success(`Budget finalized — $${Math.round(total).toLocaleString("en-US")} pushed to Team Builder`);
@@ -529,6 +548,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return { count: rowsWithMoney.filter((r) => !r.row.is_recruit && !r.row.is_added_target).length, total };
     },
     onSuccess: ({ count, total }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });
       toast.success(`Finalized ${count} players + $${Math.round(total).toLocaleString("en-US")} budget — pushed to Team Builder`);
@@ -627,7 +647,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       }
       return newId;
     },
-    onSuccess: (newBuildId) => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
+    onSuccess: (newBuildId) => { invalidateCoachSurfaces(); qc.invalidateQueries({ queryKey: ["gm-builds"] }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
     onError: (e: any) => toast.error(`Create build failed: ${e.message}`),
   });
 
@@ -641,6 +661,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       if (e2) throw e2;
     },
     onSuccess: () => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: ["gm-roster"] });
       qc.invalidateQueries({ queryKey: ["player-program-membership"] });
@@ -654,7 +675,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       const { error } = await (supabase as any).from("team_builds").update({ name: name.trim() }).eq("id", buildId);
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); toast.success("Build renamed"); },
+    onSuccess: () => { invalidateCoachSurfaces(); qc.invalidateQueries({ queryKey: ["gm-builds"] }); toast.success("Build renamed"); },
     onError: (e: any) => toast.error(`Rename failed: ${e.message}`),
   });
 
@@ -726,7 +747,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       const { error: e2 } = await (supabase as any).from("gm_player_finance").update({ roster_status: null, departure_reason: null }).eq("build_player_id", buildPlayerId);
       if (e2) throw e2;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Player restored to roster"); },
+    onSuccess: () => { invalidateCoachSurfaces(); qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Player restored to roster"); },
     onError: (e: any) => toast.error(`Restore failed: ${e.message}`),
   });
 
@@ -747,6 +768,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return season + 1;
     },
     onSuccess: (nextYear) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
       setPickedBuildId(null);
@@ -789,6 +811,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return { switched, name: trimmed };
     },
     onSuccess: ({ switched, name }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });
@@ -837,6 +860,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return { switched, name };
     },
     onSuccess: ({ switched, name }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });

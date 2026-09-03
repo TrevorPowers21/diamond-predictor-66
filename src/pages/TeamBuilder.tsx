@@ -887,6 +887,11 @@ export default function TeamBuilder() {
   //   reading `rosterPlayers` there captured an old array and the dirty-guard never fired. A ref is
   //   always current regardless of the dep array.
   const dirtyRowsRef = useRef(false);
+  // ★ Same reasoning as dirtyRowsRef, for the budget field. A budget the coach has typed but not
+  // saved is unsaved work; a refetch landing on top of it is data loss, not a refresh. Without this
+  // the value can flash back to the stored number — or to 0 on a build that has never had one set —
+  // which is the "shifts, goes to 0 for a bit, then comes back" seen while demoing.
+  const budgetDirtyRef = useRef(false);
   useEffect(() => {
     dirtyRowsRef.current = rosterPlayers.some((rp: any) => rp?._dirty);
   }, [rosterPlayers]);
@@ -1759,6 +1764,7 @@ export default function TeamBuilder() {
     setSelectedTeam("");
     setRosterPlayers([]);
     setDirty(false);
+    budgetDirtyRef.current = false;   // saved (or reset) — the field is no longer unsaved work
     setDepthAssignments({});
     setDepthPlaceholders({});
     autoSeededTeamRef.current = "";
@@ -1829,6 +1835,41 @@ export default function TeamBuilder() {
     loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTeamId, selectedBuildId, builds.length, buildsLoading]);
+
+  // ★ 2026-09-03 — LIVE SYNC FROM THE FRONT OFFICE.
+  //
+  // The GM side writes straight into this build: `team_build_players.nil_value` on the per-row
+  // checkmark, `team_builds.total_budget` on Finalize & Push. Those writes were always correct, but
+  // the auto-load effect above returns early once `selectedBuildId` is set, so Team Builder never
+  // re-read them — right in the database, stale on screen until a manual reload.
+  //
+  // GM mutations now invalidate ["team-builds"] (see useGmRoster.invalidateCoachSurfaces), which
+  // refetches `builds`. This effect notices the selected build's `updated_at` has ADVANCED and
+  // reloads just that build. Keyed on updated_at rather than on any refetch, so an ordinary window-
+  // focus refetch that changed nothing does NOT rebuild the roster.
+  const loadedBuildStampRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedBuildId || buildsLoading) return;
+    const row = builds.find((b: any) => b.id === selectedBuildId) as any;
+    if (!row?.updated_at) return;
+    const stamp = String(row.updated_at);
+
+    // First sighting of this build — record the stamp, do not reload.
+    if (loadedBuildStampRef.current === null) { loadedBuildStampRef.current = stamp; return; }
+    if (stamp === loadedBuildStampRef.current) return;
+
+    // ⛔ Never reload over unsaved work. A dirty row or a typed-but-unsaved budget is the coach's,
+    // not the database's — the 09-01 rule, applied to a second source of writes.
+    if (dirtyRowsRef.current || budgetDirtyRef.current) return;
+
+    loadedBuildStampRef.current = stamp;
+    loadBuild(selectedBuildId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builds, buildsLoading, selectedBuildId]);
+
+  // A build switch must forget the previous build's stamp, or the new build's first sighting reads
+  // as a change and triggers an immediate redundant reload.
+  useEffect(() => { loadedBuildStampRef.current = null; }, [selectedBuildId]);
 
   useEffect(() => {
     if (!selectedTeam) return;
@@ -2080,6 +2121,7 @@ export default function TeamBuilder() {
       setSelectedBuildId(buildId);
       setBuildName(targetName);
       setDirty(false);
+      budgetDirtyRef.current = false;   // saved (or reset) — the field is no longer unsaved work
       return { buildId, saveAs, targetName };
     },
     onSuccess: (result) => {
@@ -3461,6 +3503,7 @@ export default function TeamBuilder() {
     setBuildName("My Team Build");
     setTotalBudget(0);
     setDirty(false);
+    budgetDirtyRef.current = false;   // saved (or reset) — the field is no longer unsaved work
     setSelectedTeam(effectiveSchoolName ?? "");
     setTeamSearchQuery(effectiveSchoolName ?? "");
     // Clear depth assignments — old indices would silently point at the new
@@ -3685,6 +3728,7 @@ export default function TeamBuilder() {
                   onClick={() => {
                     setShowSavePrompt(false);
                     setDirty(false);
+                    budgetDirtyRef.current = false;   // saved (or reset) — the field is no longer unsaved work
                     if (blocker.state === "blocked") blocker.proceed();
                   }}
                 >
@@ -3965,7 +4009,7 @@ export default function TeamBuilder() {
           </div>
           <div>
             <Label className="text-xs mb-1 block">Total Budget ($)</Label>
-            <CurrencyInput value={totalBudget || null} onChange={(n) => { setTotalBudget(n ?? 0); setDirty(true); }} />
+            <CurrencyInput value={totalBudget || null} onChange={(n) => { setTotalBudget(n ?? 0); setDirty(true); budgetDirtyRef.current = true; }} />
           </div>
           <div>
             <Label className="text-xs mb-1 block">Program Tier Conference (PTM)</Label>
