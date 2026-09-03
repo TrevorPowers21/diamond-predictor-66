@@ -54,7 +54,7 @@ Wiring them is a secrets decision, not a coding task. **A check nobody runs is p
 | TWP check unexercised | the runner's two-way assertion is correct but no TWP sits on the test build; it warns rather than passing |
 | June migration | **in `git stash`**, findable by message. Repo says `ADD CONSTRAINT`, both DBs have a partial index. Only kind-mismatch in 326 objects. |
 | 14 prod-only indexes | never written into a migration |
-| `PHILOSOPHY.md` ⚠️ lines | need Trevor — §15 (business/engineering mapping) and §17 (mechanical floor vs voice) first |
+| `PHILOSOPHY.md` §1 | claims `rstr-agent-plan.md` has a priority inverted — deterministic checks over voice. Trevor's call; the counter-argument is in the file. |
 
 **Left in place deliberately:** `rls-test-coach@rstriq.test` on **STAGING** (Arkansas, `general_user`)
 — the only non-superadmin account there, needed for any future RLS work. The **prod** one was removed.

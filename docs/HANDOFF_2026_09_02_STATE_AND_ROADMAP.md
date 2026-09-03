@@ -148,7 +148,7 @@ Program-owned data, distinct from projections.
 
 ## 🔍 THE CHECKS — and WHEN to run them
 
-Built 2026-09-02/03. **A check nobody runs is prose** (`docs/PHILOSOPHY.md` §17), so this table is
+Built 2026-09-02/03. **A check nobody runs is prose** (`docs/PHILOSOPHY.md` §1), so this table is
 the point of them, not the scripts.
 
 | command | what it catches | run it |

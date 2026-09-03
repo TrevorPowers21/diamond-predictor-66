@@ -8,7 +8,7 @@ those instead.
 | layer | file | loaded |
 |---|---|---|
 | **Rules** (this file) | `CLAUDE.md` | every session |
-| **Voice / business judgment** | `docs/PHILOSOPHY.md` | every session |
+| **Engineering philosophy** | `docs/PHILOSOPHY.md` | every session |
 | **State — where things stand now** | `.claude/state/current.md` | every session + after compaction |
 | **Technical judgment** | `docs/knowledge/*.md` | on demand |
 | **History** | `docs/AGENT_LEARNINGS_INDEX.md` | on demand |

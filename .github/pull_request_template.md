@@ -68,6 +68,6 @@ Tick what you ran. If nothing covers the change, say so — that is useful infor
   DB, or only on SCREEN?
 - **Prod writes need an explicit "prod, now?".** Trevor merges to `main`.
 
-Full reasoning: `docs/PHILOSOPHY.md` §17 · `docs/knowledge/` · `CLAUDE.md`
+Full reasoning: `docs/PHILOSOPHY.md` · `docs/knowledge/` · `CLAUDE.md`
 
 </details>

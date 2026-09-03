@@ -113,7 +113,7 @@ The knowledge is not one file. Each layer has a different load cost, so each has
 | layer | lives in | loaded | holds |
 |---|---|---|---|
 | **Rules** | `CLAUDE.md` (repo root) | **every session** | technical facts + hard rules, one line each. ⚠ Currently ~280 lines and narrative — **needs trimming to terse rules**; the prose belongs in `docs/knowledge/`. |
-| **Voice / philosophy** | ✅ `docs/PHILOSOPHY.md` *(drafted 2026-09-02 — awaiting Trevor's corrections on the ⚠️ lines)* | every session | **business judgment**, not technical: separation by use case not sport · don't rush pricing before reputation is earned · ERP is back-office only · de-brand vendors where the point is the capability. Mine the RSTR IQ master reference doc; do not author from blank. |
+| **Engineering philosophy** | ✅ `docs/PHILOSOPHY.md` *(rewritten 2026-09-03 — engineering only)* | every session | how we decide something is TRUE. Every principle cites the failure that produced it. ⚠ BUSINESS reasoning is deliberately NOT here — `RSTR_IQ_Master_Reference` is the living source for that, and a repo copy would be a second place the same reasoning lives. |
 | **State** | `.claude/state/current.md` *(does not exist)* | every session + **after compaction** | *where things stand right now.* Overwritten, never appended. The file the agent re-reads to snap back. |
 | **Technical judgment** | `docs/knowledge/*.md` | on demand | the named principles (`p-prediction-is-not-a-snapshot`, `prove-comparable-before-diffing`, …). Already exists, 7 files. |
 | **History** | `docs/AGENT_LEARNINGS_INDEX.md` + 17 files | on demand | what was tried, what worked, what superseded what. Already exists. |
