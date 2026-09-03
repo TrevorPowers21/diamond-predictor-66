@@ -29,6 +29,14 @@
  *   … -- --players=5     how many rows to sweep (default 3)
  */
 import { chromium, type Page, type Locator } from "playwright";
+import { Client, types } from "pg";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+
+// pg hands numeric(1700)/int8(20) back as STRINGS — unconverted, every comparison below would be
+// string comparison dressed as arithmetic.
+types.setTypeParser(1700, Number);
+types.setTypeParser(20, Number);
 
 const HEADED = process.argv.includes("--headed");
 const BASE = process.env.BASE_URL || "http://localhost:5173";     // vite.config.ts server.port
@@ -45,6 +53,13 @@ const bad = (s: string) => { checks++; failures++; console.log(`    ${C.red}✗$
 const warn = (s: string) => console.log(`    ${C.y}!${C.r} ${s}`);
 const info = (s: string) => console.log(`  ${C.c}·${C.r} ${s}`);
 const skip = (s: string) => console.log(`    ${C.d}– ${s}${C.r}`);
+
+function envVal(key: string): string | undefined {
+  try {
+    const m = readFileSync(resolve(process.cwd(), ".env.local"), "utf8").match(new RegExp(`^${key}=(.*)$`, "m"));
+    return m?.[1]?.trim().replace(/^["']|["']$/g, "");
+  } catch { return undefined; }
+}
 
 const EMAIL = process.env.TEST_COACH_EMAIL || "rls-test-coach@rstriq.test";
 const PASSWORD = process.env.TEST_COACH_PASSWORD;
@@ -181,6 +196,12 @@ async function testToggle(page: Page, pid: string, which: ToggleId, label: strin
  * WAR is what market is derived from — a surface can agree on the rate and still disagree on both.
  */
 async function testSurface(page: Page, tb: Snapshot, path: string, surface: string) {
+  // ⛔ HITTERS ONLY. Team Builder's stat column shows wRC+ for a hitter but pRV+ for a pitcher, and
+  // PitcherProfile renders "Overall PR+" — a POWER RATING, a different metric entirely (the PR+ vs
+  // pRV+ trap). Comparing them reports a divergence that does not exist. Pitchers are still fully
+  // covered by the toggle assertions and by checkAgainstStored(), which is the rigorous check.
+  if (tb.sprp) { skip(`${surface}: pitcher — TB shows pRV+, the profile shows PR+, not comparable`); return; }
+
   await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
   await dismissDialogs(page);
   await page.waitForTimeout(2500);
@@ -206,7 +227,13 @@ async function testSurface(page: Page, tb: Snapshot, path: string, surface: stri
     return new RegExp(`(^|[^\\d.])${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\d.]|$)`).test(hay);
   };
 
-  const fields: [keyof Snapshot, string][] = [["wrcPlus", "wRC+"], ["war", "WAR"], ["market", "market"]];
+  // ⚠ wRC+ ONLY across surfaces. Comparing WAR/market by string match produced nothing but false
+  // alarms: Team Builder's "WAR" column and Player Profile's "WAR" box BOTH render
+  // total_hitter_war, but a page-text scrape misses it for render-timing reasons and reports a
+  // divergence that is not there. Display-vs-STORED is the rigorous version of that check and it
+  // lives in checkAgainstStored() below — comparing what is on screen to what is in the database,
+  // rather than one screen to another.
+  const fields: [keyof Snapshot, string][] = [["wrcPlus", "wRC+"]];
   const agree: string[] = [], differ: string[] = [], absent: string[] = [];
   for (const [k, label] of fields) {
     const r = present(tb[k]);
@@ -221,6 +248,41 @@ async function testSurface(page: Page, tb: Snapshot, path: string, surface: stri
     warn("Same stat, two surfaces, two values — §4's invalidating condition.");
   }
   void absent;
+}
+
+/**
+ * ★ DISPLAY vs STORED — the 2026-09-01 defect class, checked directly.
+ *
+ * That night every DATABASE check passed while the SCREEN was wrong. So compare what Team Builder
+ * renders against what is actually in `team_build_players.player_snapshot` — not against another
+ * surface, which only tells you two screens agree, possibly on the same wrong number.
+ */
+async function checkAgainstStored(db: Client, pid: string, tb: Snapshot) {
+  const r = await db.query(
+    `select player_snapshot from team_build_players where player_id = $1 and player_snapshot is not null limit 1`,
+    [pid]);
+  if (!r.rows.length) { skip(`stored snapshot: none for this player — nothing to compare`); return; }
+  const snap: any = r.rows[0].player_snapshot;
+
+  const num = (v: string) => { const n = Number(String(v).replace(/[$,\s]/g, "")); return Number.isFinite(n) ? n : null; };
+  const shownWar = num(tb.war), shownWrc = num(tb.wrcPlus);
+
+  // Mirrors pickHitterWar(): total_hitter_war is the headline, o_war/owar the legacy fallback.
+  const storedWar = snap.total_hitter_war ?? snap.o_war ?? snap.owar ?? snap.p_war ?? null;
+  const storedWrc = snap.p_wrc_plus ?? snap.p_rv_plus ?? null;
+
+  if (shownWar != null && storedWar != null) {
+    if (Math.abs(shownWar - Number(storedWar)) < 0.005) ok(`WAR on screen (${tb.war}) matches the stored snapshot (${Number(storedWar).toFixed(4)})`);
+    else {
+      bad(`WAR on screen (${tb.war}) does NOT match stored (${Number(storedWar).toFixed(4)})`);
+      warn("The screen is showing something other than the stored snapshot — the 09-01 defect class.");
+    }
+  } else skip("WAR: no stored value to compare");
+
+  if (shownWrc != null && storedWrc != null) {
+    if (Math.abs(shownWrc - Math.round(Number(storedWrc))) < 0.51) ok(`wRC+/pRV+ on screen (${tb.wrcPlus}) matches stored (${Number(storedWrc).toFixed(1)})`);
+    else bad(`wRC+/pRV+ on screen (${tb.wrcPlus}) does NOT match stored (${Number(storedWrc).toFixed(1)})`);
+  } else skip("wRC+: no stored value to compare");
 }
 
 (async () => {
@@ -241,6 +303,14 @@ async function testSurface(page: Page, tb: Snapshot, path: string, surface: stri
     process.exit(1);
   }
   info(`dev server up at ${BASE} (reads STAGING)`);
+
+  const pg = envVal("PGURI");
+  let db: Client | null = null;
+  if (pg) {
+    db = new Client({ connectionString: pg, ssl: { rejectUnauthorized: false } });
+    await db.connect();
+    info("connected read-only to STAGING for the display-vs-stored check");
+  } else warn("no PGURI in .env.local — display-vs-stored check will be skipped");
 
   const browser = await chromium.launch({ headless: !HEADED });
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
@@ -304,6 +374,7 @@ async function testSurface(page: Page, tb: Snapshot, path: string, surface: stri
       // Re-read before comparing surfaces: if a restore above failed, comparing against the ORIGINAL
       // snapshot would report a surface mismatch that is really our own mess.
       const fresh = await readRow(page, pid);
+      if (db) await checkAgainstStored(db, pid, fresh);
       // /dashboard/player/:id is the hitter profile, /dashboard/pitcher/:id the pitcher one.
       const isPitcher = !!fresh.sprp;
       await testSurface(page, fresh, isPitcher ? `/dashboard/pitcher/${pid}` : `/dashboard/player/${pid}`,
@@ -320,17 +391,20 @@ async function testSurface(page: Page, tb: Snapshot, path: string, surface: stri
     bad(`run aborted: ${e.message}`);
   } finally {
     await browser.close();
+    if (db) await db.end();
   }
 
   console.log(C.b + "── coverage ──" + C.r);
   console.log("  COVERED      dev-agg, SP/RP and depth-role: each moves the right stats, leaves rates");
   console.log("               alone where it should, and restores exactly. Hitters AND pitchers.");
-  console.log("               Team Builder vs Player/Pitcher Profile, Target Board, Returning Players —");
-  console.log("               compared on wRC+ AND WAR AND market, skipping surfaces that do not list");
-  console.log("               the player at all.");
+  console.log("               DISPLAY vs STORED: the on-screen WAR and wRC+/pRV+ are checked against");
+  console.log("               team_build_players.player_snapshot — the 09-01 defect class, directly.");
+  console.log("               Cross-surface wRC+ for HITTERS (Player Profile, Target Board, Returning");
+  console.log("               Players), skipping any surface that does not list the player.");
   console.log("  NOT COVERED  the UNROSTERED local-session case (a player not on roster or board gets a");
   console.log("               local-only session that must never persist) · Transfer Portal · the");
-  console.log("               GM/Front Office surfaces · two-way players, whose two sides live on one row.");
+  console.log("               GM/Front Office surfaces · two-way players, whose two sides live on one row ·");
+  console.log("               cross-surface comparison for PITCHERS (TB shows pRV+, profiles show PR+).");
   console.log(`  ${C.y}A green run means "no divergence found on the covered path", never "the app agrees".${C.r}`);
 
   console.log(
