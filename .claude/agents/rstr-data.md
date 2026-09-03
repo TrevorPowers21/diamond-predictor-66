@@ -59,6 +59,10 @@ Two databases, and they **have** differed in ways that changed the answer:
 - **2026-09-02**: an RLS finding measured on staging was reported as a prod security hole. Prod was
   never exposed. `npm run agent:rls` **defaults to staging** — pass `--prod` explicitly.
 - Prod has **14 indexes staging lacks**, five on `player_predictions`. Performance differs.
+- ⛔ **STAGING HAS NO SEASON-2026 ROWS.** `player_predictions`: staging is 2027 only (215,108);
+  prod carries 2026 (15,674) *and* 2027 (201,222). **A population check validated on staging will
+  not reproduce prod's season behaviour**, and a script tested there meets rows on prod it never
+  saw. Found 2026-09-03 by this agent's own first run.
 
 ⇒ **State the target in every answer.** If the question could differ between them, check both.
 
