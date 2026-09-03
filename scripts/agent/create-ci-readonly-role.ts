@@ -17,11 +17,14 @@
  * STAGING ONLY. Refuses to run against any other project ref.
  *
  *   npx tsx scripts/agent/create-ci-readonly-role.ts --dry-run   # print the SQL, change nothing
- *   npx tsx scripts/agent/create-ci-readonly-role.ts             # create it
+ *   npx tsx scripts/agent/create-ci-readonly-role.ts             # create it (rotates if it exists)
+ *
+ * The connection string is written to .env.local as CI_READONLY_PGURI — gitignored, and recoverable
+ * later with `grep CI_READONLY_PGURI .env.local` rather than a rotation.
  *   npx tsx scripts/agent/create-ci-readonly-role.ts --drop      # remove it
  */
 import { Client } from "pg";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { randomBytes } from "crypto";
 
@@ -103,7 +106,13 @@ function env(key: string): string | undefined {
   await c.end();
 
   // Prove it end to end: connect AS the new role and confirm it can read the catalog but not data.
-  const ciUri = `${u.protocol}//${ROLE}:${encodeURIComponent(password)}@${u.host}${u.pathname}`;
+  // ⚠ Supabase's POOLER needs the tenant ref embedded in the USERNAME — `role.project_ref`, which
+  // is why the app's own URI connects as `postgres.slrxowawbijbjrkozqlj`. A bare `ci_readonly` is
+  // rejected with "no tenant identifier provided (external_id or sni_hostname required)". Caught by
+  // the connect-as check below; without it we would have shipped a secret that fails in CI for a
+  // reason the log does not explain.
+  const poolerUser = u.hostname.includes("pooler.supabase.com") ? `${ROLE}.${STAGING_REF}` : ROLE;
+  const ciUri = `${u.protocol}//${poolerUser}:${encodeURIComponent(password)}@${u.host}${u.pathname}`;
   const ci = new Client({ connectionString: ciUri, ssl: { rejectUnauthorized: false } });
   try {
     await ci.connect();
@@ -114,11 +123,30 @@ function env(key: string): string | undefined {
       bad(`as ${ROLE}: CAN read player_predictions — it should not be able to`);
     } catch { ok(`as ${ROLE}: CANNOT read player_predictions — data stays private`); }
     await ci.end();
-  } catch (e: any) { bad(`could not connect as ${ROLE}: ${e.message}`); }
+  } catch (e: any) {
+    bad(`could not connect as ${poolerUser}: ${e.message}`);
+    bad("NOT usable as a CI secret until this connects. Do not save the value below.");
+    process.exitCode = 1;
+  }
+
+  // Persist to .env.local so the value is recoverable rather than one-shot. That file is
+  // gitignored (`*.local` in .gitignore, verified before writing) and already holds PGURI.
+  const envPath = resolve(process.cwd(), ".env.local");
+  if (existsSync(envPath)) {
+    const cur = readFileSync(envPath, "utf8");
+    const line = `CI_READONLY_PGURI=${ciUri}`;
+    const next = /^CI_READONLY_PGURI=.*$/m.test(cur)
+      ? cur.replace(/^CI_READONLY_PGURI=.*$/m, line)          // rotate in place
+      : cur.replace(/\n*$/, "\n") + line + "\n";
+    writeFileSync(envPath, next);
+    ok("saved to .env.local as CI_READONLY_PGURI (gitignored)");
+  } else bad(".env.local not found — the value is printed below and NOT saved anywhere");
 
   console.log(C.b + "\n── add this as a GitHub secret ──" + C.r);
   console.log(`  name:  STAGING_PGURI`);
   console.log(`  value: ${ciUri}`);
   console.log(`\n  ${C.y}Settings → Secrets and variables → Actions → New repository secret.`);
-  console.log(`  Shown once. Re-run this script to rotate.${C.r}\n`);
+  console.log(`  Also saved to .env.local, so re-reading it later does not require a rotation:`);
+  console.log(`    grep CI_READONLY_PGURI .env.local`);
+  console.log(`  Re-running this script rotates the password and updates that line.${C.r}\n`);
 })().catch((e) => { bad(e.message); process.exit(1); });

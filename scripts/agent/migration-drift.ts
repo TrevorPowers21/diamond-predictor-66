@@ -84,7 +84,10 @@ function parse(sql: string, file: string): Decl[] {
   P("  explain an object existing under the declared name as a different kind of thing.\n");
 
   for (const t of targets) {
-    const conn = readEnv(t.env, "PGURI") || readEnv(t.env, "DATABASE_URL");
+    // process.env FIRST so CI can pass the connection string directly instead of synthesising an
+    // .env.local file on the runner. Falls back to the gitignored env files for local use.
+    const conn = (t.label === "STAGING" ? process.env.PGURI : process.env.PROD_PGURI)
+      || readEnv(t.env, "PGURI") || readEnv(t.env, "DATABASE_URL");
     if (!conn) { P(`\n══ ${t.label}: no PGURI in ${t.env} — skipped`); continue; }
 
     const c = new Client({ connectionString: conn, ssl: { rejectUnauthorized: false } });

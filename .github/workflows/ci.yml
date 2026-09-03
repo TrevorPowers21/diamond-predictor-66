@@ -323,10 +323,9 @@ jobs:
         env:
           PGURI: ${{ secrets.STAGING_PGURI }}
         run: |
-          # The script reads .env.local, which does not exist in CI. Write one containing ONLY the
-          # read-only URL. Gitignored, and the runner is destroyed after the job.
-          printf 'PGURI=%s\n' "$PGURI" > .env.local
-
+          # migration-drift.ts reads process.env.PGURI first, so nothing is written to disk. PROD is
+          # skipped automatically — PROD_PGURI is not set and .env.production.local does not exist
+          # on the runner.
           set +e
           npx tsx scripts/agent/migration-drift.ts > /tmp/drift.txt 2>&1
           RC=$?
