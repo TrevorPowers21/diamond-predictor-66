@@ -185,7 +185,16 @@ function PlayerTableRow({
   })();
 
   return (
-    <TableRow key={globalIdx}>
+    // data-testid attributes on this row exist for the toggle-permutation runner
+    // (e2e/toggle-permutations.spec.ts). They are inert at runtime. That runner is the check
+    // rstr-agent-plan.md §4 calls the #1 hard stop: the same stat must read identically on every
+    // surface under every dev-agg / depth-role / SP-RP combination.
+    <TableRow
+      key={globalIdx}
+      data-testid="tb-row"
+      data-player-id={p.player_id ?? ""}
+      data-player-name={p.custom_name ?? `${p.player?.first_name ?? ""} ${p.player?.last_name ?? ""}`.trim()}
+    >
       <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">
         <div className="flex items-center gap-2">
           {isTarget && (() => {
@@ -439,7 +448,7 @@ function PlayerTableRow({
               }
             }}
           >
-            <SelectTrigger className="w-20 h-8">
+            <SelectTrigger className="w-20 h-8" data-testid="tb-sprp">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -513,7 +522,7 @@ function PlayerTableRow({
             })
           }
         >
-          <SelectTrigger className="w-[90px] h-8">
+          <SelectTrigger className="w-[90px] h-8" data-testid="tb-devagg">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -534,7 +543,7 @@ function PlayerTableRow({
               updatePlayer(globalIdx, { depth_role: v as PitcherDepthRole })
             }
           >
-            <SelectTrigger className="w-[200px] h-8">
+            <SelectTrigger className="w-[200px] h-8" data-testid="tb-depth">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -565,7 +574,7 @@ function PlayerTableRow({
               })
             }
           >
-            <SelectTrigger className="w-[140px] h-8">
+            <SelectTrigger className="w-[140px] h-8" data-testid="tb-depth">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -579,7 +588,7 @@ function PlayerTableRow({
         )}
       </TableCell>
 
-      <TableCell className="text-center">
+      <TableCell data-testid="tb-stat-slash" className="text-center">
         {(() => {
           const shown: any = projection.shown ?? null;
           const thin = p.player_id ? thinSampleMap.get(p.player_id) === true : false;
@@ -628,7 +637,7 @@ function PlayerTableRow({
         })()}
       </TableCell>
 
-      <TableCell className="text-center">
+      <TableCell data-testid="tb-stat-wrcplus" className="text-center">
         {(() => {
           const simVal = projection.sim ?? null;
           const shown: any = projection.shown ?? null;
@@ -658,7 +667,7 @@ function PlayerTableRow({
         })()}
       </TableCell>
 
-      <TableCell
+      <TableCell data-testid="tb-stat-market"
         className={`text-center font-mono text-[12px] whitespace-nowrap ${
           (p.roster_status || "returner") === "leaving"
             ? "text-muted-foreground"
@@ -714,7 +723,7 @@ function PlayerTableRow({
         />
       </TableCell>
 
-      <TableCell className="text-center font-mono text-[12px] whitespace-nowrap">
+      <TableCell data-testid="tb-stat-war" className="text-center font-mono text-[12px] whitespace-nowrap">
         {(p.roster_status || "returner") === "leaving"
           ? "—"
           : isPitcherRow

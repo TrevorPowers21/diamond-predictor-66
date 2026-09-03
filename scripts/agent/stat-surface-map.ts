@@ -146,6 +146,17 @@ for (const [file, hs] of byFile) {
 }
 
 const md = process.argv.includes("--md");
+
+/**
+ * --porcelain: one stable line per finding, sorted, for CI's delta-vs-base comparison.
+ * ⚠ NO LINE NUMBERS. An unrelated edit above a finding shifts its line and would otherwise read as
+ * a brand-new error — the same reason the tsc job strips (line,col) before diffing.
+ */
+if (process.argv.includes("--porcelain")) {
+  const lines = errors.map((e) => `${e.file}|${e.kind}|${e.stat}|${e.source}`).sort();
+  console.log(lines.join("\n"));
+  process.exit(0);
+}
 const H = (s: string) => (md ? `\n## ${s}\n` : `\n══ ${s}`);
 
 console.log(md ? "# Stat → Surface Map\n" : "STAT → SURFACE MAP");

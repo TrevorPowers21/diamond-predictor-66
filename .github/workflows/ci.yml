@@ -1,8 +1,20 @@
 name: CI
 
-# Two gates on every PR:
-#   1. tests  — the vitest suite (and, once it exists, the anchor suite)
-#   2. types  — tsc against tsconfig.app.json, compared delta-vs-base
+# Three gates on every PR:
+#   1. tests      — the vitest suite, including the ANCHOR SUITE (25 real prod players)
+#   2. types      — tsc against tsconfig.app.json, compared delta-vs-base
+#   3. read-path  — scripts/agent/stat-surface-map.ts, also delta-vs-base
+#   4. drift      — scripts/agent/migration-drift.ts against STAGING's real catalog
+#
+# Gate 3 exists because 2026-09-01's bugs lived in the READ PATH: every database check passed while
+# the screen was wrong. It flags a user-facing stat read from `.prediction` inside the team-builder
+# row shape — `snapshot ?? predictionMap[...]`, which silently degrades to a raw prediction row.
+# Needs no database, so it runs with no secrets.
+#
+# Gate 4 needs a database, and uses the STAGING_PGURI secret — a `ci_readonly` role that can read the
+# CATALOG and nothing else: no table grants, not superuser, cannot create roles. It exists because a
+# CI secret that can write to a database is fine until it isn't. See
+# scripts/agent/create-ci-readonly-role.ts.
 #
 # Why delta-vs-base rather than "zero errors": the app carries a large
 # pre-existing tsc error baseline. Gating on zero would fail every PR forever;
@@ -162,3 +174,190 @@ jobs:
           fi
 
           echo "No new type errors. Baseline: $BASE_N, head: $HEAD_N, fixed: $FIXED_N."
+
+  read-path:
+    name: read-path (stat-map delta-vs-base)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both sides of the comparison, so no shallow clone.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Same cache and key as the other jobs — they share the entry.
+      - name: Cache node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Scan HEAD
+        run: npx tsx scripts/agent/stat-surface-map.ts --porcelain | sort > /tmp/head.readpath
+
+      - name: Scan base
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then BASE_SHA=$(git rev-parse origin/staging); fi
+          echo "Base commit: $BASE_SHA"
+
+          git worktree add /tmp/base "$BASE_SHA"
+          ln -s "$PWD/node_modules" /tmp/base/node_modules
+
+          # The base may predate the script existing — that is a legitimate empty baseline, not a
+          # failure, so every finding on HEAD would then be new. Guard so the job reports rather
+          # than crashing.
+          # Two ways the base can legitimately have no comparable baseline, and BOTH must be
+          # handled explicitly. A base that does not understand --porcelain will happily print its
+          # human-readable report instead, which sorts into dozens of junk lines and makes the diff
+          # meaningless — it reads as "everything fixed, everything new". Caught by simulating this
+          # job locally before shipping it.
+          if [ ! -f /tmp/base/scripts/agent/stat-surface-map.ts ]; then
+            echo "stat-surface-map.ts does not exist on the base commit — empty baseline."
+            : > /tmp/base.readpath
+          elif ! grep -q -- "--porcelain" /tmp/base/scripts/agent/stat-surface-map.ts; then
+            echo "Base's stat-surface-map.ts predates --porcelain — empty baseline."
+            echo "::notice::Read-path baseline is empty; every finding on HEAD will read as new until this lands on the base branch."
+            : > /tmp/base.readpath
+          else
+            (cd /tmp/base && npx tsx scripts/agent/stat-surface-map.ts --porcelain | sort > /tmp/base.readpath)
+          fi
+
+      - name: Compare
+        run: |
+          # Set difference, not a count: a PR that fixes one finding and adds another leaves the
+          # count unchanged. Same reasoning as the tsc job.
+          comm -13 /tmp/base.readpath /tmp/head.readpath > /tmp/new.readpath || true
+          comm -23 /tmp/base.readpath /tmp/head.readpath > /tmp/fixed.readpath || true
+          NEW_N=$(wc -l < /tmp/new.readpath | tr -d ' ')
+          FIXED_N=$(wc -l < /tmp/fixed.readpath | tr -d ' ')
+          BASE_N=$(wc -l < /tmp/base.readpath | tr -d ' ')
+
+          {
+            echo "### read-path (stat-map delta-vs-base)"
+            echo ""
+            echo "A user-facing stat read from \`.prediction\` in the team-builder row shape."
+            echo "That field is \`snapshot ?? predictionMap[...]\` and degrades to a raw prediction row."
+            echo ""
+            echo "| | count |"
+            echo "|---|---|"
+            echo "| base | \`$BASE_N\` |"
+            echo "| **new** | **\`$NEW_N\`** |"
+            echo "| fixed | \`$FIXED_N\` |"
+            if [ "$FIXED_N" -gt 0 ]; then
+              echo ""
+              echo "<details><summary>Fixed ($FIXED_N)</summary>"
+              echo ""; echo '```'; cat /tmp/fixed.readpath; echo '```'; echo ""
+              echo "</details>"
+            fi
+            if [ "$NEW_N" -gt 0 ]; then
+              echo ""
+              echo "**New read-path findings introduced by this PR:**"
+              echo ""; echo '```'; cat /tmp/new.readpath; echo '```'
+              echo ""
+              echo "Read the stored snapshot instead: \`player_snapshot ?? transfer_snapshot\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # An empty baseline means the comparison could not be made, not that this PR introduced
+          # everything. Report loudly, do not block — otherwise the PR that INTRODUCES this gate can
+          # never pass it.
+          if [ ! -s /tmp/base.readpath ] && [ "$NEW_N" -gt 0 ]; then
+            echo "::warning::No comparable baseline on the base branch. $NEW_N finding(s) reported, not blocking."
+            cat /tmp/new.readpath
+            exit 0
+          fi
+
+          if [ "$NEW_N" -gt 0 ]; then
+            echo "::error::$NEW_N new read-path finding(s) — a stat is being read from .prediction"
+            cat /tmp/new.readpath
+            exit 1
+          fi
+
+          echo "No new read-path findings. Baseline: $BASE_N, fixed: $FIXED_N."
+
+  drift:
+    name: drift (migrations vs catalog)
+    runs-on: ubuntu-latest
+    # A fork PR cannot read secrets, so this job would fail for a reason that has nothing to do with
+    # the change. Skip rather than fail — and say so, so a green tick is never mistaken for a pass
+    # that did not happen.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Check the secret is present
+        env:
+          PGURI: ${{ secrets.STAGING_PGURI }}
+        run: |
+          if [ -z "$PGURI" ]; then
+            echo "::error::STAGING_PGURI is not set. Create it with scripts/agent/create-ci-readonly-role.ts"
+            exit 1
+          fi
+          echo "STAGING_PGURI present."
+
+      - name: Migration drift vs STAGING catalog
+        env:
+          PGURI: ${{ secrets.STAGING_PGURI }}
+        run: |
+          # migration-drift.ts reads process.env.PGURI first, so nothing is written to disk. PROD is
+          # skipped automatically — PROD_PGURI is not set and .env.production.local does not exist
+          # on the runner.
+          set +e
+          npx tsx scripts/agent/migration-drift.ts > /tmp/drift.txt 2>&1
+          RC=$?
+          set -e
+          cat /tmp/drift.txt
+
+          # KIND MISMATCH is the blocking signal: an object exists under a declared name but as a
+          # DIFFERENT KIND of thing. A later migration dropping something explains a MISSING object;
+          # nothing explains that. Known count on staging is 1 (the June
+          # team_build_players_unique_player_role file). Anything above that is new.
+          MISMATCH=$(grep -oE "KIND MISMATCH \(([0-9]+)\)" /tmp/drift.txt | head -1 | grep -oE "[0-9]+" || echo 0)
+          KNOWN=1
+
+          {
+            echo "### drift (migrations vs STAGING catalog)"
+            echo ""
+            echo "| | count |"
+            echo "|---|---|"
+            echo "| kind mismatches | \`$MISMATCH\` |"
+            echo "| known baseline | \`$KNOWN\` |"
+            echo ""
+            echo "A KIND MISMATCH means the repo declares an object one way and the database has it"
+            echo "another — the repo no longer describes the database. Known: the June"
+            echo "\`team_build_players_unique_player_role\` migration."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$MISMATCH" -gt "$KNOWN" ]; then
+            echo "::error::$MISMATCH kind mismatch(es), above the known baseline of $KNOWN"
+            exit 1
+          fi
+          if [ $RC -ne 0 ]; then
+            echo "::error::migration-drift.ts exited $RC"
+            exit $RC
+          fi
+          echo "Drift within the known baseline ($MISMATCH of $KNOWN)."

@@ -271,7 +271,7 @@ describe("anchor — D1 TRANSFER oWAR reproduces", () => {
    *                                   DELETING 7,255 legitimate season-2026 rows as "the safe option"
    *
    *   Each missing column was one query away. ⇒ READ A TABLE'S UNIQUE CONSTRAINTS BEFORE
-   *   AGGREGATING OVER IT. See docs/PHILOSOPHY.md §17.
+   *   AGGREGATING OVER IT. See docs/PHILOSOPHY.md §2.
    */
   const rows = all().filter(
     (r) => r.division === "D1" && r.model_type === "transfer" && r.o_war != null
