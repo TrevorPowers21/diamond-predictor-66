@@ -50,7 +50,8 @@ const EMAIL = process.env.TEST_COACH_EMAIL || "rls-test-coach@rstriq.test";
 const PASSWORD = process.env.TEST_COACH_PASSWORD;
 
 type Snapshot = {
-  name: string; slash: string; wrcPlus: string; market: string; war: string; devAgg: string; depth: string;
+  name: string; slash: string; wrcPlus: string; market: string; war: string;
+  devAgg: string; depth: string; sprp: string;
 };
 
 /**
@@ -65,9 +66,16 @@ type Snapshot = {
  * "depth role changed NOTHING" — when the app was correct and the assertion was wrong. Same
  * mistake shape as measuring across a key boundary: compare the thing that should actually change.
  */
-const MOVES: Record<"tb-devagg" | "tb-depth", { fields: (keyof Snapshot)[]; why: string }> = {
+type ToggleId = "tb-devagg" | "tb-depth" | "tb-sprp";
+
+const MOVES: Record<ToggleId, { fields: (keyof Snapshot)[]; why: string }> = {
   "tb-devagg": { fields: ["wrcPlus", "slash", "war", "market"], why: "dev agg changes the projection, so rate stats move" },
-  "tb-depth":  { fields: ["war", "market"],                     why: "depth changes PA only; wRC+ is a rate and must NOT move" },
+  "tb-depth":  { fields: ["war", "market"],                     why: "depth changes PA/IP only; a RATE must NOT move" },
+  // ⚠ SP↔RP is NOT playing-time-only. It swaps the depth-role option set AND the expected-IP scale,
+  // and a reliever's RATE profile legitimately differs from a starter's (the role adjustment). So
+  // rates are EXPECTED to move here — unlike depth role, which must leave them alone. An earlier
+  // version applied the depth-role guard to SP/RP and reported a false failure on Neiswonger.
+  "tb-sprp":   { fields: ["war", "market"],                     why: "SP/RP changes role AND expected IP, so both rates and counting stats move" },
 };
 
 async function dismissDialogs(page: Page) {
@@ -94,6 +102,7 @@ async function readRow(page: Page, pid: string): Promise<Snapshot> {
     war: await txt("tb-stat-war"),
     devAgg: await txt("tb-devagg"),
     depth: await txt("tb-depth"),
+    sprp: await txt("tb-sprp"),
   };
 }
 
@@ -122,9 +131,9 @@ async function pickExact(page: Page, trigger: Locator, label: string): Promise<b
 }
 
 /** T1/T2/T3 — one toggle on one player: does the number move, and does it come back? */
-async function testToggle(page: Page, pid: string, which: "tb-devagg" | "tb-depth", label: string) {
+async function testToggle(page: Page, pid: string, which: ToggleId, label: string) {
   const before = await readRow(page, pid);
-  const current = which === "tb-devagg" ? before.devAgg : before.depth;
+  const current = which === "tb-devagg" ? before.devAgg : which === "tb-depth" ? before.depth : before.sprp;
   if (!current) { skip(`${label}: no control rendered on this row`); return; }
 
   const trigger = rowFor(page, pid).locator(`[data-testid="${which}"]`).first();
@@ -165,20 +174,53 @@ async function testToggle(page: Page, pid: string, which: "tb-devagg" | "tb-dept
 }
 
 /** T4/T5 — the same player's number on another surface. */
+/**
+ * T4/T5 — the same player's numbers on another surface.
+ *
+ * Checks wRC+, WAR and MARKET, not just wRC+. Market is where a divergence costs actual money, and
+ * WAR is what market is derived from — a surface can agree on the rate and still disagree on both.
+ */
 async function testSurface(page: Page, tb: Snapshot, path: string, surface: string) {
-  const wrc = tb.wrcPlus.replace(/[^\d.]/g, "");
-  if (!wrc) { skip(`${surface}: no numeric wRC+ on the Team Builder row to compare`); return; }
   await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
   await dismissDialogs(page);
   await page.waitForTimeout(2500);
   const body = await page.locator("body").innerText().catch(() => "");
   if (!body || body.length < 50) { skip(`${surface}: page rendered nothing`); return; }
-  // Word-boundary match so "116" does not match inside "1160".
-  if (new RegExp(`(^|[^\\d.])${wrc}([^\\d.]|$)`).test(body)) ok(`${surface} shows the same wRC+ (${wrc})`);
+
+  // ★ PROVE COMPARABILITY BEFORE DIFFING. A list surface only renders the players currently in
+  // view — filtered, paginated, or simply not on that board. Asserting a player's numbers on a page
+  // that never lists them reports a divergence that does not exist. Require the NAME first; if the
+  // player is absent, this surface has nothing to say about them.
+  const last = (tb.name.split(/\s+/).pop() || "").trim();
+  if (last && !body.includes(last)) {
+    skip(`${surface}: ${tb.name} is not listed on this surface — nothing to compare`);
+    return;
+  }
+
+  // Word-boundary match so "116" does not hit inside "1160"; commas stripped so $192,934 matches
+  // a surface that renders 192934.
+  const present = (raw: string) => {
+    const v = raw.replace(/[$,\s]/g, "");
+    if (!v || !/[\d]/.test(v)) return null;
+    const hay = body.replace(/,/g, "");
+    return new RegExp(`(^|[^\\d.])${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\d.]|$)`).test(hay);
+  };
+
+  const fields: [keyof Snapshot, string][] = [["wrcPlus", "wRC+"], ["war", "WAR"], ["market", "market"]];
+  const agree: string[] = [], differ: string[] = [], absent: string[] = [];
+  for (const [k, label] of fields) {
+    const r = present(tb[k]);
+    if (r === null) continue;
+    (r ? agree : differ).push(`${label} ${tb[k]}`);
+  }
+  if (!agree.length && !differ.length) { skip(`${surface}: no comparable numbers on the TB row`); return; }
+
+  if (!differ.length) ok(`${surface} agrees on ${agree.join(", ")}`);
   else {
-    bad(`${surface} does NOT show Team Builder's wRC+ (${wrc})`);
+    bad(`${surface} does NOT show ${differ.join(", ")}${agree.length ? `  (agrees on ${agree.join(", ")})` : ""}`);
     warn("Same stat, two surfaces, two values — §4's invalidating condition.");
   }
+  void absent;
 }
 
 (async () => {
@@ -224,32 +266,50 @@ async function testSurface(page: Page, tb: Snapshot, path: string, surface: stri
     const total = await rows.count();
     info(`Team Builder rendered ${total} rows`);
 
-    const subjects: string[] = [];
-    for (let i = 0; i < total && subjects.length < N_PLAYERS; i++) {
+    // Collect BOTH hitters and pitchers. Selecting on wRC+ alone silently skipped every pitcher —
+    // and the pitcher path is where the Neiswonger bug lived, so a hitter-only sweep would have
+    // reported green while never touching the riskier half.
+    const hitters: string[] = [], pitchers: string[] = [];
+    for (let i = 0; i < total && (hitters.length + pitchers.length) < N_PLAYERS * 2; i++) {
       const r = rows.nth(i);
       const pid = await r.getAttribute("data-player-id");
-      const wrc = (await r.locator('[data-testid="tb-stat-wrcplus"]').first().innerText().catch(() => "")).trim();
-      if (pid && wrc && !/^[—-]$/.test(wrc) && !subjects.includes(pid)) subjects.push(pid);
+      if (!pid) continue;
+      const num = async (id: string) =>
+        (await r.locator(`[data-testid="${id}"]`).first().innerText().catch(() => "")).trim();
+      const wrc = await num("tb-stat-wrcplus");
+      const war = await num("tb-stat-war");
+      const isPitcher = await r.locator('[data-testid="tb-sprp"]').first().isVisible().catch(() => false);
+      const usable = (v: string) => v && !/^[—-]$/.test(v);
+      if (isPitcher && usable(war) && pitchers.length < N_PLAYERS && !pitchers.includes(pid)) pitchers.push(pid);
+      else if (!isPitcher && usable(wrc) && hitters.length < N_PLAYERS && !hitters.includes(pid)) hitters.push(pid);
     }
+    const subjects = [...hitters, ...pitchers];
     if (!subjects.length) {
-      bad("No row has both a player_id and a rendered wRC+ — nothing to assert.");
+      bad("No row has a player_id and a rendered stat — nothing to assert.");
       warn("An empty build is NOT a pass. Load a build with players and re-run.");
       throw new Error("no usable rows");
     }
-    info(`sweeping ${subjects.length} player(s)\n`);
+    info(`sweeping ${hitters.length} hitter(s) + ${pitchers.length} pitcher(s)`);
+    if (!pitchers.length) warn("no pitcher rows found — the SP/RP path is NOT being exercised");
+    console.log("");
 
     for (const pid of subjects) {
       const tb = await readRow(page, pid);
-      console.log(`  ${C.b}${tb.name}${C.r}  wRC+ ${tb.wrcPlus} · WAR ${tb.war || "—"} · ${tb.market || "—"} · devAgg ${tb.devAgg || "—"} · depth ${tb.depth || "—"}`);
+      console.log(`  ${C.b}${tb.name}${C.r}${tb.sprp ? ` [${tb.sprp}]` : ""}  wRC+ ${tb.wrcPlus || "—"} · WAR ${tb.war || "—"} · ${tb.market || "—"} · devAgg ${tb.devAgg || "—"} · depth ${tb.depth || "—"}`);
 
       await testToggle(page, pid, "tb-devagg", "dev agg");
+      await testToggle(page, pid, "tb-sprp", "SP/RP");
       await testToggle(page, pid, "tb-depth", "depth role");
 
       // Re-read before comparing surfaces: if a restore above failed, comparing against the ORIGINAL
       // snapshot would report a surface mismatch that is really our own mess.
       const fresh = await readRow(page, pid);
-      await testSurface(page, fresh, `/dashboard/player/${pid}`, "Player Profile");
+      // /dashboard/player/:id is the hitter profile, /dashboard/pitcher/:id the pitcher one.
+      const isPitcher = !!fresh.sprp;
+      await testSurface(page, fresh, isPitcher ? `/dashboard/pitcher/${pid}` : `/dashboard/player/${pid}`,
+        isPitcher ? "Pitcher Profile" : "Player Profile");
       await testSurface(page, fresh, `/dashboard/targets`, "Target Board");
+      await testSurface(page, fresh, `/dashboard/returning`, "Returning Players");
 
       await page.goto(`${BASE}/dashboard/team-builder`, { waitUntil: "domcontentloaded" });
       await dismissDialogs(page);
@@ -263,12 +323,14 @@ async function testSurface(page: Page, tb: Snapshot, path: string, surface: stri
   }
 
   console.log(C.b + "── coverage ──" + C.r);
-  console.log("  COVERED      dev-agg and depth-role move + restore; Team Builder vs Player Profile");
-  console.log("               and Target Board; swept across multiple players.");
-  console.log("  NOT COVERED  SP/RP on pitcher rows · the UNROSTERED local-session case (a player not");
-  console.log("               on roster or board gets a local-only session that must never persist) ·");
-  console.log("               Returning Players and Transfer Portal · whether surfaces agree on");
-  console.log("               MARKET VALUE and WAR, not just wRC+.");
+  console.log("  COVERED      dev-agg, SP/RP and depth-role: each moves the right stats, leaves rates");
+  console.log("               alone where it should, and restores exactly. Hitters AND pitchers.");
+  console.log("               Team Builder vs Player/Pitcher Profile, Target Board, Returning Players —");
+  console.log("               compared on wRC+ AND WAR AND market, skipping surfaces that do not list");
+  console.log("               the player at all.");
+  console.log("  NOT COVERED  the UNROSTERED local-session case (a player not on roster or board gets a");
+  console.log("               local-only session that must never persist) · Transfer Portal · the");
+  console.log("               GM/Front Office surfaces · two-way players, whose two sides live on one row.");
   console.log(`  ${C.y}A green run means "no divergence found on the covered path", never "the app agrees".${C.r}`);
 
   console.log(

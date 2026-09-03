@@ -448,7 +448,7 @@ function PlayerTableRow({
               }
             }}
           >
-            <SelectTrigger className="w-20 h-8">
+            <SelectTrigger className="w-20 h-8" data-testid="tb-sprp">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
