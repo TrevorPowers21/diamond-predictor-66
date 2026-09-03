@@ -158,6 +158,7 @@ the point of them, not the scripts.
 | `npm run agent:rls [--prod]` | RLS per table + actor; write-path gaps; program scoping. ⚠ **defaults to staging** | before shipping anything touching auth, roles, or a new table |
 | `npm run agent:stat-map` | which stored field each surface reads; flags `.prediction` in the team-builder row shape | before changing a read path or adding a surface |
 | `npm run agent:rls-test-coach` | creates a **non-superadmin** coach and proves the team boundary. ⛔ your own superadmin login CANNOT test RLS — it satisfies every policy. | any RLS change, on staging first |
+| `npm run agent:toggles` | ★ **§4's #1 hard stop.** Drives the real UI: every toggle moves the right stats, leaves rates alone where it should, restores exactly — and the on-screen value is checked against `player_snapshot`. Needs `npm run dev` + `TEST_COACH_PASSWORD`. | before shipping anything that touches Team Builder, a projection, or a read path |
 | `@rstr-data` (subagent) | read-only data questions. Knows the five-column key, the D1 boundary, and to check both databases. | "is this number right", "do staging and prod agree", "how many rows are X" |
 
 ⚠ **`agent:drift` and `agent:rls` need DB credentials, so they are NOT in CI.** They are manual

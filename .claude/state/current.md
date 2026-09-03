@@ -27,6 +27,8 @@ npm test                      305 tests + the ANCHOR SUITE — the only AUTOMATI
 npm run agent:drift           migrations vs actual catalogs, BOTH DBs
 npm run agent:rls [--prod]    RLS per table + actor   ⚠ DEFAULTS TO STAGING
 npm run agent:stat-map        which stored field each surface reads
+npm run agent:toggles         ★ §4's #1 hard stop — drives the real UI, display-vs-STORED
+npm run agent:drift           migrations vs actual catalogs, BOTH DBs
 npm run agent:rls-test-coach  non-superadmin coach + boundary proof
 @rstr-data                    read-only data questions
 ```
@@ -47,8 +49,9 @@ Wiring them is a secrets decision, not a coding task. **A check nobody runs is p
 | item | note |
 |---|---|
 | ⚠ **masters `ALL` to `{public}`** | `Hitter Master` · `Pitching Master` · `Pitch Arsenal` · `Conference Stats`, BOTH DBs. **Any authenticated user can DELETE a season.** The only confirmed prod hole. |
-| **toggle permutation runner** | the half of step 5 that would have caught 09-01 DIRECTLY. Not built. Needs a running app. |
 | `PlayerTableRow` 325/354 | risk inputs read `p.prediction` before `transfer_snapshot`; line 591 reads the opposite |
+| `owar` field name | carries `total_hitter_war`, not oWAR. Its comment still describes a fallback that the 09-01 re-bake made obsolete. Built over instead of deleted — naming fix, not data. |
+| TWP check unexercised | the runner's two-way assertion is correct but no TWP sits on the test build; it warns rather than passing |
 | June migration | **in `git stash`**, findable by message. Repo says `ADD CONSTRAINT`, both DBs have a partial index. Only kind-mismatch in 326 objects. |
 | 14 prod-only indexes | never written into a migration |
 | `PHILOSOPHY.md` ⚠️ lines | need Trevor — §15 (business/engineering mapping) and §17 (mechanical floor vs voice) first |
