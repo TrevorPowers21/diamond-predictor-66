@@ -126,9 +126,18 @@ const WRITES = ["INSERT", "UPDATE", "DELETE"] as const;
   H("PROGRAM SCOPING — customer_team_id");
   P("  Program-scoped data must key off customer_team_id. A table that HAS the column but whose");
   P("  policies never mention it is scoped by convention only.\n");
+  // ⚠ pg_attribute, NOT information_schema.columns. information_schema is PRIVILEGE-FILTERED — it
+  // only lists objects the connected role has rights on, so a least-privilege CI role would see an
+  // EMPTY result here and this section would print as clean while checking nothing. An empty result
+  // looks exactly like "nothing is wrong". pg_catalog is not filtered.
   const hasCol = (await c.query(`
-    select table_name from information_schema.columns
-    where table_schema='public' and column_name='customer_team_id' order by 1`)).rows.map((r) => r.table_name);
+    select c.relname as table_name
+    from pg_attribute a
+    join pg_class c on c.oid = a.attrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'r'
+      and a.attname = 'customer_team_id' and a.attnum > 0 and not a.attisdropped
+    order by 1`)).rows.map((r) => r.table_name);
   for (const t of hasCol) {
     const ps = byTable.get(t) ?? [];
     const mentions = ps.some((p) => `${p.using_expr ?? ""} ${p.check_expr ?? ""}`.includes("customer_team_id"));

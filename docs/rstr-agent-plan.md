@@ -113,7 +113,7 @@ The knowledge is not one file. Each layer has a different load cost, so each has
 | layer | lives in | loaded | holds |
 |---|---|---|---|
 | **Rules** | `CLAUDE.md` (repo root) | **every session** | technical facts + hard rules, one line each. ⚠ Currently ~280 lines and narrative — **needs trimming to terse rules**; the prose belongs in `docs/knowledge/`. |
-| **Voice / philosophy** | ✅ `docs/PHILOSOPHY.md` *(drafted 2026-09-02 — awaiting Trevor's corrections on the ⚠️ lines)* | every session | **business judgment**, not technical: separation by use case not sport · don't rush pricing before reputation is earned · ERP is back-office only · de-brand vendors where the point is the capability. Mine the RSTR IQ master reference doc; do not author from blank. |
+| **Engineering philosophy** | ✅ `docs/PHILOSOPHY.md` *(rewritten 2026-09-03 — engineering only)* | every session | how we decide something is TRUE. Every principle cites the failure that produced it. ⚠ BUSINESS reasoning is deliberately NOT here — `RSTR_IQ_Master_Reference` is the living source for that, and a repo copy would be a second place the same reasoning lives. |
 | **State** | `.claude/state/current.md` *(does not exist)* | every session + **after compaction** | *where things stand right now.* Overwritten, never appended. The file the agent re-reads to snap back. |
 | **Technical judgment** | `docs/knowledge/*.md` | on demand | the named principles (`p-prediction-is-not-a-snapshot`, `prove-comparable-before-diffing`, …). Already exists, 7 files. |
 | **History** | `docs/AGENT_LEARNINGS_INDEX.md` + 17 files | on demand | what was tried, what worked, what superseded what. Already exists. |
@@ -181,11 +181,16 @@ Recorded so they do not resurface in a future plan:
 `AGENT_LEARNINGS_INDEX.md` and Track B's read/write section are exactly the react-and-correct output it
 was meant to produce.
 
-1. ✅ **`docs/PHILOSOPHY.md` — DRAFTED 2026-09-02**, mined from `RSTR_IQ_Master_Reference` (Internal,
-   July 2026). 16 principles, each with *what it protects against*. ⚠️-marked lines are inference and
-   **need Trevor's correction** — that correction is the record (§5). ★ Its §15 claims the business
-   reasoning and the 09-01 engineering doctrine are **the same reasoning at different altitudes**;
-   if that holds, it is the answer to "what is the consistent voice?"
+1. ✅ **`docs/PHILOSOPHY.md` — ENGINEERING philosophy.** Drafted 2026-09-02 from the business master
+   reference; **rewritten 2026-09-03 (Trevor) to engineering only.** Eleven principles, and every one
+   names the failure that produced it — a rule you can trace to a real outage gets followed, one you
+   cannot gets rationalised away at 11pm.
+   ⚠ **Business and market reasoning is deliberately NOT in the repo.** `RSTR_IQ_Master_Reference` is
+   the living source; a copy here would be a second place the same reasoning lives.
+   ★ Its §1 argues **this plan has a priority inverted** — §7 calls the deterministic checks "the
+   mechanical floor" and the voice "the higher value", and §1 says that ordering is backwards because
+   prose degrades silently under momentum while a CI gate does not. Trevor's call; the
+   counter-argument is stated alongside it.
 2. **`.claude/state/current.md` + a compaction hook** (§7b). Cheap, and every session pays for its
    absence. Pulled ahead of the subagents deliberately.
 3. **Trim `CLAUDE.md`** to terse rules; move its narrative into `docs/knowledge/`.

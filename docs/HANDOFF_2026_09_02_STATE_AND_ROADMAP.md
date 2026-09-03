@@ -146,6 +146,34 @@ Program-owned data, distinct from projections.
 
 ---
 
+## 🔍 THE CHECKS — and WHEN to run them
+
+Built 2026-09-02/03. **A check nobody runs is prose** (`docs/PHILOSOPHY.md` §1), so this table is
+the point of them, not the scripts.
+
+| command | what it catches | run it |
+|---|---|---|
+| `npm test` | 305 tests, incl. the **anchor suite** — 25 real prod players. Catches a formula/rollup change silently moving a player's numbers. | every change to formula, projection, or precompute logic |
+| `npm run agent:drift` | migrations vs the **actual catalogs** on BOTH databases. Found a June file that disagreed with reality for 3 months. | **before any prod push**, and after applying a migration |
+| `npm run agent:rls [--prod]` | RLS per table + actor; write-path gaps; program scoping. ⚠ **defaults to staging** | before shipping anything touching auth, roles, or a new table |
+| `npm run agent:stat-map` | which stored field each surface reads; flags `.prediction` in the team-builder row shape | before changing a read path or adding a surface |
+| `npm run agent:rls-test-coach` | creates a **non-superadmin** coach and proves the team boundary. ⛔ your own superadmin login CANNOT test RLS — it satisfies every policy. | any RLS change, on staging first |
+| `npm run agent:toggles` | ★ **§4's #1 hard stop.** Drives the real UI: every toggle moves the right stats, leaves rates alone where it should, restores exactly — and the on-screen value is checked against `player_snapshot`. Needs `npm run dev` + `TEST_COACH_PASSWORD`. | before shipping anything that touches Team Builder, a projection, or a read path |
+| `@rstr-data` (subagent) | read-only data questions. Knows the five-column key, the D1 boundary, and to check both databases. | "is this number right", "do staging and prod agree", "how many rows are X" |
+
+⚠ **`agent:drift` and `agent:rls` need DB credentials, so they are NOT in CI.** They are manual
+gates until secrets are configured — which is a decision, not a coding task.
+
+### Staging is NOT a faithful rehearsal of prod
+Three measured divergences, each of which has already produced a wrong conclusion or could:
+- **Staging has NO season-2026 rows** in `player_predictions` (2027 only, 215,108). Prod has both.
+- **Prod has 14 indexes staging lacks**, five on `player_predictions` — performance differs.
+- **Staging has ONE user and they are a superadmin.** No coach account exists there by default.
+
+⇒ Validate a population check on staging and it may not reproduce on prod.
+
+---
+
 ## 📚 READ FIRST
 | document | why |
 |---|---|

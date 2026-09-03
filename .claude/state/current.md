@@ -1,66 +1,63 @@
 # ▶️ CURRENT STATE — where things stand right now
 
 > **OVERWRITTEN, never appended to.** Not history (`docs/AGENT_LEARNINGS_INDEX.md`), not roadmap
-> (`docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`). This is the snapshot the agent re-reads after
-> compaction (`docs/rstr-agent-plan.md` §7b).
+> (`docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`). The snapshot to re-read after compaction.
 >
-> Last updated: **2026-09-02**
+> Last updated: **2026-09-03** — agent build CLOSED. Back on feature work.
 
 ---
 
-## 🎯 RIGHT NOW
+## 🎯 STATUS: agent build done, steps 1–6. Step 7 deferred by decision.
 
-Agent build on branch **`docs/rstr-agent-plan`** → **PR #156 → staging, open, all CI green.**
+| | |
+|---|---|
+| Steps 1–5b | ✅ **on prod** via PR #156 → #173 |
+| Step 6 (`rstr-data` subagent) | ✅ built and **proven end to end** |
+| Close-out | **PR #174 → staging, OPEN.** Zero runtime changes. |
+| Step 7 (oversight protocol) | ⬜ **deferred** — an enforcement gate designed before the tooling has been used encodes assumptions, not friction |
 
-| # | step | status |
-|---|---|---|
-| 1 | `docs/PHILOSOPHY.md` — voice layer | ✅ ⚠️ lines need Trevor's corrections, §15 and §17 first |
-| 2 | `.claude/state/current.md` + compaction hooks | ✅ |
-| 3 | `CLAUDE.md` 331 → 156 lines | ✅ |
-| 4 | ★ anchor suite — 25 prod players, 8 shapes | ✅ 305 tests |
-| 5 | stat→surface map (`npm run agent:stat-map`) | ✅ static half · toggle permutations NOT built |
-| 5b | RLS analysis (`npm run agent:rls`) | ✅ |
-| 6 | one data subagent | ⬜ next |
-| 7 | oversight protocol + voice | ⬜ |
-
-**To ship the GM fix to prod:** merge #156 → staging, then open `staging` → `main`. Trevor merges.
+⚠ **`rstr-data` needs a session restart to be invocable** — project agents load at session start.
 
 ---
 
-## 📌 RE-GROUND ON THESE
+## 🔍 THE CHECKS (full table + triggers: `docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`)
 
-1. **Source of truth for the agent build** = `docs/rstr-agent-plan.md` + `docs/AGENT_PHASE_ONE_SCOPE.md`.
-2. **The doctrine** = a stored copy nobody recomputes, behind a `??` chain. Read
-   `docs/knowledge/snapshots-and-recompute.md` before touching snapshots. ⭐ The durable fix — one
-   save path owning every derived copy — is still **NOT BUILT**.
-3. **Never compute a user-facing number.** `player_snapshot ?? transfer_snapshot`, never
-   `p.prediction`.
-4. ★ **`player_predictions` is keyed on (player_id, customer_team_id, model_type, variant, SEASON).**
-   Aggregating without a key column produced FIVE wrong conclusions on 2026-09-02. **Read a table's
-   unique constraints before grouping over it.** See `docs/PHILOSOPHY.md` §17.
+```
+npm test                      305 tests + the ANCHOR SUITE — the only AUTOMATIC gate, runs in CI
+npm run agent:drift           migrations vs actual catalogs, BOTH DBs
+npm run agent:rls [--prod]    RLS per table + actor   ⚠ DEFAULTS TO STAGING
+npm run agent:stat-map        which stored field each surface reads
+npm run agent:toggles         ★ §4's #1 hard stop — drives the real UI, display-vs-STORED
+npm run agent:drift           migrations vs actual catalogs, BOTH DBs
+npm run agent:rls-test-coach  non-superadmin coach + boundary proof
+@rstr-data                    read-only data questions
+```
+
+⚠ Everything except `npm test` is **manual** — drift/rls need DB credentials CI does not have.
+Wiring them is a secrets decision, not a coding task. **A check nobody runs is prose.**
+
+## ⛔ STAGING IS NOT A FAITHFUL REHEARSAL OF PROD — three measured divergences
+- **No season-2026 rows** in staging `player_predictions` (2027 only, 215,108). Prod has both.
+- **Prod has 14 indexes staging lacks**, five on `player_predictions`.
+- **Staging has ONE user and they are a superadmin** — who cannot test RLS, since a superadmin
+  satisfies every policy. Use `npm run agent:rls-test-coach`.
 
 ---
 
-## 🟢 STATE
-
-- **PR #172 merged** — the WAR recalibration is on `main`. Prod data verified 09-01
-  (608 consistent / 0 inconsistent). Edge fn v23 live.
-- **`player_predictions` RLS: staging and prod policies are now IDENTICAL** (cross-DB diff verified).
-  ⚠ Prod was **never** unscoped — staging was. The migration is marked ⛔ DO NOT APPLY TO PROD.
-- **Test coach accounts** — `rls-test-coach@rstriq.test`, `general_user`, no `user_roles` row:
-  - staging → Arkansas (local dev reads staging)
-  - prod → Gardner-Webb (**Vercel previews read PROD**) · remove: `--prod --cleanup`
-
-## 🔴 OPEN
+## 🔴 OPEN — priority order
 
 | item | note |
 |---|---|
-| ⚠ **masters publicly writable** | `Hitter Master` · `Pitching Master` · `Pitch Arsenal` · `Conference Stats` are `ALL` to `{public}` on **BOTH** DBs. Any authenticated user can DELETE a season. **The only confirmed prod RLS hole.** |
+| ⚠ **masters `ALL` to `{public}`** | `Hitter Master` · `Pitching Master` · `Pitch Arsenal` · `Conference Stats`, BOTH DBs. **Any authenticated user can DELETE a season.** The only confirmed prod hole. |
 | `PlayerTableRow` 325/354 | risk inputs read `p.prediction` before `transfer_snapshot`; line 591 reads the opposite |
-| JUCO | ~33.9k stale season-2027 NJCAA rows — workstream C, fix conference env+ coverage FIRST |
-| toggle permutations | the half of step 5 that needs a running app |
-| Gate A / Georgia Tech | never fired on prod |
-| removal-from-roster semantics | UNDEFINED — currently inertia, not design |
+| `owar` field name | carries `total_hitter_war`, not oWAR. Its comment still describes a fallback that the 09-01 re-bake made obsolete. Built over instead of deleted — naming fix, not data. |
+| TWP check unexercised | the runner's two-way assertion is correct but no TWP sits on the test build; it warns rather than passing |
+| June migration | **in `git stash`**, findable by message. Repo says `ADD CONSTRAINT`, both DBs have a partial index. Only kind-mismatch in 326 objects. |
+| 14 prod-only indexes | never written into a migration |
+| `PHILOSOPHY.md` §1 | claims `rstr-agent-plan.md` has a priority inverted — deterministic checks over voice. Trevor's call; the counter-argument is in the file. |
+
+**Left in place deliberately:** `rls-test-coach@rstriq.test` on **STAGING** (Arkansas, `general_user`)
+— the only non-superadmin account there, needed for any future RLS work. The **prod** one was removed.
 
 ---
 
@@ -68,11 +65,10 @@ Agent build on branch **`docs/rstr-agent-plan`** → **PR #156 → staging, open
 
 - **Wait for an explicit go before any code or data change.** At a fork, stop and surface it.
 - **Prod writes need an explicit "prod, now?"** · **Trevor merges to `main`.**
-- **Verify config on BOTH databases** — Gate B, and it repeated on 09-02 when an RLS finding from
-  staging was reported as prod. `npm run agent:rls` **defaults to staging**.
+- ★ **Read a table's unique constraints BEFORE aggregating over it.** Five wrong conclusions on
+  2026-09-02 were all the same shape — `division`, then `updated_at`, then `season`.
+  `player_predictions` is keyed on **five** columns including `season`.
+- **Verify config on BOTH databases** (Gate B, and its 09-02 repeat).
 - **Vercel previews read PROD.** Local dev reads staging.
-- **Split FIXED / DETECTED / UNVERIFIED**, and name what you did *not* check, unprompted.
-- **The real type gate is `tsc -p tsconfig.app.json`**; CI uses a **set difference**, so an error
-  *count* hides a swap.
-- **A DB check verifies the DATABASE.** Read-path bugs only show in the UI.
-- **Escalate on the FIRST failure, not the fifth** (`AGENT_PHASE_ONE_SCOPE.md` §7).
+- **Escalate on the FIRST surprise, not the fifth.**
+- **Split FIXED / DETECTED / UNVERIFIED**, and say what you did NOT check, unprompted.
