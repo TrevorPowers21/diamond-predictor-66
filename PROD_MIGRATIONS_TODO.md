@@ -5258,3 +5258,37 @@ row): own team 14,268 rows visible · other team **0** · global 31,369 readable
 already holds.
 
 ⇒ **Nothing to do on prod for this one.** Kept in the log so the correction is on record.
+
+## 20260903180000_master_tables_admin_write_only.sql — ✅ APPLIED TO PROD 2026-09-03
+
+**The hole:** `Hitter Master`, `Pitching Master`, `Pitch Arsenal` and `Conference Stats` carried `ALL`
+policies granted to `{public}`. `ALL` includes DELETE, so **any authenticated user could delete a
+season** — using a call the app already makes (`importHistoricalPitchers.ts:206`). Present on both
+databases.
+
+⚠ **All three layers were open**, not just RLS: the "Admin" sidebar item has no `requires` so every
+logged-in user sees the link, and `/dashboard/admin` is wrapped in `ProtectedRoute` which checks
+**auth only, no role**. RLS was the only layer that enforces, so it was fixed first. **The two UI
+gaps remain** — a coach can still reach the admin page, they just cannot damage anything now.
+
+**Now:** SELECT unchanged and public. INSERT/UPDATE/DELETE require admin or staff, matching how
+`player_predictions` is already governed.
+
+**Verified on PROD, functionally — counting AFFECTED ROWS, not catching errors** (an RLS-blocked
+write returns success with 0 rows and no exception, which is how remove-access once "succeeded"
+while deleting nothing):
+```
+as a non-staff user:  SELECT 29,237 rows ✅   DELETE 0 rows (would have been 8,070) ✅   UPDATE 0 ✅
+after rollback:       8,070 rows intact
+```
+Catalog confirms: 0 write policies open to `{public}`, all 4 still publicly readable.
+
+**Impact analysis done before applying:** every writer — `importHistoricalHitters`,
+`importHistoricalPitchers`, `importPitchArsenal`, `importPaAbData`, `computeAndStoreScores`,
+`PitchingConferenceStatsTable` — is invoked only from `AdminDashboard.tsx`. The three coach pages
+that appear to call `computeAndStoreScores` only mention it in comments; `grep -rn
+"computeAndStoreScores(" src/pages` returns nothing. Scripts run under the service role and bypass
+RLS. 4 of 55 users retain write access; 51 lose a write they never should have had.
+
+**Rollback:** `supabase/rollback/20260903180000_master_tables_admin_write_only_rollback.sql` —
+reopens public write. If an admin import breaks, grant that account the role instead.
