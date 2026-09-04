@@ -372,6 +372,12 @@ function EditableMoney({ value, edited, onCommit, big, accent }: { value: number
   const [v, setV] = useState(fmt(value));
   return (
     <input
+      // Money field — Chrome offered every amount previously typed into a similar box. Raw
+      // <input>, so it does not inherit the defaults on components/ui/input.tsx.
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="off"
+      spellCheck={false}
       value={v}
       onChange={(e) => setV(e.target.value)}
       onFocus={(e) => { setV(String(Math.round(value))); requestAnimationFrame(() => e.target.select()); }}

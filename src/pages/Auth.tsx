@@ -162,7 +162,7 @@ function LoginForm({ onForgot }: { onForgot: () => void }) {
     <form onSubmit={handleSubmit} className="space-y-4 mt-4">
       <div className="space-y-2">
         <Label htmlFor="login-email">Email</Label>
-        <Input id="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" />
+        <Input id="login-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" />
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between">
@@ -178,6 +178,7 @@ function LoginForm({ onForgot }: { onForgot: () => void }) {
         <div className="relative">
           <Input
             id="login-password"
+              autoComplete="current-password"
             type={showPassword ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -240,7 +241,7 @@ function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
     <form onSubmit={handleSubmit} className="space-y-4 mt-4">
       <div className="space-y-2">
         <Label htmlFor="reset-email">Email</Label>
-        <Input id="reset-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" autoFocus />
+        <Input id="reset-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" autoFocus />
       </div>
       <Button type="submit" className="w-full" disabled={loading || !email}>
         {loading ? "Sending..." : "Send reset link"}
@@ -290,6 +291,7 @@ function SetNewPasswordForm({ isInvite = false, onDone }: { isInvite?: boolean; 
         <div className="relative">
           <Input
             id="new-password"
+              autoComplete="new-password"
             type={showPassword ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -312,6 +314,7 @@ function SetNewPasswordForm({ isInvite = false, onDone }: { isInvite?: boolean; 
         <Label htmlFor="confirm-password">Confirm password</Label>
         <Input
           id="confirm-password"
+            autoComplete="new-password"
           type={showPassword ? "text" : "password"}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}

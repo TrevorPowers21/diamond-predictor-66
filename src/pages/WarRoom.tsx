@@ -114,6 +114,12 @@ function MultiSelectFilter<T extends string>({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
             <input
               type="text"
+              // Chrome's saved-form-data dropdown only. Raw <input>, so it does not inherit the
+              // defaults now set on components/ui/input.tsx.
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search..."

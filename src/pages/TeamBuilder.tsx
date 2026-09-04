@@ -3710,6 +3710,12 @@ export default function TeamBuilder() {
               </p>
               <input
                 type="text"
+                // Chrome offered previously-typed build names here. Raw <input>, so it does not
+                // inherit the defaults now set on components/ui/input.tsx.
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 value={promptBuildName}
                 onChange={(e) => setPromptBuildName(e.target.value)}
                 onKeyDown={(e) => {
@@ -3790,6 +3796,10 @@ export default function TeamBuilder() {
               <h3 className="text-base font-bold text-slate-100 mb-1">Rename build</h3>
               <input
                 type="text"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 value={renameValue}
                 onChange={(e) => setRenameValue(e.target.value)}
                 onKeyDown={(e) => {
