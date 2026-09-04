@@ -23,6 +23,7 @@ const GMScenarios = lazyWithReload(() => import("@/gm/pages/GMScenarios"));
 const GMTargets = lazyWithReload(() => import("@/gm/pages/GMTargets"));
 const GMAllocations = lazyWithReload(() => import("@/gm/pages/GMAllocations"));
 const GMContracts = lazyWithReload(() => import("@/gm/pages/GMContracts"));
+const GMAgents = lazyWithReload(() => import("@/gm/pages/GMAgents"));
 const GMSettings = lazyWithReload(() => import("@/gm/pages/GMSettings"));
 const PlayerHub = lazyWithReload(() => import("@/pages/PlayerHub"));
 import TransferPortal from "./pages/TransferPortal";
@@ -152,6 +153,7 @@ const router = createBrowserRouter([
           { path: "targets", element: <Suspense fallback={null}><GMTargets /></Suspense> },
           { path: "allocations", element: <Suspense fallback={null}><GMAllocations /></Suspense> },
           { path: "contracts", element: <Suspense fallback={null}><GMContracts /></Suspense> },
+          { path: "agents", element: <Suspense fallback={null}><GMAgents /></Suspense> },
           { path: "player/:playerId", element: <Suspense fallback={null}><PlayerHub /></Suspense> },
           { path: "analytics", element: <Suspense fallback={null}><GMAnalytics /></Suspense> },
           { path: "recruiting", element: <Suspense fallback={null}><GMRecruits /></Suspense> },

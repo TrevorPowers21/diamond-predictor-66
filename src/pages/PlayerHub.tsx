@@ -23,6 +23,7 @@ import { marketabilityTierColor } from "@/gm/lib/marketability";
 import MarketabilityDialog from "@/gm/components/MarketabilityDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import PlayerInfoDialog from "@/gm/components/PlayerInfoDialog";
+import { RepresentationCard } from "@/gm/components/RepresentationCard";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
@@ -614,6 +615,10 @@ export default function PlayerHub() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Representation — global fact, so it reads the same for every program.
+                The notes behind the agent popup are not. */}
+            <RepresentationCard playerId={dbPlayer?.id ?? null} playerName={name} />
 
             {/* Player Development — greyed out until NewtForce/biomechanics is wired. */}
             <Card className="border-border/60 opacity-60">

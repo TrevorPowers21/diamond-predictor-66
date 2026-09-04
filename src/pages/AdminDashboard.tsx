@@ -4329,6 +4329,8 @@ function BulkPortalStatusTab() {
         </div>
 
         <textarea
+          // Raw <textarea>, so it does not inherit the default on components/ui/textarea.tsx.
+          autoComplete="off"
           className="w-full min-h-[200px] rounded-md border border-border bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           placeholder={"John Smith, Arizona State\nJane Doe, Oregon State\nDoe, Jane, Texas"}
           value={nameList}
