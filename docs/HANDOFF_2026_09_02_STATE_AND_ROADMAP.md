@@ -1,4 +1,8 @@
-# ▶️ HANDOFF — 2026-09-02. Where we are, and what's next. **START HERE.**
+# ▶️ HANDOFF — 2026-09-02
+
+> ⚠ **SUPERSEDED for current state by `docs/HANDOFF_2026_09_04.md`.** This file remains the
+> reference for the 2026-09-01 WAR recalibration and the five workstreams; the state, open items and
+> CI gates below have moved on.
 
 Written at the end of the 2026-09-01 session. Covers: what shipped, what is verified, what is
 knowingly open, and the five workstreams queued next (coach agent display · team comparison with

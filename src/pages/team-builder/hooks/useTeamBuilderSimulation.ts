@@ -678,7 +678,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         p_ops: storedClean.p_ops ?? ((storedClean.p_obp ?? 0) + (storedClean.p_slg ?? 0)),
         p_iso: storedClean.p_iso ?? null,
         p_wrc_plus: storedClean.p_wrc_plus ?? null,
-        owar: pickHitterWar(storedClean) ?? storedClean.o_war ?? storedClean.owar ?? null,
+        // pickHitterWar already resolves total_hitter_war ?? o_war ?? owar, so repeating the last
+        // two here was dead code that made the precedence look deeper than it is. `??` chains are
+        // where the 09-01 defects hid; a shorter one is a smaller place to hide.
+        owar: pickHitterWar(storedClean) ?? null,
         nil_valuation: storedClean.nil_valuation ?? storedClean.market_value ?? null,
       } as any;
     }
@@ -1387,8 +1390,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         if (treatAsPitcher && snap.p_war != null && snap.p_rv_plus != null) {
           return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_rv_plus)), owar: Number(snap.p_war), pwar: Number(snap.p_war) };
         }
-        // Headline hitter WAR = total_hitter_war (o+d+bsr); pickHitterWar falls back to
-        // o_war/owar until snapshots are re-baked with the total (transfer_snapshot=`owar`, build=`o_war`).
+        // Headline hitter WAR = total_hitter_war (o+d+bsr).
+        //
+        // ⚠ THE FIELD IS NAMED `owar` BUT CARRIES THE TOTAL, not the offensive component. For a
+        // pitcher row the same field holds p_war (see the branch above). Read it as "the headline
+        // WAR for this row", never as oWAR. The oWAR component alone is `oWarOnly`.
+        //
+        // pickHitterWar's o_war/owar fallbacks are legacy: they covered snapshots written before
+        // the 2026-09-01 re-bake added total_hitter_war. That re-bake is DONE — verified on prod,
+        // e.g. Traeger's snapshot carries total_hitter_war 1.9293 and Team Builder renders 1.93 —
+        // so the fallbacks no longer fire for current data. Kept only for rows predating it.
         const hitterWar = pickHitterWar(snap);
         if (!treatAsPitcher && hitterWar != null && snap.p_wrc_plus != null) {
           // Same shape as the dirty path below: headline in `owar`, components alongside. A CLEAN row
