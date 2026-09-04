@@ -91,6 +91,14 @@ export default function SavantLayout() {
               </svg>
               <input
                 type="text"
+                // Suppress CHROME's saved-form-data dropdown, which rendered on top of our own
+                // results list below. Browser autofill only — the results are React state and are
+                // unaffected. This is a raw <input>, so it does not inherit the defaults now set
+                // on the shared components/ui/input.tsx.
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 placeholder="Search any player or team…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}

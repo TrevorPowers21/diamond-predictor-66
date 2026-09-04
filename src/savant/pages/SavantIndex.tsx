@@ -151,6 +151,11 @@ export default function SavantIndex() {
             </svg>
             <input
               type="text"
+              // Chrome's autofill dropdown only — our own results list below is React state.
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               placeholder="Search any player or team…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}

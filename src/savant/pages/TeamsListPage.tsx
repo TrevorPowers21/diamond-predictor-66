@@ -38,6 +38,11 @@ export default function TeamsListPage() {
           </svg>
           <input
             type="text"
+            // Chrome's autofill dropdown only — the team list itself is React state.
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             placeholder="Search teams…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
