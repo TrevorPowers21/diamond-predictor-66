@@ -177,6 +177,51 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   );
 
   const key = ["gm-roster", effectiveTeamId ?? null, activeBuildId, season];
+
+  /**
+   * ★ Tell the COACH's surfaces that something they read has changed.
+   *
+   * The GM side writes straight into Team Builder's tables — `team_build_players.nil_value` on the
+   * per-row checkmark, `team_builds.total_budget` on Finalize & Push. Those writes were correct, but
+   * every mutation only ever invalidated GM query keys (`gm-roster`, `gm-builds`, `gm-activity`…).
+   * Team Builder's cache is keyed `["team-builds", …]` and never heard about it, so the value was
+   * right in the database and stale on screen until a manual reload.
+   *
+   * ⚠ Deliberately NOT called from saveRosterDraft. A draft is staff-only — "visible only to your
+   * staff until you finalize" — so pushing it to the coach would leak unfinalised money.
+   */
+  /**
+   * ★ Push a finalized pay into the coach's Team Builder so it actually RENDERS.
+   *
+   * Team Builder's Actual Value cell renders only when `nilValueOverridden` is true — the flag
+   * separating "a human decided this" from projection residue. Writing nil_value alone put the
+   * money in the database and left the cell blank.
+   *
+   * ⚠ nil_value_overridden is NOT a column. It is serialised into `production_notes` JSON by
+   * serializeBuildPlayerMeta and read back by useLoadBuild as `meta.nilValueOverridden`. Updating
+   * it as a column fails outright — `column "nil_value_overridden" of relation
+   * "team_build_players" does not exist` — which would have thrown on every finalize.
+   *
+   * Read-modify-write so the rest of the meta (rosterStatus, depthRole, transferSnapshot, …) is
+   * preserved; blowing it away would lose the coach's toggles.
+   */
+  const pushPayToCoach = async (buildPlayerId: string, actualPay: number | null, finalized: boolean) => {
+    const { data: tbp } = await (supabase as any)
+      .from("team_build_players").select("production_notes").eq("id", buildPlayerId).maybeSingle();
+    let obj: any = {};
+    try { obj = JSON.parse(tbp?.production_notes || "{}"); } catch { /* keep {} */ }
+    obj.__team_builder_metrics_v1 = true;
+    obj.nilValueOverridden = finalized;
+    const { error } = await (supabase as any).from("team_build_players")
+      .update({ nil_value: finalized ? actualPay : 0, production_notes: JSON.stringify(obj) })
+      .eq("id", buildPlayerId);
+    if (error) throw error;
+  };
+
+  const invalidateCoachSurfaces = () => {
+    qc.invalidateQueries({ queryKey: ["team-builds"] });
+    qc.invalidateQueries({ queryKey: ["target-board"] });
+  };
   const { data, isLoading } = useQuery({
     queryKey: key,
     enabled: !!user?.id && !!effectiveTeamId && !!activeBuildId,
@@ -390,13 +435,21 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         { onConflict: "build_player_id" },
       );
       if (error) throw error;
-      if (nextFinalized) {
-        const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
-        if (e2) throw e2;
-      }
+      // ★ nil_value_overridden MUST move with nil_value.
+      //
+      // Team Builder's Actual Value cell renders ONLY when nil_value_overridden is true — the flag
+      // separates "a human decided this number" from leftover projection residue. Writing
+      // nil_value alone put the money in the database and left the cell BLANK, which is exactly
+      // "it's in the database but doesn't show".
+      //
+      // A GM-finalized pay IS an explicit decision, so it belongs on the same side of that
+      // distinction as a coach-typed number. Un-finalizing clears the flag, or a number pulled back
+      // in the Front Office would stay stuck on the coach's screen.
+      await pushPayToCoach(row.build_player_id, actualPay, nextFinalized);
       return { nextFinalized, name: row.name };
     },
     onSuccess: ({ nextFinalized, name }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: key });
       if (nextFinalized) toast.success(`Finalized pay for ${name} — synced to Team Builder`);
     },
@@ -440,6 +493,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return total;
     },
     onSuccess: (total) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });
       toast.success(`Budget finalized — $${Math.round(total).toLocaleString("en-US")} pushed to Team Builder`);
@@ -510,8 +564,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
           { onConflict: "build_player_id" },
         );
         if (error) throw error;
-        const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
-        if (e2) throw e2;
+        await pushPayToCoach(row.build_player_id, actualPay, true);
       }
       // Budget totals → coach. NIL/Other = base (caps) + this build's Funding
       // Sources categories (derivedCaps), matching the additive on-screen cap.
@@ -529,6 +582,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return { count: rowsWithMoney.filter((r) => !r.row.is_recruit && !r.row.is_added_target).length, total };
     },
     onSuccess: ({ count, total }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });
       toast.success(`Finalized ${count} players + $${Math.round(total).toLocaleString("en-US")} budget — pushed to Team Builder`);
@@ -627,7 +681,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       }
       return newId;
     },
-    onSuccess: (newBuildId) => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
+    onSuccess: (newBuildId) => { invalidateCoachSurfaces(); qc.invalidateQueries({ queryKey: ["gm-builds"] }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
     onError: (e: any) => toast.error(`Create build failed: ${e.message}`),
   });
 
@@ -641,6 +695,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       if (e2) throw e2;
     },
     onSuccess: () => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: ["gm-roster"] });
       qc.invalidateQueries({ queryKey: ["player-program-membership"] });
@@ -654,7 +709,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       const { error } = await (supabase as any).from("team_builds").update({ name: name.trim() }).eq("id", buildId);
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); toast.success("Build renamed"); },
+    onSuccess: () => { invalidateCoachSurfaces(); qc.invalidateQueries({ queryKey: ["gm-builds"] }); toast.success("Build renamed"); },
     onError: (e: any) => toast.error(`Rename failed: ${e.message}`),
   });
 
@@ -726,7 +781,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       const { error: e2 } = await (supabase as any).from("gm_player_finance").update({ roster_status: null, departure_reason: null }).eq("build_player_id", buildPlayerId);
       if (e2) throw e2;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Player restored to roster"); },
+    onSuccess: () => { invalidateCoachSurfaces(); qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Player restored to roster"); },
     onError: (e: any) => toast.error(`Restore failed: ${e.message}`),
   });
 
@@ -747,6 +802,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return season + 1;
     },
     onSuccess: (nextYear) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
       setPickedBuildId(null);
@@ -789,6 +845,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return { switched, name: trimmed };
     },
     onSuccess: ({ switched, name }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });
@@ -837,6 +894,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       return { switched, name };
     },
     onSuccess: ({ switched, name }) => {
+      invalidateCoachSurfaces();   // GM wrote a coach-visible table
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["gm-activity"] });
