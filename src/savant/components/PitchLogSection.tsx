@@ -1356,10 +1356,16 @@ function PageShell({
 
   return (
     <div className="space-y-5">
-      {topRight ? (
+      {topRight && tab === "stats" ? (
         // Left column = the header rows (filter + banner + Stats/Visuals selector);
         // Right column = the VALUE panel, stretched (items-stretch + fill) to the FULL
         // height of those rows so its bottom sits flush on the line under the selector.
+        //
+        // ★ STATS TAB ONLY. The run-value panel described season totals and sat OUTSIDE the tab
+        // body, so it stayed pinned to the right while the Visuals charts rendered underneath —
+        // season-wide numbers next to filtered per-pitch views, which read as if they belonged to
+        // the same slice. On Visuals this falls through to the stacked branch below, which is
+        // already full-width, so the charts get the whole row and no empty column is left behind.
         <div className="grid grid-cols-1 gap-x-6 gap-y-5 lg:grid-cols-[1.7fr_1fr] lg:items-stretch">
           <div className="flex flex-col gap-5">
             {filterRow}

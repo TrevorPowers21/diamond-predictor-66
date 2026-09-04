@@ -277,9 +277,16 @@ export function useTeamBuilderData({
 
   // ── Team-scoped queries ──────────────────────────────────────────────────────
 
-  const { data: builds = [], isLoading: buildsLoading } = useQuery({
+  const { data: builds = [], isLoading: buildsLoading, isFetching: buildsFetching } = useQuery({
     queryKey: ["team-builds", effectiveTeamId ?? null],
     enabled: !!effectiveTeamId,
+    // ★ ALWAYS refetch on mount. /gm is a SEPARATE ROUTE, so Team Builder unmounts while the coach
+    // is in Front Office. React Query only refetches MOUNTED queries, so a GM finalize marks this
+    // stale and nothing more; on the way back React Query serves the cached PRE-finalize array
+    // first and refetches behind it. The auto-load effect reads that stale array and restores the
+    // old budget — the finalized total then only appeared a beat later, or after bouncing between
+    // views. Refetching on mount removes the stale-first window instead of racing it.
+    refetchOnMount: "always",
     queryFn: async () => {
       const { data } = await supabase
         .from("team_builds")
@@ -401,6 +408,9 @@ export function useTeamBuilderData({
     seasonUsage,
     builds,
     buildsLoading,
+    // ⚠ isLoading is FALSE whenever cached data exists, so it does NOT cover a background refetch.
+    // The auto-load effect needs isFetching to avoid restoring a build from a stale cached array.
+    buildsFetching,
     returners,
     returnersUpdatedAt,
   };
