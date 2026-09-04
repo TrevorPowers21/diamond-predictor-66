@@ -6,13 +6,15 @@ import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import AreaToggle from "@/components/AreaToggle";
 import { useBuildVersionCheck } from "@/hooks/useBuildVersionCheck";
-import { LogOut, Menu, LayoutDashboard, Users, BarChart3, ClipboardList, FlaskConical, Target, Wallet, FileText, ChevronRight, Settings } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, Users, BarChart3, ClipboardList, FlaskConical, Target, Wallet, FileText, ChevronRight, Settings, Briefcase } from "lucide-react";
 
 const NAV = [
   { label: "Dashboard", href: "/gm", icon: LayoutDashboard, description: "Front office overview" },
   { label: "Roster Management", href: "/gm/roster", icon: Users, description: "Budget, builds & departures" },
   { label: "Funding Sources", href: "/gm/allocations", icon: Wallet, description: "Track NIL vendor & other funding" },
   { label: "Contracts", href: "/gm/contracts", icon: FileText, description: "Signed deals, PDFs & obligations" },
+  // Sits with the money, not with scouting: an agent is the counterparty to a contract.
+  { label: "Agents", href: "/gm/agents", icon: Briefcase, description: "Representation, contacts & clients" },
   { label: "Target Board", href: "/gm/targets", icon: Target, description: "Watchlist, offers & add to roster" },
   { label: "The Situation Room", href: "/gm/scenarios", icon: FlaskConical, description: "What-if & build compare" },
   { label: "Program Analytics", href: "/gm/analytics", icon: BarChart3, description: "Pay per position & per win" },

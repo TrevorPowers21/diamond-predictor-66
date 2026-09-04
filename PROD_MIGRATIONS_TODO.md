@@ -5292,3 +5292,43 @@ RLS. 4 of 55 users retain write access; 51 lose a write they never should have h
 
 **Rollback:** `supabase/rollback/20260903180000_master_tables_admin_write_only_rollback.sql` —
 reopens public write. If an admin import breaks, grant that account the role instead.
+
+---
+
+## ⬜ `20260904160000_agents_representation.sql` — agent representation (STAGING ONLY, not on prod)
+
+**Status: applied to STAGING 2026-09-04. Not applied to prod — no UI consumes it yet.**
+
+Six new tables, four RPCs. **Purely additive**: no existing table, column, policy, or function is
+modified, and there is no backfill. Applying it to prod is therefore inert until the GM-side UI ships.
+
+| table | scope |
+|---|---|
+| `agencies`, `agents` | global read; create via RPC; **rename/delete superadmin only** |
+| `player_agents` | global read, dated. Partial unique index → one ACTIVE agent per player |
+| `player_agents_provenance` | **superadmin read only**, no write policy at all |
+| `agent_contacts` | `visibility='global'` read-to-all; `'program'` rows scoped by `customer_team_id` |
+| `gm_agent_notes` | program-scoped, RLS mirrors `gm_vendor` |
+
+**Why provenance is a separate table, not a `created_by` column:** the requirement is that a link
+appear no different than if Trevor added it — Arkansas must not see that Georgia authored it. **RLS is
+row-level, not column-level**: a readable row means every column on it is readable via the API, so a
+`created_by` column would leak no matter what the UI renders.
+
+**Why `agent_contacts` is rows rather than columns:** the public/private line is expected to move once
+agencies authorize sharing cell numbers through the app. `(visibility, source)` makes that a data
+change instead of a migration.
+
+⚠ `idx_player_agents_one_active` is a **partial unique INDEX**, not `ADD CONSTRAINT` — a constraint
+cannot carry a `WHERE` clause. Verify with `pg_indexes.indexdef` containing `WHERE (ended_at IS NULL)`;
+that exact kind-mismatch is the repo's one known live drift.
+
+**Verified on staging** via `pg_catalog` (not the command's exit code): 6/6 tables with `rowsecurity`
+on, 14 policies, 4/4 functions `prosecdef`, partial index retained its `WHERE`.
+
+**NOT verified:** connected as `postgres`, and **superuser bypasses RLS** — the policies are proven to
+compile, not to behave. Needs `npm run agent:rls-test-coach` against `gm_agent_notes`,
+`player_agents_provenance`, and program-scoped `agent_contacts` before prod.
+
+**Rollback:** drop in FK order — `gm_agent_notes`, `agent_contacts`, `player_agents_provenance`,
+`player_agents`, `agents`, `agencies`, plus the four functions. Nothing else references them.
