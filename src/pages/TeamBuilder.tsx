@@ -749,7 +749,7 @@ export default function TeamBuilder() {
     supabaseTargetBoard, targetBoardLoading, removeFromSupabaseBoard, addToSupabaseBoard, isOnSupabaseBoard,
     selectedTeamRow, selectedTeamId,
     remoteEquationValues, allPlayersForSearch, hitterMasterPaMap,
-    seasonUsage, builds, buildsLoading, returners, returnersUpdatedAt,
+    seasonUsage, builds, buildsLoading, buildsFetching, returners, returnersUpdatedAt,
   } = useTeamBuilderData({ effectiveTeamId, selectedTeam });
   // Team's shared Balanced/Top-Heavy NIL setting (from gm_budget) — same value
   // the GM toggle writes, so TB's projected values mirror the GM's choice.
@@ -1788,6 +1788,11 @@ export default function TeamBuilder() {
     if (stateTeamRef.current !== effectiveTeamId) return;
     if (selectedBuildId) return;
     if (buildsLoading) return;
+    // ⚠ isLoading is false while a BACKGROUND refetch runs over cached data. Returning early only
+    // on isLoading meant this effect could restore a build from the PRE-finalize cached array —
+    // the reason a GM Finalize & Push did not show up until you bounced between views. Wait for the
+    // fetch to settle so loadBuild always reads current rows.
+    if (buildsFetching) return;
     // If newBuild() was just called, don't override it by loading a saved build.
     if (newBuildPendingRef.current) {
       newBuildPendingRef.current = false;
@@ -1834,7 +1839,7 @@ export default function TeamBuilder() {
     setHasSavedOnce(!toLoad.is_default);
     loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveTeamId, selectedBuildId, builds.length, buildsLoading]);
+  }, [effectiveTeamId, selectedBuildId, builds.length, buildsLoading, buildsFetching]);
 
   // ★ 2026-09-03 — LIVE SYNC FROM THE FRONT OFFICE.
   //
