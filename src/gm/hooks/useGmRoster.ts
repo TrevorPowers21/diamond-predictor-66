@@ -407,8 +407,22 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         { onConflict: "build_player_id" },
       );
       if (error) throw error;
-      if (nextFinalized) {
-        const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
+      // ★ nil_value_overridden MUST move with nil_value.
+      //
+      // Team Builder's Actual Value cell renders ONLY when nil_value_overridden is true — the flag
+      // separates "a human decided this number" from leftover projection residue. Writing
+      // nil_value alone put the money in the database and left the cell BLANK, which is exactly
+      // "it's in the database but doesn't show".
+      //
+      // A GM-finalized pay IS an explicit decision, so it belongs on the same side of that
+      // distinction as a coach-typed number. Un-finalizing clears the flag, or a number pulled back
+      // in the Front Office would stay stuck on the coach's screen.
+      {
+        const { error: e2 } = await (supabase as any).from("team_build_players")
+          .update(nextFinalized
+            ? { nil_value: actualPay, nil_value_overridden: true }
+            : { nil_value: 0, nil_value_overridden: false })
+          .eq("id", row.build_player_id);
         if (e2) throw e2;
       }
       return { nextFinalized, name: row.name };
@@ -529,7 +543,11 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
           { onConflict: "build_player_id" },
         );
         if (error) throw error;
-        const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
+        // Same flag rule as the per-row checkmark above — without it the pushed number is
+        // invisible in Team Builder's Actual Value column.
+        const { error: e2 } = await (supabase as any).from("team_build_players")
+          .update({ nil_value: actualPay, nil_value_overridden: true })
+          .eq("id", row.build_player_id);
         if (e2) throw e2;
       }
       // Budget totals → coach. NIL/Other = base (caps) + this build's Funding
