@@ -3,7 +3,7 @@
 > **OVERWRITTEN, never appended to.** Not history (`docs/AGENT_LEARNINGS_INDEX.md`), not roadmap
 > (`docs/HANDOFF_2026_09_02_STATE_AND_ROADMAP.md`). The snapshot to re-read after compaction.
 >
-> Last updated: **2026-09-03** — agent build CLOSED. Back on feature work.
+> Last updated: **2026-09-04**. ★ **Full picture: `docs/HANDOFF_2026_09_04.md`** — read that first.
 
 ---
 
