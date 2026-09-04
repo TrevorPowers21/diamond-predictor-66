@@ -190,6 +190,34 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
    * ⚠ Deliberately NOT called from saveRosterDraft. A draft is staff-only — "visible only to your
    * staff until you finalize" — so pushing it to the coach would leak unfinalised money.
    */
+  /**
+   * ★ Push a finalized pay into the coach's Team Builder so it actually RENDERS.
+   *
+   * Team Builder's Actual Value cell renders only when `nilValueOverridden` is true — the flag
+   * separating "a human decided this" from projection residue. Writing nil_value alone put the
+   * money in the database and left the cell blank.
+   *
+   * ⚠ nil_value_overridden is NOT a column. It is serialised into `production_notes` JSON by
+   * serializeBuildPlayerMeta and read back by useLoadBuild as `meta.nilValueOverridden`. Updating
+   * it as a column fails outright — `column "nil_value_overridden" of relation
+   * "team_build_players" does not exist` — which would have thrown on every finalize.
+   *
+   * Read-modify-write so the rest of the meta (rosterStatus, depthRole, transferSnapshot, …) is
+   * preserved; blowing it away would lose the coach's toggles.
+   */
+  const pushPayToCoach = async (buildPlayerId: string, actualPay: number | null, finalized: boolean) => {
+    const { data: tbp } = await (supabase as any)
+      .from("team_build_players").select("production_notes").eq("id", buildPlayerId).maybeSingle();
+    let obj: any = {};
+    try { obj = JSON.parse(tbp?.production_notes || "{}"); } catch { /* keep {} */ }
+    obj.__team_builder_metrics_v1 = true;
+    obj.nilValueOverridden = finalized;
+    const { error } = await (supabase as any).from("team_build_players")
+      .update({ nil_value: finalized ? actualPay : 0, production_notes: JSON.stringify(obj) })
+      .eq("id", buildPlayerId);
+    if (error) throw error;
+  };
+
   const invalidateCoachSurfaces = () => {
     qc.invalidateQueries({ queryKey: ["team-builds"] });
     qc.invalidateQueries({ queryKey: ["target-board"] });
@@ -417,14 +445,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       // A GM-finalized pay IS an explicit decision, so it belongs on the same side of that
       // distinction as a coach-typed number. Un-finalizing clears the flag, or a number pulled back
       // in the Front Office would stay stuck on the coach's screen.
-      {
-        const { error: e2 } = await (supabase as any).from("team_build_players")
-          .update(nextFinalized
-            ? { nil_value: actualPay, nil_value_overridden: true }
-            : { nil_value: 0, nil_value_overridden: false })
-          .eq("id", row.build_player_id);
-        if (e2) throw e2;
-      }
+      await pushPayToCoach(row.build_player_id, actualPay, nextFinalized);
       return { nextFinalized, name: row.name };
     },
     onSuccess: ({ nextFinalized, name }) => {
@@ -543,12 +564,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
           { onConflict: "build_player_id" },
         );
         if (error) throw error;
-        // Same flag rule as the per-row checkmark above — without it the pushed number is
-        // invisible in Team Builder's Actual Value column.
-        const { error: e2 } = await (supabase as any).from("team_build_players")
-          .update({ nil_value: actualPay, nil_value_overridden: true })
-          .eq("id", row.build_player_id);
-        if (e2) throw e2;
+        await pushPayToCoach(row.build_player_id, actualPay, true);
       }
       // Budget totals → coach. NIL/Other = base (caps) + this build's Funding
       // Sources categories (derivedCaps), matching the additive on-screen cap.
